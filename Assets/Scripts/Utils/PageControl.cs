@@ -62,7 +62,7 @@ public static class PageControl
         }
     }
 
-    public static void TabSetDefault(GameObject[] tabs)
+    public static void TabSetDefault(GameObject[] tabs, PageOpenMode mode = PageOpenMode.Fresh)
     {
         if (!TryResolvePages(tabs, out IPage[] pages))
             return;
@@ -71,8 +71,7 @@ public static class PageControl
         {
             if (i == 0)
             {
-                pages[i].Open();
-                pages[i].Init();
+                pages[i].Open(mode);
             }
             else
             {
