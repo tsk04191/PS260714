@@ -483,6 +483,7 @@ $RECYCLE.BIN/
 
 /*
 !/.gitignore
+!/README.md
 !/Assets/
 /Assets/*
 !/Assets/Scripts/
