@@ -61,10 +61,34 @@ public sealed class CharacterRuntime : MonoBehaviour
             return;
 
         _remainingCooldown = Mathf.Max(0f, _remainingCooldown - deltaTime);
-        if (_remainingCooldown <= 0f && board.TryAttackLowestHealthEnemy(Data.AttackDamage))
+        if (_remainingCooldown <= 0f && TryAttack())
             _remainingCooldown = Data.AttackCooldown;
 
         RefreshUi();
+    }
+
+    private bool TryAttack()
+    {
+        switch (Data.AttackType)
+        {
+            case CharacterAttackType.RandomMultiple:
+                return board.TryAttackRandomEnemies(
+                    Data.TargetCount,
+                    Data.AttackDamage);
+
+            case CharacterAttackType.CrossHighestHealth:
+                return board.TryAttackCrossAroundHighestHealthEnemy(
+                    Data.AttackDamage);
+
+            case CharacterAttackType.FireRandom:
+                return board.TryApplyFireToRandomEnemy(
+                    Data.FireDuration,
+                    Data.FireTickInterval,
+                    Data.FireTickDamage);
+
+            default:
+                return board.TryAttackLowestHealthEnemy(Data.AttackDamage);
+        }
     }
 
     private void RefreshUi()
@@ -73,7 +97,9 @@ public sealed class CharacterRuntime : MonoBehaviour
             return;
 
         nameText.text = Data.CharacterName;
-        attackText.text = $"ATK {Data.AttackDamage}";
+        attackText.text = Data.AttackType == CharacterAttackType.FireRandom
+            ? $"FIRE {Data.FireTickDamage}/{Data.FireTickInterval:0.#}s"
+            : $"ATK {Data.AttackDamage}";
         cooldownText.text = _remainingCooldown > 0f
             ? $"CD {_remainingCooldown:0.0}s"
             : "READY";

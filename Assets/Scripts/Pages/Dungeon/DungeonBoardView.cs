@@ -183,6 +183,91 @@ public sealed class DungeonBoardView : MonoBehaviour
         return target != null && target.TryDamageTop(damage);
     }
 
+    public bool TryAttackRandomEnemies(int targetCount, int damage)
+    {
+        if (targetCount <= 0 || damage <= 0)
+            return false;
+
+        List<DungeonTileView> targets = CollectOccupiedTiles();
+        int attackCount = Mathf.Min(targetCount, targets.Count);
+        bool attacked = false;
+
+        for (int index = 0; index < attackCount; index++)
+        {
+            int randomIndex = Random.Range(index, targets.Count);
+            (targets[index], targets[randomIndex]) =
+                (targets[randomIndex], targets[index]);
+            attacked |= targets[index].TryDamageTop(damage);
+        }
+
+        return attacked;
+    }
+
+    public bool TryAttackCrossAroundHighestHealthEnemy(int damage)
+    {
+        if (damage <= 0)
+            return false;
+
+        DungeonTileView center = null;
+        int highestHealth = 0;
+        foreach (DungeonTileView tile in _tiles)
+        {
+            if (tile == null || tile.StackCount == 0 ||
+                tile.TopEnemyHealth <= highestHealth)
+            {
+                continue;
+            }
+
+            center = tile;
+            highestHealth = tile.TopEnemyHealth;
+        }
+
+        if (center == null)
+            return false;
+
+        bool attacked = center.TryDamageTop(damage);
+        attacked |= TryDamageTile(center.Row - 1, center.Column, damage);
+        attacked |= TryDamageTile(center.Row + 1, center.Column, damage);
+        attacked |= TryDamageTile(center.Row, center.Column - 1, damage);
+        attacked |= TryDamageTile(center.Row, center.Column + 1, damage);
+        return attacked;
+    }
+
+    public bool TryApplyFireToRandomEnemy(
+        float duration,
+        float tickInterval,
+        int tickDamage)
+    {
+        List<DungeonTileView> occupiedTiles = CollectOccupiedTiles();
+        if (occupiedTiles.Count == 0)
+            return false;
+
+        List<DungeonTileView> targetsWithoutFire = new();
+        foreach (DungeonTileView tile in occupiedTiles)
+        {
+            if (!tile.TopEnemyHasFire)
+                targetsWithoutFire.Add(tile);
+        }
+
+        List<DungeonTileView> targetPool = targetsWithoutFire.Count > 0
+            ? targetsWithoutFire
+            : occupiedTiles;
+        DungeonTileView target = targetPool[Random.Range(0, targetPool.Count)];
+        return target.TryApplyFireToTop(duration, tickInterval, tickDamage);
+    }
+
+    public void TickStatusEffects(float deltaTime)
+    {
+        if (deltaTime <= 0f)
+            return;
+
+        foreach (DungeonTileView tile in _tiles)
+        {
+            if (tile != null)
+                tile.TickStatusEffects(deltaTime);
+        }
+    }
+
     public void ClearAllStacks()
     {
         foreach (DungeonTileView tile in _tiles)
@@ -238,6 +323,24 @@ public sealed class DungeonBoardView : MonoBehaviour
 
         tile = _tiles[index];
         return tile != null;
+    }
+
+    private bool TryDamageTile(int row, int column, int damage)
+    {
+        return TryGetTile(row, column, out DungeonTileView tile) &&
+               tile.TryDamageTop(damage);
+    }
+
+    private List<DungeonTileView> CollectOccupiedTiles()
+    {
+        List<DungeonTileView> result = new();
+        foreach (DungeonTileView tile in _tiles)
+        {
+            if (tile != null && tile.StackCount > 0)
+                result.Add(tile);
+        }
+
+        return result;
     }
 
     private List<DungeonEnemyData>[,] CaptureExistingStacks()

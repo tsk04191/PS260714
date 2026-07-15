@@ -1,5 +1,6 @@
 using TMPro;
 using UnityEngine;
+using UnityEngine.UI;
 
 [DisallowMultipleComponent]
 [RequireComponent(typeof(RectTransform))]
@@ -10,6 +11,8 @@ public sealed class DungeonEnemyCard : MonoBehaviour
     [SerializeField] private TMP_Text healthText;
 
     private RectTransform _rectTransform;
+    private Image _tileFaceImage;
+    private Color _defaultFaceColor;
 
     public DungeonEnemyData Enemy { get; private set; }
     public RectTransform RectTransform =>
@@ -31,6 +34,19 @@ public sealed class DungeonEnemyCard : MonoBehaviour
     {
         if (healthText != null && Enemy != null)
             healthText.text = Enemy.Health.ToString();
+
+        RefreshStatus();
+    }
+
+    public void RefreshStatus()
+    {
+        CacheFaceImage();
+        if (_tileFaceImage == null || Enemy == null)
+            return;
+
+        _tileFaceImage.color = Enemy.HasFire
+            ? new Color(0.58f, 0.19f, 0.06f, 1f)
+            : _defaultFaceColor;
     }
 
     public void ApplyLayout(float edge, float sideDepth)
@@ -46,5 +62,17 @@ public sealed class DungeonEnemyCard : MonoBehaviour
             tileFace.offsetMin = new Vector2(edge, sideDepth);
             tileFace.offsetMax = new Vector2(-edge, -edge);
         }
+    }
+
+    private void CacheFaceImage()
+    {
+        if (_tileFaceImage != null || tileFace == null)
+            return;
+
+        _tileFaceImage = tileFace.GetComponent<Image>();
+        if (_tileFaceImage == null)
+            return;
+
+        _defaultFaceColor = _tileFaceImage.color;
     }
 }

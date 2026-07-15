@@ -78,7 +78,11 @@ public class DungeonPage : MonoBehaviour, IPage
     private void Update()
     {
         if (_initialized)
-            TickEnemySpawnQueue(Time.deltaTime);
+        {
+            float deltaTime = Time.deltaTime;
+            board.TickStatusEffects(deltaTime);
+            TickEnemySpawnQueue(deltaTime);
+        }
     }
 
     private void OnRectTransformDimensionsChange()
