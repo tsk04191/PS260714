@@ -62,6 +62,8 @@ public class DataManager : MonoBehaviour
         events.LoadAllRequested += LoadALL;
         events.DisplayBrightnessChangeRequested += SetDisplayBrightness;
         events.DisplayFPSChangeRequested += SetDisplayFPS;
+        events.DisplayModeChangeRequested += SetDisplayMode;
+        events.ResolutionChangeRequested += SetResolution;
         events.AudioVolumeChangeRequested += SetAudioVolume;
         events.MuteInBackgroundChangeRequested += SetMuteInBackground;
     }
@@ -72,6 +74,8 @@ public class DataManager : MonoBehaviour
         events.LoadAllRequested -= LoadALL;
         events.DisplayBrightnessChangeRequested -= SetDisplayBrightness;
         events.DisplayFPSChangeRequested -= SetDisplayFPS;
+        events.DisplayModeChangeRequested -= SetDisplayMode;
+        events.ResolutionChangeRequested -= SetResolution;
         events.AudioVolumeChangeRequested -= SetAudioVolume;
         events.MuteInBackgroundChangeRequested -= SetMuteInBackground;
     }
@@ -120,6 +124,36 @@ public class DataManager : MonoBehaviour
         DisplayDatas.Save();
         _events?.NotifyDisplayFPSChanged(DisplayDatas.fps);
     }
+
+    public int GetDisplayMode()
+    {
+        return DisplayDatas.displayMode;
+    }
+
+    public void SetDisplayMode(int mode)
+    {
+        if (!DisplayData.IsValidDisplayMode(mode))
+            return;
+
+        DisplayDatas.displayMode = mode;
+        DisplayDatas.Save();
+        _events?.NotifyDisplayModeChanged(DisplayDatas.displayMode);
+    }
+
+    public string GetResolution()
+    {
+        return DisplayDatas.resolution;
+    }
+
+    public void SetResolution(string resolution)
+    {
+        if (!DisplayData.TryNormalizeResolution(resolution, out string normalized))
+            return;
+
+        DisplayDatas.resolution = normalized;
+        DisplayDatas.Save();
+        _events?.NotifyResolutionChanged(DisplayDatas.resolution);
+    }
     #endregion Display
 
     #region Audio
@@ -158,6 +192,8 @@ public class DataManager : MonoBehaviour
         {
             _events?.NotifyDisplayBrightnessChanged(DisplayDatas.brightness);
             _events?.NotifyDisplayFPSChanged(DisplayDatas.fps);
+            _events?.NotifyDisplayModeChanged(DisplayDatas.displayMode);
+            _events?.NotifyResolutionChanged(DisplayDatas.resolution);
         }
 
         if (AudioDatas != null)

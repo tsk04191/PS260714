@@ -21,6 +21,7 @@ public class ToggleSliderController : MonoBehaviour
     [SerializeField] private bool value;
 
     public bool Value => value;
+    public event Action<bool> ValueChanged;
 
     private bool isAniRun;
     private bool isInitialized;
@@ -116,6 +117,9 @@ public class ToggleSliderController : MonoBehaviour
 
         bool hasChanged = value != newValue;
         value = newValue;
+
+        if (hasChanged)
+            ValueChanged?.Invoke(value);
 
         if (!isInitialized)
             return;

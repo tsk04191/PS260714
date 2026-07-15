@@ -3,6 +3,7 @@ using UnityEngine.Audio;
 
 public class AudioManager : MonoBehaviour
 {
+    private const string TestBgmClipName = "Audio Test";
     private const float MutedVolume = -80f;
     private const float UnmutedVolume = 0f;
 
@@ -24,6 +25,12 @@ public class AudioManager : MonoBehaviour
         _manager = manager;
         SetEventManager(manager != null ? manager.Events : null);
         ApplyMuteInBackground();
+
+        if (_manager != null && _manager.Data != null &&
+            _manager.Data.IsSetupDone)
+        {
+            PlayTestBgm();
+        }
     }
 
     public void Teardown()
@@ -65,6 +72,7 @@ public class AudioManager : MonoBehaviour
 
     private void SubscribeEventManager(GameEventManager events)
     {
+        events.DataReady += PlayTestBgm;
         events.BgmRequested += PlayBgm;
         events.SfxRequested += PlaySfx;
         events.SfxClipRequested += PlaySfx;
@@ -74,6 +82,7 @@ public class AudioManager : MonoBehaviour
 
     private void UnsubscribeEventManager(GameEventManager events)
     {
+        events.DataReady -= PlayTestBgm;
         events.BgmRequested -= PlayBgm;
         events.SfxRequested -= PlaySfx;
         events.SfxClipRequested -= PlaySfx;
@@ -129,7 +138,13 @@ public class AudioManager : MonoBehaviour
             return;
 
         speakers.MainMusic.clip = clip;
+        speakers.MainMusic.loop = true;
         speakers.MainMusic.Play();
+    }
+
+    private void PlayTestBgm()
+    {
+        PlayBgm(TestBgmClipName);
     }
 
     public void PlaySfx(string clipName)

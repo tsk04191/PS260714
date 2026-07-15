@@ -22,6 +22,11 @@ public sealed class DungeonBattleTab : MonoBehaviour
     [Header("Enemy Spawn Queue")]
     [SerializeField] private DungeonSpawnQueueView spawnQueueView;
 
+    [Header("Page Navigation")]
+    [SerializeField] private Button settingsButton;
+    [SerializeField] private GameObject dungeonPage;
+    [SerializeField] private GameObject settingPage;
+
     private BattleManager _battleManager;
     private bool _initialized;
     private bool _controlEventsBound;
@@ -101,7 +106,8 @@ public sealed class DungeonBattleTab : MonoBehaviour
     {
         if (speedButton == null || speedText == null || pauseButton == null ||
             pauseText == null || pauseOverlay == null || debugButton == null ||
-            debugPopup == null || spawnEnemyButton == null || spawnQueueView == null)
+            debugPopup == null || spawnEnemyButton == null || spawnQueueView == null ||
+            settingsButton == null || dungeonPage == null || settingPage == null)
         {
             Debug.LogError("DungeonBattleTab scene references are incomplete.", this);
             return false;
@@ -119,6 +125,7 @@ public sealed class DungeonBattleTab : MonoBehaviour
         pauseButton.onClick.AddListener(HandlePauseClicked);
         debugButton.onClick.AddListener(HandleDebugClicked);
         spawnEnemyButton.onClick.AddListener(HandleSpawnEnemyClicked);
+        settingsButton.onClick.AddListener(HandleSettingsClicked);
         _controlEventsBound = true;
     }
 
@@ -135,6 +142,8 @@ public sealed class DungeonBattleTab : MonoBehaviour
             debugButton.onClick.RemoveListener(HandleDebugClicked);
         if (spawnEnemyButton != null)
             spawnEnemyButton.onClick.RemoveListener(HandleSpawnEnemyClicked);
+        if (settingsButton != null)
+            settingsButton.onClick.RemoveListener(HandleSettingsClicked);
         _controlEventsBound = false;
     }
 
@@ -185,6 +194,11 @@ public sealed class DungeonBattleTab : MonoBehaviour
     private void HandleSpawnEnemyClicked()
     {
         _battleManager?.SpawnNextEnemyImmediately();
+    }
+
+    private void HandleSettingsClicked()
+    {
+        PageControl.PagToPag(dungeonPage, settingPage, PageOpenMode.Fresh);
     }
 
     private void HandleBattleStateChanged(EBattleState _)

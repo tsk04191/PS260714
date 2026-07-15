@@ -4,12 +4,15 @@ using UnityEngine.UI;
 public class DisplayData
 {
     public const int DefaultFpsMode = 0;
+    public const int DefaultDisplayMode = 1;
 
-    private const float MinBrightnessPercent = 0f;
-    private const float MaxBrightnessPercent = 100f;
+    private const int MinBrightnessPercent = 0;
+    private const int MaxBrightnessPercent = 100;
+    private const byte MinBrightnessOverlayAlpha = 0;
+    private const byte MaxBrightnessOverlayAlpha = 254;
     private const int MaxFpsMode = 3;
+    private const int MaxDisplayMode = 2;
 
-    private int brightness_min = 10;
     private Image imgBrightness
     { 
         get { return GameManager.Instance.Data.imgBrightness; }
@@ -18,20 +21,33 @@ public class DisplayData
 
     public int brightness = 100;
     public int fps = 0;
+    public int displayMode = DefaultDisplayMode;
+    public string resolution;
 
     public void Init()
     {
         brightness = 100;
         fps = 0;
+        displayMode = GetCurrentDisplayMode();
+        resolution = GetCurrentResolution();
         Apply();
     }
 
     public void Save()
     {
+        brightness = Mathf.Clamp(
+            brightness,
+            MinBrightnessPercent,
+            MaxBrightnessPercent);
         fps = NormalizeFpsMode(fps);
+        displayMode = NormalizeDisplayMode(displayMode);
+        if (!TryNormalizeResolution(resolution, out resolution))
+            resolution = GetCurrentResolution();
 
         PlayerPrefs.SetInt("Display.Brightness", brightness);
         PlayerPrefs.SetInt("Display.FPS", fps);
+        PlayerPrefs.SetInt("Display.Mode", displayMode);
+        PlayerPrefs.SetString("Display.Resolution", resolution);
 
         PlayerPrefs.Save();
         
@@ -40,8 +56,21 @@ public class DisplayData
 
     public void Load()
     {
-        brightness = PlayerPrefs.GetInt("Display.Brightness", brightness);
+        brightness = Mathf.Clamp(
+            PlayerPrefs.GetInt("Display.Brightness", brightness),
+            MinBrightnessPercent,
+            MaxBrightnessPercent);
         fps = NormalizeFpsMode(PlayerPrefs.GetInt("Display.FPS", fps));
+        displayMode = NormalizeDisplayMode(PlayerPrefs.GetInt(
+            "Display.Mode",
+            GetCurrentDisplayMode()));
+
+        string savedResolution = PlayerPrefs.GetString(
+            "Display.Resolution",
+            GetCurrentResolution());
+        resolution = TryNormalizeResolution(savedResolution, out string normalizedResolution)
+            ? normalizedResolution
+            : GetCurrentResolution();
         
         Apply();
     }
@@ -50,6 +79,7 @@ public class DisplayData
     {
         ApplyBrightness(brightness);
         ApplyFPS(fps);
+        ApplyResolution(resolution, displayMode);
     }
 
     public static bool IsValidFpsMode(int value)
@@ -57,19 +87,69 @@ public class DisplayData
         return value >= DefaultFpsMode && value <= MaxFpsMode;
     }
 
+    public static bool IsValidDisplayMode(int value)
+    {
+        return value >= 0 && value <= MaxDisplayMode;
+    }
+
+    public static bool TryNormalizeResolution(string value, out string normalized)
+    {
+        normalized = null;
+        if (string.IsNullOrWhiteSpace(value))
+            return false;
+
+        string[] parts = value.Split('x', 'X');
+        if (parts.Length != 2 ||
+            !int.TryParse(parts[0].Trim(), out int width) ||
+            !int.TryParse(parts[1].Trim(), out int height) ||
+            width <= 0 || height <= 0)
+        {
+            return false;
+        }
+
+        normalized = $"{width} x {height}";
+        return true;
+    }
+
+    public static string GetCurrentResolution()
+    {
+        return $"{Screen.width} x {Screen.height}";
+    }
+
     private static int NormalizeFpsMode(int value)
     {
         return IsValidFpsMode(value) ? value : DefaultFpsMode;
     }
 
-    private void ApplyBrightness(float brightness)
+    private static int NormalizeDisplayMode(int value)
+    {
+        return IsValidDisplayMode(value) ? value : DefaultDisplayMode;
+    }
+
+    private static int GetCurrentDisplayMode()
+    {
+        return Screen.fullScreenMode switch
+        {
+            FullScreenMode.ExclusiveFullScreen => 0,
+            FullScreenMode.FullScreenWindow => 1,
+            _ => 2,
+        };
+    }
+
+    private void ApplyBrightness(int value)
     {
         if (imgBrightness == null)
             return;
 
-        float cappedBrightness = Mathf.Clamp(brightness, brightness_min, MaxBrightnessPercent);
-        float alpha = 1f - Mathf.InverseLerp(MinBrightnessPercent, MaxBrightnessPercent, cappedBrightness);
-        Color color = imgBrightness.color;
+        float brightnessRatio = Mathf.InverseLerp(
+            MinBrightnessPercent,
+            MaxBrightnessPercent,
+            Mathf.Clamp(value, MinBrightnessPercent, MaxBrightnessPercent));
+        byte alpha = (byte)Mathf.RoundToInt(Mathf.Lerp(
+            MaxBrightnessOverlayAlpha,
+            MinBrightnessOverlayAlpha,
+            brightnessRatio));
+        Color32 color = imgBrightness.color;
         color.a = alpha;
         imgBrightness.color = color;
     }
@@ -93,5 +173,23 @@ public class DisplayData
                 Application.targetFrameRate = 30;
                 break;
         }
+    }
+
+    private static void ApplyResolution(string value, int mode)
+    {
+        if (!TryNormalizeResolution(value, out string normalized))
+            return;
+
+        string[] parts = normalized.Split('x');
+        int width = int.Parse(parts[0].Trim());
+        int height = int.Parse(parts[1].Trim());
+        FullScreenMode fullScreenMode = mode switch
+        {
+            0 => FullScreenMode.ExclusiveFullScreen,
+            1 => FullScreenMode.FullScreenWindow,
+            _ => FullScreenMode.Windowed,
+        };
+
+        Screen.SetResolution(width, height, fullScreenMode);
     }
 }

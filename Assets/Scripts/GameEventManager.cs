@@ -25,6 +25,8 @@ public class GameEventManager
     public event Action<string> ResolutionChangeRequested;
     public event Action<int> DisplayBrightnessChanged;
     public event Action<int> DisplayFPSChanged;
+    public event Action<int> DisplayModeChanged;
+    public event Action<string> ResolutionChanged;
 
     public event Action<EAudioChannel, int> AudioVolumeChangeRequested;
     public event Action<bool> MuteInBackgroundChangeRequested;
@@ -90,6 +92,16 @@ public class GameEventManager
     public void NotifyDisplayFPSChanged(int value)
     {
         DisplayFPSChanged?.Invoke(value);
+    }
+
+    public void NotifyDisplayModeChanged(int value)
+    {
+        DisplayModeChanged?.Invoke(value);
+    }
+
+    public void NotifyResolutionChanged(string value)
+    {
+        ResolutionChanged?.Invoke(value);
     }
 
     public void RequestAudioVolumeChange(EAudioChannel channel, int value)
