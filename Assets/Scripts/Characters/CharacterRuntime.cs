@@ -3,10 +3,9 @@ using UnityEngine;
 using UnityEngine.UI;
 
 [DisallowMultipleComponent]
-public sealed class CharacterRuntime : MonoBehaviour
+public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter
 {
     [SerializeField] private CharacterSO original;
-    [SerializeField] private DungeonBoardView board;
     [SerializeField] private TextMeshProUGUI nameText;
     [SerializeField] private TextMeshProUGUI attackText;
     [SerializeField] private TextMeshProUGUI cooldownText;
@@ -22,17 +21,12 @@ public sealed class CharacterRuntime : MonoBehaviour
         Initialize();
     }
 
-    private void Update()
-    {
-        Tick(Time.deltaTime);
-    }
-
     public bool Initialize()
     {
         if (_initialized)
             return true;
 
-        if (original == null || board == null || nameText == null ||
+        if (original == null || nameText == null ||
             attackText == null || cooldownText == null || cooldownFill == null)
         {
             Debug.LogError("CharacterRuntime references are incomplete.", this);
@@ -55,19 +49,19 @@ public sealed class CharacterRuntime : MonoBehaviour
         RefreshUi();
     }
 
-    private void Tick(float deltaTime)
+    public void TickBattle(float deltaTime, IBattleBoard board)
     {
-        if ((!_initialized && !Initialize()) || deltaTime <= 0f)
+        if ((!_initialized && !Initialize()) || board == null || deltaTime <= 0f)
             return;
 
         _remainingCooldown = Mathf.Max(0f, _remainingCooldown - deltaTime);
-        if (_remainingCooldown <= 0f && TryAttack())
+        if (_remainingCooldown <= 0f && TryAttack(board))
             _remainingCooldown = Data.AttackCooldown;
 
         RefreshUi();
     }
 
-    private bool TryAttack()
+    private bool TryAttack(IBattleBoard board)
     {
         switch (Data.AttackType)
         {

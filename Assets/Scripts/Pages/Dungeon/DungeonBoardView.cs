@@ -4,7 +4,7 @@ using UnityEngine.UI;
 
 [DisallowMultipleComponent]
 [RequireComponent(typeof(RectTransform))]
-public sealed class DungeonBoardView : MonoBehaviour
+public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard
 {
     public const int MinimumGridSize = 3;
     public const int MaximumGridSize = 9;
@@ -18,6 +18,21 @@ public sealed class DungeonBoardView : MonoBehaviour
     private bool _initialized;
 
     public int GridSize { get; private set; } = MinimumGridSize;
+    public int InitialEnemyCapacity => GridSize * GridSize;
+    public int LivingEnemyCount
+    {
+        get
+        {
+            int count = 0;
+            foreach (DungeonTileView tile in _tiles)
+            {
+                if (tile != null)
+                    count += tile.StackCount;
+            }
+
+            return count;
+        }
+    }
 
     public void Initialize(int gridSize, int stackSize)
     {
@@ -137,6 +152,11 @@ public sealed class DungeonBoardView : MonoBehaviour
 
         int randomIndex = Random.Range(0, candidateTiles.Count);
         return candidateTiles[randomIndex].TryAdd(enemy);
+    }
+
+    public bool TryAddEnemy(DungeonEnemyData enemy)
+    {
+        return TryAddEnemyCardToNextAvailableTile(enemy);
     }
 
     public bool TryRemoveTopEnemyCard(int row, int column)
@@ -275,6 +295,11 @@ public sealed class DungeonBoardView : MonoBehaviour
             if (tile != null)
                 tile.ClearStack();
         }
+    }
+
+    public void ClearAllEnemies()
+    {
+        ClearAllStacks();
     }
 
     private void OnRectTransformDimensionsChange()

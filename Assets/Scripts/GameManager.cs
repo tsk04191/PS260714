@@ -4,6 +4,9 @@ public class GameManager : MonoBehaviour
 {
     public static GameManager Instance { get; private set; }
     public GameEventManager Events { get; private set; }
+    public BattleManager Battle => battleManager;
+
+    [SerializeField] private BattleManager battleManager;
     public DataManager Data;
     public AudioManager Audio;
 
@@ -17,6 +20,10 @@ public class GameManager : MonoBehaviour
 
         Instance = this;
         Events = new GameEventManager();
+
+        if (battleManager == null || !battleManager.Setup(this))
+            Debug.LogError("GameManager requires a configured BattleManager.", this);
+
         Audio?.Setup(this);
         SubscribeEvents();
 
@@ -29,6 +36,9 @@ public class GameManager : MonoBehaviour
             return;
 
         UnsubscribeEvents();
+        if (battleManager != null)
+            battleManager.Teardown();
+
         if (Audio != null)
             Audio.Teardown();
 
