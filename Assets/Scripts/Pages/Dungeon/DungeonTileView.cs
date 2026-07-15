@@ -17,9 +17,11 @@ public sealed class DungeonTileView : MonoBehaviour
     public int Row { get; private set; }
     public int Column { get; private set; }
     public int StackCount => _cards.Count;
-    public int TopEnemyHealth => _cards.Count > 0 ? _cards[^1].Enemy.Health : 0;
+    public DungeonEnemyData TopEnemy =>
+        _cards.Count > 0 ? _cards[^1].Enemy : null;
+    public int TopEnemyHealth => TopEnemy != null ? TopEnemy.Health : 0;
     public bool TopEnemyHasFire =>
-        _cards.Count > 0 && _cards[^1].Enemy.HasFire;
+        TopEnemy != null && TopEnemy.HasFire;
     public bool IsFull => _cards.Count >= _maximumStackSize;
 
     public void Initialize(int row, int column, int stackSize)
@@ -66,21 +68,39 @@ public sealed class DungeonTileView : MonoBehaviour
         return true;
     }
 
-    internal bool TryDamageTop(int damage)
+    internal int TryDamageTop(int damage)
     {
         if (_cards.Count == 0 || damage <= 0)
-            return false;
+            return 0;
 
         DungeonEnemyCard topCard = _cards[^1];
-        if (damage >= topCard.Enemy.Health)
-            return TryRemoveTop();
+        int appliedDamage = topCard.Enemy.TakeDamage(damage);
+        if (appliedDamage <= 0)
+            return 0;
 
-        topCard.Enemy.SetHealth(topCard.Enemy.Health - damage);
-        topCard.RefreshHealth();
-        return true;
+        if (topCard.Enemy.Health <= 0)
+            TryRemoveTop();
+        else
+            topCard.RefreshHealth();
+
+        return appliedDamage;
+    }
+
+    internal int TryHealTop(int amount)
+    {
+        if (_cards.Count == 0 || amount <= 0)
+            return 0;
+
+        DungeonEnemyCard topCard = _cards[^1];
+        int healedAmount = topCard.Enemy.Heal(amount);
+        if (healedAmount > 0)
+            topCard.RefreshHealth();
+
+        return healedAmount;
     }
 
     internal bool TryApplyFireToTop(
+        IBattleCharacter source,
         float duration,
         float tickInterval,
         int tickDamage)
@@ -89,7 +109,7 @@ public sealed class DungeonTileView : MonoBehaviour
             return false;
 
         DungeonEnemyCard topCard = _cards[^1];
-        topCard.Enemy.ApplyFire(duration, tickInterval, tickDamage);
+        topCard.Enemy.ApplyFire(duration, tickInterval, tickDamage, source);
         topCard.RefreshStatus();
         return true;
     }
@@ -107,8 +127,14 @@ public sealed class DungeonTileView : MonoBehaviour
                 continue;
 
             bool hadFire = card.Enemy.HasFire;
-            int damage = card.Enemy.TickFire(deltaTime);
-            if (damage >= card.Enemy.Health)
+            int damage = card.Enemy.TickFire(
+                deltaTime,
+                out IBattleCharacter source);
+            int appliedDamage = card.Enemy.TakeDamage(damage);
+            if (appliedDamage > 0)
+                source?.RecordDamageDealt(appliedDamage);
+
+            if (card.Enemy.Health <= 0)
             {
                 _cards.RemoveAt(index);
                 Destroy(card.gameObject);
@@ -116,10 +142,7 @@ public sealed class DungeonTileView : MonoBehaviour
                 continue;
             }
 
-            if (damage > 0)
-                card.Enemy.SetHealth(card.Enemy.Health - damage);
-
-            if (damage > 0 || hadFire != card.Enemy.HasFire)
+            if (appliedDamage > 0 || hadFire != card.Enemy.HasFire)
                 card.RefreshHealth();
         }
 

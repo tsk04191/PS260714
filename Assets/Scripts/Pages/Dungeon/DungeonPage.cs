@@ -5,6 +5,15 @@ public class DungeonPage : MonoBehaviour, IPage
 {
     public const int MaximumPartySize = 4;
 
+    private static readonly EEnemyType[] NormalEnemyTypes =
+    {
+        EEnemyType.Basic,
+        EEnemyType.Assault,
+        EEnemyType.Heavy,
+        EEnemyType.Medic,
+        EEnemyType.Mechanic,
+    };
+
     [Header("Dungeon Board")]
     [SerializeField, Range(DungeonBoardView.MinimumGridSize, DungeonBoardView.MaximumGridSize)]
     private int initialGridSize = DungeonBoardView.MinimumGridSize;
@@ -24,6 +33,7 @@ public class DungeonPage : MonoBehaviour, IPage
         new CharacterRuntime[MaximumPartySize];
 
     [Header("Enemy Spawn Queue")]
+    [SerializeField, Min(1)] private int minimumEnemyHealth = 20;
     [SerializeField, Min(1)] private int maximumEnemiesPerRound = 20;
     [SerializeField, Min(0.1f)] private float enemySpawnInterval = 4f;
 
@@ -94,6 +104,7 @@ public class DungeonPage : MonoBehaviour, IPage
             DungeonBoardView.MinimumGridSize,
             DungeonBoardView.MaximumGridSize);
         maximumStackSize = Mathf.Max(1, maximumStackSize);
+        minimumEnemyHealth = Mathf.Max(1, minimumEnemyHealth);
         maximumEnemiesPerRound = Mathf.Max(1, maximumEnemiesPerRound);
         enemySpawnInterval = Mathf.Max(0.1f, enemySpawnInterval);
         EnsurePlayerCharacterSlots();
@@ -289,7 +300,14 @@ public class DungeonPage : MonoBehaviour, IPage
 
         List<DungeonEnemyData> enemies = new(maximumEnemiesPerRound);
         for (int index = 0; index < maximumEnemiesPerRound; index++)
-            enemies.Add(new DungeonEnemyData(Random.Range(1, 10)));
+        {
+            EEnemyType randomType = NormalEnemyTypes[
+                Random.Range(0, NormalEnemyTypes.Length)];
+            enemies.Add(new DungeonEnemyData(
+                Mathf.Max(1, minimumEnemyHealth) + Random.Range(0, 9),
+                EEnemyGrade.Normal,
+                randomType));
+        }
 
         return _battleManager.StartBattle(
             board,

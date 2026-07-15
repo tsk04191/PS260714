@@ -14,6 +14,10 @@ public sealed class DungeonSpawnQueueItemView : MonoBehaviour
             orderText.text = $"#{Mathf.Max(1, order):00}";
 
         if (healthText != null)
-            healthText.text = enemy != null ? $"HP {enemy.Health}" : "HP -";
+        {
+            healthText.text = enemy != null
+                ? $"{EnemyTypeDisplay.GetName(enemy.Type)} | HP {enemy.Health}"
+                : "HP -";
+        }
     }
 }

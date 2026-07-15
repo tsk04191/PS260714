@@ -44,7 +44,7 @@ public sealed class BattleManager : MonoBehaviour
     public bool IsPaused => _isPaused;
     public bool IsBoardFull => _boardFull;
     public float GameSpeed => GameSpeedScales[_gameSpeedIndex];
-    public float SpawnInterval => _spawnInterval;
+    public float SpawnInterval => GetNextSpawnInterval();
     public float SpawnTimeRemaining => _spawnTimeRemaining;
     public int PendingEnemyCount => _spawnQueue.Count;
     public int SpawnedEnemyCount => _spawnedEnemyCount;
@@ -69,6 +69,7 @@ public sealed class BattleManager : MonoBehaviour
             return;
 
         _board.TickStatusEffects(deltaTime);
+        _board.TickEnemyAbilities(deltaTime, _characters);
         foreach (IBattleCharacter character in _characters)
             character.TickBattle(deltaTime, _board);
 
@@ -128,7 +129,7 @@ public sealed class BattleManager : MonoBehaviour
         _board.ClearAllEnemies();
         ResetTimeControl();
         FillInitialBoard();
-        _spawnTimeRemaining = _spawnQueue.Count > 0 ? _spawnInterval : 0f;
+        ResetSpawnTimerForNextEnemy();
         _boardFull = false;
 
         SetState(EBattleState.Running);
@@ -200,7 +201,7 @@ public sealed class BattleManager : MonoBehaviour
         bool wasEmpty = _spawnQueue.Count == 0;
         _spawnQueue.Add(new DungeonEnemyData(health));
         if (wasEmpty)
-            _spawnTimeRemaining = _spawnInterval;
+            ResetSpawnTimerForNextEnemy();
 
         NotifyQueueAndTimerChanged();
         return true;
@@ -296,7 +297,7 @@ public sealed class BattleManager : MonoBehaviour
 
         _spawnQueue.RemoveAt(0);
         _spawnedEnemyCount++;
-        _spawnTimeRemaining = _spawnQueue.Count > 0 ? _spawnInterval : 0f;
+        ResetSpawnTimerForNextEnemy();
         _boardFull = false;
         NotifyQueueAndTimerChanged();
         return true;
@@ -374,5 +375,23 @@ public sealed class BattleManager : MonoBehaviour
     {
         SpawnQueueChanged?.Invoke();
         SpawnTimerChanged?.Invoke();
+    }
+
+    private void ResetSpawnTimerForNextEnemy()
+    {
+        _spawnTimeRemaining = _spawnQueue.Count > 0
+            ? GetNextSpawnInterval()
+            : 0f;
+    }
+
+    private float GetNextSpawnInterval()
+    {
+        if (_spawnInterval <= 0f)
+            return 0f;
+
+        float multiplier = _spawnQueue.Count > 0 && _spawnQueue[0] != null
+            ? _spawnQueue[0].SpawnIntervalMultiplier
+            : 1f;
+        return Mathf.Max(0.01f, _spawnInterval * multiplier);
     }
 }

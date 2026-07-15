@@ -180,10 +180,10 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard
                tile.TrySetTopEnemyHealth(health);
     }
 
-    public bool TryAttackLowestHealthEnemy(int damage)
+    public int TryAttackLowestHealthEnemy(int damage)
     {
         if (damage <= 0)
-            return false;
+            return 0;
 
         DungeonTileView target = null;
         int lowestHealth = int.MaxValue;
@@ -200,33 +200,33 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard
             lowestHealth = tile.TopEnemyHealth;
         }
 
-        return target != null && target.TryDamageTop(damage);
+        return target != null ? target.TryDamageTop(damage) : 0;
     }
 
-    public bool TryAttackRandomEnemies(int targetCount, int damage)
+    public int TryAttackRandomEnemies(int targetCount, int damage)
     {
         if (targetCount <= 0 || damage <= 0)
-            return false;
+            return 0;
 
         List<DungeonTileView> targets = CollectOccupiedTiles();
         int attackCount = Mathf.Min(targetCount, targets.Count);
-        bool attacked = false;
+        int totalDamage = 0;
 
         for (int index = 0; index < attackCount; index++)
         {
             int randomIndex = Random.Range(index, targets.Count);
             (targets[index], targets[randomIndex]) =
                 (targets[randomIndex], targets[index]);
-            attacked |= targets[index].TryDamageTop(damage);
+            totalDamage += targets[index].TryDamageTop(damage);
         }
 
-        return attacked;
+        return totalDamage;
     }
 
-    public bool TryAttackCrossAroundHighestHealthEnemy(int damage)
+    public int TryAttackCrossAroundHighestHealthEnemy(int damage)
     {
         if (damage <= 0)
-            return false;
+            return 0;
 
         DungeonTileView center = null;
         int highestHealth = 0;
@@ -243,17 +243,18 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard
         }
 
         if (center == null)
-            return false;
+            return 0;
 
-        bool attacked = center.TryDamageTop(damage);
-        attacked |= TryDamageTile(center.Row - 1, center.Column, damage);
-        attacked |= TryDamageTile(center.Row + 1, center.Column, damage);
-        attacked |= TryDamageTile(center.Row, center.Column - 1, damage);
-        attacked |= TryDamageTile(center.Row, center.Column + 1, damage);
-        return attacked;
+        int totalDamage = center.TryDamageTop(damage);
+        totalDamage += TryDamageTile(center.Row - 1, center.Column, damage);
+        totalDamage += TryDamageTile(center.Row + 1, center.Column, damage);
+        totalDamage += TryDamageTile(center.Row, center.Column - 1, damage);
+        totalDamage += TryDamageTile(center.Row, center.Column + 1, damage);
+        return totalDamage;
     }
 
     public bool TryApplyFireToRandomEnemy(
+        IBattleCharacter source,
         float duration,
         float tickInterval,
         int tickDamage)
@@ -273,7 +274,11 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard
             ? targetsWithoutFire
             : occupiedTiles;
         DungeonTileView target = targetPool[Random.Range(0, targetPool.Count)];
-        return target.TryApplyFireToTop(duration, tickInterval, tickDamage);
+        return target.TryApplyFireToTop(
+            source,
+            duration,
+            tickInterval,
+            tickDamage);
     }
 
     public void TickStatusEffects(float deltaTime)
@@ -285,6 +290,30 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard
         {
             if (tile != null)
                 tile.TickStatusEffects(deltaTime);
+        }
+    }
+
+    public void TickEnemyAbilities(
+        float deltaTime,
+        IReadOnlyList<IBattleCharacter> characters)
+    {
+        if (deltaTime <= 0f)
+            return;
+
+        foreach (DungeonTileView tile in _tiles)
+        {
+            DungeonEnemyData enemy = tile != null ? tile.TopEnemy : null;
+            if (enemy == null || !enemy.TickAbilityCooldown(deltaTime))
+                continue;
+
+            bool activated = enemy.Type switch
+            {
+                EEnemyType.Medic => TryHealAdjacentEnemies(tile),
+                EEnemyType.Mechanic => TryDisableHighestDamageCharacter(characters),
+                _ => false,
+            };
+            if (activated)
+                enemy.ResetAbilityCooldown();
         }
     }
 
@@ -350,10 +379,55 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard
         return tile != null;
     }
 
-    private bool TryDamageTile(int row, int column, int damage)
+    private int TryDamageTile(int row, int column, int damage)
     {
-        return TryGetTile(row, column, out DungeonTileView tile) &&
-               tile.TryDamageTop(damage);
+        return TryGetTile(row, column, out DungeonTileView tile)
+            ? tile.TryDamageTop(damage)
+            : 0;
+    }
+
+    private bool TryHealAdjacentEnemies(DungeonTileView medicTile)
+    {
+        if (medicTile == null)
+            return false;
+
+        int healedAmount = 0;
+        healedAmount += TryHealTile(medicTile.Row - 1, medicTile.Column, 1);
+        healedAmount += TryHealTile(medicTile.Row + 1, medicTile.Column, 1);
+        healedAmount += TryHealTile(medicTile.Row, medicTile.Column - 1, 1);
+        healedAmount += TryHealTile(medicTile.Row, medicTile.Column + 1, 1);
+        return healedAmount > 0;
+    }
+
+    private int TryHealTile(int row, int column, int amount)
+    {
+        return TryGetTile(row, column, out DungeonTileView tile)
+            ? tile.TryHealTop(amount)
+            : 0;
+    }
+
+    private static bool TryDisableHighestDamageCharacter(
+        IReadOnlyList<IBattleCharacter> characters)
+    {
+        if (characters == null)
+            return false;
+
+        IBattleCharacter target = null;
+        int highestDamage = 0;
+        foreach (IBattleCharacter character in characters)
+        {
+            if (character == null || character.TotalDamageDealt <= highestDamage)
+                continue;
+
+            target = character;
+            highestDamage = character.TotalDamageDealt;
+        }
+
+        if (target == null)
+            return false;
+
+        target.DisableFor(DungeonEnemyData.MechanicDisableDuration);
+        return true;
     }
 
     private List<DungeonTileView> CollectOccupiedTiles()

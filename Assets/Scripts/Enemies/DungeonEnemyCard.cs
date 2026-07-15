@@ -33,7 +33,12 @@ public sealed class DungeonEnemyCard : MonoBehaviour
     public void RefreshHealth()
     {
         if (healthText != null && Enemy != null)
-            healthText.text = Enemy.Health.ToString();
+        {
+            string typeCode = EnemyTypeDisplay.GetCardCode(Enemy.Type);
+            healthText.text = string.IsNullOrEmpty(typeCode)
+                ? Enemy.Health.ToString()
+                : $"{typeCode} {Enemy.Health}";
+        }
 
         RefreshStatus();
     }
