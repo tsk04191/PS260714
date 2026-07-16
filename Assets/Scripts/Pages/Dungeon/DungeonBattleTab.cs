@@ -14,6 +14,9 @@ public sealed class DungeonBattleTab : MonoBehaviour
     [SerializeField] private TextMeshProUGUI pauseText;
     [SerializeField] private GameObject pauseOverlay;
 
+    [Header("Battle Time")]
+    [SerializeField] private TextMeshProUGUI battleTimeText;
+
     [Header("Debug Controls")]
     [SerializeField] private Button debugButton;
     [SerializeField] private GameObject debugPopup;
@@ -28,6 +31,7 @@ public sealed class DungeonBattleTab : MonoBehaviour
     [SerializeField] private GameObject settingPage;
 
     private BattleManager _battleManager;
+    private TextMeshProUGUI _pauseOverlayText;
     private bool _initialized;
     private bool _controlEventsBound;
     private bool _battleEventsBound;
@@ -93,6 +97,7 @@ public sealed class DungeonBattleTab : MonoBehaviour
     public void Refresh()
     {
         RefreshSpawnQueue();
+        RefreshBattleTime();
         RefreshTimeControls();
     }
 
@@ -104,10 +109,17 @@ public sealed class DungeonBattleTab : MonoBehaviour
 
     private bool ValidateReferences()
     {
+        _pauseOverlayText = pauseOverlay != null
+            ? pauseOverlay.GetComponentInChildren<TextMeshProUGUI>(true)
+            : null;
+
         if (speedButton == null || speedText == null || pauseButton == null ||
-            pauseText == null || pauseOverlay == null || debugButton == null ||
-            debugPopup == null || spawnEnemyButton == null || spawnQueueView == null ||
-            settingsButton == null || dungeonPage == null || settingPage == null)
+            pauseText == null || pauseOverlay == null ||
+            _pauseOverlayText == null || battleTimeText == null ||
+            debugButton == null || debugPopup == null ||
+            spawnEnemyButton == null || spawnQueueView == null ||
+            settingsButton == null || dungeonPage == null ||
+            settingPage == null)
         {
             Debug.LogError("DungeonBattleTab scene references are incomplete.", this);
             return false;
@@ -155,6 +167,7 @@ public sealed class DungeonBattleTab : MonoBehaviour
         _battleManager.StateChanged += HandleBattleStateChanged;
         _battleManager.SpawnQueueChanged += RefreshSpawnQueue;
         _battleManager.SpawnTimerChanged += RefreshSpawnTimer;
+        _battleManager.BattleTimeChanged += RefreshBattleTime;
         _battleManager.TimeControlChanged += RefreshTimeControls;
         _battleEventsBound = true;
     }
@@ -169,6 +182,7 @@ public sealed class DungeonBattleTab : MonoBehaviour
             _battleManager.StateChanged -= HandleBattleStateChanged;
             _battleManager.SpawnQueueChanged -= RefreshSpawnQueue;
             _battleManager.SpawnTimerChanged -= RefreshSpawnTimer;
+            _battleManager.BattleTimeChanged -= RefreshBattleTime;
             _battleManager.TimeControlChanged -= RefreshTimeControls;
         }
 
@@ -211,9 +225,9 @@ public sealed class DungeonBattleTab : MonoBehaviour
         if (spawnQueueView == null)
             return;
 
-        IReadOnlyList<DungeonEnemyData> enemies = _battleManager != null
+        IReadOnlyList<EnemyRuntime> enemies = _battleManager != null
             ? _battleManager.SpawnQueue
-            : Array.Empty<DungeonEnemyData>();
+            : Array.Empty<EnemyRuntime>();
         spawnQueueView.RefreshQueue(enemies);
         RefreshSpawnTimer();
     }
@@ -234,12 +248,41 @@ public sealed class DungeonBattleTab : MonoBehaviour
     {
         float gameSpeed = _battleManager != null ? _battleManager.GameSpeed : 1f;
         bool isPaused = _battleManager != null && _battleManager.IsPaused;
+        bool isDefeated = _battleManager != null &&
+                          _battleManager.State == EBattleState.Completed &&
+                          _battleManager.Result == EBattleResult.Timeout;
 
         if (speedText != null)
             speedText.text = $"{gameSpeed:0.#}X";
         if (pauseText != null)
             pauseText.text = isPaused ? "RESUME" : "PAUSE";
+        if (_pauseOverlayText == null && pauseOverlay != null)
+        {
+            _pauseOverlayText =
+                pauseOverlay.GetComponentInChildren<TextMeshProUGUI>(true);
+        }
+
+        if (_pauseOverlayText != null)
+            _pauseOverlayText.text = isDefeated ? "DEFEAT" : "PAUSE";
         if (pauseOverlay != null)
-            pauseOverlay.SetActive(isPaused);
+            pauseOverlay.SetActive(isPaused || isDefeated);
+    }
+
+    private void RefreshBattleTime()
+    {
+        if (battleTimeText == null)
+            return;
+
+        if (_battleManager == null || _battleManager.BattleDuration <= 0f)
+        {
+            battleTimeText.text = "00:00";
+            return;
+        }
+
+        int totalSeconds = Mathf.CeilToInt(
+            _battleManager.BattleTimeRemaining);
+        int minutes = totalSeconds / 60;
+        int seconds = totalSeconds % 60;
+        battleTimeText.text = $"{minutes:00}:{seconds:00}";
     }
 }

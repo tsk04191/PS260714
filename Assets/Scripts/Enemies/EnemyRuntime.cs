@@ -1,16 +1,11 @@
+using System;
 using UnityEngine;
 
 /// <summary>
-/// Runtime state for one enemy. Additional combat stats can be added here later
-/// without coupling them to the tile UI.
+/// Independent combat state for one enemy created from an EnemySO definition.
 /// </summary>
-public sealed class DungeonEnemyData
+public sealed class EnemyRuntime
 {
-    public const int HeavyGuardHitCount = 3;
-    public const float MedicAbilityCooldown = 4f;
-    public const float MechanicAbilityCooldown = 10f;
-    public const float MechanicDisableDuration = 5f;
-
     private float _fireRemainingDuration;
     private float _fireTickElapsed;
     private float _fireTickInterval;
@@ -18,34 +13,32 @@ public sealed class DungeonEnemyData
     private IBattleCharacter _fireSource;
     private float _abilityCooldownRemaining;
 
-    public EEnemyGrade Grade { get; }
-    public EEnemyType Type { get; }
+    public EnemySO Definition { get; }
+    public EEnemyGrade Grade => Definition.Grade;
+    public EEnemyType Type => Definition.Type;
     public int MaxHealth { get; private set; }
     public int Health { get; private set; }
+    public int Armor { get; private set; }
     public int RemainingGuardedHits { get; private set; }
     public bool HasFire => _fireRemainingDuration > 0f;
-    public float SpawnIntervalMultiplier => Type == EEnemyType.Assault ? 0.5f : 1f;
+    public bool IsTargetPriorityExcluded => Definition.TargetPriorityExcluded;
+    public float SpawnIntervalMultiplier => Definition.SpawnIntervalMultiplier;
     public float AbilityCooldownRemaining => _abilityCooldownRemaining;
 
-    public DungeonEnemyData(int health)
-        : this(health, EEnemyGrade.Normal, EEnemyType.Basic)
+    public EnemyRuntime(EnemySO definition, int maximumHealthOverride = 0)
     {
-    }
-
-    public DungeonEnemyData(int health, EEnemyGrade grade)
-        : this(health, grade, EEnemyType.Basic)
-    {
-    }
-
-    public DungeonEnemyData(int health, EEnemyGrade grade, EEnemyType type)
-    {
-        Grade = NormalizeGrade(grade);
-        Type = NormalizeType(type);
-        MaxHealth = Mathf.Max(1, health);
+        Definition = definition != null
+            ? definition
+            : throw new ArgumentNullException(nameof(definition));
+        MaxHealth = maximumHealthOverride > 0
+            ? maximumHealthOverride
+            : Definition.BaseHealth;
+        MaxHealth = Mathf.Max(1, MaxHealth);
         Health = MaxHealth;
-        RemainingGuardedHits = Type == EEnemyType.Heavy
-            ? HeavyGuardHitCount
-            : 0;
+        Armor = Mathf.Max(
+            0,
+            Mathf.RoundToInt(MaxHealth * Definition.InitialArmorMultiplier));
+        RemainingGuardedHits = Mathf.Max(0, Definition.GuardedHitCount);
         ResetAbilityCooldown();
     }
 
@@ -61,15 +54,27 @@ public sealed class DungeonEnemyData
         if (damage <= 0 || Health <= 0)
             return 0;
 
-        if (Type == EEnemyType.Heavy && RemainingGuardedHits > 0)
+        if (RemainingGuardedHits > 0)
         {
             RemainingGuardedHits--;
             damage = 1;
         }
 
-        int appliedDamage = Mathf.Min(Health, damage);
-        Health -= appliedDamage;
-        return appliedDamage;
+        int appliedDamage = 0;
+        if (Armor > 0)
+        {
+            int armorDamage = Mathf.Min(Armor, damage);
+            Armor -= armorDamage;
+            damage -= armorDamage;
+            appliedDamage += armorDamage;
+        }
+
+        if (damage <= 0)
+            return appliedDamage;
+
+        int healthDamage = Mathf.Min(Health, damage);
+        Health -= healthDamage;
+        return appliedDamage + healthDamage;
     }
 
     internal int Heal(int amount)
@@ -117,11 +122,8 @@ public sealed class DungeonEnemyData
 
     internal bool TickAbilityCooldown(float deltaTime)
     {
-        if ((Type != EEnemyType.Medic && Type != EEnemyType.Mechanic) ||
-            deltaTime <= 0f)
-        {
+        if (Definition.AbilityCooldown <= 0f || deltaTime <= 0f)
             return false;
-        }
 
         _abilityCooldownRemaining = Mathf.Max(
             0f,
@@ -131,44 +133,6 @@ public sealed class DungeonEnemyData
 
     internal void ResetAbilityCooldown()
     {
-        switch (Type)
-        {
-            case EEnemyType.Medic:
-                _abilityCooldownRemaining = MedicAbilityCooldown;
-                break;
-            case EEnemyType.Mechanic:
-                _abilityCooldownRemaining = MechanicAbilityCooldown;
-                break;
-            default:
-                _abilityCooldownRemaining = 0f;
-                break;
-        }
-    }
-
-    private static EEnemyGrade NormalizeGrade(EEnemyGrade grade)
-    {
-        switch (grade)
-        {
-            case EEnemyGrade.Special:
-            case EEnemyGrade.Elite:
-            case EEnemyGrade.Boss:
-                return grade;
-            default:
-                return EEnemyGrade.Normal;
-        }
-    }
-
-    private static EEnemyType NormalizeType(EEnemyType type)
-    {
-        switch (type)
-        {
-            case EEnemyType.Assault:
-            case EEnemyType.Heavy:
-            case EEnemyType.Medic:
-            case EEnemyType.Mechanic:
-                return type;
-            default:
-                return EEnemyType.Basic;
-        }
+        _abilityCooldownRemaining = Mathf.Max(0f, Definition.AbilityCooldown);
     }
 }

@@ -4,8 +4,11 @@ public interface IBattleBoard
 {
     int InitialEnemyCapacity { get; }
     int LivingEnemyCount { get; }
+    bool HasEmptyEnemyTile { get; }
 
-    bool TryAddEnemy(DungeonEnemyData enemy);
+    bool TryAddEnemy(EnemyRuntime enemy);
+    bool TryAddEnemiesToDistinctTiles(
+        IReadOnlyList<EnemyRuntime> enemies);
     void ClearAllEnemies();
     void TickStatusEffects(float deltaTime);
     void TickEnemyAbilities(

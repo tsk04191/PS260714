@@ -31,7 +31,7 @@ public sealed class DungeonSpawnQueueView : MonoBehaviour
         return true;
     }
 
-    public void RefreshQueue(IReadOnlyList<DungeonEnemyData> enemies)
+    public void RefreshQueue(IReadOnlyList<EnemyRuntime> enemies)
     {
         if ((!_initialized && !Initialize()) || enemies == null)
             return;

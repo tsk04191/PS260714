@@ -33,6 +33,19 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard
             return count;
         }
     }
+    public bool HasEmptyEnemyTile
+    {
+        get
+        {
+            foreach (DungeonTileView tile in _tiles)
+            {
+                if (tile != null && tile.StackCount == 0)
+                    return true;
+            }
+
+            return false;
+        }
+    }
 
     public void Initialize(int gridSize, int stackSize)
     {
@@ -75,7 +88,7 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard
             return;
         }
 
-        List<DungeonEnemyData>[,] previousEnemies = CaptureExistingStacks();
+        List<EnemyRuntime>[,] previousEnemies = CaptureExistingStacks();
         int previousSize = GridSize;
 
         ClearTileObjects();
@@ -97,13 +110,21 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard
         RefreshLayout();
     }
 
-    public bool TryAddEnemyCard(int row, int column, int health = 1)
+    public bool TryAddEnemyCard(
+        int row,
+        int column,
+        EnemyRuntime enemy)
     {
-        return TryGetTile(row, column, out DungeonTileView tile) && tile.TryAdd(health);
+        return enemy != null &&
+               TryGetTile(row, column, out DungeonTileView tile) &&
+               tile.TryAdd(enemy);
     }
 
-    public bool TryAddEnemyCardToRandomTile(int health = 1)
+    public bool TryAddEnemyCardToRandomTile(EnemyRuntime enemy)
     {
+        if (enemy == null)
+            return false;
+
         List<DungeonTileView> availableTiles = new();
 
         foreach (DungeonTileView tile in _tiles)
@@ -116,15 +137,10 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard
             return false;
 
         int index = Random.Range(0, availableTiles.Count);
-        return availableTiles[index].TryAdd(health);
+        return availableTiles[index].TryAdd(enemy);
     }
 
-    public bool TryAddEnemyCardToNextAvailableTile(int health = 1)
-    {
-        return TryAddEnemyCardToNextAvailableTile(new DungeonEnemyData(health));
-    }
-
-    internal bool TryAddEnemyCardToNextAvailableTile(DungeonEnemyData enemy)
+    public bool TryAddEnemyCardToNextAvailableTile(EnemyRuntime enemy)
     {
         if (enemy == null)
             return false;
@@ -154,9 +170,63 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard
         return candidateTiles[randomIndex].TryAdd(enemy);
     }
 
-    public bool TryAddEnemy(DungeonEnemyData enemy)
+    public bool TryAddEnemy(EnemyRuntime enemy)
     {
         return TryAddEnemyCardToNextAvailableTile(enemy);
+    }
+
+    public bool TryAddEnemiesToDistinctTiles(
+        IReadOnlyList<EnemyRuntime> enemies)
+    {
+        if (enemies == null || enemies.Count == 0)
+            return false;
+
+        foreach (EnemyRuntime enemy in enemies)
+        {
+            if (enemy == null)
+                return false;
+        }
+
+        List<DungeonTileView> availableTiles = new();
+        foreach (DungeonTileView tile in _tiles)
+        {
+            if (tile != null && tile.CanAddEnemy)
+                availableTiles.Add(tile);
+        }
+
+        if (availableTiles.Count < enemies.Count)
+            return false;
+
+        List<DungeonTileView> selectedTiles = new(enemies.Count);
+        for (int enemyIndex = 0; enemyIndex < enemies.Count; enemyIndex++)
+        {
+            int smallestStackCount = int.MaxValue;
+            List<DungeonTileView> candidates = new();
+            foreach (DungeonTileView tile in availableTiles)
+            {
+                if (tile.StackCount < smallestStackCount)
+                {
+                    smallestStackCount = tile.StackCount;
+                    candidates.Clear();
+                }
+
+                if (tile.StackCount == smallestStackCount)
+                    candidates.Add(tile);
+            }
+
+            DungeonTileView selected = candidates[
+                Random.Range(0, candidates.Count)];
+            selectedTiles.Add(selected);
+            availableTiles.Remove(selected);
+        }
+
+        for (int index = 0; index < enemies.Count; index++)
+        {
+            if (!selectedTiles[index].TryAdd(enemies[index]))
+                return false;
+        }
+
+        return true;
     }
 
     public bool TryRemoveTopEnemyCard(int row, int column)
@@ -188,10 +258,9 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard
         DungeonTileView target = null;
         int lowestHealth = int.MaxValue;
 
-        foreach (DungeonTileView tile in _tiles)
+        foreach (DungeonTileView tile in CollectPriorityTargetTiles())
         {
-            if (tile == null || tile.StackCount == 0 ||
-                tile.TopEnemyHealth >= lowestHealth)
+            if (tile.TopEnemyHealth >= lowestHealth)
             {
                 continue;
             }
@@ -200,7 +269,7 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard
             lowestHealth = tile.TopEnemyHealth;
         }
 
-        return target != null ? target.TryDamageTop(damage) : 0;
+        return target != null ? TryDamageTile(target, damage) : 0;
     }
 
     public int TryAttackRandomEnemies(int targetCount, int damage)
@@ -208,7 +277,7 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard
         if (targetCount <= 0 || damage <= 0)
             return 0;
 
-        List<DungeonTileView> targets = CollectOccupiedTiles();
+        List<DungeonTileView> targets = CollectPriorityTargetTiles();
         int attackCount = Mathf.Min(targetCount, targets.Count);
         int totalDamage = 0;
 
@@ -217,7 +286,7 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard
             int randomIndex = Random.Range(index, targets.Count);
             (targets[index], targets[randomIndex]) =
                 (targets[randomIndex], targets[index]);
-            totalDamage += targets[index].TryDamageTop(damage);
+            totalDamage += TryDamageTile(targets[index], damage);
         }
 
         return totalDamage;
@@ -230,10 +299,9 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard
 
         DungeonTileView center = null;
         int highestHealth = 0;
-        foreach (DungeonTileView tile in _tiles)
+        foreach (DungeonTileView tile in CollectPriorityTargetTiles())
         {
-            if (tile == null || tile.StackCount == 0 ||
-                tile.TopEnemyHealth <= highestHealth)
+            if (tile.TopEnemyHealth <= highestHealth)
             {
                 continue;
             }
@@ -245,7 +313,7 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard
         if (center == null)
             return 0;
 
-        int totalDamage = center.TryDamageTop(damage);
+        int totalDamage = TryDamageTile(center, damage);
         totalDamage += TryDamageTile(center.Row - 1, center.Column, damage);
         totalDamage += TryDamageTile(center.Row + 1, center.Column, damage);
         totalDamage += TryDamageTile(center.Row, center.Column - 1, damage);
@@ -259,7 +327,7 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard
         float tickInterval,
         int tickDamage)
     {
-        List<DungeonTileView> occupiedTiles = CollectOccupiedTiles();
+        List<DungeonTileView> occupiedTiles = CollectPriorityTargetTiles();
         if (occupiedTiles.Count == 0)
             return false;
 
@@ -289,7 +357,7 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard
         foreach (DungeonTileView tile in _tiles)
         {
             if (tile != null)
-                tile.TickStatusEffects(deltaTime);
+                tile.TickStatusEffects(deltaTime, TryDamageTile);
         }
     }
 
@@ -302,14 +370,18 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard
 
         foreach (DungeonTileView tile in _tiles)
         {
-            DungeonEnemyData enemy = tile != null ? tile.TopEnemy : null;
+            EnemyRuntime enemy = tile != null ? tile.TopEnemy : null;
             if (enemy == null || !enemy.TickAbilityCooldown(deltaTime))
                 continue;
 
             bool activated = enemy.Type switch
             {
-                EEnemyType.Medic => TryHealAdjacentEnemies(tile),
-                EEnemyType.Mechanic => TryDisableHighestDamageCharacter(characters),
+                EEnemyType.Medic => TryHealAdjacentEnemies(
+                    tile,
+                    enemy.Definition.AbilityPower),
+                EEnemyType.Mechanic => TryDisableHighestDamageCharacter(
+                    characters,
+                    enemy.Definition.DisableDuration),
                 _ => false,
             };
             if (activated)
@@ -382,20 +454,61 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard
     private int TryDamageTile(int row, int column, int damage)
     {
         return TryGetTile(row, column, out DungeonTileView tile)
-            ? tile.TryDamageTop(damage)
+            ? TryDamageTile(tile, damage)
             : 0;
     }
 
-    private bool TryHealAdjacentEnemies(DungeonTileView medicTile)
+    private int TryDamageTile(DungeonTileView targetTile, int damage)
     {
-        if (medicTile == null)
+        if (targetTile == null || targetTile.TopEnemy == null || damage <= 0)
+            return 0;
+
+        DungeonTileView shieldTile = FindProtectingShieldBearer(targetTile);
+        DungeonTileView damageReceiver = shieldTile != null
+            ? shieldTile
+            : targetTile;
+        return damageReceiver.TryDamageTop(damage);
+    }
+
+    private DungeonTileView FindProtectingShieldBearer(
+        DungeonTileView targetTile)
+    {
+        if (targetTile == null || targetTile.TopEnemy == null ||
+            targetTile.TopEnemy.Type == EEnemyType.ShieldBearer)
+        {
+            return null;
+        }
+
+        for (int row = targetTile.Row - 1; row <= targetTile.Row + 1; row++)
+        {
+            for (int column = targetTile.Column - 1;
+                 column <= targetTile.Column + 1;
+                 column++)
+            {
+                if (!TryGetTile(row, column, out DungeonTileView candidate) ||
+                    candidate == targetTile || candidate.TopEnemy == null)
+                {
+                    continue;
+                }
+
+                if (candidate.TopEnemy.Type == EEnemyType.ShieldBearer)
+                    return candidate;
+            }
+        }
+
+        return null;
+    }
+
+    private bool TryHealAdjacentEnemies(DungeonTileView medicTile, int amount)
+    {
+        if (medicTile == null || amount <= 0)
             return false;
 
         int healedAmount = 0;
-        healedAmount += TryHealTile(medicTile.Row - 1, medicTile.Column, 1);
-        healedAmount += TryHealTile(medicTile.Row + 1, medicTile.Column, 1);
-        healedAmount += TryHealTile(medicTile.Row, medicTile.Column - 1, 1);
-        healedAmount += TryHealTile(medicTile.Row, medicTile.Column + 1, 1);
+        healedAmount += TryHealTile(medicTile.Row - 1, medicTile.Column, amount);
+        healedAmount += TryHealTile(medicTile.Row + 1, medicTile.Column, amount);
+        healedAmount += TryHealTile(medicTile.Row, medicTile.Column - 1, amount);
+        healedAmount += TryHealTile(medicTile.Row, medicTile.Column + 1, amount);
         return healedAmount > 0;
     }
 
@@ -407,9 +520,10 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard
     }
 
     private static bool TryDisableHighestDamageCharacter(
-        IReadOnlyList<IBattleCharacter> characters)
+        IReadOnlyList<IBattleCharacter> characters,
+        float duration)
     {
-        if (characters == null)
+        if (characters == null || duration <= 0f)
             return false;
 
         IBattleCharacter target = null;
@@ -426,7 +540,7 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard
         if (target == null)
             return false;
 
-        target.DisableFor(DungeonEnemyData.MechanicDisableDuration);
+        target.DisableFor(duration);
         return true;
     }
 
@@ -442,23 +556,43 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard
         return result;
     }
 
-    private List<DungeonEnemyData>[,] CaptureExistingStacks()
+    private List<DungeonTileView> CollectPriorityTargetTiles()
+    {
+        List<DungeonTileView> occupiedTiles = CollectOccupiedTiles();
+        List<DungeonTileView> priorityTargets = new();
+        foreach (DungeonTileView tile in occupiedTiles)
+        {
+            if (tile.TopEnemy != null &&
+                !tile.TopEnemy.IsTargetPriorityExcluded)
+            {
+                priorityTargets.Add(tile);
+            }
+        }
+
+        return priorityTargets.Count > 0
+            ? priorityTargets
+            : occupiedTiles;
+    }
+
+    private List<EnemyRuntime>[,] CaptureExistingStacks()
     {
         if (_tiles.Count != GridSize * GridSize)
             return null;
 
-        List<DungeonEnemyData>[,] result = new List<DungeonEnemyData>[GridSize, GridSize];
+        List<EnemyRuntime>[,] result =
+            new List<EnemyRuntime>[GridSize, GridSize];
         for (int row = 0; row < GridSize; row++)
         {
             for (int column = 0; column < GridSize; column++)
-                result[row, column] = _tiles[row * GridSize + column].CopyEnemyData();
+                result[row, column] =
+                    _tiles[row * GridSize + column].CopyEnemyRuntimes();
         }
 
         return result;
     }
 
     private void RestoreExistingStacks(
-        List<DungeonEnemyData>[,] previousEnemies,
+        List<EnemyRuntime>[,] previousEnemies,
         int previousSize)
     {
         if (previousEnemies == null)
@@ -470,7 +604,7 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard
             for (int column = 0; column < preservedSize; column++)
             {
                 DungeonTileView tile = _tiles[row * GridSize + column];
-                foreach (DungeonEnemyData enemy in previousEnemies[row, column])
+                foreach (EnemyRuntime enemy in previousEnemies[row, column])
                     tile.TryAdd(enemy);
             }
         }

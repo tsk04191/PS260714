@@ -5,7 +5,7 @@ public class DungeonPage : MonoBehaviour, IPage
 {
     public const int MaximumPartySize = 4;
 
-    private static readonly EEnemyType[] NormalEnemyTypes =
+    private static readonly EEnemyType[] FallbackNormalEnemyTypes =
     {
         EEnemyType.Basic,
         EEnemyType.Assault,
@@ -32,7 +32,12 @@ public class DungeonPage : MonoBehaviour, IPage
     [SerializeField] private CharacterRuntime[] playerCharacters =
         new CharacterRuntime[MaximumPartySize];
 
+    [Header("First Battle")]
+    [SerializeField, HideInInspector] private BattleSO firstBattle;
+
     [Header("Enemy Spawn Queue")]
+    [SerializeField] private EnemySO defaultEnemy;
+    [SerializeField] private EnemySO[] normalEnemyPool = new EnemySO[0];
     [SerializeField, Min(1)] private int minimumEnemyHealth = 20;
     [SerializeField, Min(1)] private int maximumEnemiesPerRound = 20;
     [SerializeField, Min(0.1f)] private float enemySpawnInterval = 4f;
@@ -41,6 +46,7 @@ public class DungeonPage : MonoBehaviour, IPage
     private bool _flowEventsBound;
     private bool _battleCompletionBound;
     private BattleManager _battleManager;
+    private readonly List<EnemySO> _fallbackEnemyPool = new();
 
     public AudioSource Speaker { get; set; }
     public EDungeonPhase CurrentPhase => flowController != null
@@ -95,6 +101,8 @@ public class DungeonPage : MonoBehaviour, IPage
             UnbindBattleCompletion();
             manager.EndBattle(board);
         }
+
+        ReleaseFallbackEnemyDefinitions();
     }
 
     private void OnValidate()
@@ -126,7 +134,7 @@ public class DungeonPage : MonoBehaviour, IPage
             Init();
 
         if (mode == PageOpenMode.Fresh)
-            StartNewBattle();
+            StartNewBattle(true);
 
         if (flowController != null)
         {
@@ -210,7 +218,9 @@ public class DungeonPage : MonoBehaviour, IPage
 
     public bool AddEnemyCard(int row, int column, int health = 1)
     {
-        bool added = TryPrepareBoard() && board.TryAddEnemyCard(row, column, health);
+        EnemyRuntime enemy = CreateEnemyRuntime(null, health);
+        bool added = TryPrepareBoard() &&
+                     board.TryAddEnemyCard(row, column, enemy);
         if (added)
             _battleManager?.NotifyBoardChanged();
 
@@ -219,7 +229,9 @@ public class DungeonPage : MonoBehaviour, IPage
 
     public bool AddEnemyCardToRandomTile(int health = 1)
     {
-        bool added = TryPrepareBoard() && board.TryAddEnemyCardToRandomTile(health);
+        EnemyRuntime enemy = CreateEnemyRuntime(null, health);
+        bool added = TryPrepareBoard() &&
+                     board.TryAddEnemyCardToRandomTile(enemy);
         if (added)
             _battleManager?.NotifyBoardChanged();
 
@@ -228,8 +240,9 @@ public class DungeonPage : MonoBehaviour, IPage
 
     public bool AddEnemyCardToNextAvailableTile(int health = 1)
     {
+        EnemyRuntime enemy = CreateEnemyRuntime(null, health);
         bool added = TryPrepareBoard() &&
-                     board.TryAddEnemyCardToNextAvailableTile(health);
+                     board.TryAddEnemyCardToNextAvailableTile(enemy);
         if (added)
             _battleManager?.NotifyBoardChanged();
 
@@ -238,7 +251,16 @@ public class DungeonPage : MonoBehaviour, IPage
 
     public bool QueueEnemy(int health = 1)
     {
-        return TryResolveBattleManager() && _battleManager.QueueEnemy(health);
+        EnemyRuntime enemy = CreateEnemyRuntime(null, health);
+        return TryResolveBattleManager() && _battleManager.QueueEnemy(enemy);
+    }
+
+    public bool QueueEnemy(EnemySO definition, int maximumHealthOverride = 0)
+    {
+        EnemyRuntime enemy = CreateEnemyRuntime(
+            definition,
+            maximumHealthOverride);
+        return TryResolveBattleManager() && _battleManager.QueueEnemy(enemy);
     }
 
     public bool RemoveTopEnemyCard(int row, int column)
@@ -286,7 +308,7 @@ public class DungeonPage : MonoBehaviour, IPage
             _battleManager?.SpawnNextEnemyImmediately();
     }
 
-    private bool StartNewBattle()
+    private bool StartNewBattle(bool forceFirstBattle = false)
     {
         if (!TryResolveBattleManager() || !_battleManager.IsInitialized)
             return false;
@@ -298,15 +320,45 @@ public class DungeonPage : MonoBehaviour, IPage
                 characters.Add(character);
         }
 
-        List<DungeonEnemyData> enemies = new(maximumEnemiesPerRound);
+        if ((forceFirstBattle || IsFirstBattleStep()) && firstBattle != null)
+        {
+            if (!firstBattle.TryCreateSetup(
+                    System.Environment.TickCount,
+                    out BattleSetup setup,
+                    out string error))
+            {
+                Debug.LogError(
+                    $"First battle configuration is invalid: {error}",
+                    firstBattle);
+                return false;
+            }
+
+            board.Initialize(setup.FieldSize, setup.MaximumStackSize);
+            return _battleManager.StartBattle(
+                board,
+                characters,
+                setup.Enemies,
+                setup.SpawnInterval,
+                setup.TimeLimit);
+        }
+
+        board.Initialize(initialGridSize, maximumStackSize);
+
+        IReadOnlyList<EnemySO> enemyPool = GetNormalEnemyPool();
+        if (enemyPool.Count == 0)
+        {
+            Debug.LogError("DungeonPage requires at least one enemy definition.", this);
+            return false;
+        }
+
+        List<EnemyRuntime> enemies = new(maximumEnemiesPerRound);
         for (int index = 0; index < maximumEnemiesPerRound; index++)
         {
-            EEnemyType randomType = NormalEnemyTypes[
-                Random.Range(0, NormalEnemyTypes.Length)];
-            enemies.Add(new DungeonEnemyData(
-                Mathf.Max(1, minimumEnemyHealth) + Random.Range(0, 9),
-                EEnemyGrade.Normal,
-                randomType));
+            EnemySO definition = enemyPool[Random.Range(0, enemyPool.Count)];
+            int maximumHealth = Mathf.Max(
+                minimumEnemyHealth,
+                definition.BaseHealth) + Random.Range(0, 9);
+            enemies.Add(definition.CreateRuntime(maximumHealth));
         }
 
         return _battleManager.StartBattle(
@@ -314,6 +366,32 @@ public class DungeonPage : MonoBehaviour, IPage
             characters,
             enemies,
             enemySpawnInterval);
+    }
+
+    private bool IsFirstBattleStep()
+    {
+        if (flowController == null ||
+            flowController.CurrentPhase != EDungeonPhase.Battle)
+        {
+            return false;
+        }
+
+        IReadOnlyList<EDungeonPhase> phases = flowController.PhaseSequence;
+        if (phases == null || phases.Count == 0)
+            return false;
+
+        int currentStep = Mathf.Clamp(
+            flowController.CurrentStepIndex,
+            0,
+            phases.Count - 1);
+        int battleIndex = -1;
+        for (int index = 0; index <= currentStep; index++)
+        {
+            if (phases[index] == EDungeonPhase.Battle)
+                battleIndex++;
+        }
+
+        return battleIndex == 0;
     }
 
     private bool TryResolveBattleManager()
@@ -332,6 +410,81 @@ public class DungeonPage : MonoBehaviour, IPage
 
         BindBattleCompletion();
         return battleTab != null && battleTab.Initialize(_battleManager);
+    }
+
+    private EnemyRuntime CreateEnemyRuntime(
+        EnemySO definition,
+        int maximumHealthOverride)
+    {
+        EnemySO resolvedDefinition = definition != null
+            ? definition
+            : ResolveDefaultEnemyDefinition();
+        return resolvedDefinition != null
+            ? resolvedDefinition.CreateRuntime(maximumHealthOverride)
+            : null;
+    }
+
+    private EnemySO ResolveDefaultEnemyDefinition()
+    {
+        if (defaultEnemy != null)
+            return defaultEnemy;
+
+        if (normalEnemyPool != null)
+        {
+            foreach (EnemySO definition in normalEnemyPool)
+            {
+                if (definition != null)
+                    return definition;
+            }
+        }
+
+        EnsureFallbackEnemyDefinitions();
+        return _fallbackEnemyPool.Count > 0
+            ? _fallbackEnemyPool[0]
+            : null;
+    }
+
+    private IReadOnlyList<EnemySO> GetNormalEnemyPool()
+    {
+        List<EnemySO> configuredEnemies = new();
+        if (normalEnemyPool != null)
+        {
+            foreach (EnemySO definition in normalEnemyPool)
+            {
+                if (definition != null)
+                    configuredEnemies.Add(definition);
+            }
+        }
+
+        if (configuredEnemies.Count > 0)
+            return configuredEnemies;
+
+        EnsureFallbackEnemyDefinitions();
+        return _fallbackEnemyPool;
+    }
+
+    private void EnsureFallbackEnemyDefinitions()
+    {
+        if (_fallbackEnemyPool.Count > 0)
+            return;
+
+        foreach (EEnemyType type in FallbackNormalEnemyTypes)
+        {
+            _fallbackEnemyPool.Add(EnemySO.CreateRuntimeDefault(
+                type,
+                minimumEnemyHealth));
+        }
+    }
+
+    private void ReleaseFallbackEnemyDefinitions()
+    {
+        foreach (EnemySO definition in _fallbackEnemyPool)
+        {
+            if (definition != null)
+                Destroy(definition);
+        }
+
+        _fallbackEnemyPool.Clear();
     }
 
     private void BindFlowEvents()

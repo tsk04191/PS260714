@@ -4,7 +4,7 @@ using UnityEngine.UI;
 
 [DisallowMultipleComponent]
 [RequireComponent(typeof(RectTransform))]
-public sealed class DungeonEnemyCard : MonoBehaviour
+public sealed class EnemyCard : MonoBehaviour
 {
     [SerializeField] private RectTransform cardShadow;
     [SerializeField] private RectTransform tileFace;
@@ -14,30 +14,33 @@ public sealed class DungeonEnemyCard : MonoBehaviour
     private Image _tileFaceImage;
     private Color _defaultFaceColor;
 
-    public DungeonEnemyData Enemy { get; private set; }
+    public EnemyRuntime Runtime { get; private set; }
     public RectTransform RectTransform =>
         _rectTransform != null ? _rectTransform : _rectTransform = (RectTransform)transform;
 
-    public void Setup(DungeonEnemyData enemy)
+    public void Bind(EnemyRuntime runtime)
     {
-        if (enemy == null)
+        if (runtime == null)
         {
-            Debug.LogError("DungeonEnemyCard requires enemy data.", this);
+            Debug.LogError("EnemyCard requires an enemy runtime.", this);
             return;
         }
 
-        Enemy = enemy;
+        Runtime = runtime;
         RefreshHealth();
     }
 
     public void RefreshHealth()
     {
-        if (healthText != null && Enemy != null)
+        if (healthText != null && Runtime != null)
         {
-            string typeCode = EnemyTypeDisplay.GetCardCode(Enemy.Type);
+            string typeCode = Runtime.Definition.CardCode;
+            string health = Runtime.Armor > 0
+                ? $"{Runtime.Health} A{Runtime.Armor}"
+                : Runtime.Health.ToString();
             healthText.text = string.IsNullOrEmpty(typeCode)
-                ? Enemy.Health.ToString()
-                : $"{typeCode} {Enemy.Health}";
+                ? health
+                : $"{typeCode} {health}";
         }
 
         RefreshStatus();
@@ -46,10 +49,10 @@ public sealed class DungeonEnemyCard : MonoBehaviour
     public void RefreshStatus()
     {
         CacheFaceImage();
-        if (_tileFaceImage == null || Enemy == null)
+        if (_tileFaceImage == null || Runtime == null)
             return;
 
-        _tileFaceImage.color = Enemy.HasFire
+        _tileFaceImage.color = Runtime.HasFire
             ? new Color(0.58f, 0.19f, 0.06f, 1f)
             : _defaultFaceColor;
     }

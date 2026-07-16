@@ -24,7 +24,7 @@ public sealed class BattleManager : MonoBehaviour
         3f,
     };
 
-    private readonly List<DungeonEnemyData> _spawnQueue = new();
+    private readonly List<EnemyRuntime> _spawnQueue = new();
     private readonly List<IBattleCharacter> _characters = new();
 
     private GameManager _manager;
@@ -33,6 +33,8 @@ public sealed class BattleManager : MonoBehaviour
     private int _spawnedEnemyCount;
     private float _spawnInterval;
     private float _spawnTimeRemaining;
+    private float _battleDuration;
+    private float _battleTimeRemaining;
     private int _gameSpeedIndex;
     private bool _isPaused;
     private bool _boardFull;
@@ -46,18 +48,23 @@ public sealed class BattleManager : MonoBehaviour
     public float GameSpeed => GameSpeedScales[_gameSpeedIndex];
     public float SpawnInterval => GetNextSpawnInterval();
     public float SpawnTimeRemaining => _spawnTimeRemaining;
+    public float BattleDuration => _battleDuration;
+    public float BattleTimeRemaining => _battleTimeRemaining;
+    public EBattleResult Result { get; private set; }
     public int PendingEnemyCount => _spawnQueue.Count;
     public int SpawnedEnemyCount => _spawnedEnemyCount;
     public int MaximumEnemyCount => _maximumEnemyCount;
     public int RemainingEnemySpawnCount =>
         Mathf.Max(0, _maximumEnemyCount - _spawnedEnemyCount);
-    public IReadOnlyList<DungeonEnemyData> SpawnQueue => _spawnQueue;
+    public IReadOnlyList<EnemyRuntime> SpawnQueue => _spawnQueue;
 
     public event Action<EBattleState> StateChanged;
     public event Action SpawnQueueChanged;
     public event Action SpawnTimerChanged;
+    public event Action BattleTimeChanged;
     public event Action TimeControlChanged;
     public event Action BattleCompleted;
+    public event Action<EBattleResult> BattleEnded;
 
     private void Update()
     {
@@ -66,6 +73,10 @@ public sealed class BattleManager : MonoBehaviour
 
         float deltaTime = Time.deltaTime;
         if (deltaTime <= 0f)
+            return;
+
+        TickBattleTimer(deltaTime);
+        if (State == EBattleState.Completed)
             return;
 
         _board.TickStatusEffects(deltaTime);
@@ -97,8 +108,9 @@ public sealed class BattleManager : MonoBehaviour
     public bool StartBattle(
         IBattleBoard board,
         IReadOnlyList<IBattleCharacter> characters,
-        IReadOnlyList<DungeonEnemyData> enemies,
-        float spawnInterval)
+        IReadOnlyList<EnemyRuntime> enemies,
+        float spawnInterval,
+        float timeLimit = 0f)
     {
         if (!IsInitialized || board == null || characters == null || enemies == null)
         {
@@ -109,6 +121,9 @@ public sealed class BattleManager : MonoBehaviour
         ReleaseSession();
         _board = board;
         _spawnInterval = Mathf.Max(0.1f, spawnInterval);
+        _battleDuration = Mathf.Max(0f, timeLimit);
+        _battleTimeRemaining = _battleDuration;
+        Result = EBattleResult.None;
 
         foreach (IBattleCharacter character in characters)
         {
@@ -119,7 +134,7 @@ public sealed class BattleManager : MonoBehaviour
             _characters.Add(character);
         }
 
-        foreach (DungeonEnemyData enemy in enemies)
+        foreach (EnemyRuntime enemy in enemies)
         {
             if (enemy != null)
                 _spawnQueue.Add(enemy);
@@ -135,6 +150,7 @@ public sealed class BattleManager : MonoBehaviour
         SetState(EBattleState.Running);
         ApplyBattleTimeScale();
         NotifyQueueAndTimerChanged();
+        BattleTimeChanged?.Invoke();
         TimeControlChanged?.Invoke();
         CheckForCompletion();
         return true;
@@ -190,16 +206,16 @@ public sealed class BattleManager : MonoBehaviour
         TimeControlChanged?.Invoke();
     }
 
-    public bool QueueEnemy(int health)
+    public bool QueueEnemy(EnemyRuntime enemy)
     {
-        if (!HasSession || State == EBattleState.Completed ||
+        if (enemy == null || !HasSession || State == EBattleState.Completed ||
             _spawnedEnemyCount + _spawnQueue.Count >= _maximumEnemyCount)
         {
             return false;
         }
 
         bool wasEmpty = _spawnQueue.Count == 0;
-        _spawnQueue.Add(new DungeonEnemyData(health));
+        _spawnQueue.Add(enemy);
         if (wasEmpty)
             ResetSpawnTimerForNextEnemy();
 
@@ -222,7 +238,9 @@ public sealed class BattleManager : MonoBehaviour
             return;
 
         _boardFull = false;
-        SpawnTimerChanged?.Invoke();
+        if (!TryFillEmptyTilesImmediately())
+            SpawnTimerChanged?.Invoke();
+
         CheckForCompletion();
     }
 
@@ -248,8 +266,10 @@ public sealed class BattleManager : MonoBehaviour
         StateChanged = null;
         SpawnQueueChanged = null;
         SpawnTimerChanged = null;
+        BattleTimeChanged = null;
         TimeControlChanged = null;
         BattleCompleted = null;
+        BattleEnded = null;
     }
 
     private void OnDestroy()
@@ -274,6 +294,9 @@ public sealed class BattleManager : MonoBehaviour
             return;
         }
 
+        if (TryFillEmptyTilesImmediately())
+            return;
+
         _spawnTimeRemaining = Mathf.Max(
             0f,
             _spawnTimeRemaining - Mathf.Max(0f, deltaTime));
@@ -288,19 +311,52 @@ public sealed class BattleManager : MonoBehaviour
         if (_spawnQueue.Count == 0 || _board == null)
             return false;
 
-        if (!_board.TryAddEnemy(_spawnQueue[0]))
+        int spawnCount = _spawnQueue[0].Type == EEnemyType.Pointman
+            ? Mathf.Min(
+                _spawnQueue[0].Definition.CompanionSpawnCount + 1,
+                _spawnQueue.Count)
+            : 1;
+        bool spawned;
+        if (spawnCount > 1)
+        {
+            List<EnemyRuntime> spawnGroup = _spawnQueue.GetRange(
+                0,
+                spawnCount);
+            spawned = _board.TryAddEnemiesToDistinctTiles(spawnGroup);
+        }
+        else
+        {
+            spawned = _board.TryAddEnemy(_spawnQueue[0]);
+        }
+
+        if (!spawned)
         {
             _boardFull = true;
             SpawnTimerChanged?.Invoke();
             return false;
         }
 
-        _spawnQueue.RemoveAt(0);
-        _spawnedEnemyCount++;
+        _spawnQueue.RemoveRange(0, spawnCount);
+        _spawnedEnemyCount += spawnCount;
         ResetSpawnTimerForNextEnemy();
         _boardFull = false;
         NotifyQueueAndTimerChanged();
         return true;
+    }
+
+    private bool TryFillEmptyTilesImmediately()
+    {
+        bool spawnedEnemy = false;
+        while (_spawnQueue.Count > 0 && _board != null &&
+               _board.HasEmptyEnemyTile)
+        {
+            if (!TrySpawnNextQueuedEnemy())
+                break;
+
+            spawnedEnemy = true;
+        }
+
+        return spawnedEnemy;
     }
 
     private void FillInitialBoard()
@@ -311,7 +367,8 @@ public sealed class BattleManager : MonoBehaviour
         int targetCount = Mathf.Min(
             _board.InitialEnemyCapacity,
             _spawnQueue.Count);
-        for (int index = 0; index < targetCount; index++)
+        while (_spawnQueue.Count > 0 &&
+               _board.LivingEnemyCount < targetCount)
         {
             if (!TrySpawnNextQueuedEnemy())
                 break;
@@ -326,11 +383,36 @@ public sealed class BattleManager : MonoBehaviour
             return;
         }
 
+        CompleteBattle(EBattleResult.Victory);
+    }
+
+    private void TickBattleTimer(float deltaTime)
+    {
+        if (_battleDuration <= 0f || _battleTimeRemaining <= 0f)
+            return;
+
+        _battleTimeRemaining = Mathf.Max(
+            0f,
+            _battleTimeRemaining - Mathf.Max(0f, deltaTime));
+        BattleTimeChanged?.Invoke();
+        if (_battleTimeRemaining <= 0f)
+            CompleteBattle(EBattleResult.Timeout);
+    }
+
+    private void CompleteBattle(EBattleResult result)
+    {
+        if (State == EBattleState.Completed)
+            return;
+
+        Result = result;
         _isPaused = false;
         SetState(EBattleState.Completed);
         RestoreDefaultTimeScale();
+        BattleTimeChanged?.Invoke();
         TimeControlChanged?.Invoke();
-        BattleCompleted?.Invoke();
+        BattleEnded?.Invoke(Result);
+        if (Result == EBattleResult.Victory)
+            BattleCompleted?.Invoke();
     }
 
     private void ReleaseSession()
@@ -343,7 +425,10 @@ public sealed class BattleManager : MonoBehaviour
         _spawnedEnemyCount = 0;
         _spawnInterval = 0f;
         _spawnTimeRemaining = 0f;
+        _battleDuration = 0f;
+        _battleTimeRemaining = 0f;
         _boardFull = false;
+        Result = EBattleResult.None;
         ResetTimeControl();
 
         if (IsInitialized)
