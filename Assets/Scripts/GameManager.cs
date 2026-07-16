@@ -19,6 +19,7 @@ public class GameManager : MonoBehaviour
         }
 
         Instance = this;
+        Application.runInBackground = true;
         Events = new GameEventManager();
 
         if (battleManager == null || !battleManager.Setup(this))
