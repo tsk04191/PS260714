@@ -11,7 +11,7 @@ public class ToggleSliderController : MonoBehaviour
     [SerializeField] private Image imgFill;
 
     [Header("Animation")]
-    [SerializeField, Min(0f)] private float animationDuration = 0.15f;
+    [SerializeField, Min(0f)] private float animationDuration = 0.1f;
     [SerializeField, Min(0f)] private float padding = 2f;
 
     [Header("Color")]
@@ -33,6 +33,7 @@ public class ToggleSliderController : MonoBehaviour
 
     private void Awake()
     {
+        animationDuration = TimePrecision.FloorToTenth(animationDuration);
         CacheRectTransforms();
     }
 
@@ -64,7 +65,7 @@ public class ToggleSliderController : MonoBehaviour
 
     private void OnValidate()
     {
-        animationDuration = Mathf.Max(0f, animationDuration);
+        animationDuration = TimePrecision.FloorToTenth(animationDuration);
         padding = Mathf.Max(0f, padding);
 
         if (!Application.IsPlaying(gameObject))

@@ -23,7 +23,8 @@ public sealed class EnemyRuntime
     public bool HasFire => _fireRemainingDuration > 0f;
     public bool IsTargetPriorityExcluded => Definition.TargetPriorityExcluded;
     public float SpawnIntervalMultiplier => Definition.SpawnIntervalMultiplier;
-    public float AbilityCooldownRemaining => _abilityCooldownRemaining;
+    public float AbilityCooldownRemaining =>
+        TimePrecision.FloorToTenth(_abilityCooldownRemaining);
 
     public EnemyRuntime(EnemySO definition, int maximumHealthOverride = 0)
     {
@@ -94,9 +95,9 @@ public sealed class EnemyRuntime
         int tickDamage,
         IBattleCharacter source)
     {
-        _fireRemainingDuration = Mathf.Max(0.1f, duration);
+        _fireRemainingDuration = TimePrecision.Normalize(duration, 0.1f);
         _fireTickElapsed = 0f;
-        _fireTickInterval = Mathf.Max(0.1f, tickInterval);
+        _fireTickInterval = TimePrecision.Normalize(tickInterval, 0.1f);
         _fireTickDamage = Mathf.Max(1, tickDamage);
         _fireSource = source;
     }

@@ -11,6 +11,9 @@ public sealed class CharacterData
     public float FireDuration { get; private set; }
     public float FireTickInterval { get; private set; }
     public int FireTickDamage { get; private set; }
+    public int ActiveSkillCost { get; private set; }
+    public float ActiveSkillDuration { get; private set; }
+    public int ActiveSkillAttackCount { get; private set; }
     public int AttackDamage => Mathf.Max(
         1,
         Mathf.RoundToInt(AttackPower * AttackWeight));
@@ -28,5 +31,12 @@ public sealed class CharacterData
         FireDuration = original != null ? original.FireDuration : 6f;
         FireTickInterval = original != null ? original.FireTickInterval : 2f;
         FireTickDamage = original != null ? original.FireTickDamage : 1;
+        ActiveSkillCost = original != null ? original.ActiveSkillCost : 1;
+        ActiveSkillDuration = original != null
+            ? original.ActiveSkillDuration
+            : 10f;
+        ActiveSkillAttackCount = original != null
+            ? original.ActiveSkillAttackCount
+            : 1;
     }
 }

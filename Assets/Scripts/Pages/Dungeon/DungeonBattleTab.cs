@@ -17,10 +17,8 @@ public sealed class DungeonBattleTab : MonoBehaviour
     [Header("Battle Time")]
     [SerializeField] private TextMeshProUGUI battleTimeText;
 
-    [Header("Debug Controls")]
-    [SerializeField] private Button debugButton;
-    [SerializeField] private GameObject debugPopup;
-    [SerializeField] private Button spawnEnemyButton;
+    [Header("Active Skill Resource")]
+    [SerializeField] private TextMeshProUGUI activeSkillResourceText;
 
     [Header("Enemy Spawn Queue")]
     [SerializeField] private DungeonSpawnQueueView spawnQueueView;
@@ -48,7 +46,6 @@ public sealed class DungeonBattleTab : MonoBehaviour
 
     private void OnDisable()
     {
-        HideDebugPopup();
         UnbindControlEvents();
         UnbindBattleEvents();
     }
@@ -98,13 +95,8 @@ public sealed class DungeonBattleTab : MonoBehaviour
     {
         RefreshSpawnQueue();
         RefreshBattleTime();
+        RefreshActiveSkillResource();
         RefreshTimeControls();
-    }
-
-    public void HideDebugPopup()
-    {
-        if (debugPopup != null)
-            debugPopup.SetActive(false);
     }
 
     private bool ValidateReferences()
@@ -112,12 +104,24 @@ public sealed class DungeonBattleTab : MonoBehaviour
         _pauseOverlayText = pauseOverlay != null
             ? pauseOverlay.GetComponentInChildren<TextMeshProUGUI>(true)
             : null;
+        if (activeSkillResourceText == null)
+        {
+            foreach (TextMeshProUGUI text in
+                     GetComponentsInChildren<TextMeshProUGUI>(true))
+            {
+                if (text.name != "txtPlayerPartyInfoTitle")
+                    continue;
+
+                activeSkillResourceText = text;
+                break;
+            }
+        }
 
         if (speedButton == null || speedText == null || pauseButton == null ||
             pauseText == null || pauseOverlay == null ||
             _pauseOverlayText == null || battleTimeText == null ||
-            debugButton == null || debugPopup == null ||
-            spawnEnemyButton == null || spawnQueueView == null ||
+            activeSkillResourceText == null ||
+            spawnQueueView == null ||
             settingsButton == null || dungeonPage == null ||
             settingPage == null)
         {
@@ -135,8 +139,6 @@ public sealed class DungeonBattleTab : MonoBehaviour
 
         speedButton.onClick.AddListener(HandleSpeedClicked);
         pauseButton.onClick.AddListener(HandlePauseClicked);
-        debugButton.onClick.AddListener(HandleDebugClicked);
-        spawnEnemyButton.onClick.AddListener(HandleSpawnEnemyClicked);
         settingsButton.onClick.AddListener(HandleSettingsClicked);
         _controlEventsBound = true;
     }
@@ -150,10 +152,6 @@ public sealed class DungeonBattleTab : MonoBehaviour
             speedButton.onClick.RemoveListener(HandleSpeedClicked);
         if (pauseButton != null)
             pauseButton.onClick.RemoveListener(HandlePauseClicked);
-        if (debugButton != null)
-            debugButton.onClick.RemoveListener(HandleDebugClicked);
-        if (spawnEnemyButton != null)
-            spawnEnemyButton.onClick.RemoveListener(HandleSpawnEnemyClicked);
         if (settingsButton != null)
             settingsButton.onClick.RemoveListener(HandleSettingsClicked);
         _controlEventsBound = false;
@@ -169,6 +167,8 @@ public sealed class DungeonBattleTab : MonoBehaviour
         _battleManager.SpawnTimerChanged += RefreshSpawnTimer;
         _battleManager.BattleTimeChanged += RefreshBattleTime;
         _battleManager.TimeControlChanged += RefreshTimeControls;
+        _battleManager.ActiveSkillResourceChanged +=
+            HandleActiveSkillResourceChanged;
         _battleEventsBound = true;
     }
 
@@ -184,6 +184,8 @@ public sealed class DungeonBattleTab : MonoBehaviour
             _battleManager.SpawnTimerChanged -= RefreshSpawnTimer;
             _battleManager.BattleTimeChanged -= RefreshBattleTime;
             _battleManager.TimeControlChanged -= RefreshTimeControls;
+            _battleManager.ActiveSkillResourceChanged -=
+                HandleActiveSkillResourceChanged;
         }
 
         _battleEventsBound = false;
@@ -199,17 +201,6 @@ public sealed class DungeonBattleTab : MonoBehaviour
         _battleManager?.TogglePause();
     }
 
-    private void HandleDebugClicked()
-    {
-        if (debugPopup != null)
-            debugPopup.SetActive(!debugPopup.activeSelf);
-    }
-
-    private void HandleSpawnEnemyClicked()
-    {
-        _battleManager?.SpawnNextEnemyImmediately();
-    }
-
     private void HandleSettingsClicked()
     {
         PageControl.PagToPag(dungeonPage, settingPage, PageOpenMode.Fresh);
@@ -218,6 +209,11 @@ public sealed class DungeonBattleTab : MonoBehaviour
     private void HandleBattleStateChanged(EBattleState _)
     {
         RefreshTimeControls();
+    }
+
+    private void HandleActiveSkillResourceChanged(int _)
+    {
+        RefreshActiveSkillResource();
     }
 
     private void RefreshSpawnQueue()
@@ -284,5 +280,16 @@ public sealed class DungeonBattleTab : MonoBehaviour
         int minutes = totalSeconds / 60;
         int seconds = totalSeconds % 60;
         battleTimeText.text = $"{minutes:00}:{seconds:00}";
+    }
+
+    private void RefreshActiveSkillResource()
+    {
+        if (activeSkillResourceText == null)
+            return;
+
+        int resource = _battleManager != null
+            ? _battleManager.ActiveSkillResource
+            : 0;
+        activeSkillResourceText.text = $"SKILL POINT {resource}";
     }
 }

@@ -13,7 +13,7 @@ public enum EBattleState
 }
 
 [DisallowMultipleComponent]
-public sealed class BattleManager : MonoBehaviour
+public sealed class BattleManager : MonoBehaviour, IActiveSkillResource
 {
     private const float DefaultGameSpeed = 1f;
 
@@ -39,6 +39,7 @@ public sealed class BattleManager : MonoBehaviour
     private bool _isPaused;
     private bool _boardFull;
     private bool _controlsGameTime;
+    private int _activeSkillResource;
 
     public EBattleState State { get; private set; } = EBattleState.Uninitialized;
     public bool IsInitialized => _manager != null;
@@ -47,10 +48,14 @@ public sealed class BattleManager : MonoBehaviour
     public bool IsBoardFull => _boardFull;
     public float GameSpeed => GameSpeedScales[_gameSpeedIndex];
     public float SpawnInterval => GetNextSpawnInterval();
-    public float SpawnTimeRemaining => _spawnTimeRemaining;
+    public float SpawnTimeRemaining =>
+        TimePrecision.FloorToTenth(_spawnTimeRemaining);
     public float BattleDuration => _battleDuration;
-    public float BattleTimeRemaining => _battleTimeRemaining;
+    public float BattleTimeRemaining =>
+        TimePrecision.FloorToTenth(_battleTimeRemaining);
     public EBattleResult Result { get; private set; }
+    public int ActiveSkillResource => _activeSkillResource;
+    int IActiveSkillResource.Current => _activeSkillResource;
     public int PendingEnemyCount => _spawnQueue.Count;
     public int SpawnedEnemyCount => _spawnedEnemyCount;
     public int MaximumEnemyCount => _maximumEnemyCount;
@@ -65,6 +70,12 @@ public sealed class BattleManager : MonoBehaviour
     public event Action TimeControlChanged;
     public event Action BattleCompleted;
     public event Action<EBattleResult> BattleEnded;
+    public event Action<int> ActiveSkillResourceChanged;
+    event Action<int> IActiveSkillResource.Changed
+    {
+        add => ActiveSkillResourceChanged += value;
+        remove => ActiveSkillResourceChanged -= value;
+    }
 
     private void Update()
     {
@@ -120,8 +131,9 @@ public sealed class BattleManager : MonoBehaviour
 
         ReleaseSession();
         _board = board;
-        _spawnInterval = Mathf.Max(0.1f, spawnInterval);
-        _battleDuration = Mathf.Max(0f, timeLimit);
+        _board.EnemyDefeated += HandleEnemyDefeated;
+        _spawnInterval = TimePrecision.Normalize(spawnInterval, 0.1f);
+        _battleDuration = TimePrecision.FloorToTenth(timeLimit);
         _battleTimeRemaining = _battleDuration;
         Result = EBattleResult.None;
 
@@ -131,6 +143,7 @@ public sealed class BattleManager : MonoBehaviour
                 continue;
 
             character.ResetRuntime();
+            character.BindBattle(this, _board);
             _characters.Add(character);
         }
 
@@ -153,6 +166,21 @@ public sealed class BattleManager : MonoBehaviour
         BattleTimeChanged?.Invoke();
         TimeControlChanged?.Invoke();
         CheckForCompletion();
+        return true;
+    }
+
+    public bool CanSpend(int amount)
+    {
+        return amount >= 0 && State == EBattleState.Running &&
+               _activeSkillResource >= amount;
+    }
+
+    public bool TrySpend(int amount)
+    {
+        if (!CanSpend(amount))
+            return false;
+
+        SetActiveSkillResource(_activeSkillResource - amount);
         return true;
     }
 
@@ -223,15 +251,6 @@ public sealed class BattleManager : MonoBehaviour
         return true;
     }
 
-    public bool SpawnNextEnemyImmediately()
-    {
-        if (!HasSession || State == EBattleState.Completed)
-            return false;
-
-        _spawnTimeRemaining = 0f;
-        return TrySpawnNextQueuedEnemy();
-    }
-
     public void NotifyBoardChanged()
     {
         if (!HasSession)
@@ -270,6 +289,7 @@ public sealed class BattleManager : MonoBehaviour
         TimeControlChanged = null;
         BattleCompleted = null;
         BattleEnded = null;
+        ActiveSkillResourceChanged = null;
     }
 
     private void OnDestroy()
@@ -418,6 +438,12 @@ public sealed class BattleManager : MonoBehaviour
     private void ReleaseSession()
     {
         RestoreDefaultTimeScale();
+        if (_board != null)
+            _board.EnemyDefeated -= HandleEnemyDefeated;
+
+        foreach (IBattleCharacter character in _characters)
+            character?.BindBattle(null, null);
+
         _spawnQueue.Clear();
         _characters.Clear();
         _board = null;
@@ -429,6 +455,7 @@ public sealed class BattleManager : MonoBehaviour
         _battleTimeRemaining = 0f;
         _boardFull = false;
         Result = EBattleResult.None;
+        SetActiveSkillResource(0);
         ResetTimeControl();
 
         if (IsInitialized)
@@ -462,6 +489,22 @@ public sealed class BattleManager : MonoBehaviour
         SpawnTimerChanged?.Invoke();
     }
 
+    private void HandleEnemyDefeated(EnemyRuntime _)
+    {
+        if (State == EBattleState.Running)
+            SetActiveSkillResource(_activeSkillResource + 1);
+    }
+
+    private void SetActiveSkillResource(int value)
+    {
+        value = Mathf.Max(0, value);
+        if (_activeSkillResource == value)
+            return;
+
+        _activeSkillResource = value;
+        ActiveSkillResourceChanged?.Invoke(_activeSkillResource);
+    }
+
     private void ResetSpawnTimerForNextEnemy()
     {
         _spawnTimeRemaining = _spawnQueue.Count > 0
@@ -477,6 +520,8 @@ public sealed class BattleManager : MonoBehaviour
         float multiplier = _spawnQueue.Count > 0 && _spawnQueue[0] != null
             ? _spawnQueue[0].SpawnIntervalMultiplier
             : 1f;
-        return Mathf.Max(0.01f, _spawnInterval * multiplier);
+        return TimePrecision.Normalize(
+            _spawnInterval * multiplier,
+            0.1f);
     }
 }

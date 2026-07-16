@@ -1,6 +1,8 @@
+using System;
 using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.UI;
+using Random = UnityEngine.Random;
 
 [DisallowMultipleComponent]
 [RequireComponent(typeof(RectTransform))]
@@ -46,6 +48,7 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard
             return false;
         }
     }
+    public event Action<EnemyRuntime> EnemyDefeated;
 
     public void Initialize(int gridSize, int stackSize)
     {
@@ -321,6 +324,67 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard
         return totalDamage;
     }
 
+    public int TryAttackCrossWithAdjacentSplash(
+        int damage,
+        int adjacentDamage)
+    {
+        if (damage <= 0 || adjacentDamage <= 0)
+            return 0;
+
+        DungeonTileView center = null;
+        int highestHealth = 0;
+        foreach (DungeonTileView tile in CollectPriorityTargetTiles())
+        {
+            if (tile.TopEnemyHealth <= highestHealth)
+                continue;
+
+            center = tile;
+            highestHealth = tile.TopEnemyHealth;
+        }
+
+        if (center == null)
+            return 0;
+
+        int totalDamage = TryDamageTile(center, damage);
+        totalDamage += TryDamageTile(center.Row - 1, center.Column, damage);
+        totalDamage += TryDamageTile(center.Row + 1, center.Column, damage);
+        totalDamage += TryDamageTile(center.Row, center.Column - 1, damage);
+        totalDamage += TryDamageTile(center.Row, center.Column + 1, damage);
+        totalDamage += TryDamageTile(
+            center.Row - 2,
+            center.Column,
+            adjacentDamage);
+        totalDamage += TryDamageTile(
+            center.Row + 2,
+            center.Column,
+            adjacentDamage);
+        totalDamage += TryDamageTile(
+            center.Row,
+            center.Column - 2,
+            adjacentDamage);
+        totalDamage += TryDamageTile(
+            center.Row,
+            center.Column + 2,
+            adjacentDamage);
+        totalDamage += TryDamageTile(
+            center.Row - 1,
+            center.Column - 1,
+            adjacentDamage);
+        totalDamage += TryDamageTile(
+            center.Row - 1,
+            center.Column + 1,
+            adjacentDamage);
+        totalDamage += TryDamageTile(
+            center.Row + 1,
+            center.Column - 1,
+            adjacentDamage);
+        totalDamage += TryDamageTile(
+            center.Row + 1,
+            center.Column + 1,
+            adjacentDamage);
+        return totalDamage;
+    }
+
     public bool TryApplyFireToRandomEnemy(
         IBattleCharacter source,
         float duration,
@@ -347,6 +411,42 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard
             duration,
             tickInterval,
             tickDamage);
+    }
+
+    public bool TryApplyFireAroundRandomEnemy(
+        IBattleCharacter source,
+        float duration,
+        float tickInterval,
+        int tickDamage)
+    {
+        List<DungeonTileView> occupiedTiles = CollectPriorityTargetTiles();
+        if (occupiedTiles.Count == 0)
+            return false;
+
+        DungeonTileView center = occupiedTiles[
+            Random.Range(0, occupiedTiles.Count)];
+        bool applied = false;
+        for (int row = center.Row - 1; row <= center.Row + 1; row++)
+        {
+            for (int column = center.Column - 1;
+                 column <= center.Column + 1;
+                 column++)
+            {
+                if (!TryGetTile(row, column, out DungeonTileView tile) ||
+                    tile.TopEnemy == null)
+                {
+                    continue;
+                }
+
+                applied |= tile.TryApplyFireToTop(
+                    source,
+                    duration,
+                    tickInterval,
+                    tickDamage);
+            }
+        }
+
+        return applied;
     }
 
     public void TickStatusEffects(float deltaTime)
@@ -467,7 +567,12 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard
         DungeonTileView damageReceiver = shieldTile != null
             ? shieldTile
             : targetTile;
-        return damageReceiver.TryDamageTop(damage);
+        EnemyRuntime damagedEnemy = damageReceiver.TopEnemy;
+        int appliedDamage = damageReceiver.TryDamageTop(damage);
+        if (appliedDamage > 0 && damagedEnemy.Health <= 0)
+            EnemyDefeated?.Invoke(damagedEnemy);
+
+        return appliedDamage;
     }
 
     private DungeonTileView FindProtectingShieldBearer(

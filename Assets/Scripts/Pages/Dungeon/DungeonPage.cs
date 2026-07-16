@@ -5,6 +5,14 @@ public class DungeonPage : MonoBehaviour, IPage
 {
     public const int MaximumPartySize = 4;
 
+    private static readonly Color[] DefaultPartySlotColors =
+    {
+        new Color32(0x45, 0xB7, 0xFF, 0xFF),
+        new Color32(0xFF, 0xB5, 0x47, 0xFF),
+        new Color32(0xE6, 0x6B, 0xFF, 0xFF),
+        new Color32(0x72, 0xE5, 0x8A, 0xFF),
+    };
+
     private static readonly EEnemyType[] FallbackNormalEnemyTypes =
     {
         EEnemyType.Basic,
@@ -31,6 +39,8 @@ public class DungeonPage : MonoBehaviour, IPage
     [Header("Player Party")]
     [SerializeField] private CharacterRuntime[] playerCharacters =
         new CharacterRuntime[MaximumPartySize];
+    [SerializeField, ColorUsage(false, false)]
+    private Color[] partySlotColors = new Color[MaximumPartySize];
 
     [Header("First Battle")]
     [SerializeField, HideInInspector] private BattleSO firstBattle;
@@ -114,11 +124,14 @@ public class DungeonPage : MonoBehaviour, IPage
         maximumStackSize = Mathf.Max(1, maximumStackSize);
         minimumEnemyHealth = Mathf.Max(1, minimumEnemyHealth);
         maximumEnemiesPerRound = Mathf.Max(1, maximumEnemiesPerRound);
-        enemySpawnInterval = Mathf.Max(0.1f, enemySpawnInterval);
+        enemySpawnInterval =
+            TimePrecision.Normalize(enemySpawnInterval, 0.1f);
         EnsurePlayerCharacterSlots();
+        EnsurePartySlotColors();
 
         if (Application.isPlaying && _initialized && board != null)
         {
+            ApplyPlayerCharacterSlotColors();
             board.SetGridSize(initialGridSize);
             _battleManager?.NotifyBoardChanged();
             battleTab?.Refresh();
@@ -153,7 +166,6 @@ public class DungeonPage : MonoBehaviour, IPage
             }
         }
 
-        battleTab?.HideDebugPopup();
         battleTab?.Refresh();
         RefreshBoardSize();
     }
@@ -161,7 +173,6 @@ public class DungeonPage : MonoBehaviour, IPage
     public void Close()
     {
         _battleManager?.SuspendBattle();
-        battleTab?.HideDebugPopup();
         gameObject.SetActive(false);
     }
 
@@ -195,7 +206,6 @@ public class DungeonPage : MonoBehaviour, IPage
                 this);
         }
 
-        battleTab?.HideDebugPopup();
         _initialized = true;
         battleTab?.Refresh();
         RefreshBoardSize();
@@ -299,13 +309,6 @@ public class DungeonPage : MonoBehaviour, IPage
 
         board.ClearAllStacks();
         _battleManager?.NotifyBoardChanged();
-    }
-
-    [ContextMenu("Debug/Spawn Next Enemy")]
-    private void DebugSpawnNextEnemy()
-    {
-        if (Application.isPlaying)
-            _battleManager?.SpawnNextEnemyImmediately();
     }
 
     private bool StartNewBattle(bool forceFirstBattle = false)
@@ -522,7 +525,6 @@ public class DungeonPage : MonoBehaviour, IPage
         else
         {
             _battleManager.SuspendBattle();
-            battleTab?.HideDebugPopup();
         }
 
         battleTab?.Refresh();
@@ -559,6 +561,7 @@ public class DungeonPage : MonoBehaviour, IPage
     private void InitializePlayerCharacters()
     {
         EnsurePlayerCharacterSlots();
+        EnsurePartySlotColors();
         bool hasCharacter = false;
         for (int index = 0; index < playerCharacters.Length; index++)
         {
@@ -572,7 +575,10 @@ public class DungeonPage : MonoBehaviour, IPage
                 Debug.LogError(
                     $"Player party slot {index + 1} is not configured.",
                     character);
+                continue;
             }
+
+            character.ConfigurePartySlot(index, partySlotColors[index]);
         }
 
         if (!hasCharacter)
@@ -585,6 +591,32 @@ public class DungeonPage : MonoBehaviour, IPage
             playerCharacters = new CharacterRuntime[MaximumPartySize];
         else if (playerCharacters.Length != MaximumPartySize)
             System.Array.Resize(ref playerCharacters, MaximumPartySize);
+    }
+
+    private void EnsurePartySlotColors()
+    {
+        if (partySlotColors == null)
+            partySlotColors = new Color[MaximumPartySize];
+        else if (partySlotColors.Length != MaximumPartySize)
+            System.Array.Resize(ref partySlotColors, MaximumPartySize);
+
+        for (int index = 0; index < partySlotColors.Length; index++)
+        {
+            if (partySlotColors[index].a <= 0f)
+                partySlotColors[index] = DefaultPartySlotColors[index];
+        }
+    }
+
+    private void ApplyPlayerCharacterSlotColors()
+    {
+        EnsurePlayerCharacterSlots();
+        EnsurePartySlotColors();
+        for (int index = 0; index < playerCharacters.Length; index++)
+        {
+            CharacterRuntime character = playerCharacters[index];
+            if (character != null)
+                character.ConfigurePartySlot(index, partySlotColors[index]);
+        }
     }
 
     private bool TryPrepareBoard()

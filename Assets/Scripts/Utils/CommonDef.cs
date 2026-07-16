@@ -1,3 +1,25 @@
+using UnityEngine;
+
 public class CommonDef
 {
+}
+
+public static class TimePrecision
+{
+    public const float Step = 0.1f;
+
+    public static float FloorToTenth(float value)
+    {
+        if (float.IsNaN(value) || float.IsInfinity(value))
+            return 0f;
+
+        value = Mathf.Max(0f, value);
+        return Mathf.Floor(value * 10f + 0.0001f) * Step;
+    }
+
+    public static float Normalize(float value, float minimum = 0f)
+    {
+        minimum = FloorToTenth(minimum);
+        return Mathf.Max(minimum, FloorToTenth(value));
+    }
 }

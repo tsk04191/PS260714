@@ -12,7 +12,9 @@ public sealed class EnemySO : ScriptableObject
 
     [Header("Base Stats")]
     [SerializeField, Min(1)] private int baseHealth = 20;
-    [SerializeField, Min(0.01f)] private float spawnIntervalMultiplier = 1f;
+    [SerializeField, Min(0.1f)] private float spawnIntervalMultiplier = 1f;
+    [SerializeField, Min(0f), Tooltip("0 uses the default threat for this enemy type.")]
+    private float threatCost;
     [SerializeField] private bool targetPriorityExcluded;
     [SerializeField, Min(0f)] private float initialArmorMultiplier;
 
@@ -29,14 +31,18 @@ public sealed class EnemySO : ScriptableObject
     public EEnemyGrade Grade => grade;
     public EEnemyType Type => type;
     public int BaseHealth => baseHealth;
-    public float SpawnIntervalMultiplier => spawnIntervalMultiplier;
+    public float SpawnIntervalMultiplier =>
+        TimePrecision.Normalize(spawnIntervalMultiplier, 0.1f);
+    public float ThreatCost => threatCost > 0f
+        ? threatCost
+        : GetDefaultThreatCost(type);
     public bool TargetPriorityExcluded => targetPriorityExcluded;
     public float InitialArmorMultiplier => initialArmorMultiplier;
     public int GuardedHitCount => guardedHitCount;
     public int CompanionSpawnCount => companionSpawnCount;
-    public float AbilityCooldown => abilityCooldown;
+    public float AbilityCooldown => TimePrecision.FloorToTenth(abilityCooldown);
     public int AbilityPower => abilityPower;
-    public float DisableDuration => disableDuration;
+    public float DisableDuration => TimePrecision.FloorToTenth(disableDuration);
 
     public EnemyRuntime CreateRuntime(int maximumHealthOverride = 0)
     {
@@ -53,13 +59,15 @@ public sealed class EnemySO : ScriptableObject
             cardCode = EnemyTypeDisplay.GetCardCode(type);
 
         baseHealth = Mathf.Max(1, baseHealth);
-        spawnIntervalMultiplier = Mathf.Max(0.01f, spawnIntervalMultiplier);
+        spawnIntervalMultiplier =
+            TimePrecision.Normalize(spawnIntervalMultiplier, 0.1f);
+        threatCost = Mathf.Max(0f, threatCost);
         initialArmorMultiplier = Mathf.Max(0f, initialArmorMultiplier);
         guardedHitCount = Mathf.Max(0, guardedHitCount);
         companionSpawnCount = Mathf.Max(0, companionSpawnCount);
-        abilityCooldown = Mathf.Max(0f, abilityCooldown);
+        abilityCooldown = TimePrecision.FloorToTenth(abilityCooldown);
         abilityPower = Mathf.Max(0, abilityPower);
-        disableDuration = Mathf.Max(0f, disableDuration);
+        disableDuration = TimePrecision.FloorToTenth(disableDuration);
     }
 
     [ContextMenu("Apply Current Type Defaults")]
@@ -89,6 +97,7 @@ public sealed class EnemySO : ScriptableObject
             : EEnemyGrade.Normal;
         baseHealth = Mathf.Max(1, health);
         spawnIntervalMultiplier = 1f;
+        threatCost = 0f;
         targetPriorityExcluded = false;
         initialArmorMultiplier = 0f;
         guardedHitCount = 0;
@@ -129,5 +138,20 @@ public sealed class EnemySO : ScriptableObject
         return enemyType == EEnemyType.Pointman ||
                enemyType == EEnemyType.ShieldBearer ||
                enemyType == EEnemyType.Infiltrator;
+    }
+
+    private static float GetDefaultThreatCost(EEnemyType enemyType)
+    {
+        return enemyType switch
+        {
+            EEnemyType.Assault => 1.15f,
+            EEnemyType.Heavy => 1.35f,
+            EEnemyType.Medic => 1.3f,
+            EEnemyType.Mechanic => 1.8f,
+            EEnemyType.Pointman => 1.3f,
+            EEnemyType.ShieldBearer => 2.3f,
+            EEnemyType.Infiltrator => 1.4f,
+            _ => 1f,
+        };
     }
 }

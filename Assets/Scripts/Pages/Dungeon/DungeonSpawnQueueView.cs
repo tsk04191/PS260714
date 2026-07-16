@@ -83,6 +83,10 @@ public sealed class DungeonSpawnQueueView : MonoBehaviour
         else if (queuedEnemyCount <= 0)
             timerText.text = "QUEUE EMPTY";
         else
-            timerText.text = $"NEXT {remainingTime:0.0}s | {queuedEnemyCount} WAITING";
+        {
+            float displayedTime = TimePrecision.FloorToTenth(remainingTime);
+            timerText.text =
+                $"NEXT {displayedTime:0.0}s | {queuedEnemyCount} WAITING";
+        }
     }
 }

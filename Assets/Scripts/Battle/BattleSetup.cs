@@ -59,8 +59,8 @@ public sealed class BattleSetup
     {
         FieldSize = fieldSize;
         MaximumStackSize = maximumStackSize;
-        SpawnInterval = spawnInterval;
-        TimeLimit = timeLimit;
+        SpawnInterval = TimePrecision.Normalize(spawnInterval, 0.1f);
+        TimeLimit = TimePrecision.FloorToTenth(timeLimit);
         GradeCounts = gradeCounts;
         Enemies = enemies != null
             ? enemies.AsReadOnly()

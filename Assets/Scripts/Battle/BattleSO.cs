@@ -15,11 +15,13 @@ public sealed class BattleEnemyGradeRule
     [SerializeField, Min(0)] private int count;
     [SerializeField, Min(0f)] private float ratio;
     [SerializeField] private List<EnemySO> enemyPool = new();
+    [SerializeField] private List<BattleEnemyDetailRule> detailedEnemies = new();
 
     public EEnemyGrade Grade => grade;
     public int Count => count;
     public float Ratio => ratio;
     public IReadOnlyList<EnemySO> EnemyPool => enemyPool;
+    public IReadOnlyList<BattleEnemyDetailRule> DetailedEnemies => detailedEnemies;
 
     public BattleEnemyGradeRule(
         EEnemyGrade grade,
@@ -37,7 +39,18 @@ public sealed class BattleEnemyGradeRule
         count = Mathf.Max(0, count);
         ratio = Mathf.Max(0f, ratio);
         enemyPool ??= new List<EnemySO>();
+        detailedEnemies ??= new List<BattleEnemyDetailRule>();
     }
+}
+
+[Serializable]
+public sealed class BattleEnemyDetailRule
+{
+    [SerializeField] private EnemySO enemy;
+    [SerializeField, Min(0)] private int count;
+
+    public EnemySO Enemy => enemy;
+    public int Count => count;
 }
 
 [CreateAssetMenu(fileName = "Battle", menuName = "Dungeon/Battle")]
@@ -48,6 +61,10 @@ public sealed class BattleSO : ScriptableObject
     [Header("Identity")]
     [SerializeField] private string battleId = "first_battle";
     [SerializeField] private string displayName = "FIRST BATTLE";
+
+    [Header("Progress Balance")]
+    [SerializeField, Range(0, 100)] private int difficultyPercent;
+    [SerializeField] private int balanceSeed = 1000;
 
     [Header("Field")]
     [SerializeField, Range(DungeonBoardView.MinimumGridSize, DungeonBoardView.MaximumGridSize)]
@@ -76,14 +93,16 @@ public sealed class BattleSO : ScriptableObject
 
     public string BattleId => battleId;
     public string DisplayName => displayName;
+    public int DifficultyPercent => difficultyPercent;
+    public int BalanceSeed => balanceSeed;
     public int FieldSize => fieldSize;
     public int MaximumStackSize => maximumStackSize;
     public int TotalEnemyCount => totalEnemyCount;
     public int MinimumEnemyHealth => minimumEnemyHealth;
     public int RandomHealthBonus => randomHealthBonus;
-    public float SpawnInterval => spawnInterval;
+    public float SpawnInterval => TimePrecision.Normalize(spawnInterval, 0.1f);
     public EEnemyCompositionMode CompositionMode => compositionMode;
-    public float TimeLimit => timeLimit;
+    public float TimeLimit => TimePrecision.Normalize(timeLimit, 1f);
 
     private void OnValidate()
     {
@@ -93,6 +112,7 @@ public sealed class BattleSO : ScriptableObject
         displayName = string.IsNullOrWhiteSpace(displayName)
             ? name.ToUpperInvariant()
             : displayName.Trim();
+        difficultyPercent = Mathf.Clamp(difficultyPercent, 0, 100);
         fieldSize = Mathf.Clamp(
             fieldSize,
             DungeonBoardView.MinimumGridSize,
@@ -101,8 +121,8 @@ public sealed class BattleSO : ScriptableObject
         totalEnemyCount = Mathf.Max(1, totalEnemyCount);
         minimumEnemyHealth = Mathf.Max(1, minimumEnemyHealth);
         randomHealthBonus = Mathf.Max(0, randomHealthBonus);
-        spawnInterval = Mathf.Max(0.1f, spawnInterval);
-        timeLimit = Mathf.Max(1f, timeLimit);
+        spawnInterval = TimePrecision.Normalize(spawnInterval, 0.1f);
+        timeLimit = TimePrecision.Normalize(timeLimit, 1f);
         EnsureRules();
     }
 
@@ -163,6 +183,7 @@ public sealed class BattleSO : ScriptableObject
             if (pool == null)
                 continue;
 
+            HashSet<EnemySO> poolDefinitions = new();
             foreach (EnemySO definition in pool)
             {
                 if (definition == null)
@@ -182,6 +203,49 @@ public sealed class BattleSO : ScriptableObject
                     error = $"{definition.name} is assigned more than once.";
                     return false;
                 }
+
+                poolDefinitions.Add(definition);
+            }
+
+            int gradeCount = counts.Get(rule.Grade);
+            int detailedCount = 0;
+            HashSet<EnemySO> detailedDefinitions = new();
+            foreach (BattleEnemyDetailRule detail in rule.DetailedEnemies)
+            {
+                if (detail == null || detail.Enemy == null)
+                {
+                    error = $"{rule.Grade} detailed enemies contain an empty entry.";
+                    return false;
+                }
+
+                if (!poolDefinitions.Contains(detail.Enemy))
+                {
+                    error = $"{detail.Enemy.name} must also be in the {rule.Grade} enemy pool.";
+                    return false;
+                }
+
+                if (!detailedDefinitions.Add(detail.Enemy))
+                {
+                    error = $"{detail.Enemy.name} has more than one detailed count.";
+                    return false;
+                }
+
+                detailedCount += Mathf.Max(0, detail.Count);
+            }
+
+            if (detailedCount > gradeCount)
+            {
+                error = $"{rule.Grade} detailed counts total {detailedCount}, " +
+                        $"but the grade count is {gradeCount}.";
+                return false;
+            }
+
+            if (detailedCount < gradeCount &&
+                poolDefinitions.Count <= detailedDefinitions.Count)
+            {
+                error = $"{rule.Grade} needs at least one non-detailed enemy " +
+                        "for its remaining random count.";
+                return false;
             }
         }
 
@@ -206,14 +270,30 @@ public sealed class BattleSO : ScriptableObject
         foreach (BattleEnemyGradeRule rule in GetRules())
         {
             int count = counts.Get(rule.Grade);
-            for (int index = 0; index < count; index++)
+            HashSet<EnemySO> detailedDefinitions = new();
+            int detailedCount = 0;
+            foreach (BattleEnemyDetailRule detail in rule.DetailedEnemies)
             {
-                EnemySO definition = rule.EnemyPool[
-                    random.Next(0, rule.EnemyPool.Count)];
-                int maximumHealth = Math.Max(
-                    minimumEnemyHealth,
-                    definition.BaseHealth) + random.Next(0, randomHealthBonus + 1);
-                enemies.Add(definition.CreateRuntime(maximumHealth));
+                detailedDefinitions.Add(detail.Enemy);
+                int exactCount = Mathf.Max(0, detail.Count);
+                detailedCount += exactCount;
+                for (int index = 0; index < exactCount; index++)
+                    AddEnemyRuntime(enemies, detail.Enemy, random);
+            }
+
+            List<EnemySO> randomPool = new();
+            foreach (EnemySO definition in rule.EnemyPool)
+            {
+                if (!detailedDefinitions.Contains(definition))
+                    randomPool.Add(definition);
+            }
+
+            int randomCount = count - detailedCount;
+            for (int index = 0; index < randomCount; index++)
+            {
+                EnemySO definition = randomPool[
+                    random.Next(0, randomPool.Count)];
+                AddEnemyRuntime(enemies, definition, random);
             }
         }
 
@@ -232,6 +312,17 @@ public sealed class BattleSO : ScriptableObject
             counts,
             enemies);
         return true;
+    }
+
+    private void AddEnemyRuntime(
+        ICollection<EnemyRuntime> enemies,
+        EnemySO definition,
+        System.Random random)
+    {
+        int maximumHealth = Math.Max(
+            minimumEnemyHealth,
+            definition.BaseHealth) + random.Next(0, randomHealthBonus + 1);
+        enemies.Add(definition.CreateRuntime(maximumHealth));
     }
 
     private bool TryResolveRatioCounts(
