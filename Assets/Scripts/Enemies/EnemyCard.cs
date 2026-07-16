@@ -52,9 +52,7 @@ public sealed class EnemyCard : MonoBehaviour
         if (_tileFaceImage == null || Runtime == null)
             return;
 
-        _tileFaceImage.color = Runtime.HasFire
-            ? new Color(0.58f, 0.19f, 0.06f, 1f)
-            : _defaultFaceColor;
+        _tileFaceImage.color = _defaultFaceColor;
     }
 
     public void ApplyLayout(float edge, float sideDepth)

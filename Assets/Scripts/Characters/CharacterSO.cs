@@ -21,6 +21,13 @@ public sealed class CharacterSO : ScriptableObject
     [SerializeField, Min(0.1f)] private float fireTickInterval = 2f;
     [SerializeField, Min(1)] private int fireTickDamage = 1;
 
+    [Header("Visual Effect")]
+    [SerializeField] private Sprite targetEffectSprite;
+    [SerializeField] private RuntimeAnimatorController targetEffectController;
+
+    [Header("Audio")]
+    [SerializeField] private AudioClip attackSfx;
+
     [Header("Active Skill")]
     [SerializeField, Min(1)] private int activeSkillCost = 1;
     [SerializeField, Min(0.1f)] private float activeSkillDuration = 10f;
@@ -36,6 +43,10 @@ public sealed class CharacterSO : ScriptableObject
     public float FireTickInterval =>
         TimePrecision.Normalize(fireTickInterval, 0.1f);
     public int FireTickDamage => fireTickDamage;
+    public Sprite TargetEffectSprite => targetEffectSprite;
+    public RuntimeAnimatorController TargetEffectController =>
+        targetEffectController;
+    public AudioClip AttackSfx => attackSfx;
     public int ActiveSkillCost => activeSkillCost;
     public float ActiveSkillDuration =>
         TimePrecision.Normalize(activeSkillDuration, 0.1f);

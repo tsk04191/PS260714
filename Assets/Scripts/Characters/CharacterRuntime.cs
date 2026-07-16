@@ -4,18 +4,23 @@ using UnityEngine.EventSystems;
 using UnityEngine.UI;
 
 [DisallowMultipleComponent]
+[RequireComponent(typeof(AudioSource))]
 public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
     IPointerClickHandler
 {
+    private const float TargetAttackRecoveryDuration = 0.5f;
+
     [SerializeField] private CharacterSO original;
     [SerializeField] private TextMeshProUGUI nameText;
     [SerializeField] private TextMeshProUGUI attackText;
     [SerializeField] private TextMeshProUGUI cooldownText;
     [SerializeField] private Image cooldownFill;
+    [SerializeField] private AudioSource attackSfxSpeaker;
 
     private bool _initialized;
     private float _remainingCooldown;
     private float _disabledTimeRemaining;
+    private float _attackRecoveryRemaining;
     private float _dualSkillTimeRemaining;
     private int _areaSkillAttackCount;
     private int _fireSkillAttackCount;
@@ -28,6 +33,9 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
     public int PartySlotIndex { get; private set; } = -1;
     public int PartySlotNumber => PartySlotIndex + 1;
     public Color EffectColor { get; private set; } = Color.white;
+    public Sprite TargetEffectSprite => Data?.TargetEffectSprite;
+    public RuntimeAnimatorController TargetEffectController =>
+        Data?.TargetEffectController;
     public int TotalDamageDealt { get; private set; }
     public float DisabledTimeRemaining =>
         TimePrecision.FloorToTenth(_disabledTimeRemaining);
@@ -55,6 +63,7 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
         }
 
         Data = original.CreateData();
+        InitializeAttackSfxSpeaker();
         _remainingCooldown = Data.AttackCooldown;
         _panelImage = GetComponent<Image>();
         if (_panelImage != null)
@@ -72,6 +81,7 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
         IActiveSkillResource activeSkillResource,
         IBattleBoard board)
     {
+        _board?.ClearPreparedAttack(this);
         if (_activeSkillResource != null)
             _activeSkillResource.Changed -= HandleActiveSkillResourceChanged;
 
@@ -102,6 +112,7 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
 
         _remainingCooldown = Data.AttackCooldown;
         _disabledTimeRemaining = 0f;
+        _attackRecoveryRemaining = 0f;
         _dualSkillTimeRemaining = 0f;
         _areaSkillAttackCount = 0;
         _fireSkillAttackCount = 0;
@@ -120,6 +131,20 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
             _dualSkillTimeRemaining - deltaTime);
 
         float activeDeltaTime = deltaTime;
+        if (_attackRecoveryRemaining > 0f)
+        {
+            float recoveryDeltaTime = Mathf.Min(
+                activeDeltaTime,
+                _attackRecoveryRemaining);
+            _attackRecoveryRemaining = Mathf.Max(
+                0f,
+                _attackRecoveryRemaining - recoveryDeltaTime);
+            activeDeltaTime -= recoveryDeltaTime;
+
+            if (_attackRecoveryRemaining <= 0f)
+                _remainingCooldown = Data.AttackCooldown;
+        }
+
         if (_disabledTimeRemaining > 0f)
         {
             float disabledDeltaTime = Mathf.Min(
@@ -137,9 +162,32 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
             return;
         }
 
+        bool targetChanged = false;
+        if (Data.AttackType == CharacterAttackType.LowestHealth)
+        {
+            board.TryPrepareLowestHealthAttack(this, out targetChanged);
+        }
+        else if (Data.AttackType == CharacterAttackType.RandomMultiple)
+        {
+            board.TryPrepareRandomAttack(
+                this,
+                GetRandomTargetCount(),
+                out targetChanged);
+        }
+
+        if (targetChanged)
+        {
+            _remainingCooldown = Mathf.Max(_remainingCooldown, 1f);
+        }
+
         _remainingCooldown = Mathf.Max(0f, _remainingCooldown - activeDeltaTime);
         if (_remainingCooldown <= 0f && TryAttack(board))
-            _remainingCooldown = Data.AttackCooldown;
+        {
+            if (UsesAttackRecovery())
+                BeginTargetAttackRecovery();
+            else
+                _remainingCooldown = Data.AttackCooldown;
+        }
 
         RefreshUi();
     }
@@ -183,6 +231,7 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
         {
             case CharacterAttackType.RandomMultiple:
                 _dualSkillTimeRemaining = Data.ActiveSkillDuration;
+                _board.ClearPreparedAttack(this);
                 break;
 
             case CharacterAttackType.CrossHighestHealth:
@@ -194,9 +243,16 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
                 break;
 
             default:
+                _board.ClearPreparedAttack(this);
                 int damageDealt = _board.TryAttackLowestHealthEnemy(
+                    this,
                     Data.AttackDamage * 2);
                 RecordDamageDealt(damageDealt);
+                if (damageDealt > 0)
+                {
+                    PlayAttackSfx();
+                    BeginTargetAttackRecovery();
+                }
                 break;
         }
 
@@ -210,9 +266,8 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
         switch (Data.AttackType)
         {
             case CharacterAttackType.RandomMultiple:
-                int bonusTargetCount = _dualSkillTimeRemaining > 0f ? 2 : 0;
-                damageDealt = board.TryAttackRandomEnemies(
-                    Data.TargetCount + bonusTargetCount,
+                damageDealt = board.TryResolveRandomAttack(
+                    this,
                     Data.AttackDamage);
                 break;
 
@@ -223,6 +278,7 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
                         1,
                         Mathf.FloorToInt(Data.AttackDamage * 0.5f));
                     damageDealt = board.TryAttackCrossWithAdjacentSplash(
+                        this,
                         Data.AttackDamage,
                         adjacentDamage);
                     if (damageDealt > 0)
@@ -231,6 +287,7 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
                 else
                 {
                     damageDealt = board.TryAttackCrossAroundHighestHealthEnemy(
+                        this,
                         Data.AttackDamage);
                 }
                 break;
@@ -249,10 +306,14 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
                         Data.FireTickDamage);
                 if (fireApplied && _fireSkillAttackCount > 0)
                     _fireSkillAttackCount--;
+                if (fireApplied)
+                    PlayAttackSfx();
                 return fireApplied;
 
             default:
-                damageDealt = board.TryAttackLowestHealthEnemy(Data.AttackDamage);
+                damageDealt = board.TryResolveLowestHealthAttack(
+                    this,
+                    Data.AttackDamage);
                 break;
         }
 
@@ -260,6 +321,7 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
             return false;
 
         RecordDamageDealt(damageDealt);
+        PlayAttackSfx();
         return true;
     }
 
@@ -275,6 +337,54 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
                 _fireSkillAttackCount > 0,
             _ => false,
         };
+    }
+
+    private int GetRandomTargetCount()
+    {
+        int bonusTargetCount = _dualSkillTimeRemaining > 0f ? 2 : 0;
+        return Data.TargetCount + bonusTargetCount;
+    }
+
+    private bool UsesAttackRecovery()
+    {
+        return Data.AttackType == CharacterAttackType.LowestHealth ||
+               Data.AttackType == CharacterAttackType.RandomMultiple ||
+               Data.AttackType == CharacterAttackType.CrossHighestHealth;
+    }
+
+    private void BeginTargetAttackRecovery()
+    {
+        _remainingCooldown = 0f;
+        _attackRecoveryRemaining = TargetAttackRecoveryDuration;
+    }
+
+    private void PlayAttackSfx()
+    {
+        if (Data?.AttackSfx == null)
+            return;
+
+        InitializeAttackSfxSpeaker();
+        GameManager manager = GameManager.Instance;
+        if (manager?.Audio != null)
+        {
+            manager.Audio.PlaySfx(attackSfxSpeaker, Data.AttackSfx);
+            return;
+        }
+
+        attackSfxSpeaker?.PlayOneShot(Data.AttackSfx);
+    }
+
+    private void InitializeAttackSfxSpeaker()
+    {
+        if (attackSfxSpeaker == null)
+            attackSfxSpeaker = GetComponent<AudioSource>();
+        if (attackSfxSpeaker == null)
+            attackSfxSpeaker = gameObject.AddComponent<AudioSource>();
+
+        attackSfxSpeaker.playOnAwake = false;
+        attackSfxSpeaker.loop = false;
+        attackSfxSpeaker.spatialBlend = 0f;
+        attackSfxSpeaker.dopplerLevel = 0f;
     }
 
     private void HandleActiveSkillResourceChanged(int _)
@@ -302,6 +412,12 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
                 TimePrecision.FloorToTenth(_disabledTimeRemaining);
             cooldownText.text = $"STOP {displayedTime:0.0}s";
         }
+        else if (_attackRecoveryRemaining > 0f)
+        {
+            float displayedRecovery =
+                TimePrecision.FloorToTenth(_attackRecoveryRemaining);
+            cooldownText.text = $"RECOVERY {displayedRecovery:0.0}s";
+        }
         else
         {
             float displayedCooldown =
@@ -327,9 +443,12 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
                     : "READY";
             }
         }
-        cooldownFill.fillAmount = Data.AttackCooldown > 0f
-            ? 1f - Mathf.Clamp01(_remainingCooldown / Data.AttackCooldown)
-            : 1f;
+        cooldownFill.fillAmount = _attackRecoveryRemaining > 0f
+            ? 0f
+            : Data.AttackCooldown > 0f
+                ? 1f - Mathf.Clamp01(
+                    _remainingCooldown / Data.AttackCooldown)
+                : 1f;
         cooldownFill.color = EffectColor;
 
         if (_panelImage != null)

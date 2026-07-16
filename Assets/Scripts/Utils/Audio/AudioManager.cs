@@ -159,6 +159,20 @@ public class AudioManager : MonoBehaviour
         PlayOneShot(speakers != null ? speakers.MainSFX : null, clip);
     }
 
+    public void PlaySfx(AudioSource speaker, AudioClip clip)
+    {
+        Speakers speakers = main_speakers;
+        AudioSource fallbackSpeaker = speakers != null
+            ? speakers.MainSFX
+            : null;
+        AudioSource targetSpeaker = speaker != null
+            ? speaker
+            : fallbackSpeaker;
+
+        ConfigureSfxSpeaker(targetSpeaker, fallbackSpeaker);
+        PlayOneShot(targetSpeaker, clip);
+    }
+
     public void PlayUiSound(string clipName)
     {
         PlayUiSound(FindUiClip(clipName));
@@ -177,6 +191,25 @@ public class AudioManager : MonoBehaviour
             return;
 
         speaker.PlayOneShot(clip);
+    }
+
+    private static void ConfigureSfxSpeaker(
+        AudioSource speaker,
+        AudioSource template)
+    {
+        if (speaker == null)
+            return;
+
+        speaker.playOnAwake = false;
+        speaker.loop = false;
+        speaker.spatialBlend = 0f;
+        speaker.dopplerLevel = 0f;
+
+        if (template == null || ReferenceEquals(speaker, template))
+            return;
+
+        speaker.outputAudioMixerGroup = template.outputAudioMixerGroup;
+        speaker.priority = template.priority;
     }
 
     private void OnMuteInBackgroundChanged(bool _)

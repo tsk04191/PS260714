@@ -7,14 +7,40 @@ using UnityEngine.UI;
 [RequireComponent(typeof(RectTransform), typeof(Image))]
 public sealed class DungeonTileView : MonoBehaviour
 {
+    private const byte TargetEffectAlpha = 155;
+    private const string BasicAimStateName = "BasicAimIn";
+    private const string BasicFireStateName = "BasicFire";
+    private const string BasicHiddenStateName = "BasicHidden";
+    private const string FireStatusLoopStateName = "FireStatusLoop";
+    private const string FireStatusHiddenStateName = "FireStatusHidden";
+
+    private static readonly float[] FireStatusAnimationOffsets =
+    {
+        0f,
+        0.15f,
+        0.3f,
+    };
+
     [SerializeField] private Image slotSurface;
     [SerializeField] private RectTransform stackRoot;
     [SerializeField] private EnemyCard enemyCardPrefab;
+
+    [Header("Basic Target Effect")]
+    [SerializeField] private Image[] basicTargetEffectImages =
+        new Image[DungeonPage.MaximumPartySize];
+    [SerializeField] private Animator[] basicTargetEffectAnimators =
+        new Animator[DungeonPage.MaximumPartySize];
+
+    [Header("Fire Status Effect")]
+    [SerializeField] private Sprite fireStatusSprite;
+    [SerializeField] private Image[] fireStatusImages = new Image[3];
+    [SerializeField] private Animator[] fireStatusAnimators = new Animator[3];
 
     private readonly List<EnemyRuntime> _enemies = new();
     private readonly List<EnemyCard> _cards = new();
     private int _maximumStackSize;
     private float _currentCellSize;
+    private EnemyRuntime _displayedFireEnemy;
 
     public int Row { get; private set; }
     public int Column { get; private set; }
@@ -40,6 +66,9 @@ public sealed class DungeonTileView : MonoBehaviour
                 ? new Color(0.075f, 0.105f, 0.09f, 1f)
                 : new Color(0.09f, 0.12f, 0.105f, 1f);
         }
+
+        InitializeBasicTargetEffects();
+        InitializeFireStatusEffects();
     }
 
     internal bool TryAdd(EnemyRuntime enemy)
@@ -54,6 +83,7 @@ public sealed class DungeonTileView : MonoBehaviour
         _cards.Add(card);
 
         RefreshCardPositions();
+        RefreshFireStatusEffect();
         return true;
     }
 
@@ -108,7 +138,60 @@ public sealed class DungeonTileView : MonoBehaviour
 
         TopEnemy.ApplyFire(duration, tickInterval, tickDamage, source);
         _cards[^1]?.RefreshStatus();
+        RefreshFireStatusEffect();
         return true;
+    }
+
+    internal void PlayBasicTargetAim(IBattleCharacter source)
+    {
+        if (!TryGetBasicTargetEffect(
+                source,
+                out Image image,
+                out Animator animator))
+        {
+            return;
+        }
+
+        image.color = GetTargetEffectColor(source.EffectColor);
+        image.sprite = source.TargetEffectSprite;
+        image.enabled = true;
+        animator.Play(BasicAimStateName, 0, 0f);
+    }
+
+    internal void PlayBasicTargetFire(IBattleCharacter source)
+    {
+        if (!TryGetBasicTargetEffect(
+                source,
+                out Image image,
+                out Animator animator))
+        {
+            return;
+        }
+
+        image.color = GetTargetEffectColor(source.EffectColor);
+        image.sprite = source.TargetEffectSprite;
+        image.enabled = true;
+        animator.Play(BasicFireStateName, 0, 0f);
+    }
+
+    internal void HideBasicTargetEffect(IBattleCharacter source)
+    {
+        if (!TryGetBasicTargetEffect(
+                source,
+                out _,
+                out Animator animator))
+        {
+            return;
+        }
+
+        if (animator.isActiveAndEnabled)
+            animator.Play(BasicHiddenStateName, 0, 0f);
+        else
+        {
+            CanvasGroup canvasGroup = animator.GetComponent<CanvasGroup>();
+            if (canvasGroup != null)
+                canvasGroup.alpha = 0f;
+        }
     }
 
     internal void TickStatusEffects(
@@ -128,10 +211,14 @@ public sealed class DungeonTileView : MonoBehaviour
             source?.RecordDamageDealt(appliedDamage);
 
         if (!ReferenceEquals(TopEnemy, burningEnemy))
+        {
+            RefreshFireStatusEffect();
             return;
+        }
 
         if (hadFire != burningEnemy.HasFire)
             _cards[^1]?.RefreshHealth();
+        RefreshFireStatusEffect();
     }
 
     public bool TryRemoveTop()
@@ -148,6 +235,7 @@ public sealed class DungeonTileView : MonoBehaviour
             Destroy(topCard.gameObject);
 
         RefreshCardPositions();
+        RefreshFireStatusEffect();
         return true;
     }
 
@@ -161,6 +249,8 @@ public sealed class DungeonTileView : MonoBehaviour
 
         _enemies.Clear();
         _cards.Clear();
+        HideAllBasicTargetEffects();
+        HideFireStatusEffect();
     }
 
     internal List<EnemyRuntime> CopyEnemyRuntimes()
@@ -200,6 +290,171 @@ public sealed class DungeonTileView : MonoBehaviour
 
             root.anchoredPosition = new Vector2(0f, baseHeight + stackStep * index);
             card.ApplyLayout(edge, sideDepth);
+        }
+    }
+
+    private void InitializeBasicTargetEffects()
+    {
+        int effectCount = Mathf.Min(
+            basicTargetEffectImages?.Length ?? 0,
+            basicTargetEffectAnimators?.Length ?? 0);
+        for (int index = 0; index < effectCount; index++)
+        {
+            Image image = basicTargetEffectImages[index];
+            Animator animator = basicTargetEffectAnimators[index];
+            if (image != null)
+            {
+                image.raycastTarget = false;
+            }
+
+            if (animator != null && animator.runtimeAnimatorController != null &&
+                animator.isActiveAndEnabled)
+                animator.Play(BasicHiddenStateName, 0, 0f);
+        }
+    }
+
+    private void InitializeFireStatusEffects()
+    {
+        int effectCount = Mathf.Min(
+            fireStatusImages?.Length ?? 0,
+            fireStatusAnimators?.Length ?? 0);
+        for (int index = 0; index < effectCount; index++)
+        {
+            Image image = fireStatusImages[index];
+            Animator animator = fireStatusAnimators[index];
+            if (image != null)
+            {
+                image.raycastTarget = false;
+                if (fireStatusSprite != null)
+                    image.sprite = fireStatusSprite;
+                image.color = BattleStatusColors.Fire;
+            }
+
+            if (animator == null || animator.runtimeAnimatorController == null)
+                continue;
+
+            if (animator.isActiveAndEnabled)
+                animator.Play(FireStatusHiddenStateName, 0, 0f);
+            else
+                SetAnimatorCanvasAlpha(animator, 0f);
+        }
+
+        _displayedFireEnemy = null;
+        RefreshFireStatusEffect();
+    }
+
+    private void RefreshFireStatusEffect()
+    {
+        EnemyRuntime fireEnemy = TopEnemy != null && TopEnemy.HasFire
+            ? TopEnemy
+            : null;
+        if (fireEnemy == null)
+        {
+            if (_displayedFireEnemy != null)
+                HideFireStatusEffect();
+            return;
+        }
+
+        bool shouldRestart = !ReferenceEquals(_displayedFireEnemy, fireEnemy);
+        _displayedFireEnemy = fireEnemy;
+        int effectCount = Mathf.Min(
+            fireStatusImages?.Length ?? 0,
+            fireStatusAnimators?.Length ?? 0);
+        for (int index = 0; index < effectCount; index++)
+        {
+            Image image = fireStatusImages[index];
+            Animator animator = fireStatusAnimators[index];
+            if (image != null)
+            {
+                Sprite displaySprite = fireStatusSprite != null
+                    ? fireStatusSprite
+                    : fireEnemy.FireStatusSprite;
+                if (displaySprite != null)
+                    image.sprite = displaySprite;
+                image.color = BattleStatusColors.Fire;
+                image.enabled = true;
+            }
+
+            if (!shouldRestart || animator == null ||
+                animator.runtimeAnimatorController == null ||
+                !animator.isActiveAndEnabled)
+            {
+                continue;
+            }
+
+            float offset = index < FireStatusAnimationOffsets.Length
+                ? FireStatusAnimationOffsets[index]
+                : 0f;
+            animator.Play(FireStatusLoopStateName, 0, offset);
+        }
+    }
+
+    private void HideFireStatusEffect()
+    {
+        _displayedFireEnemy = null;
+        if (fireStatusAnimators == null)
+            return;
+
+        foreach (Animator animator in fireStatusAnimators)
+        {
+            if (animator == null || animator.runtimeAnimatorController == null)
+                continue;
+
+            if (animator.isActiveAndEnabled)
+                animator.Play(FireStatusHiddenStateName, 0, 0f);
+            else
+                SetAnimatorCanvasAlpha(animator, 0f);
+        }
+    }
+
+    private static void SetAnimatorCanvasAlpha(Animator animator, float alpha)
+    {
+        CanvasGroup canvasGroup = animator != null
+            ? animator.GetComponent<CanvasGroup>()
+            : null;
+        if (canvasGroup != null)
+            canvasGroup.alpha = alpha;
+    }
+
+    private static Color32 GetTargetEffectColor(Color sourceColor)
+    {
+        Color32 color = sourceColor;
+        color.a = TargetEffectAlpha;
+        return color;
+    }
+
+    private bool TryGetBasicTargetEffect(
+        IBattleCharacter source,
+        out Image image,
+        out Animator animator)
+    {
+        image = null;
+        animator = null;
+        if (source == null || source.PartySlotIndex < 0 ||
+            basicTargetEffectImages == null ||
+            basicTargetEffectAnimators == null ||
+            source.PartySlotIndex >= basicTargetEffectImages.Length ||
+            source.PartySlotIndex >= basicTargetEffectAnimators.Length)
+        {
+            return false;
+        }
+
+        image = basicTargetEffectImages[source.PartySlotIndex];
+        animator = basicTargetEffectAnimators[source.PartySlotIndex];
+        return image != null && animator != null &&
+               animator.runtimeAnimatorController != null;
+    }
+
+    private void HideAllBasicTargetEffects()
+    {
+        if (basicTargetEffectAnimators == null)
+            return;
+
+        foreach (Animator animator in basicTargetEffectAnimators)
+        {
+            if (animator != null && animator.runtimeAnimatorController != null &&
+                animator.isActiveAndEnabled)
+                animator.Play(BasicHiddenStateName, 0, 0f);
         }
     }
 }

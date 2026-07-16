@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using UnityEngine;
 
 public interface IActiveSkillResource
 {
@@ -26,10 +27,28 @@ public interface IBattleBoard
         float deltaTime,
         IReadOnlyList<IBattleCharacter> characters);
 
-    int TryAttackLowestHealthEnemy(int damage);
-    int TryAttackRandomEnemies(int targetCount, int damage);
-    int TryAttackCrossAroundHighestHealthEnemy(int damage);
+    bool TryPrepareLowestHealthAttack(
+        IBattleCharacter source,
+        out bool targetChanged);
+    int TryResolveLowestHealthAttack(
+        IBattleCharacter source,
+        int damage);
+    int TryAttackLowestHealthEnemy(
+        IBattleCharacter source,
+        int damage);
+    bool TryPrepareRandomAttack(
+        IBattleCharacter source,
+        int targetCount,
+        out bool targetChanged);
+    int TryResolveRandomAttack(
+        IBattleCharacter source,
+        int damage);
+    void ClearPreparedAttack(IBattleCharacter source);
+    int TryAttackCrossAroundHighestHealthEnemy(
+        IBattleCharacter source,
+        int damage);
     int TryAttackCrossWithAdjacentSplash(
+        IBattleCharacter source,
         int damage,
         int adjacentDamage);
     bool TryApplyFireToRandomEnemy(
@@ -46,6 +65,10 @@ public interface IBattleBoard
 
 public interface IBattleCharacter
 {
+    int PartySlotIndex { get; }
+    Color EffectColor { get; }
+    Sprite TargetEffectSprite { get; }
+    RuntimeAnimatorController TargetEffectController { get; }
     int TotalDamageDealt { get; }
     float DisabledTimeRemaining { get; }
 

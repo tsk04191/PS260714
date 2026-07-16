@@ -11,6 +11,7 @@ public sealed class EnemyRuntime
     private float _fireTickInterval;
     private int _fireTickDamage;
     private IBattleCharacter _fireSource;
+    private Sprite _fireStatusSprite;
     private float _abilityCooldownRemaining;
 
     public EnemySO Definition { get; }
@@ -21,6 +22,7 @@ public sealed class EnemyRuntime
     public int Armor { get; private set; }
     public int RemainingGuardedHits { get; private set; }
     public bool HasFire => _fireRemainingDuration > 0f;
+    public Sprite FireStatusSprite => _fireStatusSprite;
     public bool IsTargetPriorityExcluded => Definition.TargetPriorityExcluded;
     public float SpawnIntervalMultiplier => Definition.SpawnIntervalMultiplier;
     public float AbilityCooldownRemaining =>
@@ -100,6 +102,7 @@ public sealed class EnemyRuntime
         _fireTickInterval = TimePrecision.Normalize(tickInterval, 0.1f);
         _fireTickDamage = Mathf.Max(1, tickDamage);
         _fireSource = source;
+        _fireStatusSprite = source?.TargetEffectSprite;
     }
 
     internal int TickFire(float deltaTime, out IBattleCharacter source)

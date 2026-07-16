@@ -4,6 +4,12 @@ public class CommonDef
 {
 }
 
+public static class BattleStatusColors
+{
+    public static readonly Color32 Fire =
+        new Color32(0xFF, 0x6A, 0x24, 0x9B);
+}
+
 public static class TimePrecision
 {
     public const float Step = 0.1f;

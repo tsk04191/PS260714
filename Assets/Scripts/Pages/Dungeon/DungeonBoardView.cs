@@ -8,6 +8,46 @@ using Random = UnityEngine.Random;
 [RequireComponent(typeof(RectTransform))]
 public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard
 {
+    private const byte AreaEffectAlpha = 155;
+    private const float AreaEffectSizeScale = 0.75f;
+    private const float AreaEffectAnimationSpeed = 0.5f;
+    private const string AreaExplosionFireStateName = "AreaExplosionFire";
+    private const string AreaExplosionHiddenStateName = "AreaExplosionHidden";
+
+    private sealed class AreaEffectHandle
+    {
+        public RectTransform RectTransform { get; }
+        public Image Image { get; }
+        public CanvasGroup CanvasGroup { get; }
+        public Animator Animator { get; }
+
+        public AreaEffectHandle(
+            RectTransform rectTransform,
+            Image image,
+            CanvasGroup canvasGroup,
+            Animator animator)
+        {
+            RectTransform = rectTransform;
+            Image = image;
+            CanvasGroup = canvasGroup;
+            Animator = animator;
+        }
+    }
+
+    private readonly struct PreparedTarget
+    {
+        public DungeonTileView Tile { get; }
+        public EnemyRuntime Enemy { get; }
+
+        public PreparedTarget(
+            DungeonTileView tile,
+            EnemyRuntime enemy)
+        {
+            Tile = tile;
+            Enemy = enemy;
+        }
+    }
+
     public const int MinimumGridSize = 3;
     public const int MaximumGridSize = 9;
 
@@ -16,6 +56,11 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard
     [SerializeField] private DungeonTileView tilePrefab;
 
     private readonly List<DungeonTileView> _tiles = new();
+    private readonly Dictionary<IBattleCharacter, PreparedTarget>
+        _preparedLowestHealthTargets = new();
+    private readonly Dictionary<IBattleCharacter, List<PreparedTarget>>
+        _preparedRandomTargets = new();
+    private readonly Dictionary<int, AreaEffectHandle> _areaEffects = new();
     private int _maximumStackSize = 8;
     private bool _initialized;
 
@@ -253,51 +298,220 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard
                tile.TrySetTopEnemyHealth(health);
     }
 
-    public int TryAttackLowestHealthEnemy(int damage)
+    public bool TryPrepareLowestHealthAttack(
+        IBattleCharacter source,
+        out bool targetChanged)
     {
-        if (damage <= 0)
+        targetChanged = false;
+        if (source == null)
+            return false;
+
+        if (_preparedLowestHealthTargets.TryGetValue(
+                source,
+                out PreparedTarget currentTarget) &&
+            currentTarget.Tile != null &&
+            ReferenceEquals(currentTarget.Tile.TopEnemy, currentTarget.Enemy))
+        {
+            return true;
+        }
+
+        if (currentTarget.Tile != null)
+            currentTarget.Tile.HideBasicTargetEffect(source);
+        _preparedLowestHealthTargets.Remove(source);
+
+        DungeonTileView target = FindLowestHealthTarget();
+        if (target == null)
+            return false;
+
+        _preparedLowestHealthTargets[source] = new PreparedTarget(
+            target,
+            target.TopEnemy);
+        target.PlayBasicTargetAim(source);
+        targetChanged = true;
+        return true;
+    }
+
+    public int TryResolveLowestHealthAttack(
+        IBattleCharacter source,
+        int damage)
+    {
+        if (source == null || damage <= 0 ||
+            !_preparedLowestHealthTargets.TryGetValue(
+                source,
+                out PreparedTarget preparedTarget))
+        {
+            return 0;
+        }
+
+        _preparedLowestHealthTargets.Remove(source);
+        DungeonTileView target = preparedTarget.Tile;
+        if (target == null ||
+            !ReferenceEquals(target.TopEnemy, preparedTarget.Enemy))
+        {
+            target?.HideBasicTargetEffect(source);
+            return 0;
+        }
+
+        target.PlayBasicTargetFire(source);
+        return TryDamageTile(target, damage);
+    }
+
+    public int TryAttackLowestHealthEnemy(
+        IBattleCharacter source,
+        int damage)
+    {
+        if (source == null || damage <= 0)
             return 0;
 
+        DungeonTileView target = FindLowestHealthTarget();
+        if (target == null)
+            return 0;
+
+        target.PlayBasicTargetFire(source);
+        return TryDamageTile(target, damage);
+    }
+
+    public void ClearPreparedAttack(IBattleCharacter source)
+    {
+        if (source == null)
+            return;
+
+        if (_preparedLowestHealthTargets.TryGetValue(
+                source,
+                out PreparedTarget preparedTarget))
+        {
+            _preparedLowestHealthTargets.Remove(source);
+            preparedTarget.Tile?.HideBasicTargetEffect(source);
+        }
+
+        if (_preparedRandomTargets.TryGetValue(
+                source,
+                out List<PreparedTarget> randomTargets))
+        {
+            _preparedRandomTargets.Remove(source);
+            HidePreparedTargetEffects(source, randomTargets);
+        }
+    }
+
+    private DungeonTileView FindLowestHealthTarget()
+    {
         DungeonTileView target = null;
         int lowestHealth = int.MaxValue;
 
         foreach (DungeonTileView tile in CollectPriorityTargetTiles())
         {
             if (tile.TopEnemyHealth >= lowestHealth)
-            {
                 continue;
-            }
 
             target = tile;
             lowestHealth = tile.TopEnemyHealth;
         }
 
-        return target != null ? TryDamageTile(target, damage) : 0;
+        return target;
     }
 
-    public int TryAttackRandomEnemies(int targetCount, int damage)
+    public bool TryPrepareRandomAttack(
+        IBattleCharacter source,
+        int targetCount,
+        out bool targetChanged)
     {
-        if (targetCount <= 0 || damage <= 0)
-            return 0;
+        targetChanged = false;
+        if (source == null || targetCount <= 0)
+            return false;
 
         List<DungeonTileView> targets = CollectPriorityTargetTiles();
-        int attackCount = Mathf.Min(targetCount, targets.Count);
-        int totalDamage = 0;
+        int preparedCount = Mathf.Min(targetCount, targets.Count);
+        if (_preparedRandomTargets.TryGetValue(
+                source,
+                out List<PreparedTarget> currentTargets) &&
+            currentTargets.Count == preparedCount &&
+            ArePreparedTargetsValid(currentTargets))
+        {
+            return preparedCount > 0;
+        }
 
-        for (int index = 0; index < attackCount; index++)
+        if (currentTargets != null)
+            HidePreparedTargetEffects(source, currentTargets);
+        _preparedRandomTargets.Remove(source);
+
+        if (preparedCount <= 0)
+            return false;
+
+        List<PreparedTarget> preparedTargets = new(preparedCount);
+        for (int index = 0; index < preparedCount; index++)
         {
             int randomIndex = Random.Range(index, targets.Count);
             (targets[index], targets[randomIndex]) =
                 (targets[randomIndex], targets[index]);
-            totalDamage += TryDamageTile(targets[index], damage);
+            DungeonTileView target = targets[index];
+            preparedTargets.Add(new PreparedTarget(target, target.TopEnemy));
+            target.PlayBasicTargetAim(source);
+        }
+
+        _preparedRandomTargets[source] = preparedTargets;
+        targetChanged = true;
+        return true;
+    }
+
+    public int TryResolveRandomAttack(
+        IBattleCharacter source,
+        int damage)
+    {
+        if (source == null || damage <= 0 ||
+            !_preparedRandomTargets.TryGetValue(
+                source,
+                out List<PreparedTarget> preparedTargets))
+        {
+            return 0;
+        }
+
+        _preparedRandomTargets.Remove(source);
+        int totalDamage = 0;
+        foreach (PreparedTarget preparedTarget in preparedTargets)
+        {
+            DungeonTileView target = preparedTarget.Tile;
+            if (target == null ||
+                !ReferenceEquals(target.TopEnemy, preparedTarget.Enemy))
+            {
+                target?.HideBasicTargetEffect(source);
+                continue;
+            }
+
+            target.PlayBasicTargetFire(source);
+            totalDamage += TryDamageTile(target, damage);
         }
 
         return totalDamage;
     }
 
-    public int TryAttackCrossAroundHighestHealthEnemy(int damage)
+    private static bool ArePreparedTargetsValid(
+        IReadOnlyList<PreparedTarget> targets)
     {
-        if (damage <= 0)
+        foreach (PreparedTarget target in targets)
+        {
+            if (target.Tile == null ||
+                !ReferenceEquals(target.Tile.TopEnemy, target.Enemy))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private static void HidePreparedTargetEffects(
+        IBattleCharacter source,
+        IReadOnlyList<PreparedTarget> targets)
+    {
+        foreach (PreparedTarget target in targets)
+            target.Tile?.HideBasicTargetEffect(source);
+    }
+
+    public int TryAttackCrossAroundHighestHealthEnemy(
+        IBattleCharacter source,
+        int damage)
+    {
+        if (source == null || damage <= 0)
             return 0;
 
         DungeonTileView center = null;
@@ -316,6 +530,7 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard
         if (center == null)
             return 0;
 
+        PlayAreaExplosion(source, center, 3);
         int totalDamage = TryDamageTile(center, damage);
         totalDamage += TryDamageTile(center.Row - 1, center.Column, damage);
         totalDamage += TryDamageTile(center.Row + 1, center.Column, damage);
@@ -325,10 +540,11 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard
     }
 
     public int TryAttackCrossWithAdjacentSplash(
+        IBattleCharacter source,
         int damage,
         int adjacentDamage)
     {
-        if (damage <= 0 || adjacentDamage <= 0)
+        if (source == null || damage <= 0 || adjacentDamage <= 0)
             return 0;
 
         DungeonTileView center = null;
@@ -345,6 +561,7 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard
         if (center == null)
             return 0;
 
+        PlayAreaExplosion(source, center, 5);
         int totalDamage = TryDamageTile(center, damage);
         totalDamage += TryDamageTile(center.Row - 1, center.Column, damage);
         totalDamage += TryDamageTile(center.Row + 1, center.Column, damage);
@@ -500,7 +717,127 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard
 
     public void ClearAllEnemies()
     {
+        foreach (KeyValuePair<IBattleCharacter, PreparedTarget>
+                 prepared in
+                 _preparedLowestHealthTargets)
+        {
+            prepared.Value.Tile?.HideBasicTargetEffect(prepared.Key);
+        }
+        _preparedLowestHealthTargets.Clear();
+
+        foreach (KeyValuePair<IBattleCharacter, List<PreparedTarget>> prepared in
+                 _preparedRandomTargets)
+        {
+            HidePreparedTargetEffects(prepared.Key, prepared.Value);
+        }
+        _preparedRandomTargets.Clear();
+        HideAllAreaEffects();
         ClearAllStacks();
+    }
+
+    private void PlayAreaExplosion(
+        IBattleCharacter source,
+        DungeonTileView centerTile,
+        int tileSpan)
+    {
+        if (source == null || centerTile == null ||
+            source.PartySlotIndex < 0 ||
+            source.TargetEffectSprite == null ||
+            source.TargetEffectController == null || boardRect == null)
+        {
+            return;
+        }
+
+        AreaEffectHandle effect = GetOrCreateAreaEffect(source);
+        if (effect == null)
+            return;
+
+        Bounds targetBounds = RectTransformUtility.CalculateRelativeRectTransformBounds(
+            boardRect,
+            centerTile.transform as RectTransform);
+        float effectSize = (gridLayout.cellSize.x * tileSpan +
+                            gridLayout.spacing.x * (tileSpan - 1)) *
+                           AreaEffectSizeScale;
+
+        effect.RectTransform.anchoredPosition = targetBounds.center;
+        effect.RectTransform.sizeDelta = new Vector2(effectSize, effectSize);
+        effect.RectTransform.SetAsLastSibling();
+        effect.Image.sprite = source.TargetEffectSprite;
+        Color32 color = source.EffectColor;
+        color.a = AreaEffectAlpha;
+        effect.Image.color = color;
+        effect.Image.enabled = true;
+        effect.Animator.runtimeAnimatorController =
+            source.TargetEffectController;
+        effect.Animator.speed = AreaEffectAnimationSpeed;
+        effect.Animator.Play(AreaExplosionFireStateName, 0, 0f);
+    }
+
+    private AreaEffectHandle GetOrCreateAreaEffect(IBattleCharacter source)
+    {
+        if (_areaEffects.TryGetValue(
+                source.PartySlotIndex,
+                out AreaEffectHandle effect) && effect?.RectTransform != null)
+        {
+            return effect;
+        }
+
+        GameObject effectObject = new(
+            $"imgAreaExplosionEffect_S{source.PartySlotIndex + 1}",
+            typeof(RectTransform),
+            typeof(CanvasRenderer),
+            typeof(Image),
+            typeof(CanvasGroup),
+            typeof(Animator));
+        effectObject.layer = gameObject.layer;
+
+        RectTransform rectTransform =
+            effectObject.GetComponent<RectTransform>();
+        rectTransform.SetParent(boardRect, false);
+        rectTransform.anchorMin = new Vector2(0.5f, 0.5f);
+        rectTransform.anchorMax = new Vector2(0.5f, 0.5f);
+        rectTransform.pivot = new Vector2(0.5f, 0.5f);
+        rectTransform.localScale = Vector3.one;
+
+        Image image = effectObject.GetComponent<Image>();
+        image.raycastTarget = false;
+        image.preserveAspect = true;
+
+        CanvasGroup canvasGroup = effectObject.GetComponent<CanvasGroup>();
+        canvasGroup.alpha = 0f;
+        canvasGroup.interactable = false;
+        canvasGroup.blocksRaycasts = false;
+
+        Animator animator = effectObject.GetComponent<Animator>();
+        animator.runtimeAnimatorController = source.TargetEffectController;
+        animator.updateMode = AnimatorUpdateMode.Normal;
+        animator.cullingMode = AnimatorCullingMode.AlwaysAnimate;
+        animator.speed = AreaEffectAnimationSpeed;
+
+        effect = new AreaEffectHandle(
+            rectTransform,
+            image,
+            canvasGroup,
+            animator);
+        _areaEffects[source.PartySlotIndex] = effect;
+        return effect;
+    }
+
+    private void HideAllAreaEffects()
+    {
+        foreach (AreaEffectHandle effect in _areaEffects.Values)
+        {
+            if (effect?.Animator != null &&
+                effect.Animator.runtimeAnimatorController != null &&
+                effect.Animator.isActiveAndEnabled)
+            {
+                effect.Animator.Play(AreaExplosionHiddenStateName, 0, 0f);
+            }
+            else if (effect?.CanvasGroup != null)
+            {
+                effect.CanvasGroup.alpha = 0f;
+            }
+        }
     }
 
     private void OnRectTransformDimensionsChange()

@@ -11,6 +11,9 @@ public sealed class CharacterData
     public float FireDuration { get; private set; }
     public float FireTickInterval { get; private set; }
     public int FireTickDamage { get; private set; }
+    public Sprite TargetEffectSprite { get; private set; }
+    public RuntimeAnimatorController TargetEffectController { get; private set; }
+    public AudioClip AttackSfx { get; private set; }
     public int ActiveSkillCost { get; private set; }
     public float ActiveSkillDuration { get; private set; }
     public int ActiveSkillAttackCount { get; private set; }
@@ -31,6 +34,13 @@ public sealed class CharacterData
         FireDuration = original != null ? original.FireDuration : 6f;
         FireTickInterval = original != null ? original.FireTickInterval : 2f;
         FireTickDamage = original != null ? original.FireTickDamage : 1;
+        TargetEffectSprite = original != null
+            ? original.TargetEffectSprite
+            : null;
+        TargetEffectController = original != null
+            ? original.TargetEffectController
+            : null;
+        AttackSfx = original != null ? original.AttackSfx : null;
         ActiveSkillCost = original != null ? original.ActiveSkillCost : 1;
         ActiveSkillDuration = original != null
             ? original.ActiveSkillDuration
