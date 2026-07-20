@@ -32,8 +32,12 @@ public sealed class DungeonFlowController : MonoBehaviour
     public EDungeonPhase CurrentPhase { get; private set; } = EDungeonPhase.Battle;
     public int CurrentStepIndex { get; private set; }
     public int StepCount => phaseSequence != null ? phaseSequence.Length : 0;
+    public int CurrentBattleNumber => CurrentPhase == EDungeonPhase.Battle
+        ? CurrentStepIndex / 2 + 1
+        : Mathf.Max(1, (CurrentStepIndex + 1) / 2);
     public bool IsCompleted { get; private set; }
     public IReadOnlyList<EDungeonPhase> PhaseSequence => phaseSequence;
+    public GameObject EventTab => eventTab;
 
     public event Action<EDungeonPhase, int> PhaseChanged;
     public event Action FlowCompleted;
@@ -62,6 +66,34 @@ public sealed class DungeonFlowController : MonoBehaviour
         CurrentPhase = phaseSequence[CurrentStepIndex];
         IsCompleted = false;
         return ApplyCurrentPhase();
+    }
+
+    public bool StartBattleEventRun(int battleCount)
+    {
+        if (!_initialized && !Initialize())
+            return false;
+
+        battleCount = Mathf.Max(1, battleCount);
+        phaseSequence = new EDungeonPhase[battleCount * 2 - 1];
+        for (int index = 0; index < phaseSequence.Length; index++)
+        {
+            phaseSequence[index] = index % 2 == 0
+                ? EDungeonPhase.Battle
+                : EDungeonPhase.Event;
+        }
+
+        CurrentStepIndex = 0;
+        CurrentPhase = EDungeonPhase.Battle;
+        IsCompleted = false;
+        return ApplyCurrentPhase();
+    }
+
+    public bool ShowEventTab()
+    {
+        if (!_initialized && !Initialize())
+            return false;
+
+        return SetActiveTab(eventTab);
     }
 
     public bool RefreshCurrentPhase()
@@ -110,6 +142,17 @@ public sealed class DungeonFlowController : MonoBehaviour
     private bool ApplyCurrentPhase(bool notifyPhaseChanged = true)
     {
         GameObject targetTab = GetTab(CurrentPhase);
+        if (!SetActiveTab(targetTab))
+            return false;
+
+        if (notifyPhaseChanged)
+            PhaseChanged?.Invoke(CurrentPhase, CurrentStepIndex);
+
+        return true;
+    }
+
+    private bool SetActiveTab(GameObject targetTab)
+    {
         if (targetTab == null)
             return false;
 
@@ -117,9 +160,6 @@ public sealed class DungeonFlowController : MonoBehaviour
         eventTab.SetActive(targetTab == eventTab);
         restTab.SetActive(targetTab == restTab);
         shopTab.SetActive(targetTab == shopTab);
-        if (notifyPhaseChanged)
-            PhaseChanged?.Invoke(CurrentPhase, CurrentStepIndex);
-
         return true;
     }
 

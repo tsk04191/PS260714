@@ -188,13 +188,16 @@ public sealed class BattleEditorWindow : EditorWindow
     private void DrawProgressBalance()
     {
         DrawSection(
-            "Progress Balance",
+            "Manual Battle Preview",
             "difficultyPercent",
             "balanceSeed");
         EditorGUILayout.HelpBox(
-            "Difficulty uses the run progress scale: 0% is the start and " +
-            "100% is the final objective. Auto Balance keeps field size and " +
-            "time limit, then safely randomizes enemy pressure.",
+            "Difficulty Percent and Balance Seed are used only by this " +
+            "manual BattleSO preview. A dungeon run generates every battle " +
+            "scale and seed when the run starts. Runtime battles use this " +
+            "asset's enemy pools, field, stack, spawn, and time settings, " +
+            "then calculate enemy count, health, and composition from that " +
+            "generated scale.",
             MessageType.Info);
 
         EditorGUILayout.BeginHorizontal();

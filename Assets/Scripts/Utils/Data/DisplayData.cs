@@ -33,7 +33,7 @@ public class DisplayData
         Apply();
     }
 
-    public void Save()
+    public void Save(bool flush = true)
     {
         brightness = Mathf.Clamp(
             brightness,
@@ -49,9 +49,8 @@ public class DisplayData
         PlayerPrefs.SetInt("Display.Mode", displayMode);
         PlayerPrefs.SetString("Display.Resolution", resolution);
 
-        PlayerPrefs.Save();
-        
-        Apply();
+        if (flush)
+            PlayerPrefs.Save();
     }
 
     public void Load()
@@ -79,6 +78,21 @@ public class DisplayData
     {
         ApplyBrightness(brightness);
         ApplyFPS(fps);
+        ApplyResolution(resolution, displayMode);
+    }
+
+    public void ApplyBrightness()
+    {
+        ApplyBrightness(brightness);
+    }
+
+    public void ApplyFPS()
+    {
+        ApplyFPS(fps);
+    }
+
+    public void ApplyResolution()
+    {
         ApplyResolution(resolution, displayMode);
     }
 

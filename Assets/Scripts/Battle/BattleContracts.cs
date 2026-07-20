@@ -2,6 +2,108 @@ using System;
 using System.Collections.Generic;
 using UnityEngine;
 
+public enum EBattleItemType
+{
+    Focus,
+    Molotov,
+    PrecisionShot,
+    OverSupply,
+    Overheat,
+}
+
+public enum EBattleItemTargetType
+{
+    Enemy,
+    Turret,
+}
+
+public readonly struct BattleItemDefinition
+{
+    public EBattleItemType Type { get; }
+    public string DisplayName { get; }
+    public string Description { get; }
+    public int EnergyCost { get; }
+    public EBattleItemTargetType TargetType { get; }
+    public bool IsReusable { get; }
+    public float Cooldown { get; }
+
+    public BattleItemDefinition(
+        EBattleItemType type,
+        string displayName,
+        string description,
+        int energyCost,
+        EBattleItemTargetType targetType,
+        bool isReusable = false,
+        float cooldown = 0f)
+    {
+        Type = type;
+        DisplayName = displayName ?? type.ToString();
+        Description = description ?? string.Empty;
+        EnergyCost = Mathf.Max(0, energyCost);
+        TargetType = targetType;
+        IsReusable = isReusable;
+        Cooldown = Mathf.Max(0f, cooldown);
+    }
+}
+
+public static class BattleItemCatalog
+{
+    private static readonly EBattleItemType[] ConsumableItemTypes =
+    {
+        EBattleItemType.Molotov,
+        EBattleItemType.PrecisionShot,
+        EBattleItemType.OverSupply,
+        EBattleItemType.Overheat,
+    };
+
+    public static IReadOnlyList<EBattleItemType> Consumables =>
+        ConsumableItemTypes;
+
+    public static BattleItemDefinition Get(EBattleItemType type)
+    {
+        return type switch
+        {
+            EBattleItemType.Molotov => new BattleItemDefinition(
+                type,
+                "MOLOTOV",
+                "Apply fire for 3 seconds to one enemy.",
+                3,
+                EBattleItemTargetType.Enemy),
+            EBattleItemType.PrecisionShot => new BattleItemDefinition(
+                type,
+                "PRECISION SHOT",
+                "Deal 5 damage to one enemy.",
+                2,
+                EBattleItemTargetType.Enemy),
+            EBattleItemType.OverSupply => new BattleItemDefinition(
+                type,
+                "OVER SUPPLY",
+                "Double one turret's attack speed for 5 seconds.",
+                3,
+                EBattleItemTargetType.Turret),
+            EBattleItemType.Overheat => new BattleItemDefinition(
+                type,
+                "OVERHEAT",
+                "Double attack power for 3 seconds. Fire duration doubles instead.",
+                3,
+                EBattleItemTargetType.Turret),
+            _ => new BattleItemDefinition(
+                EBattleItemType.Focus,
+                "FOCUS",
+                "Force one enemy to be the first target for 5 seconds.",
+                1,
+                EBattleItemTargetType.Enemy,
+                true,
+                10f),
+        };
+    }
+
+    public static bool IsConsumable(EBattleItemType type)
+    {
+        return !Get(type).IsReusable;
+    }
+}
+
 public interface IActiveSkillResource
 {
     int Current { get; }
@@ -56,8 +158,9 @@ public interface IBattleBoard
         float duration,
         float tickInterval,
         int tickDamage);
-    bool TryApplyFireAroundRandomEnemy(
+    bool TryApplyFireAroundRandomEnemies(
         IBattleCharacter source,
+        int centerTargetCount,
         float duration,
         float tickInterval,
         int tickDamage);

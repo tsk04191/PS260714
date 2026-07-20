@@ -1,13 +1,18 @@
 using System;
 using System.Collections.Generic;
 using UnityEngine;
+using UnityEngine.EventSystems;
 using UnityEngine.UI;
 
 [DisallowMultipleComponent]
 [RequireComponent(typeof(RectTransform), typeof(Image))]
-public sealed class DungeonTileView : MonoBehaviour
+public sealed class DungeonTileView : MonoBehaviour, IPointerClickHandler
 {
     private const byte TargetEffectAlpha = 155;
+    private const float AttackRangeDisplayDuration = 0.5f;
+    private const byte AttackRangeMinimumAlpha = 100;
+    private const byte AttackRangeAlphaStep = 50;
+    private const byte AttackRangeMaximumAlpha = 250;
     private const string BasicAimStateName = "BasicAimIn";
     private const string BasicFireStateName = "BasicFire";
     private const string BasicHiddenStateName = "BasicHidden";
@@ -38,6 +43,8 @@ public sealed class DungeonTileView : MonoBehaviour
 
     private readonly List<EnemyRuntime> _enemies = new();
     private readonly List<EnemyCard> _cards = new();
+    private readonly List<float> _attackRangeHitDurations = new();
+    private Image _attackRangeOverlay;
     private int _maximumStackSize;
     private float _currentCellSize;
     private EnemyRuntime _displayedFireEnemy;
@@ -51,6 +58,7 @@ public sealed class DungeonTileView : MonoBehaviour
     public bool TopEnemyHasFire =>
         TopEnemy != null && TopEnemy.HasFire;
     public bool IsFull => _enemies.Count >= _maximumStackSize;
+    public event Action<EnemyRuntime> EnemyClicked;
     internal bool CanAddEnemy =>
         !IsFull && stackRoot != null && enemyCardPrefab != null;
 
@@ -60,15 +68,45 @@ public sealed class DungeonTileView : MonoBehaviour
         Column = column;
         _maximumStackSize = Mathf.Max(1, stackSize);
 
+        Image pointerSurface = GetComponent<Image>();
+        if (pointerSurface != null)
+            pointerSurface.raycastTarget = true;
+
         if (slotSurface != null)
         {
+            slotSurface.raycastTarget = false;
             slotSurface.color = (row + column) % 2 == 0
                 ? new Color(0.075f, 0.105f, 0.09f, 1f)
                 : new Color(0.09f, 0.12f, 0.105f, 1f);
         }
 
+        EnsureAttackRangeOverlay();
+        ClearAttackRangeIndicator();
         InitializeBasicTargetEffects();
         InitializeFireStatusEffects();
+    }
+
+    private void Update()
+    {
+        if (_attackRangeHitDurations.Count == 0)
+            return;
+
+        float deltaTime = Time.deltaTime;
+        if (deltaTime <= 0f)
+            return;
+
+        for (int index = _attackRangeHitDurations.Count - 1;
+             index >= 0;
+             index--)
+        {
+            float remaining = _attackRangeHitDurations[index] - deltaTime;
+            if (remaining <= 0f)
+                _attackRangeHitDurations.RemoveAt(index);
+            else
+                _attackRangeHitDurations[index] = remaining;
+        }
+
+        RefreshAttackRangeIndicator();
     }
 
     internal bool TryAdd(EnemyRuntime enemy)
@@ -79,6 +117,7 @@ public sealed class DungeonTileView : MonoBehaviour
         EnemyCard card = Instantiate(enemyCardPrefab, stackRoot);
         card.name = $"grpEnemyCard_{_cards.Count + 1}";
         card.Bind(enemy);
+        card.Clicked += HandleEnemyCardClicked;
         _enemies.Add(enemy);
         _cards.Add(card);
 
@@ -142,6 +181,18 @@ public sealed class DungeonTileView : MonoBehaviour
         return true;
     }
 
+    internal void ShowAttackRange(int overlapCount = 1)
+    {
+        overlapCount = Mathf.Max(0, overlapCount);
+        if (overlapCount == 0)
+            return;
+
+        EnsureAttackRangeOverlay();
+        for (int index = 0; index < overlapCount; index++)
+            _attackRangeHitDurations.Add(AttackRangeDisplayDuration);
+        RefreshAttackRangeIndicator();
+    }
+
     internal void PlayBasicTargetAim(IBattleCharacter source)
     {
         if (!TryGetBasicTargetEffect(
@@ -203,12 +254,16 @@ public sealed class DungeonTileView : MonoBehaviour
 
         EnemyRuntime burningEnemy = TopEnemy;
         bool hadFire = burningEnemy.HasFire;
-        int damage = burningEnemy.TickFire(
-            deltaTime,
-            out IBattleCharacter source);
-        int appliedDamage = applyDamage(this, damage);
-        if (appliedDamage > 0)
-            source?.RecordDamageDealt(appliedDamage);
+        burningEnemy.TickFire(deltaTime, (damage, source) =>
+        {
+            if (!ReferenceEquals(TopEnemy, burningEnemy))
+                return false;
+
+            int appliedDamage = applyDamage(this, damage);
+            if (appliedDamage > 0)
+                source?.RecordDamageDealt(appliedDamage);
+            return ReferenceEquals(TopEnemy, burningEnemy);
+        });
 
         if (!ReferenceEquals(TopEnemy, burningEnemy))
         {
@@ -232,7 +287,10 @@ public sealed class DungeonTileView : MonoBehaviour
         _cards.RemoveAt(topIndex);
 
         if (topCard != null)
+        {
+            topCard.Clicked -= HandleEnemyCardClicked;
             Destroy(topCard.gameObject);
+        }
 
         RefreshCardPositions();
         RefreshFireStatusEffect();
@@ -244,11 +302,15 @@ public sealed class DungeonTileView : MonoBehaviour
         foreach (EnemyCard card in _cards)
         {
             if (card != null)
+            {
+                card.Clicked -= HandleEnemyCardClicked;
                 Destroy(card.gameObject);
+            }
         }
 
         _enemies.Clear();
         _cards.Clear();
+        ClearAttackRangeIndicator();
         HideAllBasicTargetEffects();
         HideFireStatusEffect();
     }
@@ -256,6 +318,85 @@ public sealed class DungeonTileView : MonoBehaviour
     internal List<EnemyRuntime> CopyEnemyRuntimes()
     {
         return new List<EnemyRuntime>(_enemies);
+    }
+
+    private void HandleEnemyCardClicked(EnemyRuntime enemy)
+    {
+        if (enemy != null && ReferenceEquals(enemy, TopEnemy))
+            NotifyEnemyClicked(enemy);
+    }
+
+    public void OnPointerClick(PointerEventData eventData)
+    {
+        if (eventData != null &&
+            eventData.button == PointerEventData.InputButton.Left &&
+            TopEnemy != null)
+        {
+            NotifyEnemyClicked(TopEnemy);
+        }
+    }
+
+    private void NotifyEnemyClicked(EnemyRuntime enemy)
+    {
+        EnemyClicked?.Invoke(enemy);
+    }
+
+    private void EnsureAttackRangeOverlay()
+    {
+        if (_attackRangeOverlay != null)
+            return;
+
+        Transform existing = transform.Find("imgAttackRangeOverlay");
+        if (existing != null)
+            _attackRangeOverlay = existing.GetComponent<Image>();
+        if (_attackRangeOverlay == null)
+        {
+            GameObject overlayObject = new(
+                "imgAttackRangeOverlay",
+                typeof(RectTransform),
+                typeof(CanvasRenderer),
+                typeof(Image));
+            overlayObject.transform.SetParent(transform, false);
+            _attackRangeOverlay = overlayObject.GetComponent<Image>();
+        }
+
+        RectTransform overlayRect = _attackRangeOverlay.rectTransform;
+        overlayRect.anchorMin = Vector2.zero;
+        overlayRect.anchorMax = Vector2.one;
+        overlayRect.offsetMin = Vector2.zero;
+        overlayRect.offsetMax = Vector2.zero;
+        overlayRect.localScale = Vector3.one;
+        overlayRect.SetAsLastSibling();
+        _attackRangeOverlay.raycastTarget = false;
+        _attackRangeOverlay.enabled = false;
+    }
+
+    private void RefreshAttackRangeIndicator()
+    {
+        if (_attackRangeOverlay == null)
+            return;
+
+        int overlapCount = _attackRangeHitDurations.Count;
+        if (overlapCount <= 0)
+        {
+            _attackRangeOverlay.enabled = false;
+            return;
+        }
+
+        int alpha = Mathf.Min(
+            AttackRangeMaximumAlpha,
+            AttackRangeMinimumAlpha +
+            (Mathf.Min(overlapCount, 4) - 1) * AttackRangeAlphaStep);
+        _attackRangeOverlay.color = new Color32(255, 0, 0, (byte)alpha);
+        _attackRangeOverlay.enabled = true;
+        _attackRangeOverlay.rectTransform.SetAsLastSibling();
+    }
+
+    private void ClearAttackRangeIndicator()
+    {
+        _attackRangeHitDurations.Clear();
+        if (_attackRangeOverlay != null)
+            _attackRangeOverlay.enabled = false;
     }
 
     public void RefreshLayout(float cellSize)

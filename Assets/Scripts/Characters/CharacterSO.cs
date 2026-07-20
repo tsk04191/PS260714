@@ -16,10 +16,12 @@ public sealed class CharacterSO : ScriptableObject
     [SerializeField, Min(1)] private int attackPower = 1;
     [SerializeField, Min(0.01f)] private float attackWeight = 1f;
     [SerializeField, Min(0.1f)] private float attackCooldown = 1f;
+    [SerializeField, Min(1)] private int skillAttackPower = 2;
     [SerializeField, Min(1)] private int targetCount = 1;
     [SerializeField, Min(0.1f)] private float fireDuration = 6f;
     [SerializeField, Min(0.1f)] private float fireTickInterval = 2f;
     [SerializeField, Min(1)] private int fireTickDamage = 1;
+    [SerializeField, Min(1)] private int fireSkillTargetCount = 1;
 
     [Header("Visual Effect")]
     [SerializeField] private Sprite targetEffectSprite;
@@ -38,11 +40,13 @@ public sealed class CharacterSO : ScriptableObject
     public int AttackPower => attackPower;
     public float AttackWeight => attackWeight;
     public float AttackCooldown => TimePrecision.Normalize(attackCooldown, 0.1f);
+    public int SkillAttackPower => skillAttackPower;
     public int TargetCount => targetCount;
     public float FireDuration => TimePrecision.Normalize(fireDuration, 0.1f);
     public float FireTickInterval =>
         TimePrecision.Normalize(fireTickInterval, 0.1f);
     public int FireTickDamage => fireTickDamage;
+    public int FireSkillTargetCount => fireSkillTargetCount;
     public Sprite TargetEffectSprite => targetEffectSprite;
     public RuntimeAnimatorController TargetEffectController =>
         targetEffectController;
@@ -57,10 +61,12 @@ public sealed class CharacterSO : ScriptableObject
         attackPower = Mathf.Max(1, attackPower);
         attackWeight = Mathf.Max(0.01f, attackWeight);
         attackCooldown = TimePrecision.Normalize(attackCooldown, 0.1f);
+        skillAttackPower = Mathf.Max(1, skillAttackPower);
         targetCount = Mathf.Max(1, targetCount);
         fireDuration = TimePrecision.Normalize(fireDuration, 0.1f);
         fireTickInterval = TimePrecision.Normalize(fireTickInterval, 0.1f);
         fireTickDamage = Mathf.Max(1, fireTickDamage);
+        fireSkillTargetCount = Mathf.Max(1, fireSkillTargetCount);
         activeSkillCost = Mathf.Max(1, activeSkillCost);
         activeSkillDuration = TimePrecision.Normalize(
             activeSkillDuration,

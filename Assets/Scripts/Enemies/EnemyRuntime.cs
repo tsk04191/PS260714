@@ -6,12 +6,31 @@ using UnityEngine;
 /// </summary>
 public sealed class EnemyRuntime
 {
-    private float _fireRemainingDuration;
+    private sealed class FireDurationStack
+    {
+        public float RemainingDuration;
+        public readonly float TickInterval;
+        public readonly int TickDamage;
+        public readonly IBattleCharacter Source;
+        public readonly Sprite StatusSprite;
+
+        public FireDurationStack(
+            float duration,
+            float tickInterval,
+            int tickDamage,
+            IBattleCharacter source)
+        {
+            RemainingDuration = duration;
+            TickInterval = tickInterval;
+            TickDamage = tickDamage;
+            Source = source;
+            StatusSprite = source?.TargetEffectSprite;
+        }
+    }
+
+    private readonly System.Collections.Generic.List<FireDurationStack>
+        _fireDurationStacks = new();
     private float _fireTickElapsed;
-    private float _fireTickInterval;
-    private int _fireTickDamage;
-    private IBattleCharacter _fireSource;
-    private Sprite _fireStatusSprite;
     private float _abilityCooldownRemaining;
 
     public EnemySO Definition { get; }
@@ -21,8 +40,20 @@ public sealed class EnemyRuntime
     public int Health { get; private set; }
     public int Armor { get; private set; }
     public int RemainingGuardedHits { get; private set; }
-    public bool HasFire => _fireRemainingDuration > 0f;
-    public Sprite FireStatusSprite => _fireStatusSprite;
+    public bool HasFire => _fireDurationStacks.Count > 0;
+    public float FireRemainingDuration
+    {
+        get
+        {
+            float total = 0f;
+            foreach (FireDurationStack stack in _fireDurationStacks)
+                total += stack.RemainingDuration;
+            return TimePrecision.FloorToTenth(total);
+        }
+    }
+    public Sprite FireStatusSprite => HasFire
+        ? _fireDurationStacks[0].StatusSprite
+        : null;
     public bool IsTargetPriorityExcluded => Definition.TargetPriorityExcluded;
     public float SpawnIntervalMultiplier => Definition.SpawnIntervalMultiplier;
     public float AbilityCooldownRemaining =>
@@ -97,31 +128,58 @@ public sealed class EnemyRuntime
         int tickDamage,
         IBattleCharacter source)
     {
-        _fireRemainingDuration = TimePrecision.Normalize(duration, 0.1f);
-        _fireTickElapsed = 0f;
-        _fireTickInterval = TimePrecision.Normalize(tickInterval, 0.1f);
-        _fireTickDamage = Mathf.Max(1, tickDamage);
-        _fireSource = source;
-        _fireStatusSprite = source?.TargetEffectSprite;
+        duration = TimePrecision.Normalize(duration, 0.1f);
+        if (duration <= 0f)
+            return;
+
+        if (!HasFire)
+            _fireTickElapsed = 0f;
+        _fireDurationStacks.Add(new FireDurationStack(
+            duration,
+            TimePrecision.Normalize(tickInterval, 0.1f),
+            Mathf.Max(1, tickDamage),
+            source));
     }
 
-    internal int TickFire(float deltaTime, out IBattleCharacter source)
+    internal void TickFire(
+        float deltaTime,
+        Func<int, IBattleCharacter, bool> applyDamage)
     {
-        source = _fireSource;
-        if (!HasFire || deltaTime <= 0f)
-            return 0;
+        if (!HasFire || deltaTime <= 0f || applyDamage == null)
+            return;
 
-        float activeDelta = Mathf.Min(deltaTime, _fireRemainingDuration);
-        _fireRemainingDuration = Mathf.Max(0f, _fireRemainingDuration - activeDelta);
-        _fireTickElapsed += activeDelta;
+        float remainingDelta = deltaTime;
+        while (remainingDelta > 0f && HasFire)
+        {
+            FireDurationStack stack = _fireDurationStacks[0];
+            float activeDelta = Mathf.Min(
+                remainingDelta,
+                stack.RemainingDuration);
+            stack.RemainingDuration = Mathf.Max(
+                0f,
+                stack.RemainingDuration - activeDelta);
+            remainingDelta -= activeDelta;
+            _fireTickElapsed += activeDelta;
 
-        int tickCount = Mathf.FloorToInt(
-            (_fireTickElapsed + 0.0001f) / _fireTickInterval);
-        if (tickCount <= 0)
-            return 0;
+            int tickCount = Mathf.FloorToInt(
+                (_fireTickElapsed + 0.0001f) / stack.TickInterval);
+            if (tickCount > 0)
+            {
+                _fireTickElapsed -= tickCount * stack.TickInterval;
+                if (!applyDamage(
+                        tickCount * stack.TickDamage,
+                        stack.Source))
+                {
+                    return;
+                }
+            }
 
-        _fireTickElapsed -= tickCount * _fireTickInterval;
-        return tickCount * _fireTickDamage;
+            if (stack.RemainingDuration <= 0f)
+                _fireDurationStacks.RemoveAt(0);
+        }
+
+        if (!HasFire)
+            _fireTickElapsed = 0f;
     }
 
     internal bool TickAbilityCooldown(float deltaTime)

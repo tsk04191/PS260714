@@ -82,8 +82,9 @@ public class DataManager : MonoBehaviour
 
     public void SaveALL()
     {
-        DisplayDatas.Save();
-        AudioDatas.Save();
+        DisplayDatas.Save(false);
+        AudioDatas.Save(false);
+        PlayerPrefs.Save();
 
         _events?.NotifyDataSaved();
     }
@@ -106,7 +107,8 @@ public class DataManager : MonoBehaviour
     public void SetDisplayBrightness(int brightness)
     {
         DisplayDatas.brightness = Mathf.Clamp(brightness, 0, 100);
-        DisplayDatas.Save();
+        DisplayDatas.ApplyBrightness();
+        DisplayDatas.Save(false);
         _events?.NotifyDisplayBrightnessChanged(DisplayDatas.brightness);
     }
 
@@ -121,7 +123,8 @@ public class DataManager : MonoBehaviour
             return;
 
         DisplayDatas.fps = fps;
-        DisplayDatas.Save();
+        DisplayDatas.ApplyFPS();
+        DisplayDatas.Save(false);
         _events?.NotifyDisplayFPSChanged(DisplayDatas.fps);
     }
 
@@ -136,7 +139,8 @@ public class DataManager : MonoBehaviour
             return;
 
         DisplayDatas.displayMode = mode;
-        DisplayDatas.Save();
+        DisplayDatas.ApplyResolution();
+        DisplayDatas.Save(false);
         _events?.NotifyDisplayModeChanged(DisplayDatas.displayMode);
     }
 
@@ -151,7 +155,8 @@ public class DataManager : MonoBehaviour
             return;
 
         DisplayDatas.resolution = normalized;
-        DisplayDatas.Save();
+        DisplayDatas.ApplyResolution();
+        DisplayDatas.Save(false);
         _events?.NotifyResolutionChanged(DisplayDatas.resolution);
     }
     #endregion Display

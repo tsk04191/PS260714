@@ -121,6 +121,7 @@ public sealed class SettingPage : MonoBehaviour, IPage
 
     public void Close()
     {
+        SaveSettings();
         UnbindEvents();
         HideQuitConfirmation();
         gameObject.SetActive(false);
@@ -375,11 +376,20 @@ public sealed class SettingPage : MonoBehaviour, IPage
 
     private void HandleQuitOkClicked()
     {
+        SaveSettings();
 #if UNITY_EDITOR
         UnityEditor.EditorApplication.isPlaying = false;
 #else
         Application.Quit();
 #endif
+    }
+
+    private void SaveSettings()
+    {
+        if (_gameEvents != null)
+            _gameEvents.RequestSaveAll();
+        else
+            _dataManager?.SaveALL();
     }
 
     private void HideQuitConfirmation()

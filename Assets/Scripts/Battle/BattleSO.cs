@@ -104,6 +104,23 @@ public sealed class BattleSO : ScriptableObject
     public EEnemyCompositionMode CompositionMode => compositionMode;
     public float TimeLimit => TimePrecision.Normalize(timeLimit, 1f);
 
+    public IReadOnlyList<EnemySO> GetAllEnemyDefinitions()
+    {
+        EnsureRules();
+        List<EnemySO> definitions = new();
+        HashSet<EnemySO> uniqueDefinitions = new();
+        foreach (BattleEnemyGradeRule rule in GetRules())
+        {
+            foreach (EnemySO definition in rule.EnemyPool)
+            {
+                if (definition != null && uniqueDefinitions.Add(definition))
+                    definitions.Add(definition);
+            }
+        }
+
+        return definitions.AsReadOnly();
+    }
+
     private void OnValidate()
     {
         battleId = string.IsNullOrWhiteSpace(battleId)

@@ -61,6 +61,9 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard
     private readonly Dictionary<IBattleCharacter, List<PreparedTarget>>
         _preparedRandomTargets = new();
     private readonly Dictionary<int, AreaEffectHandle> _areaEffects = new();
+    private Func<EnemyRuntime, bool> _itemTargetHandler;
+    private EnemyRuntime _forcedPriorityTarget;
+    private float _forcedPriorityRemaining;
     private int _maximumStackSize = 8;
     private bool _initialized;
 
@@ -94,6 +97,13 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard
         }
     }
     public event Action<EnemyRuntime> EnemyDefeated;
+    public event Action<EnemyRuntime> EnemyClicked;
+
+    public void BindItemTargetHandler(
+        Func<EnemyRuntime, bool> itemTargetHandler)
+    {
+        _itemTargetHandler = itemTargetHandler;
+    }
 
     public void Initialize(int gridSize, int stackSize)
     {
@@ -150,6 +160,7 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard
                 DungeonTileView tile = Instantiate(tilePrefab, gridLayout.transform);
                 tile.name = $"grpDungeonTile_{row}_{column}";
                 tile.Initialize(row, column, _maximumStackSize);
+                BindTile(tile);
                 _tiles.Add(tile);
             }
         }
@@ -298,6 +309,54 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard
                tile.TrySetTopEnemyHealth(health);
     }
 
+    public bool ContainsTargetableEnemy(EnemyRuntime enemy)
+    {
+        return TryFindEnemyTile(enemy, out _);
+    }
+
+    public int TryDamageEnemy(EnemyRuntime enemy, int damage)
+    {
+        if (damage <= 0 ||
+            !TryFindEnemyTile(enemy, out DungeonTileView tile))
+        {
+            return 0;
+        }
+
+        tile.ShowAttackRange();
+        return TryDamageTile(tile, damage);
+    }
+
+    public bool TryApplyFireToEnemy(
+        EnemyRuntime enemy,
+        float duration,
+        float tickInterval,
+        int tickDamage)
+    {
+        if (!TryFindEnemyTile(enemy, out DungeonTileView tile))
+            return false;
+
+        bool applied = tile.TryApplyFireToTop(
+            null,
+            duration,
+            tickInterval,
+            tickDamage);
+        if (applied)
+            tile.ShowAttackRange();
+        return applied;
+    }
+
+    public bool TryForcePriorityTarget(EnemyRuntime enemy, float duration)
+    {
+        duration = TimePrecision.Normalize(duration, 0.1f);
+        if (duration <= 0f || !TryFindEnemyTile(enemy, out _))
+            return false;
+
+        ClearAllPreparedAttacks();
+        _forcedPriorityTarget = enemy;
+        _forcedPriorityRemaining = duration;
+        return true;
+    }
+
     public bool TryPrepareLowestHealthAttack(
         IBattleCharacter source,
         out bool targetChanged)
@@ -353,6 +412,7 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard
         }
 
         target.PlayBasicTargetFire(source);
+        target.ShowAttackRange();
         return TryDamageTile(target, damage);
     }
 
@@ -368,6 +428,7 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard
             return 0;
 
         target.PlayBasicTargetFire(source);
+        target.ShowAttackRange();
         return TryDamageTile(target, damage);
     }
 
@@ -395,6 +456,9 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard
 
     private DungeonTileView FindLowestHealthTarget()
     {
+        if (TryGetForcedPriorityTile(out DungeonTileView forcedTarget))
+            return forcedTarget;
+
         DungeonTileView target = null;
         int lowestHealth = int.MaxValue;
 
@@ -420,7 +484,13 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard
             return false;
 
         List<DungeonTileView> targets = CollectPriorityTargetTiles();
-        int preparedCount = Mathf.Min(targetCount, targets.Count);
+        bool hasForcedTarget = TryGetForcedPriorityTile(
+            out DungeonTileView forcedTarget);
+        if (hasForcedTarget)
+            targets.Remove(forcedTarget);
+        int preparedCount = Mathf.Min(
+            targetCount,
+            targets.Count + (hasForcedTarget ? 1 : 0));
         if (_preparedRandomTargets.TryGetValue(
                 source,
                 out List<PreparedTarget> currentTargets) &&
@@ -438,12 +508,23 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard
             return false;
 
         List<PreparedTarget> preparedTargets = new(preparedCount);
-        for (int index = 0; index < preparedCount; index++)
+        int firstRandomIndex = 0;
+        if (hasForcedTarget)
         {
-            int randomIndex = Random.Range(index, targets.Count);
-            (targets[index], targets[randomIndex]) =
-                (targets[randomIndex], targets[index]);
-            DungeonTileView target = targets[index];
+            preparedTargets.Add(new PreparedTarget(
+                forcedTarget,
+                forcedTarget.TopEnemy));
+            forcedTarget.PlayBasicTargetAim(source);
+            firstRandomIndex = 1;
+        }
+
+        for (int index = firstRandomIndex; index < preparedCount; index++)
+        {
+            int poolIndex = index - firstRandomIndex;
+            int randomIndex = Random.Range(poolIndex, targets.Count);
+            (targets[poolIndex], targets[randomIndex]) =
+                (targets[randomIndex], targets[poolIndex]);
+            DungeonTileView target = targets[poolIndex];
             preparedTargets.Add(new PreparedTarget(target, target.TopEnemy));
             target.PlayBasicTargetAim(source);
         }
@@ -478,6 +559,7 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard
             }
 
             target.PlayBasicTargetFire(source);
+            target.ShowAttackRange();
             totalDamage += TryDamageTile(target, damage);
         }
 
@@ -514,9 +596,15 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard
         if (source == null || damage <= 0)
             return 0;
 
-        DungeonTileView center = null;
+        DungeonTileView center = TryGetForcedPriorityTile(
+            out DungeonTileView forcedTarget)
+            ? forcedTarget
+            : null;
         int highestHealth = 0;
-        foreach (DungeonTileView tile in CollectPriorityTargetTiles())
+        List<DungeonTileView> automaticTargets = center == null
+            ? CollectPriorityTargetTiles()
+            : new List<DungeonTileView>();
+        foreach (DungeonTileView tile in automaticTargets)
         {
             if (tile.TopEnemyHealth <= highestHealth)
             {
@@ -531,6 +619,11 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard
             return 0;
 
         PlayAreaExplosion(source, center, 3);
+        ShowAttackRangeTile(center.Row, center.Column);
+        ShowAttackRangeTile(center.Row - 1, center.Column);
+        ShowAttackRangeTile(center.Row + 1, center.Column);
+        ShowAttackRangeTile(center.Row, center.Column - 1);
+        ShowAttackRangeTile(center.Row, center.Column + 1);
         int totalDamage = TryDamageTile(center, damage);
         totalDamage += TryDamageTile(center.Row - 1, center.Column, damage);
         totalDamage += TryDamageTile(center.Row + 1, center.Column, damage);
@@ -547,9 +640,15 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard
         if (source == null || damage <= 0 || adjacentDamage <= 0)
             return 0;
 
-        DungeonTileView center = null;
+        DungeonTileView center = TryGetForcedPriorityTile(
+            out DungeonTileView forcedTarget)
+            ? forcedTarget
+            : null;
         int highestHealth = 0;
-        foreach (DungeonTileView tile in CollectPriorityTargetTiles())
+        List<DungeonTileView> automaticTargets = center == null
+            ? CollectPriorityTargetTiles()
+            : new List<DungeonTileView>();
+        foreach (DungeonTileView tile in automaticTargets)
         {
             if (tile.TopEnemyHealth <= highestHealth)
                 continue;
@@ -562,6 +661,19 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard
             return 0;
 
         PlayAreaExplosion(source, center, 5);
+        ShowAttackRangeTile(center.Row, center.Column);
+        ShowAttackRangeTile(center.Row - 1, center.Column);
+        ShowAttackRangeTile(center.Row + 1, center.Column);
+        ShowAttackRangeTile(center.Row, center.Column - 1);
+        ShowAttackRangeTile(center.Row, center.Column + 1);
+        ShowAttackRangeTile(center.Row - 2, center.Column);
+        ShowAttackRangeTile(center.Row + 2, center.Column);
+        ShowAttackRangeTile(center.Row, center.Column - 2);
+        ShowAttackRangeTile(center.Row, center.Column + 2);
+        ShowAttackRangeTile(center.Row - 1, center.Column - 1);
+        ShowAttackRangeTile(center.Row - 1, center.Column + 1);
+        ShowAttackRangeTile(center.Row + 1, center.Column - 1);
+        ShowAttackRangeTile(center.Row + 1, center.Column + 1);
         int totalDamage = TryDamageTile(center, damage);
         totalDamage += TryDamageTile(center.Row - 1, center.Column, damage);
         totalDamage += TryDamageTile(center.Row + 1, center.Column, damage);
@@ -608,6 +720,18 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard
         float tickInterval,
         int tickDamage)
     {
+        if (TryGetForcedPriorityTile(out DungeonTileView forcedTarget))
+        {
+            bool forcedApplied = forcedTarget.TryApplyFireToTop(
+                source,
+                duration,
+                tickInterval,
+                tickDamage);
+            if (forcedApplied)
+                forcedTarget.ShowAttackRange();
+            return forcedApplied;
+        }
+
         List<DungeonTileView> occupiedTiles = CollectPriorityTargetTiles();
         if (occupiedTiles.Count == 0)
             return false;
@@ -623,15 +747,19 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard
             ? targetsWithoutFire
             : occupiedTiles;
         DungeonTileView target = targetPool[Random.Range(0, targetPool.Count)];
-        return target.TryApplyFireToTop(
+        bool applied = target.TryApplyFireToTop(
             source,
             duration,
             tickInterval,
             tickDamage);
+        if (applied)
+            target.ShowAttackRange();
+        return applied;
     }
 
-    public bool TryApplyFireAroundRandomEnemy(
+    public bool TryApplyFireAroundRandomEnemies(
         IBattleCharacter source,
+        int centerTargetCount,
         float duration,
         float tickInterval,
         int tickDamage)
@@ -640,30 +768,66 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard
         if (occupiedTiles.Count == 0)
             return false;
 
-        DungeonTileView center = occupiedTiles[
-            Random.Range(0, occupiedTiles.Count)];
-        bool applied = false;
-        for (int row = center.Row - 1; row <= center.Row + 1; row++)
+        bool hasForcedTarget = TryGetForcedPriorityTile(
+            out DungeonTileView forcedTarget);
+        if (hasForcedTarget)
         {
-            for (int column = center.Column - 1;
-                 column <= center.Column + 1;
-                 column++)
-            {
-                if (!TryGetTile(row, column, out DungeonTileView tile) ||
-                    tile.TopEnemy == null)
-                {
-                    continue;
-                }
+            occupiedTiles.Remove(forcedTarget);
+            occupiedTiles.Insert(0, forcedTarget);
+        }
+        int targetCount = Mathf.Clamp(
+            centerTargetCount,
+            1,
+            occupiedTiles.Count);
+        int firstRandomIndex = hasForcedTarget ? 1 : 0;
 
-                applied |= tile.TryApplyFireToTop(
-                    source,
-                    duration,
-                    tickInterval,
-                    tickDamage);
+        for (int index = firstRandomIndex; index < targetCount; index++)
+        {
+            int swapIndex = Random.Range(index, occupiedTiles.Count);
+            (occupiedTiles[index], occupiedTiles[swapIndex]) =
+                (occupiedTiles[swapIndex], occupiedTiles[index]);
+        }
+
+        Dictionary<DungeonTileView, int> rangeHitCounts = new();
+        for (int index = 0; index < targetCount; index++)
+        {
+            DungeonTileView center = occupiedTiles[index];
+            for (int row = center.Row - 1; row <= center.Row + 1; row++)
+            {
+                for (int column = center.Column - 1;
+                     column <= center.Column + 1;
+                     column++)
+                {
+                    if (!TryGetTile(row, column, out DungeonTileView tile))
+                        continue;
+
+                    rangeHitCounts.TryGetValue(tile, out int hitCount);
+                    rangeHitCounts[tile] = hitCount + 1;
+                }
             }
         }
 
+        bool applied = false;
+        foreach ((DungeonTileView tile, int hitCount) in rangeHitCounts)
+        {
+            tile.ShowAttackRange(hitCount);
+            if (tile.TopEnemy == null)
+                continue;
+
+            applied |= tile.TryApplyFireToTop(
+                source,
+                duration * hitCount,
+                tickInterval,
+                tickDamage);
+        }
+
         return applied;
+    }
+
+    private void ShowAttackRangeTile(int row, int column)
+    {
+        if (TryGetTile(row, column, out DungeonTileView tile))
+            tile.ShowAttackRange();
     }
 
     public void TickStatusEffects(float deltaTime)
@@ -671,6 +835,7 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard
         if (deltaTime <= 0f)
             return;
 
+        TickForcedPriorityTarget(deltaTime);
         foreach (DungeonTileView tile in _tiles)
         {
             if (tile != null)
@@ -717,20 +882,9 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard
 
     public void ClearAllEnemies()
     {
-        foreach (KeyValuePair<IBattleCharacter, PreparedTarget>
-                 prepared in
-                 _preparedLowestHealthTargets)
-        {
-            prepared.Value.Tile?.HideBasicTargetEffect(prepared.Key);
-        }
-        _preparedLowestHealthTargets.Clear();
-
-        foreach (KeyValuePair<IBattleCharacter, List<PreparedTarget>> prepared in
-                 _preparedRandomTargets)
-        {
-            HidePreparedTargetEffects(prepared.Key, prepared.Value);
-        }
-        _preparedRandomTargets.Clear();
+        ClearAllPreparedAttacks();
+        _forcedPriorityTarget = null;
+        _forcedPriorityRemaining = 0f;
         HideAllAreaEffects();
         ClearAllStacks();
     }
@@ -1016,6 +1170,74 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard
             : occupiedTiles;
     }
 
+    private bool TryFindEnemyTile(
+        EnemyRuntime enemy,
+        out DungeonTileView targetTile)
+    {
+        targetTile = null;
+        if (enemy == null)
+            return false;
+
+        foreach (DungeonTileView tile in _tiles)
+        {
+            if (tile != null && ReferenceEquals(tile.TopEnemy, enemy))
+            {
+                targetTile = tile;
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private bool TryGetForcedPriorityTile(out DungeonTileView targetTile)
+    {
+        if (_forcedPriorityRemaining > 0f &&
+            TryFindEnemyTile(_forcedPriorityTarget, out targetTile))
+        {
+            return true;
+        }
+
+        targetTile = null;
+        return false;
+    }
+
+    private void TickForcedPriorityTarget(float deltaTime)
+    {
+        if (_forcedPriorityTarget == null)
+            return;
+
+        _forcedPriorityRemaining = Mathf.Max(
+            0f,
+            _forcedPriorityRemaining - Mathf.Max(0f, deltaTime));
+        if (_forcedPriorityRemaining > 0f &&
+            TryFindEnemyTile(_forcedPriorityTarget, out _))
+        {
+            return;
+        }
+
+        _forcedPriorityTarget = null;
+        _forcedPriorityRemaining = 0f;
+        ClearAllPreparedAttacks();
+    }
+
+    private void ClearAllPreparedAttacks()
+    {
+        foreach (KeyValuePair<IBattleCharacter, PreparedTarget> prepared in
+                 _preparedLowestHealthTargets)
+        {
+            prepared.Value.Tile?.HideBasicTargetEffect(prepared.Key);
+        }
+        _preparedLowestHealthTargets.Clear();
+
+        foreach (KeyValuePair<IBattleCharacter, List<PreparedTarget>> prepared in
+                 _preparedRandomTargets)
+        {
+            HidePreparedTargetEffects(prepared.Key, prepared.Value);
+        }
+        _preparedRandomTargets.Clear();
+    }
+
     private List<EnemyRuntime>[,] CaptureExistingStacks()
     {
         if (_tiles.Count != GridSize * GridSize)
@@ -1057,7 +1279,10 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard
         foreach (DungeonTileView tile in _tiles)
         {
             if (tile != null)
+            {
+                UnbindTile(tile);
                 Destroy(tile.gameObject);
+            }
         }
 
         _tiles.Clear();
@@ -1083,6 +1308,33 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard
             int row = index / GridSize;
             int column = index % GridSize;
             _tiles[index].Initialize(row, column, _maximumStackSize);
+            BindTile(_tiles[index]);
         }
+    }
+
+    private void BindTile(DungeonTileView tile)
+    {
+        if (tile == null)
+            return;
+
+        tile.EnemyClicked -= HandleEnemyClicked;
+        tile.EnemyClicked += HandleEnemyClicked;
+    }
+
+    private void UnbindTile(DungeonTileView tile)
+    {
+        if (tile != null)
+            tile.EnemyClicked -= HandleEnemyClicked;
+    }
+
+    private void HandleEnemyClicked(EnemyRuntime enemy)
+    {
+        if (enemy == null)
+            return;
+
+        if (_itemTargetHandler != null && _itemTargetHandler(enemy))
+            return;
+
+        EnemyClicked?.Invoke(enemy);
     }
 }

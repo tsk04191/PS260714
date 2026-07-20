@@ -6,9 +6,11 @@ using UnityEngine.UI;
 [DisallowMultipleComponent]
 [RequireComponent(typeof(AudioSource))]
 public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
-    IPointerClickHandler
+    IPointerClickHandler,
+    IPointerEnterHandler,
+    IPointerExitHandler
 {
-    private const float TargetAttackRecoveryDuration = 0.5f;
+    public const float TargetAttackRecoveryDuration = 0.5f;
 
     [SerializeField] private CharacterSO original;
     [SerializeField] private TextMeshProUGUI nameText;
@@ -22,13 +24,21 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
     private float _disabledTimeRemaining;
     private float _attackRecoveryRemaining;
     private float _dualSkillTimeRemaining;
+    private float _attackSpeedBoostRemaining;
+    private float _attackSpeedMultiplier = 1f;
+    private float _powerBoostRemaining;
+    private float _powerMultiplier = 1f;
     private int _areaSkillAttackCount;
     private int _fireSkillAttackCount;
     private IActiveSkillResource _activeSkillResource;
     private IBattleBoard _board;
     private Image _panelImage;
     private Color _defaultPanelColor;
+    private System.Func<CharacterRuntime, bool> _itemTargetHandler;
+    private GameObject _skillTooltip;
+    private TextMeshProUGUI _skillTooltipText;
 
+    public CharacterSO Definition => original;
     public CharacterData Data { get; private set; }
     public int PartySlotIndex { get; private set; } = -1;
     public int PartySlotNumber => PartySlotIndex + 1;
@@ -47,6 +57,7 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
 
     private void OnDestroy()
     {
+        _itemTargetHandler = null;
         BindBattle(null, null);
     }
 
@@ -64,7 +75,7 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
 
         Data = original.CreateData();
         InitializeAttackSfxSpeaker();
-        _remainingCooldown = Data.AttackCooldown;
+        _remainingCooldown = GetEffectiveAttackCooldown();
         _panelImage = GetComponent<Image>();
         if (_panelImage != null)
         {
@@ -73,8 +84,14 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
         }
 
         _initialized = true;
+        EnsureSkillTooltip();
         RefreshUi();
         return true;
+    }
+
+    private void OnDisable()
+    {
+        _skillTooltip?.SetActive(false);
     }
 
     public void BindBattle(
@@ -105,12 +122,50 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
         RefreshUi();
     }
 
+    public bool ConfigureDefinition(CharacterSO definition)
+    {
+        if (definition == null)
+            return false;
+
+        BindBattle(null, null);
+        original = definition;
+        if (!_initialized)
+            return Initialize();
+
+        Data = original.CreateData();
+        ResetRuntime();
+        return true;
+    }
+
+    public bool ApplyUpgrade(ETurretUpgradeType upgradeType)
+    {
+        if ((!_initialized && !Initialize()) || Data == null)
+            return false;
+
+        float previousCooldown = Data.AttackCooldown;
+        if (!Data.ApplyUpgrade(upgradeType))
+            return false;
+
+        if (Data.AttackCooldown < previousCooldown)
+        {
+            _remainingCooldown = Mathf.Min(
+                _remainingCooldown,
+                GetEffectiveAttackCooldown());
+        }
+        RefreshUi();
+        return true;
+    }
+
     public void ResetRuntime()
     {
         if (!_initialized && !Initialize())
             return;
 
-        _remainingCooldown = Data.AttackCooldown;
+        _attackSpeedBoostRemaining = 0f;
+        _attackSpeedMultiplier = 1f;
+        _powerBoostRemaining = 0f;
+        _powerMultiplier = 1f;
+        _remainingCooldown = GetEffectiveAttackCooldown();
         _disabledTimeRemaining = 0f;
         _attackRecoveryRemaining = 0f;
         _dualSkillTimeRemaining = 0f;
@@ -126,6 +181,7 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
             return;
 
         _board = board;
+        TickTemporaryBoosts(deltaTime);
         _dualSkillTimeRemaining = Mathf.Max(
             0f,
             _dualSkillTimeRemaining - deltaTime);
@@ -142,7 +198,7 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
             activeDeltaTime -= recoveryDeltaTime;
 
             if (_attackRecoveryRemaining <= 0f)
-                _remainingCooldown = Data.AttackCooldown;
+                _remainingCooldown = GetEffectiveAttackCooldown();
         }
 
         if (_disabledTimeRemaining > 0f)
@@ -177,7 +233,9 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
 
         if (targetChanged)
         {
-            _remainingCooldown = Mathf.Max(_remainingCooldown, 1f);
+            _remainingCooldown = Mathf.Max(
+                _remainingCooldown,
+                1f / _attackSpeedMultiplier);
         }
 
         _remainingCooldown = Mathf.Max(0f, _remainingCooldown - activeDeltaTime);
@@ -186,7 +244,7 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
             if (UsesAttackRecovery())
                 BeginTargetAttackRecovery();
             else
-                _remainingCooldown = Data.AttackCooldown;
+                _remainingCooldown = GetEffectiveAttackCooldown();
         }
 
         RefreshUi();
@@ -206,6 +264,47 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
         RefreshUi();
     }
 
+    public void BindItemTargetHandler(
+        System.Func<CharacterRuntime, bool> itemTargetHandler)
+    {
+        _itemTargetHandler = itemTargetHandler;
+    }
+
+    public bool ApplyAttackSpeedBoost(float multiplier, float duration)
+    {
+        multiplier = Mathf.Max(1f, multiplier);
+        duration = TimePrecision.Normalize(duration, 0.1f);
+        if (multiplier <= 1f || duration <= 0f)
+            return false;
+
+        if (_attackSpeedMultiplier < multiplier)
+        {
+            float ratio = multiplier / _attackSpeedMultiplier;
+            _remainingCooldown /= ratio;
+            _attackRecoveryRemaining /= ratio;
+            _attackSpeedMultiplier = multiplier;
+        }
+
+        _attackSpeedBoostRemaining = Mathf.Max(
+            _attackSpeedBoostRemaining,
+            duration);
+        RefreshUi();
+        return true;
+    }
+
+    public bool ApplyPowerBoost(float multiplier, float duration)
+    {
+        multiplier = Mathf.Max(1f, multiplier);
+        duration = TimePrecision.Normalize(duration, 0.1f);
+        if (multiplier <= 1f || duration <= 0f)
+            return false;
+
+        _powerMultiplier = Mathf.Max(_powerMultiplier, multiplier);
+        _powerBoostRemaining = Mathf.Max(_powerBoostRemaining, duration);
+        RefreshUi();
+        return true;
+    }
+
     public void OnPointerClick(PointerEventData eventData)
     {
         if (eventData == null ||
@@ -214,7 +313,26 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
             return;
         }
 
+        if (_itemTargetHandler != null && _itemTargetHandler(this))
+            return;
+
         TryActivateActiveSkill();
+    }
+
+    public void OnPointerEnter(PointerEventData eventData)
+    {
+        if ((!_initialized && !Initialize()) || Data == null)
+            return;
+
+        EnsureSkillTooltip();
+        PositionSkillTooltip();
+        RefreshSkillTooltip();
+        _skillTooltip?.SetActive(true);
+    }
+
+    public void OnPointerExit(PointerEventData eventData)
+    {
+        _skillTooltip?.SetActive(false);
     }
 
     public bool TryActivateActiveSkill()
@@ -246,7 +364,7 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
                 _board.ClearPreparedAttack(this);
                 int damageDealt = _board.TryAttackLowestHealthEnemy(
                     this,
-                    Data.AttackDamage * 2);
+                    Data.SkillAttackDamage);
                 RecordDamageDealt(damageDealt);
                 if (damageDealt > 0)
                 {
@@ -268,7 +386,9 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
             case CharacterAttackType.RandomMultiple:
                 damageDealt = board.TryResolveRandomAttack(
                     this,
-                    Data.AttackDamage);
+                    _dualSkillTimeRemaining > 0f
+                        ? Data.SkillAttackDamage
+                        : GetNormalAttackDamage());
                 break;
 
             case CharacterAttackType.CrossHighestHealth:
@@ -276,10 +396,10 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
                 {
                     int adjacentDamage = Mathf.Max(
                         1,
-                        Mathf.FloorToInt(Data.AttackDamage * 0.5f));
+                        Mathf.FloorToInt(Data.SkillAttackDamage * 0.5f));
                     damageDealt = board.TryAttackCrossWithAdjacentSplash(
                         this,
-                        Data.AttackDamage,
+                        Data.SkillAttackDamage,
                         adjacentDamage);
                     if (damageDealt > 0)
                         _areaSkillAttackCount--;
@@ -288,20 +408,21 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
                 {
                     damageDealt = board.TryAttackCrossAroundHighestHealthEnemy(
                         this,
-                        Data.AttackDamage);
+                        GetNormalAttackDamage());
                 }
                 break;
 
             case CharacterAttackType.FireRandom:
                 bool fireApplied = _fireSkillAttackCount > 0
-                    ? board.TryApplyFireAroundRandomEnemy(
+                    ? board.TryApplyFireAroundRandomEnemies(
                         this,
-                        Data.FireDuration,
+                        Data.FireSkillTargetCount,
+                        GetEffectiveFireDuration(),
                         Data.FireTickInterval,
                         Data.FireTickDamage)
                     : board.TryApplyFireToRandomEnemy(
                         this,
-                        Data.FireDuration,
+                        GetEffectiveFireDuration(),
                         Data.FireTickInterval,
                         Data.FireTickDamage);
                 if (fireApplied && _fireSkillAttackCount > 0)
@@ -313,7 +434,7 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
             default:
                 damageDealt = board.TryResolveLowestHealthAttack(
                     this,
-                    Data.AttackDamage);
+                    GetNormalAttackDamage());
                 break;
         }
 
@@ -355,7 +476,59 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
     private void BeginTargetAttackRecovery()
     {
         _remainingCooldown = 0f;
-        _attackRecoveryRemaining = TargetAttackRecoveryDuration;
+        _attackRecoveryRemaining =
+            TargetAttackRecoveryDuration / _attackSpeedMultiplier;
+    }
+
+    private void TickTemporaryBoosts(float deltaTime)
+    {
+        if (_attackSpeedBoostRemaining > 0f)
+        {
+            _attackSpeedBoostRemaining = Mathf.Max(
+                0f,
+                _attackSpeedBoostRemaining - deltaTime);
+            if (_attackSpeedBoostRemaining <= 0f &&
+                _attackSpeedMultiplier > 1f)
+            {
+                _remainingCooldown *= _attackSpeedMultiplier;
+                _attackRecoveryRemaining *= _attackSpeedMultiplier;
+                _attackSpeedMultiplier = 1f;
+            }
+        }
+
+        if (_powerBoostRemaining > 0f)
+        {
+            _powerBoostRemaining = Mathf.Max(
+                0f,
+                _powerBoostRemaining - deltaTime);
+            if (_powerBoostRemaining <= 0f)
+                _powerMultiplier = 1f;
+        }
+    }
+
+    private float GetEffectiveAttackCooldown()
+    {
+        return Data != null
+            ? Data.AttackCooldown / Mathf.Max(1f, _attackSpeedMultiplier)
+            : 0f;
+    }
+
+    private int GetNormalAttackDamage()
+    {
+        return Data != null
+            ? Mathf.Max(
+                1,
+                Mathf.RoundToInt(Data.AttackDamage * _powerMultiplier))
+            : 0;
+    }
+
+    private float GetEffectiveFireDuration()
+    {
+        return Data != null
+            ? TimePrecision.Normalize(
+                Data.FireDuration * _powerMultiplier,
+                0.1f)
+            : 0f;
     }
 
     private void PlayAttackSfx()
@@ -392,6 +565,138 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
         RefreshUi();
     }
 
+    private void EnsureSkillTooltip()
+    {
+        if (_skillTooltip != null && _skillTooltipText != null)
+            return;
+
+        Transform existing = transform.Find("grpSkillTooltip");
+        if (existing != null)
+            _skillTooltip = existing.gameObject;
+        if (_skillTooltip == null)
+        {
+            _skillTooltip = new GameObject(
+                "grpSkillTooltip",
+                typeof(RectTransform),
+                typeof(Canvas),
+                typeof(CanvasRenderer),
+                typeof(CanvasGroup),
+                typeof(Image));
+            _skillTooltip.transform.SetParent(transform, false);
+        }
+
+        RectTransform tooltipRect =
+            (RectTransform)_skillTooltip.transform;
+        tooltipRect.sizeDelta = new Vector2(410f, 172f);
+        tooltipRect.localScale = Vector3.one;
+
+        Canvas tooltipCanvas = _skillTooltip.GetComponent<Canvas>();
+        tooltipCanvas.overrideSorting = true;
+        tooltipCanvas.sortingOrder = 200;
+
+        CanvasGroup tooltipGroup = _skillTooltip.GetComponent<CanvasGroup>();
+        tooltipGroup.interactable = false;
+        tooltipGroup.blocksRaycasts = false;
+
+        Image tooltipBackground = _skillTooltip.GetComponent<Image>();
+        tooltipBackground.color = new Color(0.045f, 0.06f, 0.052f, 0.98f);
+        tooltipBackground.raycastTarget = false;
+
+        Transform textTransform = tooltipRect.Find("txtSkillTooltip");
+        if (textTransform != null)
+            _skillTooltipText = textTransform.GetComponent<TextMeshProUGUI>();
+        if (_skillTooltipText == null)
+        {
+            GameObject textObject = new(
+                "txtSkillTooltip",
+                typeof(RectTransform),
+                typeof(TextMeshProUGUI));
+            textObject.transform.SetParent(tooltipRect, false);
+            _skillTooltipText = textObject.GetComponent<TextMeshProUGUI>();
+        }
+
+        RectTransform textRect = _skillTooltipText.rectTransform;
+        textRect.anchorMin = Vector2.zero;
+        textRect.anchorMax = Vector2.one;
+        textRect.offsetMin = new Vector2(16f, 12f);
+        textRect.offsetMax = new Vector2(-16f, -12f);
+        _skillTooltipText.fontSize = 17f;
+        _skillTooltipText.fontStyle = FontStyles.Bold;
+        _skillTooltipText.color = new Color(0.94f, 0.91f, 0.78f, 1f);
+        _skillTooltipText.alignment = TextAlignmentOptions.MidlineLeft;
+        _skillTooltipText.textWrappingMode = TextWrappingModes.Normal;
+        _skillTooltipText.raycastTarget = false;
+        _skillTooltip.SetActive(false);
+    }
+
+    private void PositionSkillTooltip()
+    {
+        if (_skillTooltip == null)
+            return;
+
+        bool openToLeft = true;
+        Canvas rootCanvas = GetComponentInParent<Canvas>()?.rootCanvas;
+        RectTransform canvasRect = rootCanvas != null
+            ? rootCanvas.transform as RectTransform
+            : null;
+        RectTransform turretRect = transform as RectTransform;
+        if (canvasRect != null && turretRect != null)
+        {
+            Vector3 worldCenter = turretRect.TransformPoint(
+                turretRect.rect.center);
+            Vector3 canvasLocalCenter = canvasRect.InverseTransformPoint(
+                worldCenter);
+            openToLeft = canvasLocalCenter.x > canvasRect.rect.center.x;
+        }
+
+        RectTransform tooltipRect =
+            (RectTransform)_skillTooltip.transform;
+        float anchorX = openToLeft ? 0f : 1f;
+        tooltipRect.anchorMin = new Vector2(anchorX, 0.5f);
+        tooltipRect.anchorMax = new Vector2(anchorX, 0.5f);
+        tooltipRect.pivot = new Vector2(openToLeft ? 1f : 0f, 0.5f);
+        tooltipRect.anchoredPosition = new Vector2(
+            openToLeft ? -12f : 12f,
+            0f);
+        tooltipRect.SetAsLastSibling();
+    }
+
+    private void RefreshSkillTooltip()
+    {
+        if (_skillTooltipText == null || Data == null)
+            return;
+
+        string effect = Data.AttackType switch
+        {
+            CharacterAttackType.RandomMultiple =>
+                $"For {Data.ActiveSkillDuration:0.#}s, attacks target " +
+                $"{Data.TargetCount + 2} enemies and deal " +
+                $"{Data.SkillAttackDamage} damage each.",
+            CharacterAttackType.CrossHighestHealth =>
+                $"Next {Data.ActiveSkillAttackCount} attacks deal " +
+                $"{Data.SkillAttackDamage} damage in the inner cross and " +
+                $"{Mathf.Max(1, Mathf.FloorToInt(Data.SkillAttackDamage * 0.5f))} " +
+                "damage to the outer and diagonal tiles.",
+            CharacterAttackType.FireRandom =>
+                $"Next {Data.ActiveSkillAttackCount} attacks choose " +
+                $"{Data.FireSkillTargetCount} centers and apply fire for " +
+                $"{GetEffectiveFireDuration():0.#}s in each 3x3 area. " +
+                "Overlapping areas stack duration.",
+            _ =>
+                $"Deal {Data.SkillAttackDamage} damage to the " +
+                "lowest-health enemy.",
+        };
+        string status = IsActiveSkillPending()
+            ? "ACTIVE"
+            : _activeSkillResource != null &&
+              _activeSkillResource.Current >= Data.ActiveSkillCost
+                ? "READY"
+                : "NOT ENOUGH ENERGY";
+        _skillTooltipText.text =
+            $"ACTIVE SKILL  [C{Data.ActiveSkillCost}]  {status}\n" +
+            effect + "\nCLICK TURRET TO ACTIVATE";
+    }
+
     private void RefreshUi()
     {
         if (!_initialized)
@@ -404,8 +709,8 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
             $"{slotLabel}{Data.CharacterName} [C{Data.ActiveSkillCost}]";
         nameText.color = EffectColor;
         attackText.text = Data.AttackType == CharacterAttackType.FireRandom
-            ? $"FIRE {Data.FireTickDamage}/{Data.FireTickInterval:0.#}s"
-            : $"ATK {Data.AttackDamage}";
+            ? $"FIRE {Data.FireDuration:0.#}s | SK x{Data.FireSkillTargetCount}"
+            : $"ATK {Data.AttackDamage} | SK {Data.SkillAttackDamage}";
         if (_disabledTimeRemaining > 0f)
         {
             float displayedTime =
@@ -443,11 +748,12 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
                     : "READY";
             }
         }
+        float effectiveAttackCooldown = GetEffectiveAttackCooldown();
         cooldownFill.fillAmount = _attackRecoveryRemaining > 0f
             ? 0f
-            : Data.AttackCooldown > 0f
+            : effectiveAttackCooldown > 0f
                 ? 1f - Mathf.Clamp01(
-                    _remainingCooldown / Data.AttackCooldown)
+                    _remainingCooldown / effectiveAttackCooldown)
                 : 1f;
         cooldownFill.color = EffectColor;
 
@@ -462,5 +768,8 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
                     ? _defaultPanelColor
                     : Color.Lerp(_defaultPanelColor, Color.black, 0.35f);
         }
+
+        if (_skillTooltip != null && _skillTooltip.activeSelf)
+            RefreshSkillTooltip();
     }
 }

@@ -24,8 +24,13 @@ public class AudioData
         Apply(GetMixer());
     }
 
-    public void Save()
+    public void Save(bool flush = true)
     {
+        master = Mathf.Clamp(master, 0, 100);
+        music = Mathf.Clamp(music, 0, 100);
+        sfx = Mathf.Clamp(sfx, 0, 100);
+        ui = Mathf.Clamp(ui, 0, 100);
+
         PlayerPrefs.SetInt("Sound.Master", master);
         PlayerPrefs.SetInt("Sound.Music", music);
         PlayerPrefs.SetInt("Sound.SFX", sfx);
@@ -33,16 +38,16 @@ public class AudioData
 
         PlayerPrefs.SetInt("Sound.MuteInBackground", CommonUtil.BoolToInt(mute_in_bg));
 
-        PlayerPrefs.Save();
-        Apply(GetMixer());
+        if (flush)
+            PlayerPrefs.Save();
     }
 
     public void Load()
     {
-        master = PlayerPrefs.GetInt("Sound.Master", master);
-        music = PlayerPrefs.GetInt("Sound.Music", music);
-        sfx = PlayerPrefs.GetInt("Sound.SFX", sfx);
-        ui = PlayerPrefs.GetInt("Sound.UI", ui);
+        master = Mathf.Clamp(PlayerPrefs.GetInt("Sound.Master", master), 0, 100);
+        music = Mathf.Clamp(PlayerPrefs.GetInt("Sound.Music", music), 0, 100);
+        sfx = Mathf.Clamp(PlayerPrefs.GetInt("Sound.SFX", sfx), 0, 100);
+        ui = Mathf.Clamp(PlayerPrefs.GetInt("Sound.UI", ui), 0, 100);
         
         mute_in_bg = CommonUtil.IntToBool(PlayerPrefs.GetInt("Sound.MuteInBackground", CommonUtil.BoolToInt(mute_in_bg)));
         
@@ -77,27 +82,31 @@ public class AudioData
 
     public void SetMasterVolume(int volume)
     {
-        master = volume;
-        Save();
+        master = Mathf.Clamp(volume, 0, 100);
+        Save(false);
+        Apply(GetMixer());
     }
     public void SetMusicVolume(int volume)
     {
-        music = volume;
-        Save();
+        music = Mathf.Clamp(volume, 0, 100);
+        Save(false);
+        Apply(GetMixer());
     }
     public void SetSFXVolume(int volume)
     {
-        sfx = volume;
-        Save();
+        sfx = Mathf.Clamp(volume, 0, 100);
+        Save(false);
+        Apply(GetMixer());
     }
     public void SetUIVolume(int volume)
     {
-        ui = volume;
-        Save();
+        ui = Mathf.Clamp(volume, 0, 100);
+        Save(false);
+        Apply(GetMixer());
     }
     public void SetMiB(bool b)
     {
         mute_in_bg = b;
-        Save();
+        Save(false);
     }
 }

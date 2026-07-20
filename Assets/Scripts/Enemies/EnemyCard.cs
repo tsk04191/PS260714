@@ -1,10 +1,12 @@
+using System;
 using TMPro;
 using UnityEngine;
+using UnityEngine.EventSystems;
 using UnityEngine.UI;
 
 [DisallowMultipleComponent]
 [RequireComponent(typeof(RectTransform))]
-public sealed class EnemyCard : MonoBehaviour
+public sealed class EnemyCard : MonoBehaviour, IPointerClickHandler
 {
     [SerializeField] private RectTransform cardShadow;
     [SerializeField] private RectTransform tileFace;
@@ -15,6 +17,7 @@ public sealed class EnemyCard : MonoBehaviour
     private Color _defaultFaceColor;
 
     public EnemyRuntime Runtime { get; private set; }
+    public event Action<EnemyRuntime> Clicked;
     public RectTransform RectTransform =>
         _rectTransform != null ? _rectTransform : _rectTransform = (RectTransform)transform;
 
@@ -67,6 +70,16 @@ public sealed class EnemyCard : MonoBehaviour
         {
             tileFace.offsetMin = new Vector2(edge, sideDepth);
             tileFace.offsetMax = new Vector2(-edge, -edge);
+        }
+    }
+
+    public void OnPointerClick(PointerEventData eventData)
+    {
+        if (eventData != null &&
+            eventData.button == PointerEventData.InputButton.Left &&
+            Runtime != null)
+        {
+            Clicked?.Invoke(Runtime);
         }
     }
 

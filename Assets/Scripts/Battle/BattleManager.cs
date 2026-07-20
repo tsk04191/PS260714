@@ -16,6 +16,8 @@ public enum EBattleState
 public sealed class BattleManager : MonoBehaviour, IActiveSkillResource
 {
     private const float DefaultGameSpeed = 1f;
+    public const int DefaultMaximumEnergy = 3;
+    public const float DefaultEnergyRechargeDuration = 5f;
 
     private static readonly float[] GameSpeedScales =
     {
@@ -40,6 +42,10 @@ public sealed class BattleManager : MonoBehaviour, IActiveSkillResource
     private bool _boardFull;
     private bool _controlsGameTime;
     private int _activeSkillResource;
+    private int _maximumActiveSkillResource = DefaultMaximumEnergy;
+    private float _activeSkillRechargeDuration =
+        DefaultEnergyRechargeDuration;
+    private float _activeSkillRechargeRemaining;
 
     public EBattleState State { get; private set; } = EBattleState.Uninitialized;
     public bool IsInitialized => _manager != null;
@@ -55,6 +61,11 @@ public sealed class BattleManager : MonoBehaviour, IActiveSkillResource
         TimePrecision.FloorToTenth(_battleTimeRemaining);
     public EBattleResult Result { get; private set; }
     public int ActiveSkillResource => _activeSkillResource;
+    public int MaximumActiveSkillResource => _maximumActiveSkillResource;
+    public float ActiveSkillRechargeDuration =>
+        _activeSkillRechargeDuration;
+    public float ActiveSkillRechargeRemaining =>
+        TimePrecision.FloorToTenth(_activeSkillRechargeRemaining);
     int IActiveSkillResource.Current => _activeSkillResource;
     public int PendingEnemyCount => _spawnQueue.Count;
     public int SpawnedEnemyCount => _spawnedEnemyCount;
@@ -71,6 +82,7 @@ public sealed class BattleManager : MonoBehaviour, IActiveSkillResource
     public event Action BattleCompleted;
     public event Action<EBattleResult> BattleEnded;
     public event Action<int> ActiveSkillResourceChanged;
+    public event Action ActiveSkillRechargeChanged;
     event Action<int> IActiveSkillResource.Changed
     {
         add => ActiveSkillResourceChanged += value;
@@ -87,9 +99,10 @@ public sealed class BattleManager : MonoBehaviour, IActiveSkillResource
             return;
 
         TickBattleTimer(deltaTime);
-        if (State == EBattleState.Completed)
+        if (State != EBattleState.Running || _board == null)
             return;
 
+        TickActiveSkillRecharge(deltaTime);
         _board.TickStatusEffects(deltaTime);
         _board.TickEnemyAbilities(deltaTime, _characters);
         foreach (IBattleCharacter character in _characters)
@@ -131,7 +144,6 @@ public sealed class BattleManager : MonoBehaviour, IActiveSkillResource
 
         ReleaseSession();
         _board = board;
-        _board.EnemyDefeated += HandleEnemyDefeated;
         _spawnInterval = TimePrecision.Normalize(spawnInterval, 0.1f);
         _battleDuration = TimePrecision.FloorToTenth(timeLimit);
         _battleTimeRemaining = _battleDuration;
@@ -159,6 +171,8 @@ public sealed class BattleManager : MonoBehaviour, IActiveSkillResource
         FillInitialBoard();
         ResetSpawnTimerForNextEnemy();
         _boardFull = false;
+        SetActiveSkillResource(_maximumActiveSkillResource);
+        SetActiveSkillRechargeRemaining(0f);
 
         SetState(EBattleState.Running);
         ApplyBattleTimeScale();
@@ -180,8 +194,28 @@ public sealed class BattleManager : MonoBehaviour, IActiveSkillResource
         if (!CanSpend(amount))
             return false;
 
+        bool wasFull = _activeSkillResource >= _maximumActiveSkillResource;
         SetActiveSkillResource(_activeSkillResource - amount);
+        if (wasFull && _activeSkillResource < _maximumActiveSkillResource)
+        {
+            SetActiveSkillRechargeRemaining(
+                _activeSkillRechargeDuration);
+        }
         return true;
+    }
+
+    public void ConfigureActiveSkillResource(
+        int maximumResource,
+        float rechargeDuration)
+    {
+        _maximumActiveSkillResource = Mathf.Max(1, maximumResource);
+        _activeSkillRechargeDuration = TimePrecision.Normalize(
+            rechargeDuration,
+            TimePrecision.Step);
+        SetActiveSkillResource(_activeSkillResource);
+        if (_activeSkillResource >= _maximumActiveSkillResource)
+            SetActiveSkillRechargeRemaining(0f);
+        ActiveSkillRechargeChanged?.Invoke();
     }
 
     public bool ResumeBattle()
@@ -236,14 +270,14 @@ public sealed class BattleManager : MonoBehaviour, IActiveSkillResource
 
     public bool QueueEnemy(EnemyRuntime enemy)
     {
-        if (enemy == null || !HasSession || State == EBattleState.Completed ||
-            _spawnedEnemyCount + _spawnQueue.Count >= _maximumEnemyCount)
+        if (enemy == null || !HasSession || State == EBattleState.Completed)
         {
             return false;
         }
 
         bool wasEmpty = _spawnQueue.Count == 0;
         _spawnQueue.Add(enemy);
+        _maximumEnemyCount++;
         if (wasEmpty)
             ResetSpawnTimerForNextEnemy();
 
@@ -290,6 +324,7 @@ public sealed class BattleManager : MonoBehaviour, IActiveSkillResource
         BattleCompleted = null;
         BattleEnded = null;
         ActiveSkillResourceChanged = null;
+        ActiveSkillRechargeChanged = null;
     }
 
     private void OnDestroy()
@@ -438,9 +473,6 @@ public sealed class BattleManager : MonoBehaviour, IActiveSkillResource
     private void ReleaseSession()
     {
         RestoreDefaultTimeScale();
-        if (_board != null)
-            _board.EnemyDefeated -= HandleEnemyDefeated;
-
         foreach (IBattleCharacter character in _characters)
             character?.BindBattle(null, null);
 
@@ -456,6 +488,7 @@ public sealed class BattleManager : MonoBehaviour, IActiveSkillResource
         _boardFull = false;
         Result = EBattleResult.None;
         SetActiveSkillResource(0);
+        SetActiveSkillRechargeRemaining(0f);
         ResetTimeControl();
 
         if (IsInitialized)
@@ -489,20 +522,59 @@ public sealed class BattleManager : MonoBehaviour, IActiveSkillResource
         SpawnTimerChanged?.Invoke();
     }
 
-    private void HandleEnemyDefeated(EnemyRuntime _)
+    private void TickActiveSkillRecharge(float deltaTime)
     {
-        if (State == EBattleState.Running)
+        if (deltaTime <= 0f ||
+            _activeSkillResource >= _maximumActiveSkillResource)
+        {
+            return;
+        }
+
+        float remainingDelta = deltaTime;
+        if (_activeSkillRechargeRemaining <= 0f)
+        {
+            SetActiveSkillRechargeRemaining(
+                _activeSkillRechargeDuration);
+        }
+
+        while (remainingDelta > 0f &&
+               _activeSkillResource < _maximumActiveSkillResource)
+        {
+            float appliedDelta = Mathf.Min(
+                remainingDelta,
+                _activeSkillRechargeRemaining);
+            remainingDelta -= appliedDelta;
+            SetActiveSkillRechargeRemaining(
+                _activeSkillRechargeRemaining - appliedDelta);
+            if (_activeSkillRechargeRemaining > 0f)
+                break;
+
             SetActiveSkillResource(_activeSkillResource + 1);
+            SetActiveSkillRechargeRemaining(
+                _activeSkillResource < _maximumActiveSkillResource
+                    ? _activeSkillRechargeDuration
+                    : 0f);
+        }
     }
 
     private void SetActiveSkillResource(int value)
     {
-        value = Mathf.Max(0, value);
+        value = Mathf.Clamp(value, 0, _maximumActiveSkillResource);
         if (_activeSkillResource == value)
             return;
 
         _activeSkillResource = value;
         ActiveSkillResourceChanged?.Invoke(_activeSkillResource);
+    }
+
+    private void SetActiveSkillRechargeRemaining(float value)
+    {
+        value = Mathf.Max(0f, value);
+        if (Mathf.Approximately(_activeSkillRechargeRemaining, value))
+            return;
+
+        _activeSkillRechargeRemaining = value;
+        ActiveSkillRechargeChanged?.Invoke();
     }
 
     private void ResetSpawnTimerForNextEnemy()
