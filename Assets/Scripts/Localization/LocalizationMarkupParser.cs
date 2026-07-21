@@ -1,6 +1,5 @@
 using System.Collections.Generic;
 using System.Text;
-using TMPro;
 using UnityEngine;
 
 namespace PS260714.Localization
@@ -82,10 +81,10 @@ namespace PS260714.Localization
                     if (TryResolveIcon(
                         catalog,
                         iconId,
-                        out string spriteName))
+                        out string spriteKey))
                     {
                         output.Append("<sprite name=\"");
-                        output.Append(spriteName);
+                        output.Append(spriteKey);
                         output.Append("\">");
                     }
                     else
@@ -204,21 +203,17 @@ namespace PS260714.Localization
         private static bool TryResolveIcon(
             LocalizationMarkupCatalog catalog,
             string iconId,
-            out string spriteName)
+            out string spriteKey)
         {
             if (catalog != null)
             {
                 return catalog.TryGetRenderableIcon(
                     iconId,
-                    out spriteName);
+                    out spriteKey);
             }
 
-            bool found = LocalizationMarkupDefaults.TryGetIcon(
-                iconId,
-                out spriteName);
-            return found && LocalizationMarkupCatalog.ContainsSprite(
-                TMP_Settings.defaultSpriteAsset,
-                spriteName);
+            spriteKey = string.Empty;
+            return false;
         }
 
         private static void AppendIconFallback(

@@ -39,6 +39,24 @@ public sealed class DungeonBattleTab : MonoBehaviour
     private bool _battleEventsBound;
     private bool _localizationEventsBound;
 
+    public RectTransform TimerHighlightRect => battleTimeText != null
+        ? battleTimeText.rectTransform
+        : null;
+    public RectTransform QueueHighlightRect => spawnQueueView != null
+        ? spawnQueueView.transform as RectTransform
+        : null;
+    public RectTransform ItemHighlightRect
+    {
+        get
+        {
+            if (_itemHandView == null)
+                EnsureItemHandView();
+            return _itemHandView != null
+                ? _itemHandView.HighlightRect
+                : null;
+        }
+    }
+
     private void OnEnable()
     {
         if (!_initialized)
@@ -264,11 +282,16 @@ public sealed class DungeonBattleTab : MonoBehaviour
     private void HandleSpeedClicked()
     {
         _battleManager?.CycleGameSpeed();
+        if (_battleManager != null)
+            _page?.RecordBattleSpeed(_battleManager.GameSpeed);
     }
 
     private void HandlePauseClicked()
     {
-        _battleManager?.TogglePause();
+        if (_page != null)
+            _page.ToggleBattlePause();
+        else
+            _battleManager?.TogglePause();
     }
 
     private void HandleSettingsClicked()
@@ -390,9 +413,7 @@ public sealed class DungeonBattleTab : MonoBehaviour
                 LocalizationService.Arg("seconds", rechargeRemaining));
         activeSkillResourceText.text = _page != null
             ? LocalizationService.Get(
-                _page.IsTutorialBattle
-                    ? LocalizationKeys.UiDungeonEnergyTutorial
-                    : LocalizationKeys.UiDungeonEnergyScale,
+                LocalizationKeys.UiDungeonEnergyScale,
                 LocalizationService.Arg("current", resource),
                 LocalizationService.Arg("max", maximumResource),
                 LocalizationService.Arg("recharge", recharge),
@@ -449,6 +470,23 @@ public sealed class DungeonItemHandView : MonoBehaviour
     private float _focusCooldownRemaining;
     private EBattleState _previousBattleState;
     private bool _initialized;
+
+    public RectTransform HighlightRect
+    {
+        get
+        {
+            foreach (EBattleItemType itemType in DisplayOrder)
+            {
+                if (_cards.TryGetValue(itemType, out DungeonItemCardView card) &&
+                    card != null && card.gameObject.activeInHierarchy)
+                {
+                    return card.transform as RectTransform;
+                }
+            }
+
+            return transform as RectTransform;
+        }
+    }
 
     public void Initialize(DungeonPage page, BattleManager battleManager)
     {

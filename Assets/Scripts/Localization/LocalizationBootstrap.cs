@@ -87,7 +87,11 @@ namespace PS260714.Localization
             TMP_FontAsset font)
         {
             return IsKorean(locale) &&
-                   (font == null || !font.HasCharacter('\uD55C', true));
+                   (font == null ||
+                    !font.HasCharacter(
+                        '\uD55C',
+                        searchFallbacks: true,
+                        tryAddCharacter: true));
         }
 
         public static void ResetCache()

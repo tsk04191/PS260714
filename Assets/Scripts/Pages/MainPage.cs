@@ -5,7 +5,7 @@ using UnityEngine;
 public sealed class MainPage : RuntimeMenuPageBase
 {
     [Header("Page Navigation")]
-    [SerializeField] private GameObject dungeonPage;
+    [SerializeField] private GameObject stageSelectPage;
     [SerializeField] private GameObject codexPage;
     [SerializeField] private GameObject rosterPage;
     [SerializeField] private GameObject shopPage;
@@ -56,7 +56,7 @@ public sealed class MainPage : RuntimeMenuPageBase
 
     private void HandlePlayClicked()
     {
-        NavigateTo(dungeonPage, PageOpenMode.Fresh);
+        NavigateTo(stageSelectPage, PageOpenMode.Fresh);
     }
 
     private void OpenPage(GameObject targetPage)

@@ -61,6 +61,8 @@ public static class MenuPageSceneBuilder
         GameObject titleObject = FindDirectChild(layClient, "pagTitle");
         GameObject mainObject = FindDirectChild(layClient, "pagMain");
         GameObject dungeonObject = FindDirectChild(layClient, "pagDungeon");
+        GameObject stageSelectObject =
+            FindDirectChild(layClient, "pagStageSelect");
         GameObject settingObject = FindDirectChild(layClient, "pagSetting");
         if (titleObject == null || mainObject == null ||
             dungeonObject == null || settingObject == null)
@@ -84,6 +86,11 @@ public static class MenuPageSceneBuilder
         TitlePage titlePage = titleObject.GetComponent<TitlePage>();
         MainPage mainPage = mainObject.GetComponent<MainPage>();
         DungeonPage dungeonPage = dungeonObject.GetComponent<DungeonPage>();
+        DungeonFieldView dungeonFieldView =
+            dungeonObject.GetComponent<DungeonFieldView>();
+        StageSelectPage stageSelectPage = stageSelectObject != null
+            ? stageSelectObject.GetComponent<StageSelectPage>()
+            : null;
         MainSubPage codexPage = codexObject != null
             ? codexObject.GetComponent<MainSubPage>()
             : null;
@@ -114,9 +121,17 @@ public static class MenuPageSceneBuilder
             : null;
         bool titleUiExists = HasGeneratedUi(titleObject);
         bool mainUiExists = HasGeneratedUi(mainObject);
+        bool stageSelectUiExists = HasStageSelectUi(stageSelectObject);
         if (!forceRebuild && titlePage != null && mainPage != null &&
             dungeonPage != null &&
+            stageSelectPage != null &&
+            HasObjectReference(mainPage, "stageSelectPage") &&
+            HasObjectReference(stageSelectPage, "mainPage") &&
+            HasObjectReference(stageSelectPage, "dungeonPage") &&
             HasObjectReference(dungeonPage, "mainPage") &&
+            HasObjectReference(dungeonPage, "stageSelectPage") &&
+            dungeonFieldView != null &&
+            HasObjectReference(dungeonPage, "fieldView") &&
             HasObjectReference(codexPage, "enemyCodexPage") &&
             HasObjectReference(codexPage, "characterCodexPage") &&
             HasObjectReference(codexPage, "skillCodexPage") &&
@@ -133,7 +148,7 @@ public static class MenuPageSceneBuilder
             HasObjectReference(itemCodexPage, "codexPage") &&
             codexPage != null && rosterPage != null && shopPage != null &&
             questPage != null && storagePage != null &&
-            titleUiExists && mainUiExists &&
+            titleUiExists && mainUiExists && stageSelectUiExists &&
             HasGeneratedUi(codexObject) && HasGeneratedUi(rosterObject) &&
             HasGeneratedUi(shopObject) && HasGeneratedUi(questObject) &&
             HasGeneratedUi(storageObject) &&
@@ -149,6 +164,10 @@ public static class MenuPageSceneBuilder
         Undo.SetCurrentGroupName(undoName);
         int undoGroup = Undo.GetCurrentGroup();
 
+        stageSelectObject ??= CreatePageObject(
+            layClient,
+            "pagStageSelect",
+            undoName);
         codexObject ??= CreatePageObject(layClient, "pagCodex", undoName);
         rosterObject ??= CreatePageObject(layClient, "pagRoster", undoName);
         shopObject ??= CreatePageObject(layClient, "pagShop", undoName);
@@ -174,6 +193,10 @@ public static class MenuPageSceneBuilder
         titlePage ??= Undo.AddComponent<TitlePage>(titleObject);
         mainPage ??= Undo.AddComponent<MainPage>(mainObject);
         dungeonPage ??= Undo.AddComponent<DungeonPage>(dungeonObject);
+        dungeonFieldView ??=
+            Undo.AddComponent<DungeonFieldView>(dungeonObject);
+        stageSelectPage ??=
+            Undo.AddComponent<StageSelectPage>(stageSelectObject);
         codexPage ??= Undo.AddComponent<MainSubPage>(codexObject);
         rosterPage ??= Undo.AddComponent<MainSubPage>(rosterObject);
         shopPage ??= Undo.AddComponent<MainSubPage>(shopObject);
@@ -190,6 +213,7 @@ public static class MenuPageSceneBuilder
 
         ConfigureFullScreenRect(titleObject, undoName);
         ConfigureFullScreenRect(mainObject, undoName);
+        ConfigureFullScreenRect(stageSelectObject, undoName);
         ConfigureFullScreenRect(codexObject, undoName);
         ConfigureFullScreenRect(rosterObject, undoName);
         ConfigureFullScreenRect(shopObject, undoName);
@@ -202,14 +226,21 @@ public static class MenuPageSceneBuilder
 
         SetObjectReference(titlePage, "mainPage", mainObject);
         SetObjectReference(titlePage, "settingPage", settingObject);
-        SetObjectReference(mainPage, "dungeonPage", dungeonObject);
+        SetObjectReference(mainPage, "stageSelectPage", stageSelectObject);
         SetObjectReference(mainPage, "codexPage", codexObject);
         SetObjectReference(mainPage, "rosterPage", rosterObject);
         SetObjectReference(mainPage, "shopPage", shopObject);
         SetObjectReference(mainPage, "questPage", questObject);
         SetObjectReference(mainPage, "storagePage", storageObject);
         SetObjectReference(mainPage, "settingPage", settingObject);
+        SetObjectReference(stageSelectPage, "mainPage", mainObject);
+        SetObjectReference(stageSelectPage, "dungeonPage", dungeonObject);
         SetObjectReference(dungeonPage, "mainPage", mainObject);
+        SetObjectReference(
+            dungeonPage,
+            "stageSelectPage",
+            stageSelectObject);
+        SetObjectReference(dungeonPage, "fieldView", dungeonFieldView);
         SetObjectReference(
             codexPage,
             "enemyCodexPage",
@@ -259,20 +290,34 @@ public static class MenuPageSceneBuilder
             EMainSubPageType.Storage,
             mainObject);
 
-        titlePage.RebuildEditorPreview();
-        mainPage.RebuildEditorPreview();
-        codexPage.RebuildEditorPreview();
-        rosterPage.RebuildEditorPreview();
-        shopPage.RebuildEditorPreview();
-        questPage.RebuildEditorPreview();
-        storagePage.RebuildEditorPreview();
-        enemyCodexPage.RebuildEditorPreview();
-        characterCodexPage.RebuildEditorPreview();
-        skillCodexPage.RebuildEditorPreview();
-        itemCodexPage.RebuildEditorPreview();
+        if (forceRebuild || !titleUiExists)
+            titlePage.RebuildEditorPreview();
+        if (forceRebuild || !mainUiExists)
+            mainPage.RebuildEditorPreview();
+        if (forceRebuild || !stageSelectUiExists)
+            stageSelectPage.RebuildEditorPreview();
+        if (forceRebuild || !HasGeneratedUi(codexObject))
+            codexPage.RebuildEditorPreview();
+        if (forceRebuild || !HasGeneratedUi(rosterObject))
+            rosterPage.RebuildEditorPreview();
+        if (forceRebuild || !HasGeneratedUi(shopObject))
+            shopPage.RebuildEditorPreview();
+        if (forceRebuild || !HasGeneratedUi(questObject))
+            questPage.RebuildEditorPreview();
+        if (forceRebuild || !HasGeneratedUi(storageObject))
+            storagePage.RebuildEditorPreview();
+        if (forceRebuild || !HasGeneratedUi(enemyCodexObject))
+            enemyCodexPage.RebuildEditorPreview();
+        if (forceRebuild || !HasGeneratedUi(characterCodexObject))
+            characterCodexPage.RebuildEditorPreview();
+        if (forceRebuild || !HasGeneratedUi(skillCodexObject))
+            skillCodexPage.RebuildEditorPreview();
+        if (forceRebuild || !HasGeneratedUi(itemCodexObject))
+            itemCodexPage.RebuildEditorPreview();
 
         SetActive(titleObject, true, undoName);
         SetActive(mainObject, false, undoName);
+        SetActive(stageSelectObject, false, undoName);
         SetActive(dungeonObject, false, undoName);
         SetActive(settingObject, false, undoName);
         SetActive(codexObject, false, undoName);
@@ -410,6 +455,20 @@ public static class MenuPageSceneBuilder
             RuntimeMenuPageBase.RuntimeRootObjectName) != null;
     }
 
+    private static bool HasStageSelectUi(GameObject pageObject)
+    {
+        if (!HasGeneratedUi(pageObject))
+            return false;
+
+        Transform buttonRoot = pageObject.transform.Find(
+            RuntimeMenuPageBase.RuntimeRootObjectName +
+            "/grpMenuPanel/grpMenuButtons");
+        return buttonRoot != null &&
+               buttonRoot.Find("btnSTAGE0TESTFIELD") != null &&
+               buttonRoot.Find("btnFREEBATTLE") != null &&
+               buttonRoot.Find("btnBACK") != null;
+    }
+
     private static bool HasObjectReference(
         Object target,
         string propertyName)
@@ -446,7 +505,7 @@ public static class MenuPageSceneBuilder
     private static void SetObjectReference(
         Object target,
         string propertyName,
-        GameObject value)
+        Object value)
     {
         SerializedObject serializedObject = new(target);
         SerializedProperty property =

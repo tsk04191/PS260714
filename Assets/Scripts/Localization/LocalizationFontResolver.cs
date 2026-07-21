@@ -5,7 +5,7 @@ using UnityEngine;
 namespace PS260714.Localization
 {
     /// <summary>
-    /// Install once for the client. It applies the DataManager-owned default
+    /// Install once for the client. It applies the localization catalog font
     /// to every loaded TMP text, including inactive and runtime-created views.
     /// </summary>
     [DefaultExecutionOrder(-10000)]
@@ -95,17 +95,10 @@ namespace PS260714.Localization
 
         public TMP_FontAsset Resolve(string fontRole = null)
         {
-            TMP_FontAsset clientDefault = ResolveClientDefaultFont();
-            if (clientDefault != null)
-            {
-                return PrepareResolvedFont(clientDefault);
-            }
-
             if (fontCatalog != null)
             {
-                TMP_FontAsset resolved = fontCatalog.Resolve(
-                    LocalizationService.CurrentLocale,
-                    fontRole);
+                TMP_FontAsset resolved =
+                    fontCatalog.ResolveGlobalDefault();
                 return PrepareResolvedFont(resolved);
             }
 
@@ -157,7 +150,8 @@ namespace PS260714.Localization
         private void BindNewRuntimeText()
         {
             TMP_Text[] texts = FindClientTexts();
-            bool enforceClientDefault = ResolveClientDefaultFont() != null;
+            bool enforceCatalogFont = fontCatalog != null &&
+                                      fontCatalog.GlobalDefaultFont != null;
             for (int index = 0; index < texts.Length; index++)
             {
                 TMP_Text text = texts[index];
@@ -167,10 +161,10 @@ namespace PS260714.Localization
                 }
 
                 bool isNewText = boundTextIds.Add(text.GetInstanceID());
-                if (enforceClientDefault)
+                if (enforceCatalogFont)
                 {
                     // Some pages copy a template font after their first
-                    // initialization. Reapply the DataManager-owned font so
+                    // initialization. Reapply the catalog-owned font so
                     // those late writes cannot split the client typography.
                     Apply(text);
                     continue;
@@ -224,17 +218,13 @@ namespace PS260714.Localization
             LocalizationService.Initialize();
             LocalizationFontCatalog catalog =
                 LocalizationService.FontCatalog;
-            TMP_FontAsset clientDefault = ResolveClientDefaultFontStatic(
-                catalog);
-            TMP_FontAsset font = clientDefault != null
-                ? clientDefault
-                : catalog != null
-                    ? catalog.Resolve(
-                        LocalizationService.CurrentLocale,
-                        fontRole)
-                    : TMP_Settings.defaultFontAsset;
+            TMP_FontAsset font = catalog != null
+                ? catalog.ResolveGlobalDefault()
+                : TMP_Settings.defaultFontAsset;
+            font = EnableDynamicAtlasGrowth(font);
             if (catalog != null)
                 font = catalog.PrepareFallbacks(font);
+            font = EnableDynamicAtlasGrowth(font);
             if (LocalizationSystemFontFallback.NeedsKoreanFallback(
                     LocalizationService.CurrentLocale,
                     font))
@@ -242,6 +232,7 @@ namespace PS260714.Localization
                 font = LocalizationSystemFontFallback.Resolve(
                            LocalizationService.CurrentLocale) ??
                        font;
+                font = EnableDynamicAtlasGrowth(font);
             }
 
             if (font != null)
@@ -282,30 +273,14 @@ namespace PS260714.Localization
                 FindObjectsSortMode.None);
         }
 
-        private TMP_FontAsset ResolveClientDefaultFont()
-        {
-            return ResolveClientDefaultFontStatic(fontCatalog);
-        }
-
-        private static TMP_FontAsset ResolveClientDefaultFontStatic(
-            LocalizationFontCatalog catalog)
-        {
-            DataManager dataManager = DataManager.Current;
-            if (dataManager == null && GameManager.Instance != null)
-                dataManager = GameManager.Instance.Data;
-
-            return dataManager != null &&
-                   dataManager.ClientDefaultFont != null
-                ? dataManager.ClientDefaultFont
-                : catalog != null
-                    ? catalog.GlobalDefaultFont
-                    : null;
-        }
-
         private TMP_FontAsset PrepareResolvedFont(TMP_FontAsset font)
         {
+            font = EnableDynamicAtlasGrowth(font);
+
             if (fontCatalog != null)
                 font = fontCatalog.PrepareFallbacks(font);
+
+            font = EnableDynamicAtlasGrowth(font);
 
             if (LocalizationSystemFontFallback.NeedsKoreanFallback(
                     LocalizationService.CurrentLocale,
@@ -315,7 +290,23 @@ namespace PS260714.Localization
                     LocalizationSystemFontFallback.Resolve(
                         LocalizationService.CurrentLocale);
                 if (systemFont != null)
-                    return systemFont;
+                    return EnableDynamicAtlasGrowth(systemFont);
+            }
+
+            return font;
+        }
+
+        private static TMP_FontAsset EnableDynamicAtlasGrowth(
+            TMP_FontAsset font)
+        {
+            if (font != null &&
+                font.atlasPopulationMode != AtlasPopulationMode.Static)
+            {
+                // The localization source contains more Hangul glyphs than a
+                // single 1024 atlas can hold. Project font assets are not
+                // tracked in the scripts-only repository, so guarantee this
+                // at runtime instead of relying on an Inspector-only setting.
+                font.isMultiAtlasTexturesEnabled = true;
             }
 
             return font;

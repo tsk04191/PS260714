@@ -118,6 +118,7 @@ public class DungeonPage : MonoBehaviour, IPage
 
     [Header("Page Navigation")]
     [SerializeField] private GameObject mainPage;
+    [SerializeField] private GameObject stageSelectPage;
 
     [Header("Player Party")]
     [SerializeField] private CharacterRuntime[] playerCharacters =
@@ -150,14 +151,15 @@ public class DungeonPage : MonoBehaviour, IPage
     private bool _initialized;
     private bool _flowEventsBound;
     private bool _battleEventsBound;
-    private bool _runActive;
     private bool _eventRewardPending;
     private bool _startingCharacterSelectionPending;
-    private int _totalBattleCount;
-    private int _currentBattleNumber;
-    private EDungeonRunResult _runResult;
     private BattleManager _battleManager;
     private DungeonEventTab _eventTab;
+    private DungeonTutorialController _tutorialController;
+    [SerializeField] private DungeonFieldView fieldView;
+    private DungeonDefinition _pendingDefinition;
+    private readonly DungeonRunSession _session = new();
+    private DungeonRuntimeContext _runtimeContext;
     private CharacterSO _startingTurret;
     private readonly List<CharacterRuntime> _ownedTurrets = new();
     private readonly List<CharacterSO> _availableTurrets = new();
@@ -185,11 +187,13 @@ public class DungeonPage : MonoBehaviour, IPage
     public int RemainingEnemySpawnCount => _battleManager != null
         ? _battleManager.RemainingEnemySpawnCount
         : maximumEnemiesPerRound;
-    public int TotalBattleCount => _totalBattleCount;
-    public int CurrentBattleNumber => _currentBattleNumber;
+    public int TotalBattleCount => _session.TotalBattleCount;
+    public int CurrentBattleNumber => _session.CurrentBattleNumber;
     public int CurrentDifficultyScale => GetBattleDifficultyScale(
-        _currentBattleNumber);
-    public EDungeonRunResult RunResult => _runResult;
+        _session.CurrentBattleNumber);
+    public EDungeonRunResult RunResult => _session.Result;
+    public DungeonRunSession RunSession => _session;
+    public DungeonDefinition CurrentDungeon => _session.Definition;
     public IReadOnlyList<CharacterRuntime> OwnedTurrets => _ownedTurrets;
     public IReadOnlyList<CharacterSO> AvailableTurrets => _availableTurrets;
     public IReadOnlyList<CharacterSO> StartingCharacterChoices =>
@@ -200,7 +204,9 @@ public class DungeonPage : MonoBehaviour, IPage
     public float EnergyRechargeDuration => _energyRechargeDuration;
     public bool IsStartingCharacterSelectionPending =>
         _startingCharacterSelectionPending;
-    public bool IsTutorialBattle => _runActive && _currentBattleNumber == 1;
+    public bool IsTutorialBattle =>
+        _session.IsActive && _session.Definition != null &&
+        _session.Definition.HasTutorial;
 
     public IReadOnlyList<EnemySO> GetCodexEnemyDefinitions()
     {
@@ -243,8 +249,11 @@ public class DungeonPage : MonoBehaviour, IPage
     private void Start()
     {
         RefreshBoardSize();
-        if (_initialized && !_runActive && _runResult == EDungeonRunResult.None)
+        if (_initialized && !_session.IsActive &&
+            _session.Result == EDungeonRunResult.None)
+        {
             StartNewDungeonRun();
+        }
     }
 
     private void OnRectTransformDimensionsChange()
@@ -253,9 +262,28 @@ public class DungeonPage : MonoBehaviour, IPage
             RefreshBoardSize();
     }
 
+    private void Update()
+    {
+        if (!_session.IsActive || _session.Definition == null ||
+            _session.Definition.Modifiers.Count == 0 ||
+            _battleManager == null ||
+            _battleManager.State != EBattleState.Running)
+        {
+            return;
+        }
+
+        float deltaTime = Time.deltaTime;
+        ForEachModifier(modifier =>
+            modifier.OnRunTick(GetRuntimeContext(), deltaTime));
+    }
+
     private void OnDisable()
     {
-        _battleManager?.SuspendBattle();
+        if (!_session.IsActive)
+            return;
+
+        _session.Pause.Add(EDungeonPauseReason.PageHidden);
+        ApplyBattlePauseState();
     }
 
     private void OnDestroy()
@@ -328,29 +356,53 @@ public class DungeonPage : MonoBehaviour, IPage
 
         if (mode == PageOpenMode.Fresh)
         {
-            StartNewDungeonRun();
+            DungeonDefinition definition = _pendingDefinition ??
+                DungeonDefinitionCatalog.Get(
+                    DungeonDefinitionCatalog.FreeBattleId);
+            _pendingDefinition = null;
+            StartNewRun(definition);
         }
-        else if (_runResult != EDungeonRunResult.None)
+        else if (_session.Result != EDungeonRunResult.None)
         {
-            flowController?.ShowEventTab();
-            _eventTab?.ShowRunResult(_runResult);
+            if (_session.Definition != null &&
+                _session.Definition.HasTutorial &&
+                _session.Result == EDungeonRunResult.Clear)
+            {
+                flowController?.RefreshCurrentPhaseView();
+                _tutorialController?.ShowCompletion();
+            }
+            else
+            {
+                flowController?.ShowEventTab();
+                _eventTab?.ShowRunResult(_session.Result);
+            }
         }
         else if (_startingCharacterSelectionPending)
         {
             flowController?.ShowEventTab();
             _eventTab?.ShowStartingCharacterSelection(
                 _startingCharacterChoices);
+            if (_session.Definition != null &&
+                _session.Definition.HasTutorial)
+            {
+                _tutorialController?.BeginStartingChoice(
+                    _session.Definition.Tutorial,
+                    _eventTab?.FirstStartingChoiceRect);
+            }
         }
         else
         {
-            flowController?.RefreshCurrentPhase();
+            flowController?.RefreshCurrentPhaseView();
             if (CurrentPhase == EDungeonPhase.Battle &&
-                TryResolveBattleManager() && !_battleManager.ResumeBattle() &&
-                !_battleManager.HasSession && _runActive)
+                TryResolveBattleManager())
             {
-                StartNewBattle();
+                if (!_battleManager.HasSession && _session.IsActive)
+                    StartNewBattle();
             }
         }
+
+        _session.Pause.Remove(EDungeonPauseReason.PageHidden);
+        ApplyBattlePauseState();
 
         battleTab?.Refresh();
         RefreshBoardSize();
@@ -358,7 +410,16 @@ public class DungeonPage : MonoBehaviour, IPage
 
     public void Close()
     {
-        _battleManager?.SuspendBattle();
+        if (_session.IsActive)
+        {
+            if (_battleManager != null && _battleManager.HasSession)
+            {
+                _session.SetPreferredGameSpeed(
+                    _battleManager.GameSpeed);
+            }
+            _session.Pause.Add(EDungeonPauseReason.PageHidden);
+            ApplyBattlePauseState();
+        }
         gameObject.SetActive(false);
     }
 
@@ -393,6 +454,8 @@ public class DungeonPage : MonoBehaviour, IPage
         }
 
         InitializeEventTab();
+        EnsureFieldView();
+        EnsureTutorialController();
 
         _initialized = true;
         battleTab?.Refresh();
@@ -412,8 +475,88 @@ public class DungeonPage : MonoBehaviour, IPage
 
     public void StartNewDungeonRun()
     {
+        DungeonDefinition definition =
+            _session.Definition != null &&
+            !_session.Definition.HasTutorial
+                ? _session.Definition
+                : DungeonDefinitionCatalog.Get(
+                    DungeonDefinitionCatalog.FreeBattleId);
+        StartNewRun(definition);
+    }
+
+    public void PrepareDungeon(DungeonDefinition definition)
+    {
+        _pendingDefinition = definition ?? DungeonDefinitionCatalog.Get(
+            DungeonDefinitionCatalog.FreeBattleId);
+    }
+
+    public void PrepareTutorialStage()
+    {
+        PrepareDungeon(DungeonDefinitionCatalog.Get(
+            DungeonDefinitionCatalog.TestFieldId));
+    }
+
+    public void PrepareFreeBattle()
+    {
+        PrepareDungeon(DungeonDefinitionCatalog.Get(
+            DungeonDefinitionCatalog.FreeBattleId));
+    }
+
+    public bool BeginTutorialBattle()
+    {
+        if (_session.Definition == null ||
+            !_session.Definition.HasTutorial || !_session.IsActive ||
+            !TryResolveBattleManager() || !_battleManager.HasSession)
+        {
+            return false;
+        }
+
+        _session.SetTutorialStep(-1);
+        _session.SetActivity(EDungeonRunActivity.Battle);
+        _session.Pause.Remove(EDungeonPauseReason.TutorialGuide);
+        ApplyBattlePauseState();
+        battleTab?.Refresh();
+        return _battleManager.State == EBattleState.Running;
+    }
+
+    public void UpdateTutorialProgress(int stepIndex)
+    {
+        if (_session.Definition != null &&
+            _session.Definition.HasTutorial)
+        {
+            _session.SetTutorialStep(stepIndex);
+        }
+    }
+
+    public void CompleteTutorialStage()
+    {
+        if (_session.Definition == null ||
+            !_session.Definition.HasTutorial)
+        {
+            return;
+        }
+
+        _tutorialController?.StopTutorial();
+        _eventRewardPending = false;
+        _startingCharacterSelectionPending = false;
+        EDungeonCompletionDestination destination =
+            _session.Definition.CompletionDestination;
+
+        if (_battleManager != null && _battleManager.HasSession)
+            _battleManager.EndBattle(board);
+        board?.ClearAllStacks();
+        ClearPlayerParty();
+        ResetRunResourcesAndItems(includeStartingConsumable: false);
+        _session.Reset();
+        _pendingDefinition = null;
+
+        NavigateToCompletionDestination(destination);
+    }
+
+    private void StartNewRun(DungeonDefinition definition)
+    {
         if (!_initialized || flowController == null ||
-            !TryResolveBattleManager())
+            !TryResolveBattleManager() || definition == null)
         {
             return;
         }
@@ -422,24 +565,34 @@ public class DungeonPage : MonoBehaviour, IPage
             _battleManager.EndBattle(board);
 
         ClearPlayerParty();
-        ResetRunResourcesAndItems(includeStartingConsumable: true);
+        ResetRunResourcesAndItems(definition.IncludeStartingConsumable);
         board.ClearAllStacks();
-        _totalBattleCount = UnityEngine.Random.Range(
-            MinimumBattleCount,
-            MaximumBattleCount + 1);
-        GenerateBattlePlans(_totalBattleCount);
-        _currentBattleNumber = 1;
+        _tutorialController?.StopTutorial();
+        int runSeed = Environment.TickCount ^
+                      UnityEngine.Random.Range(0, int.MaxValue);
+        int battleCount = definition.ResolveBattleCount(runSeed);
+        IReadOnlyList<EDungeonPhase> phases =
+            definition.BuildPhaseSequence(battleCount, runSeed);
+        _session.Begin(definition, runSeed, battleCount, phases);
+        fieldView?.ApplyTheme(definition.Theme);
+        GenerateBattlePlans(battleCount, runSeed);
         _eventRewardPending = false;
         _startingCharacterSelectionPending = false;
-        _runResult = EDungeonRunResult.None;
-        _runActive = true;
+        NotifyRunStarted();
 
         if (!PrepareStartingCharacterSelection())
         {
-            _runActive = false;
+            _session.Finish(EDungeonRunResult.Defeat);
             flowController.ShowEventTab();
             _eventTab?.ShowStartingCharacterConfigurationError(
                 _availableTurrets.Count);
+            return;
+        }
+
+        if (!definition.SelectStartingCharacter &&
+            _startingCharacterChoices.Count > 0)
+        {
+            TrySelectStartingCharacter(_startingCharacterChoices[0]);
         }
     }
 
@@ -468,6 +621,38 @@ public class DungeonPage : MonoBehaviour, IPage
             PageOpenMode.Resume);
     }
 
+    public void ReturnFromRunResult()
+    {
+        EDungeonCompletionDestination destination =
+            _session.Definition != null
+                ? _session.Definition.CompletionDestination
+                : EDungeonCompletionDestination.Main;
+        NavigateToCompletionDestination(destination);
+    }
+
+    public void ToggleBattlePause()
+    {
+        if (!_session.IsActive || _battleManager == null ||
+            !_battleManager.HasSession ||
+            _session.Activity != EDungeonRunActivity.Battle)
+        {
+            return;
+        }
+
+        if (_session.Pause.IsUserPaused)
+            _session.Pause.Remove(EDungeonPauseReason.UserPause);
+        else
+            _session.Pause.Add(EDungeonPauseReason.UserPause);
+        ApplyBattlePauseState();
+        battleTab?.Refresh();
+    }
+
+    public void RecordBattleSpeed(float speed)
+    {
+        if (_session.IsActive)
+            _session.SetPreferredGameSpeed(speed);
+    }
+
     public bool TrySelectStartingCharacter(CharacterSO definition)
     {
         if (!_startingCharacterSelectionPending || definition == null ||
@@ -488,11 +673,23 @@ public class DungeonPage : MonoBehaviour, IPage
         _ownedTurrets.Add(startingSlot);
         _startingCharacterSelectionPending = false;
 
-        if (flowController.StartBattleEventRun(_totalBattleCount))
+        if (flowController.StartRun(_session.PhaseSequence))
+        {
+            if (_session.Definition != null &&
+                _session.Definition.HasTutorial)
+            {
+                _session.SetActivity(EDungeonRunActivity.TutorialGuide);
+                _session.Pause.Add(EDungeonPauseReason.TutorialGuide);
+                ApplyBattlePauseState();
+                battleTab?.Refresh();
+                _tutorialController?.BeginBattleWalkthrough();
+            }
+
             return true;
+        }
 
         ClearPlayerParty();
-        _runActive = false;
+        _session.Finish(EDungeonRunResult.Defeat);
         Debug.LogError("Failed to start the dungeon run flow.", this);
         return false;
     }
@@ -768,7 +965,7 @@ public class DungeonPage : MonoBehaviour, IPage
         }
 
         int battleIndex = Mathf.Clamp(
-            _currentBattleNumber - 1,
+            _session.CurrentBattleNumber - 1,
             0,
             Mathf.Max(0, _battlePlans.Length - 1));
         if (_battlePlans.Length == 0)
@@ -780,9 +977,26 @@ public class DungeonPage : MonoBehaviour, IPage
         DungeonBattlePlan plan = _battlePlans[battleIndex];
         BattleSetup setup;
         string error;
-        bool setupCreated = _currentBattleNumber == 1
-            ? TryCreateTutorialBattleSetup(plan, out setup, out error)
-            : TryCreateScaledBattleSetup(plan, out setup, out error);
+        bool setupCreated;
+        if (_session.Definition != null &&
+            _session.Definition.TryGetFixedBattle(
+                battleIndex,
+                out BattleSO fixedBattle))
+        {
+            setupCreated = fixedBattle.TryCreateSetup(
+                plan.RandomSeed,
+                out setup,
+                out error);
+        }
+        else
+        {
+            bool useIntroBalance = _session.Definition != null &&
+                                   _session.Definition.UseIntroBattleBalance &&
+                                   _session.CurrentBattleNumber == 1;
+            setupCreated = useIntroBalance
+                ? TryCreateTutorialBattleSetup(plan, out setup, out error)
+                : TryCreateScaledBattleSetup(plan, out setup, out error);
+        }
         if (!setupCreated)
         {
             Debug.LogError($"Failed to create dungeon battle: {error}", this);
@@ -793,21 +1007,22 @@ public class DungeonPage : MonoBehaviour, IPage
         _battleManager.ConfigureActiveSkillResource(
             _maximumEnergy,
             _energyRechargeDuration);
-        return _battleManager.StartBattle(
+        bool started = _battleManager.StartBattle(
             board,
             characters,
             setup.Enemies,
             setup.SpawnInterval,
             setup.TimeLimit,
             setup.InitialEnemyCount);
+        if (started)
+            NotifyBattleStarted();
+        return started;
     }
 
-    private void GenerateBattlePlans(int battleCount)
+    private void GenerateBattlePlans(int battleCount, int runSeed)
     {
         battleCount = Mathf.Max(1, battleCount);
         _battlePlans = new DungeonBattlePlan[battleCount];
-        int runSeed = Environment.TickCount ^
-                      UnityEngine.Random.Range(0, int.MaxValue);
         System.Random random = new(runSeed);
         int previousScale = -1;
         for (int index = 0; index < battleCount; index++)
@@ -1154,6 +1369,13 @@ public class DungeonPage : MonoBehaviour, IPage
 
     private IReadOnlyList<EnemySO> GetBattleEnemyPool()
     {
+        IReadOnlyList<EnemySO> overridePool =
+            _session.Definition != null
+                ? _session.Definition.EnemyPoolOverride
+                : null;
+        if (overridePool != null && overridePool.Count > 0)
+            return overridePool;
+
         if (firstBattle != null)
         {
             IReadOnlyList<EnemySO> configuredDefinitions =
@@ -1365,18 +1587,24 @@ public class DungeonPage : MonoBehaviour, IPage
 
         if (phase == EDungeonPhase.Battle)
         {
-            _currentBattleNumber = flowController.CurrentBattleNumber;
+            _session.SetBattleNumber(flowController.CurrentBattleNumber);
+            _session.SetActivity(EDungeonRunActivity.Battle);
+            _session.Pause.Remove(EDungeonPauseReason.NonBattlePhase);
             _eventRewardPending = false;
             if (_battleManager.State == EBattleState.Completed)
                 StartNewBattle();
             else if (!_battleManager.HasSession)
                 StartNewBattle();
-            else
-                _battleManager.ResumeBattle();
         }
         else
         {
-            _battleManager.SuspendBattle();
+            _session.SetActivity(phase switch
+            {
+                EDungeonPhase.Rest => EDungeonRunActivity.Rest,
+                EDungeonPhase.Shop => EDungeonRunActivity.Shop,
+                _ => EDungeonRunActivity.Event,
+            });
+            _session.Pause.Add(EDungeonPauseReason.NonBattlePhase);
             if (phase == EDungeonPhase.Event)
             {
                 _eventRewardPending = true;
@@ -1384,6 +1612,8 @@ public class DungeonPage : MonoBehaviour, IPage
             }
         }
 
+        NotifyPhaseEntered(phase);
+        ApplyBattlePauseState();
         battleTab?.Refresh();
     }
 
@@ -1410,6 +1640,18 @@ public class DungeonPage : MonoBehaviour, IPage
     private void HandleBattleCompleted()
     {
         battleTab?.Refresh();
+        if (_session.Definition != null &&
+            _session.Definition.HasTutorial)
+        {
+            _eventRewardPending = false;
+            _startingCharacterSelectionPending = false;
+            _session.Finish(EDungeonRunResult.Clear);
+            NotifyRunEnded(EDungeonRunResult.Clear);
+            ApplyBattlePauseState();
+            _tutorialController?.ShowCompletion();
+            return;
+        }
+
         if (CurrentPhase == EDungeonPhase.Battle && flowController != null &&
             !flowController.IsCompleted)
         {
@@ -1419,34 +1661,38 @@ public class DungeonPage : MonoBehaviour, IPage
 
     private void HandleBattleEnded(EBattleResult result)
     {
-        if (!_runActive || result == EBattleResult.Victory)
+        if (!_session.IsActive)
             return;
 
-        _runActive = false;
+        NotifyBattleEnded(result);
+        if (result == EBattleResult.Victory)
+            return;
+
         _eventRewardPending = false;
         _startingCharacterSelectionPending = false;
-        _runResult = EDungeonRunResult.Defeat;
+        _session.Finish(EDungeonRunResult.Defeat);
         _battleManager?.EndBattle(board);
         board?.ClearAllStacks();
         ClearPlayerParty();
         ResetRunResourcesAndItems(includeStartingConsumable: false);
         flowController?.ShowEventTab();
-        _eventTab?.ShowRunResult(_runResult);
-        RunEnded?.Invoke(_runResult);
+        _eventTab?.ShowRunResult(_session.Result);
+        NotifyRunEnded(_session.Result);
+        RunEnded?.Invoke(_session.Result);
     }
 
     private void HandleDungeonFlowCompleted()
     {
-        if (!_runActive)
+        if (!_session.IsActive)
             return;
 
-        _runActive = false;
         _eventRewardPending = false;
         _startingCharacterSelectionPending = false;
-        _runResult = EDungeonRunResult.Clear;
+        _session.Finish(EDungeonRunResult.Clear);
         flowController?.ShowEventTab();
-        _eventTab?.ShowRunResult(_runResult);
-        RunEnded?.Invoke(_runResult);
+        _eventTab?.ShowRunResult(_session.Result);
+        NotifyRunEnded(_session.Result);
+        RunEnded?.Invoke(_session.Result);
     }
 
     private void CompleteEventReward()
@@ -1460,7 +1706,8 @@ public class DungeonPage : MonoBehaviour, IPage
 
     private bool CanUseBattleItem(BattleItemDefinition definition)
     {
-        return _runActive &&
+        return _session.IsActive &&
+               _session.Activity == EDungeonRunActivity.Battle &&
                (definition.IsReusable || GetBattleItemCount(definition.Type) > 0) &&
                _battleManager != null &&
                _battleManager.CanSpend(definition.EnergyCost);
@@ -1540,6 +1787,13 @@ public class DungeonPage : MonoBehaviour, IPage
         flowController.ShowEventTab();
         _eventTab?.ShowStartingCharacterSelection(
             _startingCharacterChoices);
+        if (_session.Definition != null &&
+            _session.Definition.HasTutorial)
+        {
+            _tutorialController?.BeginStartingChoice(
+                _session.Definition.Tutorial,
+                _eventTab?.FirstStartingChoiceRect);
+        }
         return true;
     }
 
@@ -1607,6 +1861,184 @@ public class DungeonPage : MonoBehaviour, IPage
 
         _eventTab ??= new DungeonEventTab();
         _eventTab.Initialize(eventTabObject, this);
+    }
+
+    private void EnsureTutorialController()
+    {
+        if (_tutorialController == null)
+            _tutorialController = GetComponent<DungeonTutorialController>();
+        if (_tutorialController == null)
+            _tutorialController = gameObject.AddComponent<DungeonTutorialController>();
+
+        _tutorialController.Initialize(this, fieldView);
+    }
+
+    private void EnsureFieldView()
+    {
+        if (fieldView == null)
+            fieldView = GetComponent<DungeonFieldView>();
+        if (fieldView == null)
+            fieldView = gameObject.AddComponent<DungeonFieldView>();
+
+        fieldView.BindSceneStructure(
+            board,
+            flowController,
+            battleTab,
+            playerCharacters);
+    }
+
+    private void ApplyBattlePauseState()
+    {
+        if (_battleManager == null || !_battleManager.HasSession ||
+            _battleManager.State == EBattleState.Completed)
+        {
+            return;
+        }
+
+        if (_session.Pause.HasBlockingReason)
+        {
+            _battleManager.SuspendBattle();
+            return;
+        }
+
+        if (_session.Pause.IsUserPaused)
+        {
+            if (_battleManager.State == EBattleState.Suspended)
+                _battleManager.ResumeBattle();
+            RestorePreferredGameSpeed();
+            if (_battleManager.State == EBattleState.Running)
+                _battleManager.TogglePause();
+            return;
+        }
+
+        if (_battleManager.State == EBattleState.Suspended ||
+            _battleManager.State == EBattleState.Paused)
+        {
+            _battleManager.ResumeBattle();
+        }
+        RestorePreferredGameSpeed();
+    }
+
+    private void RestorePreferredGameSpeed()
+    {
+        if (_battleManager == null ||
+            _battleManager.State != EBattleState.Running)
+        {
+            return;
+        }
+
+        int guard = 0;
+        while (!Mathf.Approximately(
+                   _battleManager.GameSpeed,
+                   _session.PreferredGameSpeed) && guard < 3)
+        {
+            _battleManager.CycleGameSpeed();
+            guard++;
+        }
+    }
+
+    private void NavigateToCompletionDestination(
+        EDungeonCompletionDestination destination)
+    {
+        GameObject targetPage = destination ==
+            EDungeonCompletionDestination.StageSelect
+                ? stageSelectPage
+                : mainPage;
+        string fallbackName = destination ==
+            EDungeonCompletionDestination.StageSelect
+                ? "pagStageSelect"
+                : "pagMain";
+        if (targetPage == null && transform.parent != null)
+        {
+            Transform targetTransform = transform.parent.Find(fallbackName);
+            targetPage = targetTransform != null
+                ? targetTransform.gameObject
+                : null;
+        }
+
+        if (targetPage == null)
+        {
+            Debug.LogError(
+                $"DungeonPage could not resolve completion destination " +
+                $"'{fallbackName}'.",
+                this);
+            return;
+        }
+
+        PageControl.PagToPag(
+            gameObject,
+            targetPage,
+            PageOpenMode.Resume);
+    }
+
+    private void NotifyRunStarted()
+    {
+        ForEachModifier(modifier =>
+            modifier.OnRunStarted(GetRuntimeContext()));
+    }
+
+    private void NotifyPhaseEntered(EDungeonPhase phase)
+    {
+        ForEachModifier(modifier =>
+            modifier.OnPhaseEntered(GetRuntimeContext(), phase));
+    }
+
+    private void NotifyBattleStarted()
+    {
+        ForEachModifier(modifier =>
+            modifier.OnBattleStarted(GetRuntimeContext()));
+    }
+
+    private void NotifyBattleEnded(EBattleResult result)
+    {
+        ForEachModifier(modifier =>
+            modifier.OnBattleEnded(GetRuntimeContext(), result));
+    }
+
+    private void NotifyRunEnded(EDungeonRunResult result)
+    {
+        ForEachModifier(modifier =>
+            modifier.OnRunEnded(GetRuntimeContext(), result));
+    }
+
+    private DungeonRuntimeContext GetRuntimeContext()
+    {
+        if (_runtimeContext == null ||
+            !ReferenceEquals(_runtimeContext.BattleManager, _battleManager) ||
+            !ReferenceEquals(_runtimeContext.FieldView, fieldView))
+        {
+            _runtimeContext = new DungeonRuntimeContext(
+                _session,
+                this,
+                fieldView,
+                _battleManager);
+        }
+
+        return _runtimeContext;
+    }
+
+    private void ForEachModifier(Action<DungeonModifier> callback)
+    {
+        if (callback == null || _session.Definition == null)
+            return;
+
+        IReadOnlyList<DungeonModifier> modifiers =
+            _session.Definition.Modifiers;
+        for (int index = 0; index < modifiers.Count; index++)
+        {
+            DungeonModifier modifier = modifiers[index];
+            if (modifier == null)
+                continue;
+
+            try
+            {
+                callback(modifier);
+            }
+            catch (Exception exception)
+            {
+                Debug.LogException(exception, modifier);
+            }
+        }
     }
 
     private void EnsurePlayerCharacterSlots()
@@ -1804,6 +2236,7 @@ public sealed class DungeonEventTab
     private RectTransform _rewardCardRoot;
     private GridLayoutGroup _rewardCardLayout;
     private RectTransform _buttonRoot;
+    private RectTransform _firstStartingChoiceRect;
     private readonly List<RewardOption> _currentRewardOptions = new();
     private readonly List<CharacterSO> _startingChoices = new();
     private EViewMode _viewMode;
@@ -1812,6 +2245,9 @@ public sealed class DungeonEventTab
     private CharacterSO _replacementDefinition;
     private bool _initialized;
     private bool _localizationEventsBound;
+
+    public RectTransform FirstStartingChoiceRect =>
+        _firstStartingChoiceRect;
 
     public void Initialize(GameObject root, DungeonPage page)
     {
@@ -1851,6 +2287,7 @@ public sealed class DungeonEventTab
         _rewardCardRoot = null;
         _rewardCardLayout = null;
         _buttonRoot = null;
+        _firstStartingChoiceRect = null;
         _panel = null;
         _root = null;
         _page = null;
@@ -1904,9 +2341,11 @@ public sealed class DungeonEventTab
             if (selectedDefinition == null)
                 continue;
 
-            CreateRewardCard(
+            RectTransform cardRect = CreateRewardCard(
                 GetStartingTurretCardContent(selectedDefinition),
                 () => _page.TrySelectStartingCharacter(selectedDefinition));
+            if (_firstStartingChoiceRect == null)
+                _firstStartingChoiceRect = cardRect;
         }
     }
 
@@ -1974,8 +2413,12 @@ public sealed class DungeonEventTab
         {
             CreateButton(
                 LocalizationService.Get(
-                    LocalizationKeys.UiDungeonResultReturnMain),
-                _page.ReturnToMain);
+                    _page.CurrentDungeon != null &&
+                    _page.CurrentDungeon.CompletionDestination ==
+                    EDungeonCompletionDestination.StageSelect
+                        ? LocalizationKeys.UiTutorialReturn
+                        : LocalizationKeys.UiDungeonResultReturnMain),
+                _page.ReturnFromRunResult);
         }
     }
 
@@ -2577,10 +3020,12 @@ public sealed class DungeonEventTab
         return text;
     }
 
-    private void CreateRewardCard(RewardCardContent content, Action action)
+    private RectTransform CreateRewardCard(
+        RewardCardContent content,
+        Action action)
     {
         if (_rewardCardRoot == null)
-            return;
+            return null;
 
         GameObject cardObject = new(
             "btnRewardCard",
@@ -2664,6 +3109,7 @@ public sealed class DungeonEventTab
             14f);
         footer.color = Color.Lerp(_textColor, content.AccentColor, 0.35f);
         footer.text = content.Footer;
+        return cardObject.transform as RectTransform;
     }
 
     private TextMeshProUGUI CreateRewardCardText(
@@ -2734,6 +3180,7 @@ public sealed class DungeonEventTab
 
     private void ClearButtons()
     {
+        _firstStartingChoiceRect = null;
         ClearChildren(_rewardCardRoot);
         ClearChildren(_buttonRoot);
     }

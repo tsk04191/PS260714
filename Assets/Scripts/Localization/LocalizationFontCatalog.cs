@@ -99,6 +99,19 @@ namespace PS260714.Localization
         public IReadOnlyList<LocalizationSelectableFontDefinition>
             SelectableFonts => selectableFonts;
 
+        public TMP_FontAsset ResolveGlobalDefault()
+        {
+            if (globalDefaultFont != null)
+            {
+                return globalDefaultFont;
+            }
+
+            TMP_FontAsset font = ResolveOsFont(
+                globalDefaultOsFontFamily,
+                globalDefaultOsFontStyle);
+            return font != null ? font : TMP_Settings.defaultFontAsset;
+        }
+
         public TMP_FontAsset Resolve(string locale, string role)
         {
             return Resolve(locale, role, null);

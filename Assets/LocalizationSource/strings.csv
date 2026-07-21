@@ -56,6 +56,20 @@ ui.title.title,타이틀 페이지 제목,title,,타이틀,TITLE
 ui.title.description,타이틀 페이지 설명,body,,PS260714,PS260714
 ui.main.title,메인 페이지 제목,title,,메인,MAIN
 ui.main.description,메인 페이지 설명,body,,이동할 메뉴를 선택하세요,CHOOSE A DESTINATION
+ui.stage_select.title,스테이지 선택 페이지 제목,title,,던전 스테이지,DUNGEON STAGE
+ui.stage_select.description,스테이지 선택 페이지 설명,body,,스테이지를 선택하세요.,SELECT A STAGE
+ui.stage_select.test_field,스테이지 선택 버튼,body,,0 스테이지 · 테스트 필드,STAGE 0 · TEST FIELD
+ui.stage_select.free_battle,스테이지 선택 버튼,body,,자유 전투,FREE BATTLE
+ui.tutorial.choice,튜토리얼 안내,body,,첫 번째 선택지를 눌러 전투에 배치할 캐릭터를 선택하세요.,PRESS THE FIRST CHOICE TO SELECT THE CHARACTER TO DEPLOY
+ui.tutorial.field,튜토리얼 안내,body,,필드는 적이 배치되고 캐릭터가 공격하는 전투 공간입니다.,THE FIELD IS WHERE ENEMIES ARE PLACED AND CHARACTERS ATTACK
+ui.tutorial.queue,튜토리얼 안내,body,,대기열에는 앞으로 필드에 등장할 적이 순서대로 표시됩니다.,THE QUEUE SHOWS THE ENEMIES THAT WILL ENTER THE FIELD IN ORDER
+ui.tutorial.character,튜토리얼 안내,body,,캐릭터는 자동으로 적을 공격하며 고유 능력과 스킬을 사용합니다.,CHARACTERS ATTACK AUTOMATICALLY AND USE THEIR UNIQUE ABILITIES AND SKILLS
+ui.tutorial.item,튜토리얼 안내,body,,아이템은 전투 중 적이나 캐릭터를 대상으로 사용하는 보조 수단입니다.,ITEMS PROVIDE SUPPORT BY TARGETING ENEMIES OR CHARACTERS DURING BATTLE
+ui.tutorial.timer,튜토리얼 안내,body,,타이머가 0이 되기 전에 모든 적을 처치해야 합니다.,DEFEAT EVERY ENEMY BEFORE THE TIMER REACHES ZERO
+ui.tutorial.complete,튜토리얼 완료,title,,튜토리얼 완료,TUTORIAL COMPLETE
+ui.tutorial.next,튜토리얼 버튼,body,,다음,NEXT
+ui.tutorial.return,튜토리얼 버튼,body,,스테이지 선택으로,RETURN TO STAGE SELECT
+ui.tutorial.start_battle,튜토리얼 버튼,body,,전투 시작,START BATTLE
 ui.codex.title,도감 허브 제목,title,,도감,CODEX
 ui.codex.description,도감 허브 설명,body,,적 | 캐릭터 | 기술 | 아이템 | 이벤트,ENEMIES | CHARACTERS | SKILLS | ITEMS | EVENTS
 ui.roster.title,목록 페이지 제목,title,,목록,ROSTER
@@ -108,7 +122,6 @@ ui.dungeon.energy_full,에너지 상태,number,,가득 참,FULL
 ui.dungeon.energy_recharge,에너지 상태,number,,"+1까지 {seconds:0.0}초","+1 IN {seconds:0.0}s"
 ui.dungeon.energy_status,에너지 HUD,number,,"에너지 {current}/{max} | {recharge}","ENERGY {current}/{max} | {recharge}"
 ui.dungeon.energy_scale,에너지 HUD,number,,"에너지 {current}/{max} | {recharge} | 난이도 {scale}","ENERGY {current}/{max} | {recharge} | SCALE {scale}"
-ui.dungeon.energy_tutorial,에너지 HUD,tooltip,,"에너지 {current}/{max} | {recharge} | 난이도 {scale}[br]튜토리얼: 터렛에 마우스를 올려 기술 정보 확인 | 터렛을 클릭해 기술 사용","ENERGY {current}/{max} | {recharge} | SCALE {scale}[br]TUTORIAL: HOVER A TURRET FOR SKILL INFO | CLICK A TURRET TO USE ITS SKILL"
 ui.dungeon.queue.board_full,적 대기열 상태,body,,"필드 가득 참 | {count}기 대기","BOARD FULL | {count} WAITING"
 ui.dungeon.queue.empty,적 대기열 상태,body,,대기열 비어 있음,QUEUE EMPTY
 ui.dungeon.queue.next,적 대기열 상태,number,,"다음 {seconds:0.0}초 | {count}기 대기","NEXT {seconds:0.0}s | {count} WAITING"
@@ -191,7 +204,7 @@ codex.enemy.ability.infiltrator,적 능력 설명,body,,은신[br]다른 유효�
 codex.enemy.empty_title,적 도감 빈 상태,title,,적 데이터 없음,NO ENEMY DATA
 codex.enemy.empty_body,적 도감 빈 상태,body,,사용 가능한 적 정의가 없습니다.,NO ENEMY DEFINITIONS ARE AVAILABLE.
 ui.dungeon.start.title,시작 터렛 선택 제목,title,,시작 터렛 선택,CHOOSE STARTING TURRET
-ui.dungeon.start.description,시작 터렛 선택 설명,body,,3개 중 하나를 선택하세요.[br]첫 전투는 30초 튜토리얼입니다.,SELECT 1 OF 3 TURRETS[br]THE FIRST BATTLE IS A 30 SECOND TUTORIAL
+ui.dungeon.start.description,시작 터렛 선택 설명,body,,3개 중 하나를 선택하세요.,SELECT 1 OF 3 TURRETS
 ui.dungeon.start.error_title,시작 터렛 설정 오류 제목,title,,시작 터렛 설정 오류,STARTING TURRET SETUP ERROR
 ui.dungeon.start.error_description,시작 터렛 설정 오류 설명,body,,서로 다른 터렛 3개가 필요합니다.[br]사용 가능한 정의: {count},3 DIFFERENT TURRETS ARE REQUIRED[br]AVAILABLE DEFINITIONS: {count}
 ui.dungeon.start.retry,시작 터렛 다시 시도 버튼,body,,다시 시도,RETRY

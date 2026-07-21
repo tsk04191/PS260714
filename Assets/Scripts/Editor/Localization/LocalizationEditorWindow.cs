@@ -28,6 +28,7 @@ namespace PS260714.Localization.Editor
         private LocalizationValidationResult validation;
         private Vector2 tableScroll;
         private Vector2 validationScroll;
+        private Vector2 catalogScroll;
         private int tab;
         private int selectedStringRow = 1;
         private int previewLocaleColumn = 4;
@@ -36,6 +37,8 @@ namespace PS260714.Localization.Editor
         private LocalizationMarkupCatalog markupCatalog;
         private UnityEditor.Editor fontCatalogEditor;
         private UnityEditor.Editor markupCatalogEditor;
+        private bool showFontCatalog = true;
+        private bool showMarkupCatalog = true;
 
         [MenuItem("Tools/PS260714/Localization Editor")]
         public static void Open()
@@ -62,6 +65,16 @@ namespace PS260714.Localization.Editor
             tab = GUILayout.Toolbar(tab, Tabs);
             EditorGUILayout.Space(4f);
 
+            if (tab == 2)
+            {
+                catalogScroll = EditorGUILayout.BeginScrollView(
+                    catalogScroll);
+                DrawCatalogs();
+                DrawValidation();
+                EditorGUILayout.EndScrollView();
+                return;
+            }
+
             switch (tab)
             {
                 case 0:
@@ -70,9 +83,6 @@ namespace PS260714.Localization.Editor
                     break;
                 case 1:
                     DrawCsv(locales, false);
-                    break;
-                default:
-                    DrawCatalogs();
                     break;
             }
 
@@ -291,16 +301,37 @@ namespace PS260714.Localization.Editor
         private void DrawCatalogs()
         {
             EditorGUILayout.HelpBox(
-                "CSV stores stable style/icon/font-role IDs. Unity font and " +
-                "sprite assets remain in Resources/Localization catalogs, " +
-                "with TMP/default and DynamicOS fallbacks when an asset is " +
-                "missing. A catalog assigned directly to a scene resolver " +
-                "overrides the Resources catalog.",
+                "The Font Catalog's Global Default Font is the single " +
+                "game-wide font source. Markup styles and icons must be " +
+                "registered explicitly in the Markup Catalog; there are no " +
+                "built-in markup presets. Icon entries accept Sprite " +
+                "references directly and build the required TMP assets " +
+                "automatically. Catalogs remain in " +
+                "Resources/Localization, and a catalog assigned directly " +
+                "to a scene resolver overrides the Resources catalog.",
                 MessageType.Info);
 
+            showFontCatalog = EditorGUILayout.BeginFoldoutHeaderGroup(
+                showFontCatalog,
+                "Font");
+            if (showFontCatalog)
+                DrawFontCatalog();
+            EditorGUILayout.EndFoldoutHeaderGroup();
+
+            EditorGUILayout.Space(8f);
+            showMarkupCatalog = EditorGUILayout.BeginFoldoutHeaderGroup(
+                showMarkupCatalog,
+                "Markup");
+            if (showMarkupCatalog)
+                DrawMarkupCatalog();
+            EditorGUILayout.EndFoldoutHeaderGroup();
+        }
+
+        private void DrawFontCatalog()
+        {
             LocalizationFontCatalog newFontCatalog =
                 (LocalizationFontCatalog)EditorGUILayout.ObjectField(
-                    "Font Catalog",
+                    "Catalog",
                     fontCatalog,
                     typeof(LocalizationFontCatalog),
                     false);
@@ -317,19 +348,21 @@ namespace PS260714.Localization.Editor
                     "LocalizationFontCatalog.asset");
             }
 
-            if (fontCatalog != null)
-            {
-                UnityEditor.Editor.CreateCachedEditor(
-                    fontCatalog,
-                    null,
-                    ref fontCatalogEditor);
-                fontCatalogEditor.OnInspectorGUI();
-            }
+            if (fontCatalog == null)
+                return;
 
-            EditorGUILayout.Space(8f);
+            UnityEditor.Editor.CreateCachedEditor(
+                fontCatalog,
+                null,
+                ref fontCatalogEditor);
+            fontCatalogEditor.OnInspectorGUI();
+        }
+
+        private void DrawMarkupCatalog()
+        {
             LocalizationMarkupCatalog newMarkupCatalog =
                 (LocalizationMarkupCatalog)EditorGUILayout.ObjectField(
-                    "Markup Catalog",
+                    "Catalog",
                     markupCatalog,
                     typeof(LocalizationMarkupCatalog),
                     false);
@@ -347,14 +380,14 @@ namespace PS260714.Localization.Editor
                     "LocalizationMarkupCatalog.asset");
             }
 
-            if (markupCatalog != null)
-            {
-                UnityEditor.Editor.CreateCachedEditor(
-                    markupCatalog,
-                    null,
-                    ref markupCatalogEditor);
-                markupCatalogEditor.OnInspectorGUI();
-            }
+            if (markupCatalog == null)
+                return;
+
+            UnityEditor.Editor.CreateCachedEditor(
+                markupCatalog,
+                null,
+                ref markupCatalogEditor);
+            markupCatalogEditor.OnInspectorGUI();
         }
 
         private void DrawValidation()

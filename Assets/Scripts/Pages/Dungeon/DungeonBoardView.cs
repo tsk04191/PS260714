@@ -68,6 +68,9 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard
     private bool _initialized;
 
     public int GridSize { get; private set; } = MinimumGridSize;
+    public RectTransform HighlightRect => boardRect != null
+        ? boardRect
+        : transform as RectTransform;
     public int InitialEnemyCapacity => GridSize * GridSize;
     public int LivingEnemyCount
     {

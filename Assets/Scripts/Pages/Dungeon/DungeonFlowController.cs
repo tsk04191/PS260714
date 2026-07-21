@@ -34,9 +34,21 @@ public sealed class DungeonFlowController : MonoBehaviour
     public EDungeonPhase CurrentPhase { get; private set; } = EDungeonPhase.Battle;
     public int CurrentStepIndex { get; private set; }
     public int StepCount => phaseSequence != null ? phaseSequence.Length : 0;
-    public int CurrentBattleNumber => CurrentPhase == EDungeonPhase.Battle
-        ? CurrentStepIndex / 2 + 1
-        : Mathf.Max(1, (CurrentStepIndex + 1) / 2);
+    public int CurrentBattleNumber
+    {
+        get
+        {
+            int count = 0;
+            int end = Mathf.Min(CurrentStepIndex, StepCount - 1);
+            for (int index = 0; index <= end; index++)
+            {
+                if (phaseSequence[index] == EDungeonPhase.Battle)
+                    count++;
+            }
+
+            return Mathf.Max(1, count);
+        }
+    }
     public bool IsCompleted { get; private set; }
     public IReadOnlyList<EDungeonPhase> PhaseSequence => phaseSequence;
     public GameObject EventTab => eventTab;
@@ -97,8 +109,22 @@ public sealed class DungeonFlowController : MonoBehaviour
                 : EDungeonPhase.Event;
         }
 
+        return StartRun(phaseSequence);
+    }
+
+    public bool StartRun(IReadOnlyList<EDungeonPhase> phases)
+    {
+        if (!_initialized && !Initialize())
+            return false;
+        if (phases == null || phases.Count == 0)
+            return false;
+
+        phaseSequence = new EDungeonPhase[phases.Count];
+        for (int index = 0; index < phases.Count; index++)
+            phaseSequence[index] = phases[index];
+
         CurrentStepIndex = 0;
-        CurrentPhase = EDungeonPhase.Battle;
+        CurrentPhase = phaseSequence[0];
         IsCompleted = false;
         return ApplyCurrentPhase();
     }
@@ -117,6 +143,14 @@ public sealed class DungeonFlowController : MonoBehaviour
             return Initialize();
 
         return ApplyCurrentPhase();
+    }
+
+    public bool RefreshCurrentPhaseView()
+    {
+        if (!_initialized)
+            return Initialize();
+
+        return ApplyCurrentPhase(false);
     }
 
     public bool TryAdvance()

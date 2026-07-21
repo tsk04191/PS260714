@@ -120,7 +120,6 @@ namespace PS260714.Localization
         public const string UiDungeonEnergyRecharge = "ui.dungeon.energy_recharge";
         public const string UiDungeonEnergyScale = "ui.dungeon.energy_scale";
         public const string UiDungeonEnergyStatus = "ui.dungeon.energy_status";
-        public const string UiDungeonEnergyTutorial = "ui.dungeon.energy_tutorial";
         public const string UiDungeonEvent = "ui.dungeon.event";
         public const string UiDungeonItemCardHeader = "ui.dungeon.item_card_header";
         public const string UiDungeonItemConsumable = "ui.dungeon.item_consumable";
@@ -236,6 +235,10 @@ namespace PS260714.Localization
         public const string UiShopCurrency = "ui.shop.currency";
         public const string UiShopDescription = "ui.shop.description";
         public const string UiShopTitle = "ui.shop.title";
+        public const string UiStageSelectDescription = "ui.stage_select.description";
+        public const string UiStageSelectFreeBattle = "ui.stage_select.free_battle";
+        public const string UiStageSelectTestField = "ui.stage_select.test_field";
+        public const string UiStageSelectTitle = "ui.stage_select.title";
         public const string UiStorageDescription = "ui.storage.description";
         public const string UiStorageTitle = "ui.storage.title";
         public const string UiTitleDescription = "ui.title.description";
@@ -253,5 +256,15 @@ namespace PS260714.Localization
         public const string UiTurretStatusActive = "ui.turret.status.active";
         public const string UiTurretStatusNotEnoughEnergy = "ui.turret.status.not_enough_energy";
         public const string UiTurretStatusReady = "ui.turret.status.ready";
+        public const string UiTutorialCharacter = "ui.tutorial.character";
+        public const string UiTutorialChoice = "ui.tutorial.choice";
+        public const string UiTutorialComplete = "ui.tutorial.complete";
+        public const string UiTutorialField = "ui.tutorial.field";
+        public const string UiTutorialItem = "ui.tutorial.item";
+        public const string UiTutorialNext = "ui.tutorial.next";
+        public const string UiTutorialQueue = "ui.tutorial.queue";
+        public const string UiTutorialReturn = "ui.tutorial.return";
+        public const string UiTutorialStartBattle = "ui.tutorial.start_battle";
+        public const string UiTutorialTimer = "ui.tutorial.timer";
     }
 }

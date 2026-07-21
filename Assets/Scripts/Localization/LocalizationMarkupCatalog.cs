@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using TMPro;
 using UnityEngine;
+using UnityEngine.TextCore;
 
 namespace PS260714.Localization
 {
@@ -25,12 +26,12 @@ namespace PS260714.Localization
     public sealed class LocalizationIconDefinition
     {
         [SerializeField] private string id = "icon";
-        [SerializeField] private string spriteName = "icon";
-        [Tooltip("Visible text used when the sprite asset or alias is missing.")]
+        [SerializeField] private Sprite sprite;
+        [Tooltip("Visible text used when the sprite is not assigned.")]
         [SerializeField] private string fallbackText;
 
         public string Id => id;
-        public string SpriteName => spriteName;
+        public Sprite Sprite => sprite;
         public string FallbackText => fallbackText;
     }
 
@@ -43,13 +44,23 @@ namespace PS260714.Localization
         menuName = "PS260714/Localization/Markup Catalog")]
     public sealed class LocalizationMarkupCatalog : ScriptableObject
     {
-        [SerializeField] private TMP_SpriteAsset spriteAsset;
+        private const string RuntimeSpriteAssetVersionJson =
+            "{\"m_Version\":\"1.1.0\"}";
+        private const float RuntimeIconEmSize = 100f;
+        private const float RuntimeIconAscent = 80f;
+        private const float RuntimeIconDescent = -20f;
+
         [SerializeField]
         private List<LocalizationMarkupStyleDefinition> styles = new();
         [SerializeField]
         private List<LocalizationIconDefinition> icons = new();
 
-        public TMP_SpriteAsset SpriteAsset => spriteAsset;
+        [NonSerialized] private TMP_SpriteAsset runtimeSpriteAsset;
+        [NonSerialized] private List<TMP_SpriteAsset> runtimeSpriteAssets;
+        [NonSerialized] private List<Material> runtimeSpriteMaterials;
+        [NonSerialized] private bool runtimeSpriteAssetBuilt;
+
+        public TMP_SpriteAsset SpriteAsset => GetOrCreateSpriteAsset();
         public IReadOnlyList<LocalizationMarkupStyleDefinition> Styles => styles;
         public IReadOnlyList<LocalizationIconDefinition> Icons => icons;
 
@@ -85,7 +96,7 @@ namespace PS260714.Localization
                 out underline);
         }
 
-        public bool TryGetIcon(string id, out string spriteName)
+        public bool TryGetIcon(string id, out Sprite sprite)
         {
             for (int index = 0; index < icons.Count; index++)
             {
@@ -95,28 +106,41 @@ namespace PS260714.Localization
                         definition.Id,
                         id,
                         StringComparison.OrdinalIgnoreCase) &&
-                    LocalizationMarkupDefaults.IsSafeIdentifier(
-                        definition.SpriteName))
+                    definition.Sprite != null)
                 {
-                    spriteName = definition.SpriteName;
+                    sprite = definition.Sprite;
                     return true;
                 }
             }
 
-            return LocalizationMarkupDefaults.TryGetIcon(id, out spriteName);
+            sprite = null;
+            return false;
         }
 
-        public bool TryGetRenderableIcon(string id, out string spriteName)
+        public bool TryGetRenderableIcon(string id, out string spriteKey)
         {
-            if (!TryGetIcon(id, out spriteName))
+            spriteKey = string.Empty;
+            if (!LocalizationMarkupDefaults.IsSafeIdentifier(id) ||
+                !TryGetIcon(id, out Sprite _))
             {
                 return false;
             }
 
-            TMP_SpriteAsset effectiveAsset = spriteAsset != null
-                ? spriteAsset
-                : TMP_Settings.defaultSpriteAsset;
-            return ContainsSprite(effectiveAsset, spriteName);
+            TMP_SpriteAsset asset = SpriteAsset;
+            int hashCode = TMP_TextUtilities.GetHashCode(id);
+            if (asset == null ||
+                TMP_SpriteAsset.SearchForSpriteByHashCode(
+                    asset,
+                    hashCode,
+                    true,
+                    out int spriteIndex) == null ||
+                spriteIndex < 0)
+            {
+                return false;
+            }
+
+            spriteKey = id;
+            return true;
         }
 
         public string GetIconFallback(string id)
@@ -138,48 +162,216 @@ namespace PS260714.Localization
             return LocalizationMarkupDefaults.GetIconFallback(id);
         }
 
-        public static bool ContainsSprite(
-            TMP_SpriteAsset asset,
-            string spriteName)
+        private TMP_SpriteAsset GetOrCreateSpriteAsset()
         {
-            if (asset == null ||
-                !LocalizationMarkupDefaults.IsSafeIdentifier(spriteName))
+            if (runtimeSpriteAssetBuilt)
+                return runtimeSpriteAsset;
+
+            runtimeSpriteAssetBuilt = true;
+            runtimeSpriteAssets = new List<TMP_SpriteAsset>();
+            runtimeSpriteMaterials = new List<Material>();
+
+            Dictionary<Texture, List<LocalizationIconDefinition>> groups =
+                new Dictionary<Texture, List<LocalizationIconDefinition>>();
+            List<Texture> textureOrder = new List<Texture>();
+            for (int index = 0; index < icons.Count; index++)
             {
-                return false;
+                LocalizationIconDefinition definition = icons[index];
+                if (definition == null ||
+                    definition.Sprite == null ||
+                    !LocalizationMarkupDefaults.IsSafeIdentifier(
+                        definition.Id))
+                {
+                    continue;
+                }
+
+                Texture texture = definition.Sprite.texture;
+                if (texture == null)
+                    continue;
+
+                if (!groups.TryGetValue(
+                        texture,
+                        out List<LocalizationIconDefinition> definitions))
+                {
+                    definitions = new List<LocalizationIconDefinition>();
+                    groups.Add(texture, definitions);
+                    textureOrder.Add(texture);
+                }
+
+                definitions.Add(definition);
             }
 
-            int hashCode = TMP_TextUtilities.GetHashCode(spriteName);
-            return TMP_SpriteAsset.SearchForSpriteByHashCode(
-                       asset,
-                       hashCode,
-                       true,
-                       out int spriteIndex) != null &&
-                   spriteIndex >= 0;
+            for (int index = 0; index < textureOrder.Count; index++)
+            {
+                Texture texture = textureOrder[index];
+                TMP_SpriteAsset asset = CreateRuntimeSpriteAsset(
+                    texture,
+                    groups[texture],
+                    index);
+                if (asset != null)
+                    runtimeSpriteAssets.Add(asset);
+            }
+
+            if (runtimeSpriteAssets.Count == 0)
+                return null;
+
+            runtimeSpriteAsset = runtimeSpriteAssets[0];
+            if (runtimeSpriteAssets.Count > 1)
+            {
+                runtimeSpriteAsset.fallbackSpriteAssets =
+                    runtimeSpriteAssets.GetRange(
+                        1,
+                        runtimeSpriteAssets.Count - 1);
+            }
+
+            return runtimeSpriteAsset;
+        }
+
+        private TMP_SpriteAsset CreateRuntimeSpriteAsset(
+            Texture texture,
+            List<LocalizationIconDefinition> definitions,
+            int groupIndex)
+        {
+            Material template = TMP_Settings.defaultSpriteAsset != null
+                ? TMP_Settings.defaultSpriteAsset.material
+                : null;
+            Shader shader = template != null
+                ? template.shader
+                : Shader.Find("TextMeshPro/Sprite");
+            if (shader == null)
+                return null;
+
+            Material material = template != null
+                ? new Material(template)
+                : new Material(shader);
+            material.name = $"{name} Runtime Icon Material {groupIndex}";
+            material.hideFlags = HideFlags.HideAndDontSave;
+            material.SetTexture(Shader.PropertyToID("_MainTex"), texture);
+            runtimeSpriteMaterials.Add(material);
+
+            TMP_SpriteAsset asset = CreateInstance<TMP_SpriteAsset>();
+            asset.name = $"{name} Runtime Icons {groupIndex}";
+            asset.hideFlags = HideFlags.HideAndDontSave;
+            JsonUtility.FromJsonOverwrite(
+                RuntimeSpriteAssetVersionJson,
+                asset);
+            asset.spriteInfoList = new List<TMP_Sprite>();
+            asset.spriteSheet = texture;
+            asset.material = material;
+            asset.faceInfo = CreateRuntimeIconFaceInfo();
+            asset.UpdateLookupTables();
+
+            List<TMP_SpriteGlyph> glyphs = new List<TMP_SpriteGlyph>();
+            List<TMP_SpriteCharacter> characters =
+                new List<TMP_SpriteCharacter>();
+            for (int index = 0; index < definitions.Count; index++)
+            {
+                LocalizationIconDefinition definition = definitions[index];
+                Sprite sprite = definition.Sprite;
+                Rect rect = sprite.rect;
+                TMP_SpriteGlyph glyph = new TMP_SpriteGlyph(
+                    (uint)index,
+                    new GlyphMetrics(
+                        RuntimeIconEmSize,
+                        RuntimeIconEmSize,
+                        0f,
+                        RuntimeIconAscent,
+                        RuntimeIconEmSize),
+                    new GlyphRect(rect),
+                    1f,
+                    0,
+                    sprite);
+                TMP_SpriteCharacter character = new TMP_SpriteCharacter(
+                    0xFFFE,
+                    asset,
+                    glyph)
+                {
+                    name = definition.Id,
+                    scale = 1f,
+                };
+                glyphs.Add(glyph);
+                characters.Add(character);
+            }
+
+            asset.spriteGlyphTable.AddRange(glyphs);
+            asset.spriteCharacterTable.AddRange(characters);
+            asset.UpdateLookupTables();
+            return asset;
+        }
+
+        private static FaceInfo CreateRuntimeIconFaceInfo()
+        {
+            return new FaceInfo
+            {
+                pointSize = RuntimeIconEmSize,
+                scale = 1f,
+                lineHeight = RuntimeIconEmSize,
+                ascentLine = RuntimeIconAscent,
+                capLine = RuntimeIconAscent,
+                meanLine = RuntimeIconAscent * 0.625f,
+                baseline = 0f,
+                descentLine = RuntimeIconDescent,
+            };
+        }
+
+        private void OnValidate()
+        {
+            ReleaseRuntimeSpriteAssets();
+        }
+
+        private void OnDisable()
+        {
+            ReleaseRuntimeSpriteAssets();
+        }
+
+        private void ReleaseRuntimeSpriteAssets()
+        {
+            if (runtimeSpriteAssets != null)
+            {
+                for (int index = 0;
+                     index < runtimeSpriteAssets.Count;
+                     index++)
+                {
+                    DestroyRuntimeObject(runtimeSpriteAssets[index]);
+                }
+            }
+
+            if (runtimeSpriteMaterials != null)
+            {
+                for (int index = 0;
+                     index < runtimeSpriteMaterials.Count;
+                     index++)
+                {
+                    DestroyRuntimeObject(runtimeSpriteMaterials[index]);
+                }
+            }
+
+            runtimeSpriteAsset = null;
+            runtimeSpriteAssets = null;
+            runtimeSpriteMaterials = null;
+            runtimeSpriteAssetBuilt = false;
+        }
+
+        private static void DestroyRuntimeObject(UnityEngine.Object value)
+        {
+            if (value == null)
+                return;
+
+#if UNITY_EDITOR
+            if (!Application.isPlaying)
+            {
+                DestroyImmediate(value);
+                return;
+            }
+#endif
+            Destroy(value);
         }
     }
 
     public static class LocalizationMarkupDefaults
     {
-        public static readonly string[] StyleIds =
-        {
-            "fire",
-            "focus",
-            "damage",
-            "energy",
-            "warning",
-            "positive",
-            "title",
-        };
-
-        public static readonly string[] IconIds =
-        {
-            "fire",
-            "focus",
-            "damage",
-            "energy",
-            "attack",
-            "speed",
-        };
+        public static readonly string[] StyleIds = Array.Empty<string>();
+        public static readonly string[] IconIds = Array.Empty<string>();
 
         public static bool TryGetStyle(
             string id,
@@ -188,84 +380,18 @@ namespace PS260714.Localization
             out bool italic,
             out bool underline)
         {
+            color = Color.white;
             bold = false;
             italic = false;
             underline = false;
-
-            switch ((id ?? string.Empty).ToLowerInvariant())
-            {
-                case "fire":
-                    color = new Color32(255, 112, 67, 255);
-                    bold = true;
-                    return true;
-                case "focus":
-                    color = new Color32(255, 209, 102, 255);
-                    bold = true;
-                    return true;
-                case "damage":
-                    color = new Color32(255, 92, 92, 255);
-                    bold = true;
-                    return true;
-                case "energy":
-                    color = new Color32(102, 204, 255, 255);
-                    bold = true;
-                    return true;
-                case "warning":
-                    color = new Color32(255, 193, 7, 255);
-                    bold = true;
-                    return true;
-                case "positive":
-                    color = new Color32(117, 230, 143, 255);
-                    return true;
-                case "title":
-                    color = Color.white;
-                    bold = true;
-                    return true;
-                default:
-                    color = Color.white;
-                    return false;
-            }
-        }
-
-        public static bool TryGetIcon(string id, out string spriteName)
-        {
-            for (int index = 0; index < IconIds.Length; index++)
-            {
-                if (string.Equals(
-                    IconIds[index],
-                    id,
-                    StringComparison.OrdinalIgnoreCase))
-                {
-                    spriteName = IconIds[index];
-                    return true;
-                }
-            }
-
-            spriteName = string.Empty;
             return false;
         }
 
         public static string GetIconFallback(string id)
         {
-            switch ((id ?? string.Empty).ToLowerInvariant())
-            {
-                case "fire":
-                    return "FIRE";
-                case "focus":
-                    return "FOCUS";
-                case "damage":
-                    return "DMG";
-                case "energy":
-                    return "ENERGY";
-                case "attack":
-                    return "ATK";
-                case "speed":
-                    return "SPD";
-                default:
-                    return string.IsNullOrWhiteSpace(id)
-                        ? "ICON"
-                        : id.Trim().ToUpperInvariant();
-            }
+            return string.IsNullOrWhiteSpace(id)
+                ? "ICON"
+                : id.Trim().ToUpperInvariant();
         }
 
         public static bool IsSafeIdentifier(string value)

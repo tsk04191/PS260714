@@ -5,6 +5,7 @@ using System.Text;
 using System.Text.RegularExpressions;
 using TMPro;
 using UnityEditor;
+using UnityEngine;
 
 namespace PS260714.Localization.Editor
 {
@@ -554,37 +555,25 @@ namespace PS260714.Localization.Editor
                 AssetDatabase.LoadAssetAtPath<LocalizationMarkupCatalog>(
                     "Assets/Resources/Localization/" +
                     "LocalizationMarkupCatalog.asset");
-            TMP_SpriteAsset spriteAsset = catalog != null &&
-                                          catalog.SpriteAsset != null
-                ? catalog.SpriteAsset
-                : TMP_Settings.defaultSpriteAsset;
-
             foreach (string iconId in usedIcons.OrderBy(id => id))
             {
-                string spriteName;
-                bool hasAlias = catalog != null
-                    ? catalog.TryGetIcon(iconId, out spriteName)
-                    : LocalizationMarkupDefaults.TryGetIcon(
-                        iconId,
-                        out spriteName);
-                if (!hasAlias)
+                if (catalog == null)
                 {
                     result.Warning(
                         $"icon {iconId}",
-                        "No runtime icon alias exists. The visible text " +
+                        "No Markup Catalog exists. The visible text " +
                         $"fallback '[{iconId.ToUpperInvariant()}]' will be used.");
                     continue;
                 }
 
-                if (!LocalizationMarkupCatalog.ContainsSprite(
-                        spriteAsset,
-                        spriteName))
+                if (!catalog.TryGetIcon(iconId, out Sprite sprite) ||
+                    sprite == null)
                 {
                     result.Warning(
                         $"icon {iconId}",
-                        $"Sprite '{spriteName}' was not found in the runtime " +
-                        "sprite asset or its fallbacks. A visible text " +
-                        "fallback will be used.");
+                        "No Sprite is assigned to this icon. A visible text " +
+                        $"fallback '[{catalog.GetIconFallback(iconId)}]' " +
+                        "will be used.");
                 }
             }
         }

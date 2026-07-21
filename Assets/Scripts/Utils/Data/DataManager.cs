@@ -1,6 +1,5 @@
 using System.Collections.Generic;
 using PS260714.Localization;
-using TMPro;
 using UnityEngine;
 using UnityEngine.UI;
 
@@ -12,12 +11,6 @@ public class DataManager : MonoBehaviour
 
     public Image imgBrightness;
 
-    [Header("Client UI")]
-    [Tooltip(
-        "Game-wide TMP font. When empty, the global font from " +
-        "LocalizationFontCatalog is used.")]
-    [SerializeField] private TMP_FontAsset clientDefaultFont;
-
     [HideInInspector] public DisplayData DisplayDatas;
     [HideInInspector] public AudioData AudioDatas;
 
@@ -27,8 +20,6 @@ public class DataManager : MonoBehaviour
     public AudioClipList UIList = new AudioClipList();
 
     private GameEventManager _events;
-
-    public TMP_FontAsset ClientDefaultFont => clientDefaultFont;
 
     [RuntimeInitializeOnLoadMethod(
         RuntimeInitializeLoadType.SubsystemRegistration)]
