@@ -44,6 +44,7 @@ public sealed class BattleSetup
 {
     public int FieldSize { get; }
     public int MaximumStackSize { get; }
+    public int InitialEnemyCount { get; }
     public float SpawnInterval { get; }
     public float TimeLimit { get; }
     public BattleEnemyGradeCounts GradeCounts { get; }
@@ -55,7 +56,8 @@ public sealed class BattleSetup
         float spawnInterval,
         float timeLimit,
         BattleEnemyGradeCounts gradeCounts,
-        List<EnemyRuntime> enemies)
+        List<EnemyRuntime> enemies,
+        int initialEnemyCount = 0)
     {
         FieldSize = fieldSize;
         MaximumStackSize = maximumStackSize;
@@ -65,5 +67,13 @@ public sealed class BattleSetup
         Enemies = enemies != null
             ? enemies.AsReadOnly()
             : new List<EnemyRuntime>().AsReadOnly();
+        int defaultInitialCount = fieldSize * fieldSize;
+        InitialEnemyCount = System.Math.Min(
+            Enemies.Count,
+            System.Math.Max(
+                0,
+                initialEnemyCount > 0
+                    ? initialEnemyCount
+                    : defaultInitialCount));
     }
 }

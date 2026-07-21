@@ -217,6 +217,13 @@ public sealed class DungeonBattleTab : MonoBehaviour
 
     private void HandleSettingsClicked()
     {
+        if (settingPage != null &&
+            settingPage.TryGetComponent(out SettingPage settings))
+        {
+            settings.OpenFrom(dungeonPage);
+            return;
+        }
+
         PageControl.PagToPag(dungeonPage, settingPage, PageOpenMode.Fresh);
     }
 
@@ -315,7 +322,11 @@ public sealed class DungeonBattleTab : MonoBehaviour
             : $"+1 IN {rechargeRemaining:0.0}s";
         activeSkillResourceText.text = _page != null
             ? $"ENERGY {resource}/{maximumResource} | {recharge} | " +
-              $"SCALE {_page.CurrentDifficultyScale}"
+              $"SCALE {_page.CurrentDifficultyScale}" +
+              (_page.IsTutorialBattle
+                  ? "\nTUTORIAL: HOVER A TURRET FOR SKILL INFO | " +
+                    "CLICK A TURRET TO USE ITS SKILL"
+                  : string.Empty)
             : $"ENERGY {resource}/{maximumResource} | {recharge}";
     }
 

@@ -134,7 +134,8 @@ public sealed class BattleManager : MonoBehaviour, IActiveSkillResource
         IReadOnlyList<IBattleCharacter> characters,
         IReadOnlyList<EnemyRuntime> enemies,
         float spawnInterval,
-        float timeLimit = 0f)
+        float timeLimit = 0f,
+        int initialEnemyCount = 0)
     {
         if (!IsInitialized || board == null || characters == null || enemies == null)
         {
@@ -168,7 +169,7 @@ public sealed class BattleManager : MonoBehaviour, IActiveSkillResource
         _maximumEnemyCount = _spawnQueue.Count;
         _board.ClearAllEnemies();
         ResetTimeControl();
-        FillInitialBoard();
+        FillInitialBoard(initialEnemyCount);
         ResetSpawnTimerForNextEnemy();
         _boardFull = false;
         SetActiveSkillResource(_maximumActiveSkillResource);
@@ -291,8 +292,7 @@ public sealed class BattleManager : MonoBehaviour, IActiveSkillResource
             return;
 
         _boardFull = false;
-        if (!TryFillEmptyTilesImmediately())
-            SpawnTimerChanged?.Invoke();
+        SpawnTimerChanged?.Invoke();
 
         CheckForCompletion();
     }
@@ -349,9 +349,6 @@ public sealed class BattleManager : MonoBehaviour, IActiveSkillResource
             return;
         }
 
-        if (TryFillEmptyTilesImmediately())
-            return;
-
         _spawnTimeRemaining = Mathf.Max(
             0f,
             _spawnTimeRemaining - Mathf.Max(0f, deltaTime));
@@ -399,27 +396,16 @@ public sealed class BattleManager : MonoBehaviour, IActiveSkillResource
         return true;
     }
 
-    private bool TryFillEmptyTilesImmediately()
-    {
-        bool spawnedEnemy = false;
-        while (_spawnQueue.Count > 0 && _board != null &&
-               _board.HasEmptyEnemyTile)
-        {
-            if (!TrySpawnNextQueuedEnemy())
-                break;
-
-            spawnedEnemy = true;
-        }
-
-        return spawnedEnemy;
-    }
-
-    private void FillInitialBoard()
+    private void FillInitialBoard(int initialEnemyCount)
     {
         if (_board == null)
             return;
 
+        int requestedCount = initialEnemyCount > 0
+            ? initialEnemyCount
+            : _board.InitialEnemyCapacity;
         int targetCount = Mathf.Min(
+            requestedCount,
             _board.InitialEnemyCapacity,
             _spawnQueue.Count);
         while (_spawnQueue.Count > 0 &&

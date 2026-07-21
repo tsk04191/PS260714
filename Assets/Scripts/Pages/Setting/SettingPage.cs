@@ -68,6 +68,8 @@ public sealed class SettingPage : MonoBehaviour, IPage
     private bool _eventsBound;
     private bool _isRefreshingControls;
     private int _selectedTabIndex;
+    private GameObject _returnPage;
+    private PageOpenMode _returnMode = PageOpenMode.Resume;
     private GameEventManager _gameEvents;
     private DataManager _dataManager;
     private readonly List<string> _supportedResolutions = new();
@@ -119,6 +121,23 @@ public sealed class SettingPage : MonoBehaviour, IPage
         HideQuitConfirmation();
     }
 
+    public void OpenFrom(
+        GameObject sourcePage,
+        PageOpenMode returnMode = PageOpenMode.Resume)
+    {
+        if (sourcePage == null)
+        {
+            Debug.LogError(
+                "SettingPage requires a source page for return navigation.",
+                this);
+            return;
+        }
+
+        _returnPage = sourcePage;
+        _returnMode = returnMode;
+        PageControl.PagToPag(sourcePage, gameObject, PageOpenMode.Fresh);
+    }
+
     public void Close()
     {
         SaveSettings();
@@ -136,6 +155,7 @@ public sealed class SettingPage : MonoBehaviour, IPage
             return;
 
         ResolveSettingManagers();
+        _returnPage ??= dungeonPage;
         BuildSupportedResolutionList();
         _initialized = true;
         _selectedTabIndex = 0;
@@ -265,7 +285,10 @@ public sealed class SettingPage : MonoBehaviour, IPage
 
     private void HandleBackClicked()
     {
-        PageControl.PagToPag(gameObject, dungeonPage, PageOpenMode.Resume);
+        GameObject targetPage = _returnPage != null
+            ? _returnPage
+            : dungeonPage;
+        PageControl.PagToPag(gameObject, targetPage, _returnMode);
     }
 
     private void HandleDisplayTabClicked()

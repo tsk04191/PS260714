@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using TMPro;
 using UnityEngine;
+using UnityEngine.EventSystems;
 using UnityEngine.UI;
 
 public enum EDungeonRunResult
@@ -29,13 +30,59 @@ public readonly struct DungeonBattlePlan
     }
 }
 
+[DisallowMultipleComponent]
+public sealed class DungeonRewardCardHoverView : MonoBehaviour,
+    IPointerEnterHandler,
+    IPointerExitHandler
+{
+    private bool _hovered;
+
+    private void Update()
+    {
+        Vector3 targetScale = _hovered
+            ? new Vector3(1.03f, 1.03f, 1f)
+            : Vector3.one;
+        transform.localScale = Vector3.Lerp(
+            transform.localScale,
+            targetScale,
+            1f - Mathf.Exp(-18f * Time.unscaledDeltaTime));
+    }
+
+    private void OnDisable()
+    {
+        _hovered = false;
+        transform.localScale = Vector3.one;
+    }
+
+    public void OnPointerEnter(PointerEventData eventData)
+    {
+        _hovered = true;
+    }
+
+    public void OnPointerExit(PointerEventData eventData)
+    {
+        _hovered = false;
+    }
+}
+
 public class DungeonPage : MonoBehaviour, IPage
 {
     public const int MaximumPartySize = 4;
     public const int MinimumBattleCount = 5;
     public const int MaximumBattleCount = 8;
+    public const int StartingCharacterChoiceCount = 3;
     public const float EnergyRechargeUpgradeAmount = 0.5f;
     public const float MinimumEnergyRechargeDuration = 0.5f;
+
+    private const int TutorialGridSize = 3;
+    private const int TutorialEnemyCount = 12;
+    private const int TutorialInitialEnemyCount =
+        TutorialGridSize * TutorialGridSize;
+    private const float TutorialSpawnInterval = 1f;
+    private const float TutorialTimeLimit = 45f;
+    private const float TutorialTargetAutoClearDuration = 34f;
+    private const float TutorialDamageBudgetRatio = 0.9f;
+    private const int StartingChoiceSeedSalt = unchecked((int)0x5A17C0DE);
 
     private static readonly Color[] DefaultPartySlotColors =
     {
@@ -67,6 +114,9 @@ public class DungeonPage : MonoBehaviour, IPage
     [Header("Dungeon Flow")]
     [SerializeField] private DungeonFlowController flowController;
     [SerializeField] private DungeonBattleTab battleTab;
+
+    [Header("Page Navigation")]
+    [SerializeField] private GameObject mainPage;
 
     [Header("Player Party")]
     [SerializeField] private CharacterRuntime[] playerCharacters =
@@ -101,6 +151,7 @@ public class DungeonPage : MonoBehaviour, IPage
     private bool _battleEventsBound;
     private bool _runActive;
     private bool _eventRewardPending;
+    private bool _startingCharacterSelectionPending;
     private int _totalBattleCount;
     private int _currentBattleNumber;
     private EDungeonRunResult _runResult;
@@ -109,6 +160,7 @@ public class DungeonPage : MonoBehaviour, IPage
     private CharacterSO _startingTurret;
     private readonly List<CharacterRuntime> _ownedTurrets = new();
     private readonly List<CharacterSO> _availableTurrets = new();
+    private readonly List<CharacterSO> _startingCharacterChoices = new();
     private readonly CharacterSO[] _slotDefaultDefinitions =
         new CharacterSO[MaximumPartySize];
     private DungeonBattlePlan[] _battlePlans = Array.Empty<DungeonBattlePlan>();
@@ -139,10 +191,45 @@ public class DungeonPage : MonoBehaviour, IPage
     public EDungeonRunResult RunResult => _runResult;
     public IReadOnlyList<CharacterRuntime> OwnedTurrets => _ownedTurrets;
     public IReadOnlyList<CharacterSO> AvailableTurrets => _availableTurrets;
+    public IReadOnlyList<CharacterSO> StartingCharacterChoices =>
+        _startingCharacterChoices;
     public IReadOnlyList<DungeonBattlePlan> BattlePlans => _battlePlans;
     public DungeonBoardView Board => board;
     public int MaximumEnergy => _maximumEnergy;
     public float EnergyRechargeDuration => _energyRechargeDuration;
+    public bool IsStartingCharacterSelectionPending =>
+        _startingCharacterSelectionPending;
+    public bool IsTutorialBattle => _runActive && _currentBattleNumber == 1;
+
+    public IReadOnlyList<EnemySO> GetCodexEnemyDefinitions()
+    {
+        return GetBattleEnemyPool();
+    }
+
+    public IReadOnlyList<CharacterSO> GetCodexCharacterDefinitions()
+    {
+        List<CharacterSO> definitions = new();
+        HashSet<CharacterSO> uniqueDefinitions = new();
+        if (playerCharacters != null)
+        {
+            foreach (CharacterRuntime character in playerCharacters)
+            {
+                CharacterSO definition = character != null
+                    ? character.Definition
+                    : null;
+                if (definition != null && uniqueDefinitions.Add(definition))
+                    definitions.Add(definition);
+            }
+        }
+
+        foreach (CharacterSO definition in _availableTurrets)
+        {
+            if (definition != null && uniqueDefinitions.Add(definition))
+                definitions.Add(definition);
+        }
+
+        return definitions.AsReadOnly();
+    }
 
     public event Action<EDungeonRunResult> RunEnded;
     public event Action BattleItemsChanged;
@@ -246,6 +333,12 @@ public class DungeonPage : MonoBehaviour, IPage
             flowController?.ShowEventTab();
             _eventTab?.ShowRunResult(_runResult);
         }
+        else if (_startingCharacterSelectionPending)
+        {
+            flowController?.ShowEventTab();
+            _eventTab?.ShowStartingCharacterSelection(
+                _startingCharacterChoices);
+        }
         else
         {
             flowController?.RefreshCurrentPhase();
@@ -306,8 +399,11 @@ public class DungeonPage : MonoBehaviour, IPage
 
     public bool AdvanceDungeonPhase()
     {
-        if (CurrentPhase == EDungeonPhase.Event && _eventRewardPending)
+        if (_startingCharacterSelectionPending ||
+            CurrentPhase == EDungeonPhase.Event && _eventRewardPending)
+        {
             return false;
+        }
 
         return flowController != null && flowController.TryAdvance();
     }
@@ -323,7 +419,7 @@ public class DungeonPage : MonoBehaviour, IPage
         if (_battleManager.HasSession)
             _battleManager.EndBattle(board);
 
-        ResetPlayerParty();
+        ClearPlayerParty();
         ResetRunResourcesAndItems(includeStartingConsumable: true);
         board.ClearAllStacks();
         _totalBattleCount = UnityEngine.Random.Range(
@@ -332,14 +428,71 @@ public class DungeonPage : MonoBehaviour, IPage
         GenerateBattlePlans(_totalBattleCount);
         _currentBattleNumber = 1;
         _eventRewardPending = false;
+        _startingCharacterSelectionPending = false;
         _runResult = EDungeonRunResult.None;
         _runActive = true;
 
-        if (!flowController.StartBattleEventRun(_totalBattleCount))
+        if (!PrepareStartingCharacterSelection())
         {
             _runActive = false;
-            Debug.LogError("Failed to start the dungeon run flow.", this);
+            flowController.ShowEventTab();
+            _eventTab?.ShowStartingCharacterConfigurationError(
+                _availableTurrets.Count);
         }
+    }
+
+    public void ReturnToMain()
+    {
+        GameObject targetPage = mainPage;
+        if (targetPage == null && transform.parent != null)
+        {
+            Transform targetTransform = transform.parent.Find("pagMain");
+            targetPage = targetTransform != null
+                ? targetTransform.gameObject
+                : null;
+        }
+
+        if (targetPage == null)
+        {
+            Debug.LogError(
+                "DungeonPage requires a MainPage navigation target.",
+                this);
+            return;
+        }
+
+        PageControl.PagToPag(
+            gameObject,
+            targetPage,
+            PageOpenMode.Resume);
+    }
+
+    public bool TrySelectStartingCharacter(CharacterSO definition)
+    {
+        if (!_startingCharacterSelectionPending || definition == null ||
+            !_startingCharacterChoices.Contains(definition) ||
+            playerCharacters.Length == 0 || playerCharacters[0] == null)
+        {
+            return false;
+        }
+
+        CharacterRuntime startingSlot = playerCharacters[0];
+        if (!startingSlot.ConfigureDefinition(definition))
+            return false;
+
+        _startingTurret = definition;
+        startingSlot.ConfigurePartySlot(0, partySlotColors[0]);
+        startingSlot.gameObject.SetActive(true);
+        _ownedTurrets.Clear();
+        _ownedTurrets.Add(startingSlot);
+        _startingCharacterSelectionPending = false;
+
+        if (flowController.StartBattleEventRun(_totalBattleCount))
+            return true;
+
+        ClearPlayerParty();
+        _runActive = false;
+        Debug.LogError("Failed to start the dungeon run flow.", this);
+        return false;
     }
 
     public bool TryApplyTurretUpgrade(
@@ -622,12 +775,15 @@ public class DungeonPage : MonoBehaviour, IPage
             return false;
         }
 
-        if (!TryCreateScaledBattleSetup(
-                _battlePlans[battleIndex],
-                out BattleSetup setup,
-                out string error))
+        DungeonBattlePlan plan = _battlePlans[battleIndex];
+        BattleSetup setup;
+        string error;
+        bool setupCreated = _currentBattleNumber == 1
+            ? TryCreateTutorialBattleSetup(plan, out setup, out error)
+            : TryCreateScaledBattleSetup(plan, out setup, out error);
+        if (!setupCreated)
         {
-            Debug.LogError($"Failed to create scaled battle: {error}", this);
+            Debug.LogError($"Failed to create dungeon battle: {error}", this);
             return false;
         }
 
@@ -640,7 +796,8 @@ public class DungeonPage : MonoBehaviour, IPage
             characters,
             setup.Enemies,
             setup.SpawnInterval,
-            setup.TimeLimit);
+            setup.TimeLimit,
+            setup.InitialEnemyCount);
     }
 
     private void GenerateBattlePlans(int battleCount)
@@ -697,12 +854,17 @@ public class DungeonPage : MonoBehaviour, IPage
         }
 
         float progress = plan.DifficultyScale / 100f;
-        int enemyCount = Mathf.Max(
+        int fieldSize = GetScaledGridSize(plan.DifficultyScale);
+        int initialEnemyCount = fieldSize * fieldSize;
+        int scaledEnemyCount = Mathf.Max(
             1,
             Mathf.RoundToInt(Mathf.Lerp(
                 baselineEnemyCount,
                 maximumScaledEnemyCount,
                 progress)));
+        int enemyCount = Mathf.Max(
+            initialEnemyCount,
+            scaledEnemyCount);
         int baselineHealth = CalculateBaselineEnemyHealth();
         int enemyHealth = Mathf.Max(
             1,
@@ -750,9 +912,13 @@ public class DungeonPage : MonoBehaviour, IPage
         }
 
         System.Random random = new(plan.RandomSeed);
-        IReadOnlyList<int> enemyHealthValues = CreateEnemyHealthDistribution(
+        int totalEnemyHealth = Mathf.Max(
             enemyCount,
-            enemyHealth,
+            scaledEnemyCount * enemyHealth);
+        IReadOnlyList<int> enemyHealthValues =
+            CreateEnemyHealthDistributionFromTotal(
+            enemyCount,
+            totalEnemyHealth,
             healthVariance,
             random);
         List<EnemyRuntime> enemies = new(enemyCount);
@@ -792,9 +958,6 @@ public class DungeonPage : MonoBehaviour, IPage
                 (enemies[swapIndex], enemies[index]);
         }
 
-        int fieldSize = firstBattle != null
-            ? firstBattle.FieldSize
-            : initialGridSize;
         int stackSize = firstBattle != null
             ? firstBattle.MaximumStackSize
             : maximumStackSize;
@@ -811,9 +974,154 @@ public class DungeonPage : MonoBehaviour, IPage
                 specialCount,
                 eliteCount,
                 bossCount),
-            enemies);
+            enemies,
+            initialEnemyCount);
         error = string.Empty;
         return true;
+    }
+
+    private bool TryCreateTutorialBattleSetup(
+        DungeonBattlePlan plan,
+        out BattleSetup setup,
+        out string error)
+    {
+        setup = null;
+        IReadOnlyList<EnemySO> allDefinitions = GetBattleEnemyPool();
+        if (allDefinitions.Count == 0)
+        {
+            error = "At least one enemy definition is required.";
+            return false;
+        }
+
+        EnemySO tutorialEnemy = null;
+        foreach (EnemySO definition in allDefinitions)
+        {
+            if (definition == null)
+                continue;
+
+            if (tutorialEnemy == null || definition.Type == EEnemyType.Basic ||
+                definition.ThreatCost < tutorialEnemy.ThreatCost)
+            {
+                tutorialEnemy = definition;
+            }
+
+            if (definition.Type == EEnemyType.Basic)
+                break;
+        }
+
+        if (tutorialEnemy == null)
+        {
+            error = "A valid tutorial enemy definition is required.";
+            return false;
+        }
+
+        CharacterData startingData = _startingTurret != null
+            ? _startingTurret.CreateData()
+            : null;
+        int totalHealth = CalculateTutorialTotalEnemyHealth(startingData);
+        System.Random random = new(plan.RandomSeed);
+        IReadOnlyList<int> healthValues =
+            CreateEnemyHealthDistributionFromTotal(
+                TutorialEnemyCount,
+                totalHealth,
+                1,
+                random);
+        List<EnemyRuntime> enemies = new(TutorialEnemyCount);
+        for (int index = 0; index < TutorialEnemyCount; index++)
+            enemies.Add(tutorialEnemy.CreateRuntime(healthValues[index]));
+
+        for (int index = enemies.Count - 1; index > 0; index--)
+        {
+            int swapIndex = random.Next(0, index + 1);
+            (enemies[index], enemies[swapIndex]) =
+                (enemies[swapIndex], enemies[index]);
+        }
+
+        BattleEnemyGradeCounts gradeCounts = tutorialEnemy.Grade switch
+        {
+            EEnemyGrade.Special => new BattleEnemyGradeCounts(
+                0, TutorialEnemyCount, 0, 0),
+            EEnemyGrade.Elite => new BattleEnemyGradeCounts(
+                0, 0, TutorialEnemyCount, 0),
+            EEnemyGrade.Boss => new BattleEnemyGradeCounts(
+                0, 0, 0, TutorialEnemyCount),
+            _ => new BattleEnemyGradeCounts(
+                TutorialEnemyCount, 0, 0, 0),
+        };
+        setup = new BattleSetup(
+            TutorialGridSize,
+            firstBattle != null
+                ? firstBattle.MaximumStackSize
+                : maximumStackSize,
+            TutorialSpawnInterval,
+            TutorialTimeLimit,
+            gradeCounts,
+            enemies,
+            TutorialInitialEnemyCount);
+        error = string.Empty;
+        return true;
+    }
+
+    private static int CalculateTutorialTotalEnemyHealth(
+        CharacterData data)
+    {
+        if (data == null)
+            return TutorialEnemyCount;
+
+        float attackCycle = Mathf.Max(
+            0.1f,
+            data.AttackCooldown +
+            (data.AttackType == CharacterAttackType.FireRandom
+                ? 0f
+                : CharacterRuntime.TargetAttackRecoveryDuration));
+        int expectedAttackCount = Mathf.Max(
+            1,
+            Mathf.FloorToInt(
+                TutorialTargetAutoClearDuration / attackCycle));
+        float damagePerAttack = CalculateEstimatedNormalDamagePerAttack(data);
+        return Mathf.Max(
+            TutorialEnemyCount,
+            Mathf.RoundToInt(
+                expectedAttackCount *
+                damagePerAttack *
+                TutorialDamageBudgetRatio));
+    }
+
+    private static int GetScaledGridSize(int difficultyScale)
+    {
+        int size = difficultyScale switch
+        {
+            < 30 => 3,
+            < 65 => 4,
+            < 90 => 5,
+            _ => 6,
+        };
+        return Mathf.Clamp(
+            size,
+            DungeonBoardView.MinimumGridSize,
+            DungeonBoardView.MaximumGridSize);
+    }
+
+    private static float CalculateEstimatedNormalDamagePerAttack(
+        CharacterData data)
+    {
+        if (data == null)
+            return 1f;
+
+        return data.AttackType switch
+        {
+            CharacterAttackType.RandomMultiple =>
+                data.AttackDamage * Mathf.Max(1, data.TargetCount),
+            CharacterAttackType.CrossHighestHealth =>
+                data.AttackDamage * 2f,
+            CharacterAttackType.FireRandom =>
+                data.FireTickDamage * Mathf.Max(
+                    1,
+                    Mathf.FloorToInt(
+                        data.FireDuration /
+                        Mathf.Max(0.1f, data.FireTickInterval))),
+            _ => data.AttackDamage,
+        };
     }
 
     private int CalculateBaselineEnemyHealth()
@@ -821,12 +1129,11 @@ public class DungeonPage : MonoBehaviour, IPage
         CharacterData startingData = _startingTurret != null
             ? _startingTurret.CreateData()
             : null;
-        int attackDamage = startingData != null
-            ? startingData.AttackDamage
-            : 1;
         float attackCycle = startingData != null
             ? startingData.AttackCooldown +
-              CharacterRuntime.TargetAttackRecoveryDuration
+              (startingData.AttackType == CharacterAttackType.FireRandom
+                  ? 0f
+                  : CharacterRuntime.TargetAttackRecoveryDuration)
             : 1.5f;
         float timeLimit = firstBattle != null
             ? firstBattle.TimeLimit
@@ -835,7 +1142,8 @@ public class DungeonPage : MonoBehaviour, IPage
             1,
             Mathf.FloorToInt(timeLimit / Mathf.Max(0.1f, attackCycle)));
         float totalDamageBudget = expectedAttackCount *
-                                  attackDamage *
+                                  CalculateEstimatedNormalDamagePerAttack(
+                                      startingData) *
                                   baselineSoloDamageBudgetRatio;
         return Mathf.Max(
             1,
@@ -882,21 +1190,24 @@ public class DungeonPage : MonoBehaviour, IPage
         return definitions[definitions.Count - 1];
     }
 
-    private static IReadOnlyList<int> CreateEnemyHealthDistribution(
+    private static IReadOnlyList<int> CreateEnemyHealthDistributionFromTotal(
         int enemyCount,
-        int averageHealth,
+        int totalHealth,
         int healthVariance,
         System.Random random)
     {
         enemyCount = Mathf.Max(1, enemyCount);
-        averageHealth = Mathf.Max(1, averageHealth);
+        totalHealth = Mathf.Max(enemyCount, totalHealth);
         healthVariance = Mathf.Max(0, healthVariance);
-
-        int minimumHealth = Mathf.Max(1, averageHealth - healthVariance);
-        int maximumHealth = averageHealth + healthVariance;
-        int remainingHealth = averageHealth * enemyCount;
+        float averageHealth = totalHealth / (float)enemyCount;
+        int minimumHealth = Mathf.Max(
+            1,
+            Mathf.FloorToInt(averageHealth) - healthVariance);
+        int maximumHealth = Mathf.Max(
+            minimumHealth,
+            Mathf.CeilToInt(averageHealth) + healthVariance);
         int[] healthValues = new int[enemyCount];
-        bool hasVariation = false;
+        int remainingHealth = totalHealth;
 
         for (int index = 0; index < enemyCount; index++)
         {
@@ -912,13 +1223,6 @@ public class DungeonPage : MonoBehaviour, IPage
                 : random.Next(minimumAllowed, maximumAllowed + 1);
             healthValues[index] = health;
             remainingHealth -= health;
-            hasVariation |= health != averageHealth;
-        }
-
-        if (!hasVariation && enemyCount >= 2 && minimumHealth < averageHealth)
-        {
-            healthValues[0]--;
-            healthValues[1]++;
         }
 
         return healthValues;
@@ -1118,10 +1422,11 @@ public class DungeonPage : MonoBehaviour, IPage
 
         _runActive = false;
         _eventRewardPending = false;
+        _startingCharacterSelectionPending = false;
         _runResult = EDungeonRunResult.Defeat;
         _battleManager?.EndBattle(board);
         board?.ClearAllStacks();
-        ResetPlayerParty();
+        ClearPlayerParty();
         ResetRunResourcesAndItems(includeStartingConsumable: false);
         flowController?.ShowEventTab();
         _eventTab?.ShowRunResult(_runResult);
@@ -1135,6 +1440,7 @@ public class DungeonPage : MonoBehaviour, IPage
 
         _runActive = false;
         _eventRewardPending = false;
+        _startingCharacterSelectionPending = false;
         _runResult = EDungeonRunResult.Clear;
         flowController?.ShowEventTab();
         _eventTab?.ShowRunResult(_runResult);
@@ -1203,6 +1509,38 @@ public class DungeonPage : MonoBehaviour, IPage
         BattleItemsChanged?.Invoke();
     }
 
+    private bool PrepareStartingCharacterSelection()
+    {
+        _startingCharacterChoices.Clear();
+        if (_availableTurrets.Count < StartingCharacterChoiceCount)
+        {
+            Debug.LogError(
+                $"DungeonPage requires at least {StartingCharacterChoiceCount} " +
+                "different character definitions for the starting choice.",
+                this);
+            return false;
+        }
+
+        List<CharacterSO> candidates = new(_availableTurrets);
+        int randomSeed = _battlePlans.Length > 0
+            ? _battlePlans[0].RandomSeed ^ StartingChoiceSeedSalt
+            : Environment.TickCount;
+        System.Random random = new(randomSeed);
+        for (int index = 0; index < StartingCharacterChoiceCount; index++)
+        {
+            int swapIndex = random.Next(index, candidates.Count);
+            (candidates[index], candidates[swapIndex]) =
+                (candidates[swapIndex], candidates[index]);
+            _startingCharacterChoices.Add(candidates[index]);
+        }
+
+        _startingCharacterSelectionPending = true;
+        flowController.ShowEventTab();
+        _eventTab?.ShowStartingCharacterSelection(
+            _startingCharacterChoices);
+        return true;
+    }
+
     private void InitializePlayerCharacters()
     {
         EnsurePlayerCharacterSlots();
@@ -1234,30 +1572,26 @@ public class DungeonPage : MonoBehaviour, IPage
         if (!hasCharacter)
             Debug.LogError("DungeonPage requires at least one player character.", this);
         else
-        {
-            _startingTurret = playerCharacters[0]?.Definition;
-            ResetPlayerParty();
-        }
+            ClearPlayerParty();
     }
 
-    private void ResetPlayerParty()
+    private void ClearPlayerParty()
     {
         _ownedTurrets.Clear();
+        _startingTurret = null;
+        _startingCharacterSelectionPending = false;
+        _startingCharacterChoices.Clear();
         for (int index = 0; index < playerCharacters.Length; index++)
         {
             CharacterRuntime character = playerCharacters[index];
             if (character == null)
                 continue;
 
-            CharacterSO definition = index == 0
-                ? _startingTurret
-                : _slotDefaultDefinitions[index];
+            CharacterSO definition = _slotDefaultDefinitions[index];
             if (definition != null)
                 character.ConfigureDefinition(definition);
             character.ConfigurePartySlot(index, partySlotColors[index]);
-            character.gameObject.SetActive(index == 0 && definition != null);
-            if (index == 0 && definition != null)
-                _ownedTurrets.Add(character);
+            character.gameObject.SetActive(false);
         }
     }
 
@@ -1423,14 +1757,40 @@ public sealed class DungeonEventTab
         }
     }
 
+    private readonly struct RewardCardContent
+    {
+        public string Category { get; }
+        public string Title { get; }
+        public string Description { get; }
+        public string Footer { get; }
+        public Color AccentColor { get; }
+
+        public RewardCardContent(
+            string category,
+            string title,
+            string description,
+            string footer,
+            Color accentColor)
+        {
+            Category = category ?? string.Empty;
+            Title = title ?? string.Empty;
+            Description = description ?? string.Empty;
+            Footer = footer ?? string.Empty;
+            AccentColor = accentColor;
+        }
+    }
+
     private readonly Color _panelColor = new(0.075f, 0.095f, 0.08f, 0.98f);
     private readonly Color _buttonColor = new(0.19f, 0.28f, 0.22f, 1f);
     private readonly Color _textColor = new(0.94f, 0.91f, 0.78f, 1f);
 
     private DungeonPage _page;
     private GameObject _root;
+    private RectTransform _panel;
     private TextMeshProUGUI _titleText;
     private TextMeshProUGUI _descriptionText;
+    private RectTransform _rewardCardRoot;
+    private GridLayoutGroup _rewardCardLayout;
     private RectTransform _buttonRoot;
     private readonly List<RewardOption> _currentRewardOptions = new();
     private bool _initialized;
@@ -1465,18 +1825,69 @@ public sealed class DungeonEventTab
         ShowCurrentRewardOptions();
     }
 
+    public void ShowStartingCharacterSelection(
+        IReadOnlyList<CharacterSO> choices)
+    {
+        if (!EnsureInitialized())
+            return;
+
+        ClearButtons();
+        SetRewardCardMode(true);
+        RefreshRuntimeLayout();
+        _titleText.text = "CHOOSE STARTING TURRET";
+        _descriptionText.text =
+            "SELECT 1 OF 3 TURRETS\n" +
+            "THE FIRST BATTLE IS A 30 SECOND TUTORIAL";
+
+        if (choices == null)
+            return;
+
+        int choiceCount = Mathf.Min(
+            DungeonPage.StartingCharacterChoiceCount,
+            choices.Count);
+        for (int index = 0; index < choiceCount; index++)
+        {
+            CharacterSO selectedDefinition = choices[index];
+            if (selectedDefinition == null)
+                continue;
+
+            CreateRewardCard(
+                GetStartingTurretCardContent(selectedDefinition),
+                () => _page.TrySelectStartingCharacter(selectedDefinition));
+        }
+    }
+
+    public void ShowStartingCharacterConfigurationError(int availableCount)
+    {
+        if (!EnsureInitialized())
+            return;
+
+        ClearButtons();
+        SetRewardCardMode(false);
+        RefreshRuntimeLayout();
+        _titleText.text = "STARTING TURRET SETUP ERROR";
+        _descriptionText.text =
+            $"3 DIFFERENT TURRETS ARE REQUIRED\n" +
+            $"AVAILABLE DEFINITIONS: {Mathf.Max(0, availableCount)}";
+        CreateButton("RETRY", _page.StartNewDungeonRun);
+    }
+
     public void ShowRunResult(EDungeonRunResult result)
     {
         if (!EnsureInitialized())
             return;
 
         ClearButtons();
+        SetRewardCardMode(false);
+        RefreshRuntimeLayout();
         bool cleared = result == EDungeonRunResult.Clear;
         _titleText.text = cleared ? "DUNGEON CLEAR" : "DEFEAT";
         _descriptionText.text = cleared
             ? $"ALL {_page.TotalBattleCount} BATTLES CLEARED"
-            : "THE RUN WAS RESET\nSTART AGAIN WITH ONE BASIC TURRET";
+            : "THE RUN WAS RESET\nCHOOSE A NEW STARTING TURRET";
         CreateButton("START NEW RUN", _page.StartNewDungeonRun);
+        if (!cleared)
+            CreateButton("RETURN TO MAIN", _page.ReturnToMain);
     }
 
     private void GenerateRewardOptions()
@@ -1538,6 +1949,8 @@ public sealed class DungeonEventTab
     private void ShowCurrentRewardOptions()
     {
         ClearButtons();
+        SetRewardCardMode(true);
+        RefreshRuntimeLayout();
         _titleText.text = "CHOOSE REWARD";
         _descriptionText.text =
             $"BATTLE {_page.CurrentBattleNumber} / {_page.TotalBattleCount} CLEAR " +
@@ -1548,38 +1961,66 @@ public sealed class DungeonEventTab
         foreach (RewardOption option in _currentRewardOptions)
         {
             RewardOption selectedOption = option;
-            CreateButton(GetRewardOptionLabel(option), () =>
+            CreateRewardCard(GetRewardCardContent(option), () =>
             {
                 SelectRewardOption(selectedOption);
             });
         }
     }
 
-    private string GetRewardOptionLabel(RewardOption option)
+    private RewardCardContent GetRewardCardContent(RewardOption option)
     {
         if (option.Type == ERewardOptionType.EnergyUpgrade)
         {
-            return option.EnergyUpgradeType ==
-                   EDungeonEnergyUpgradeType.MaximumEnergy
-                ? $"ENERGY UPGRADE | MAX {_page.MaximumEnergy} > " +
-                  $"{_page.MaximumEnergy + 1}"
-                : $"ENERGY UPGRADE | RECHARGE " +
-                  $"{_page.EnergyRechargeDuration:0.0}s > " +
-                  $"{Mathf.Max(DungeonPage.MinimumEnergyRechargeDuration, _page.EnergyRechargeDuration - DungeonPage.EnergyRechargeUpgradeAmount):0.0}s";
+            bool maximumEnergy = option.EnergyUpgradeType ==
+                                 EDungeonEnergyUpgradeType.MaximumEnergy;
+            return new RewardCardContent(
+                "ENERGY UPGRADE",
+                maximumEnergy ? "MAX ENERGY +1" : "RECHARGE -0.5s",
+                maximumEnergy
+                    ? $"MAX {_page.MaximumEnergy}  >  " +
+                      $"{_page.MaximumEnergy + 1}"
+                    : $"{_page.EnergyRechargeDuration:0.0}s  >  " +
+                      $"{Mathf.Max(DungeonPage.MinimumEnergyRechargeDuration, _page.EnergyRechargeDuration - DungeonPage.EnergyRechargeUpgradeAmount):0.0}s",
+                "APPLIES FOR THIS RUN",
+                new Color(0.82f, 0.64f, 0.2f, 1f));
         }
 
         if (option.Type == ERewardOptionType.BattleItem)
         {
             BattleItemDefinition item = BattleItemCatalog.Get(
                 option.BattleItemType);
-            return $"ITEM | {item.DisplayName} x1\n" + item.Description;
+            return new RewardCardContent(
+                "CONSUMABLE ITEM",
+                item.DisplayName,
+                item.Description,
+                $"OWNED x{_page.GetBattleItemCount(item.Type)}  |  GAIN x1",
+                new Color(0.8f, 0.35f, 0.22f, 1f));
         }
 
         if (option.Type == ERewardOptionType.NewTurret)
         {
-            return option.TurretDefinition != null
-                ? $"NEW TURRET | {option.TurretDefinition.CharacterName}"
-                : "NEW TURRET";
+            CharacterData newTurretData =
+                option.TurretDefinition?.CreateData();
+            string description = newTurretData == null
+                ? "ADD A NEW TURRET"
+                : newTurretData.AttackType == CharacterAttackType.FireRandom
+                    ? $"FIRE {newTurretData.FireDuration:0.#}s\n" +
+                      $"SKILL TARGETS x{newTurretData.FireSkillTargetCount}"
+                    : $"ATK {newTurretData.AttackDamage}\n" +
+                      $"SKILL {newTurretData.SkillAttackDamage}";
+            string footer = newTurretData != null
+                ? $"SKILL C{newTurretData.ActiveSkillCost}  |  " +
+                  $"ATTACK CD {newTurretData.AttackCooldown:0.#}s"
+                : "EMPTY PARTY SLOT REQUIRED";
+            return new RewardCardContent(
+                "NEW TURRET",
+                option.TurretDefinition != null
+                    ? option.TurretDefinition.CharacterName
+                    : "UNKNOWN TURRET",
+                description,
+                footer,
+                new Color(0.25f, 0.52f, 0.78f, 1f));
         }
 
         IReadOnlyList<CharacterRuntime> turrets = _page.OwnedTurrets;
@@ -1587,12 +2028,89 @@ public sealed class DungeonEventTab
         if (slotIndex < 0 || slotIndex >= turrets.Count ||
             turrets[slotIndex]?.Data == null)
         {
-            return "TURRET UPGRADE";
+            return new RewardCardContent(
+                "TURRET UPGRADE",
+                "UNKNOWN UPGRADE",
+                "TURRET DATA IS UNAVAILABLE",
+                string.Empty,
+                new Color(0.3f, 0.68f, 0.4f, 1f));
         }
 
         CharacterData data = turrets[slotIndex].Data;
-        return $"UPGRADE | S{slotIndex + 1} {data.CharacterName}\n" +
-               data.GetUpgradeLabel(option.UpgradeType);
+        return new RewardCardContent(
+            $"TURRET UPGRADE  |  S{slotIndex + 1}",
+            GetUpgradeCardTitle(data, option.UpgradeType),
+            $"{data.CharacterName}\n" +
+            data.GetUpgradeLabel(option.UpgradeType),
+            "PERMANENT FOR THIS RUN",
+            new Color(0.3f, 0.68f, 0.4f, 1f));
+    }
+
+    private static RewardCardContent GetStartingTurretCardContent(
+        CharacterSO definition)
+    {
+        CharacterData data = definition?.CreateData();
+        if (data == null)
+        {
+            return new RewardCardContent(
+                "STARTING TURRET",
+                "UNKNOWN TURRET",
+                "TURRET DATA IS UNAVAILABLE",
+                string.Empty,
+                new Color(0.25f, 0.52f, 0.78f, 1f));
+        }
+
+        string description = data.AttackType switch
+        {
+            CharacterAttackType.RandomMultiple =>
+                $"RANDOM TARGETS x{data.TargetCount}\n" +
+                $"ATK {data.AttackDamage} EACH",
+            CharacterAttackType.CrossHighestHealth =>
+                $"CROSS AREA ATTACK\nATK {data.AttackDamage}",
+            CharacterAttackType.FireRandom =>
+                $"FIRE {data.FireDuration:0.#}s\n" +
+                $"{data.FireTickDamage} DMG / " +
+                $"{data.FireTickInterval:0.#}s",
+            _ =>
+                $"LOWEST HEALTH TARGET\nATK {data.AttackDamage}",
+        };
+        Color accent = data.AttackType switch
+        {
+            CharacterAttackType.RandomMultiple =>
+                new Color(0.55f, 0.38f, 0.82f, 1f),
+            CharacterAttackType.CrossHighestHealth =>
+                new Color(0.25f, 0.68f, 0.48f, 1f),
+            CharacterAttackType.FireRandom =>
+                new Color(0.88f, 0.32f, 0.16f, 1f),
+            _ => new Color(0.25f, 0.52f, 0.78f, 1f),
+        };
+        return new RewardCardContent(
+            "STARTING TURRET",
+            data.CharacterName,
+            description,
+            $"SKILL C{data.ActiveSkillCost}  |  " +
+            $"ATTACK CD {data.AttackCooldown:0.#}s\nCLICK TO START",
+            accent);
+    }
+
+    private static string GetUpgradeCardTitle(
+        CharacterData data,
+        ETurretUpgradeType upgradeType)
+    {
+        return upgradeType switch
+        {
+            ETurretUpgradeType.PrimaryPower
+                when data.AttackType == CharacterAttackType.FireRandom =>
+                "FIRE DURATION",
+            ETurretUpgradeType.PrimaryPower => "ATTACK POWER",
+            ETurretUpgradeType.AttackSpeed => "ATTACK SPEED",
+            ETurretUpgradeType.SkillPower
+                when data.AttackType == CharacterAttackType.FireRandom =>
+                "SKILL TARGETS",
+            ETurretUpgradeType.SkillPower => "SKILL POWER",
+            ETurretUpgradeType.SkillCost => "SKILL COST",
+            _ => "TURRET UPGRADE",
+        };
     }
 
     private void SelectRewardOption(RewardOption option)
@@ -1630,6 +2148,8 @@ public sealed class DungeonEventTab
     private void ShowReplacementSelection(CharacterSO newDefinition)
     {
         ClearButtons();
+        SetRewardCardMode(false);
+        RefreshRuntimeLayout();
         _titleText.text = "REPLACE TURRET";
         _descriptionText.text =
             $"NEW: {newDefinition.CharacterName}\n" +
@@ -1673,12 +2193,12 @@ public sealed class DungeonEventTab
             typeof(RectTransform),
             typeof(Image),
             typeof(VerticalLayoutGroup));
-        RectTransform panel = (RectTransform)panelObject.transform;
-        panel.SetParent(_root.transform, false);
-        panel.anchorMin = new Vector2(0.5f, 0.5f);
-        panel.anchorMax = new Vector2(0.5f, 0.5f);
-        panel.pivot = new Vector2(0.5f, 0.5f);
-        panel.sizeDelta = new Vector2(720f, 680f);
+        _panel = (RectTransform)panelObject.transform;
+        _panel.SetParent(_root.transform, false);
+        _panel.anchorMin = new Vector2(0.5f, 0.5f);
+        _panel.anchorMax = new Vector2(0.5f, 0.5f);
+        _panel.pivot = new Vector2(0.5f, 0.5f);
+        _panel.sizeDelta = new Vector2(900f, 650f);
 
         panelObject.GetComponent<Image>().color = _panelColor;
         VerticalLayoutGroup layout = panelObject.GetComponent<VerticalLayoutGroup>();
@@ -1687,15 +2207,38 @@ public sealed class DungeonEventTab
         layout.childAlignment = TextAnchor.UpperCenter;
         layout.childControlWidth = true;
         layout.childForceExpandWidth = true;
-        layout.childControlHeight = false;
+        layout.childControlHeight = true;
         layout.childForceExpandHeight = false;
 
-        _titleText = CreateText(panel, "txtEventTitle", 36f, 72f);
+        _titleText = CreateText(_panel, "txtEventTitle", 34f, 56f);
         _descriptionText = CreateText(
-            panel,
+            _panel,
             "txtEventDescription",
-            24f,
-            90f);
+            21f,
+            76f);
+
+        GameObject rewardCardRootObject = new(
+            "grpRewardCards",
+            typeof(RectTransform),
+            typeof(GridLayoutGroup),
+            typeof(LayoutElement));
+        _rewardCardRoot =
+            (RectTransform)rewardCardRootObject.transform;
+        _rewardCardRoot.SetParent(_panel, false);
+        LayoutElement rewardRootLayout =
+            rewardCardRootObject.GetComponent<LayoutElement>();
+        rewardRootLayout.preferredHeight = 350f;
+        rewardRootLayout.flexibleHeight = 1f;
+        _rewardCardLayout =
+            rewardCardRootObject.GetComponent<GridLayoutGroup>();
+        _rewardCardLayout.padding = new RectOffset(0, 0, 0, 0);
+        _rewardCardLayout.spacing = new Vector2(20f, 0f);
+        _rewardCardLayout.startCorner = GridLayoutGroup.Corner.UpperLeft;
+        _rewardCardLayout.startAxis = GridLayoutGroup.Axis.Horizontal;
+        _rewardCardLayout.childAlignment = TextAnchor.MiddleCenter;
+        _rewardCardLayout.constraint = GridLayoutGroup.Constraint.FixedColumnCount;
+        _rewardCardLayout.constraintCount = RewardChoiceCount;
+        _rewardCardLayout.cellSize = new Vector2(250f, 350f);
 
         GameObject buttonRootObject = new(
             "grpEventButtons",
@@ -1703,9 +2246,9 @@ public sealed class DungeonEventTab
             typeof(VerticalLayoutGroup),
             typeof(LayoutElement));
         _buttonRoot = (RectTransform)buttonRootObject.transform;
-        _buttonRoot.SetParent(panel, false);
+        _buttonRoot.SetParent(_panel, false);
         LayoutElement rootLayout = buttonRootObject.GetComponent<LayoutElement>();
-        rootLayout.preferredHeight = 460f;
+        rootLayout.preferredHeight = 420f;
         rootLayout.flexibleHeight = 1f;
         VerticalLayoutGroup buttonLayout =
             buttonRootObject.GetComponent<VerticalLayoutGroup>();
@@ -1715,6 +2258,59 @@ public sealed class DungeonEventTab
         buttonLayout.childForceExpandWidth = true;
         buttonLayout.childControlHeight = false;
         buttonLayout.childForceExpandHeight = false;
+
+        _rewardCardRoot.gameObject.SetActive(false);
+        _buttonRoot.gameObject.SetActive(false);
+        RefreshRuntimeLayout();
+    }
+
+    private void SetRewardCardMode(bool showRewardCards)
+    {
+        if (_rewardCardRoot != null)
+            _rewardCardRoot.gameObject.SetActive(showRewardCards);
+        if (_buttonRoot != null)
+            _buttonRoot.gameObject.SetActive(!showRewardCards);
+    }
+
+    private void RefreshRuntimeLayout()
+    {
+        if (_panel == null)
+            return;
+
+        RectTransform rootRect = _root != null
+            ? _root.transform as RectTransform
+            : null;
+        float rootWidth = rootRect != null && rootRect.rect.width > 0f
+            ? rootRect.rect.width
+            : 960f;
+        float rootHeight = rootRect != null && rootRect.rect.height > 0f
+            ? rootRect.rect.height
+            : 700f;
+        float panelWidth = Mathf.Min(900f, Mathf.Max(540f, rootWidth - 48f));
+        float panelHeight = Mathf.Min(650f, Mathf.Max(500f, rootHeight - 48f));
+        _panel.sizeDelta = new Vector2(panelWidth, panelHeight);
+
+        if (_rewardCardLayout == null || _rewardCardRoot == null)
+            return;
+
+        const float horizontalPadding = 64f;
+        const float totalCardSpacing = 40f;
+        const float reservedHeaderHeight = 228f;
+        float widthBound =
+            (panelWidth - horizontalPadding - totalCardSpacing) /
+            RewardChoiceCount;
+        float heightBound =
+            Mathf.Max(140f, panelHeight - reservedHeaderHeight) / 1.4f;
+        float cardWidth = Mathf.Clamp(
+            Mathf.Min(widthBound, heightBound),
+            140f,
+            250f);
+        float cardHeight = cardWidth * 1.4f;
+        _rewardCardLayout.cellSize = new Vector2(cardWidth, cardHeight);
+        LayoutElement rewardLayout =
+            _rewardCardRoot.GetComponent<LayoutElement>();
+        if (rewardLayout != null)
+            rewardLayout.preferredHeight = cardHeight;
     }
 
     private TextMeshProUGUI CreateText(
@@ -1734,6 +2330,127 @@ public sealed class DungeonEventTab
         text.color = _textColor;
         text.alignment = TextAlignmentOptions.Center;
         textObject.GetComponent<LayoutElement>().preferredHeight = preferredHeight;
+        return text;
+    }
+
+    private void CreateRewardCard(RewardCardContent content, Action action)
+    {
+        if (_rewardCardRoot == null)
+            return;
+
+        GameObject cardObject = new(
+            "btnRewardCard",
+            typeof(RectTransform),
+            typeof(CanvasRenderer),
+            typeof(Image),
+            typeof(Button),
+            typeof(DungeonRewardCardHoverView));
+        cardObject.transform.SetParent(_rewardCardRoot, false);
+
+        Color normalColor = Color.Lerp(
+            _buttonColor,
+            content.AccentColor,
+            0.18f);
+        Image cardImage = cardObject.GetComponent<Image>();
+        cardImage.color = normalColor;
+        cardImage.raycastTarget = true;
+
+        Button button = cardObject.GetComponent<Button>();
+        button.targetGraphic = cardImage;
+        ColorBlock colors = button.colors;
+        colors.normalColor = normalColor;
+        colors.highlightedColor = Color.Lerp(normalColor, Color.white, 0.14f);
+        colors.pressedColor = Color.Lerp(normalColor, content.AccentColor, 0.5f);
+        colors.selectedColor = colors.highlightedColor;
+        colors.disabledColor = Color.Lerp(normalColor, Color.black, 0.5f);
+        colors.colorMultiplier = 1f;
+        colors.fadeDuration = 0.08f;
+        button.colors = colors;
+        if (action != null)
+            button.onClick.AddListener(() => action());
+
+        GameObject accentObject = new(
+            "imgRewardAccent",
+            typeof(RectTransform),
+            typeof(CanvasRenderer),
+            typeof(Image));
+        accentObject.transform.SetParent(cardObject.transform, false);
+        RectTransform accentRect =
+            (RectTransform)accentObject.transform;
+        accentRect.anchorMin = new Vector2(0f, 1f);
+        accentRect.anchorMax = new Vector2(1f, 1f);
+        accentRect.pivot = new Vector2(0.5f, 1f);
+        accentRect.anchoredPosition = Vector2.zero;
+        accentRect.sizeDelta = new Vector2(0f, 8f);
+        Image accentImage = accentObject.GetComponent<Image>();
+        accentImage.color = content.AccentColor;
+        accentImage.raycastTarget = false;
+
+        TextMeshProUGUI category = CreateRewardCardText(
+            cardObject.transform,
+            "txtRewardCategory",
+            new Vector2(0f, 0.83f),
+            new Vector2(1f, 0.96f),
+            14f);
+        category.color = Color.Lerp(_textColor, content.AccentColor, 0.45f);
+        category.text = content.Category;
+
+        TextMeshProUGUI title = CreateRewardCardText(
+            cardObject.transform,
+            "txtRewardTitle",
+            new Vector2(0f, 0.63f),
+            new Vector2(1f, 0.83f),
+            24f);
+        title.text = content.Title;
+
+        TextMeshProUGUI description = CreateRewardCardText(
+            cardObject.transform,
+            "txtRewardDescription",
+            new Vector2(0f, 0.22f),
+            new Vector2(1f, 0.63f),
+            18f);
+        description.fontStyle = FontStyles.Normal;
+        description.text = content.Description;
+
+        TextMeshProUGUI footer = CreateRewardCardText(
+            cardObject.transform,
+            "txtRewardFooter",
+            new Vector2(0f, 0.04f),
+            new Vector2(1f, 0.2f),
+            14f);
+        footer.color = Color.Lerp(_textColor, content.AccentColor, 0.35f);
+        footer.text = content.Footer;
+    }
+
+    private TextMeshProUGUI CreateRewardCardText(
+        Transform parent,
+        string objectName,
+        Vector2 anchorMin,
+        Vector2 anchorMax,
+        float maximumFontSize)
+    {
+        GameObject textObject = new(
+            objectName,
+            typeof(RectTransform),
+            typeof(TextMeshProUGUI));
+        textObject.transform.SetParent(parent, false);
+        RectTransform textRect = (RectTransform)textObject.transform;
+        textRect.anchorMin = anchorMin;
+        textRect.anchorMax = anchorMax;
+        textRect.offsetMin = new Vector2(14f, 4f);
+        textRect.offsetMax = new Vector2(-14f, -4f);
+
+        TextMeshProUGUI text = textObject.GetComponent<TextMeshProUGUI>();
+        text.fontSize = maximumFontSize;
+        text.fontSizeMax = maximumFontSize;
+        text.fontSizeMin = Mathf.Max(11f, maximumFontSize - 6f);
+        text.enableAutoSizing = true;
+        text.textWrappingMode = TextWrappingModes.Normal;
+        text.overflowMode = TextOverflowModes.Ellipsis;
+        text.fontStyle = FontStyles.Bold;
+        text.color = _textColor;
+        text.alignment = TextAlignmentOptions.Center;
+        text.raycastTarget = false;
         return text;
     }
 
@@ -1772,12 +2489,18 @@ public sealed class DungeonEventTab
 
     private void ClearButtons()
     {
-        if (_buttonRoot == null)
+        ClearChildren(_rewardCardRoot);
+        ClearChildren(_buttonRoot);
+    }
+
+    private static void ClearChildren(RectTransform root)
+    {
+        if (root == null)
             return;
 
-        for (int index = _buttonRoot.childCount - 1; index >= 0; index--)
+        for (int index = root.childCount - 1; index >= 0; index--)
         {
-            GameObject child = _buttonRoot.GetChild(index).gameObject;
+            GameObject child = root.GetChild(index).gameObject;
             child.SetActive(false);
             UnityEngine.Object.Destroy(child);
         }
