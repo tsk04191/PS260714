@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using PS260714.Localization;
 using TMPro;
 using UnityEngine;
 using UnityEngine.UI;
@@ -33,6 +34,7 @@ public sealed class CharacterCodexPage : RuntimeMenuPageBase
     private TextMeshProUGUI _detailTitle;
     private TextMeshProUGUI _identityText;
     private TextMeshProUGUI _statText;
+    private TextMeshProUGUI _normalAttackTitleText;
     private TextMeshProUGUI _normalAttackText;
     private TextMeshProUGUI _skillTitleText;
     private TextMeshProUGUI _skillText;
@@ -41,6 +43,10 @@ public sealed class CharacterCodexPage : RuntimeMenuPageBase
     protected override string PageTitle => "CHARACTER CODEX";
     protected override string PageDescription =>
         "SELECT A CHARACTER TAB TO VIEW ITS INFORMATION";
+    protected override string PageTitleLocalizationKey =>
+        LocalizationKeys.CodexCharacterTitle;
+    protected override string PageDescriptionLocalizationKey =>
+        LocalizationKeys.CodexCharacterDescription;
     protected override Vector2 PanelSize => new(1220f, 900f);
 
     protected override void BuildButtons()
@@ -48,7 +54,10 @@ public sealed class CharacterCodexPage : RuntimeMenuPageBase
         RefreshEntries();
         BuildCharacterTabStrip();
         BuildDetailPanel();
-        CreateMenuButton("BACK TO CODEX", HandleBackClicked);
+        CreateLocalizedMenuButton(
+            "btnBACKTOCODEX",
+            LocalizationKeys.UiCommonBack,
+            HandleBackClicked);
 
         if (_entries.Count > 0)
         {
@@ -81,8 +90,8 @@ public sealed class CharacterCodexPage : RuntimeMenuPageBase
             _entries.Add(new CharacterCodexEntry(definition));
 
         _entries.Sort((left, right) => string.Compare(
-            left.Data.CharacterName,
-            right.Data.CharacterName,
+            CharacterLocalization.GetName(left.Data),
+            CharacterLocalization.GetName(right.Data),
             StringComparison.OrdinalIgnoreCase));
     }
 
@@ -164,7 +173,7 @@ public sealed class CharacterCodexPage : RuntimeMenuPageBase
             Button button = CreateStyledButton(
                 contentObject.transform,
                 $"btnCharacterTab_{index}",
-                entry.Data.CharacterName,
+                CharacterLocalization.GetName(entry.Data),
                 () => SelectCharacter(selectedIndex),
                 60f);
             LayoutElement buttonLayout =
@@ -225,10 +234,11 @@ public sealed class CharacterCodexPage : RuntimeMenuPageBase
             string.Empty,
             21f,
             72f);
-        CreateContentText(
+        _normalAttackTitleText = CreateContentText(
             detailObject.transform,
             "txtNormalAttackTitle",
-            "NORMAL ATTACK",
+            LocalizationService.Get(
+                LocalizationKeys.CodexCharacterNormalAttack),
             19f,
             28f,
             FontStyles.Bold);
@@ -279,104 +289,92 @@ public sealed class CharacterCodexPage : RuntimeMenuPageBase
                 0.18f);
         }
 
-        _detailTitle.text = data.CharacterName;
-        _identityText.text =
-            $"ASSET {entry.AssetName}   |   " +
-            $"TYPE {GetAttackTypeName(data.AttackType)}";
-        _statText.text = GetStatDescription(data);
-        _normalAttackText.text = GetNormalAttackDescription(data);
+        _detailTitle.text = CharacterLocalization.GetName(data);
+        _identityText.text = CharacterLocalization.GetIdentity(
+            entry.AssetName,
+            data.AttackType);
+        _statText.text = CharacterLocalization.GetStats(data);
+        _normalAttackText.text =
+            CharacterLocalization.GetNormalAttackDescription(data);
         _skillTitleText.text =
-            $"ACTIVE SKILL   [COST {data.ActiveSkillCost}]";
-        _skillText.text = GetActiveSkillDescription(data);
+            CharacterLocalization.GetActiveSkillTitle(data.ActiveSkillCost);
+        _skillText.text =
+            CharacterLocalization.GetActiveSkillDescription(data);
     }
 
     private void ShowEmptyState()
     {
         if (_detailTitle != null)
-            _detailTitle.text = "NO CHARACTER DATA";
+        {
+            _detailTitle.text = LocalizationService.Get(
+                LocalizationKeys.CodexCharacterEmptyTitle);
+        }
         if (_identityText != null)
             _identityText.text = string.Empty;
         if (_statText != null)
-            _statText.text = "NO CHARACTER DEFINITIONS ARE AVAILABLE.";
+        {
+            _statText.text = LocalizationService.Get(
+                LocalizationKeys.CodexCharacterEmptyBody);
+        }
         if (_normalAttackText != null)
             _normalAttackText.text = string.Empty;
         if (_skillTitleText != null)
-            _skillTitleText.text = "ACTIVE SKILL";
+        {
+            _skillTitleText.text = LocalizationService.Get(
+                LocalizationKeys.CodexCharacterActiveSkill);
+        }
         if (_skillText != null)
             _skillText.text = string.Empty;
     }
 
-    private static string GetStatDescription(CharacterData data)
+    private void OnEnable()
     {
-        if (data.AttackType == CharacterAttackType.FireRandom)
+        LocalizationService.LocaleChanged += HandleLocaleChanged;
+        RefreshLocalizedView();
+    }
+
+    private void OnDisable()
+    {
+        LocalizationService.LocaleChanged -= HandleLocaleChanged;
+    }
+
+    private void HandleLocaleChanged(string unusedLocale)
+    {
+        RefreshLocalizedView();
+    }
+
+    private void RefreshLocalizedView()
+    {
+        if (_detailTitle == null)
+            return;
+
+        if (_normalAttackTitleText != null)
         {
-            return $"ATTACK COOLDOWN  {data.AttackCooldown:0.#}s     " +
-                   $"FIRE DURATION  {data.FireDuration:0.#}s\n" +
-                   $"FIRE TICK  {data.FireTickDamage} DAMAGE / " +
-                   $"{data.FireTickInterval:0.#}s     " +
-                   $"POWER WEIGHT  x{data.AttackWeight:0.##}";
+            _normalAttackTitleText.text = LocalizationService.Get(
+                LocalizationKeys.CodexCharacterNormalAttack);
         }
 
-        return $"ATTACK DAMAGE  {data.AttackDamage}     " +
-               $"ATTACK COOLDOWN  {data.AttackCooldown:0.#}s\n" +
-               $"SKILL DAMAGE  {data.SkillAttackDamage}     " +
-               $"POWER WEIGHT  x{data.AttackWeight:0.##}";
-    }
-
-    private static string GetNormalAttackDescription(CharacterData data)
-    {
-        return data.AttackType switch
+        for (int index = 0;
+             index < _tabButtons.Count && index < _entries.Count;
+             index++)
         {
-            CharacterAttackType.RandomMultiple =>
-                $"ATTACKS {data.TargetCount} RANDOM PRIORITY TARGETS " +
-                $"FOR {data.AttackDamage} DAMAGE EACH.",
-            CharacterAttackType.CrossHighestHealth =>
-                "ATTACKS THE CROSS-SHAPED AREA AROUND THE " +
-                $"HIGHEST-HEALTH ENEMY FOR {data.AttackDamage} DAMAGE.",
-            CharacterAttackType.FireRandom =>
-                "APPLIES FIRE TO ONE RANDOM PRIORITY TARGET FOR " +
-                $"{data.FireDuration:0.#}s. FIRE DEALS " +
-                $"{data.FireTickDamage} DAMAGE EVERY " +
-                $"{data.FireTickInterval:0.#}s.",
-            _ =>
-                $"DEALS {data.AttackDamage} DAMAGE TO THE " +
-                "LOWEST-HEALTH PRIORITY TARGET.",
-        };
-    }
+            TextMeshProUGUI label = _tabButtons[index]
+                .GetComponentInChildren<TextMeshProUGUI>(true);
+            if (label != null)
+                label.text = CharacterLocalization.GetName(_entries[index].Data);
+        }
 
-    private static string GetActiveSkillDescription(CharacterData data)
-    {
-        return data.AttackType switch
+        if (_entries.Count > 0)
         {
-            CharacterAttackType.RandomMultiple =>
-                $"FOR {data.ActiveSkillDuration:0.#}s, ATTACKS TARGET " +
-                $"{data.TargetCount + 2} ENEMIES AND DEAL " +
-                $"{data.SkillAttackDamage} DAMAGE EACH.",
-            CharacterAttackType.CrossHighestHealth =>
-                $"THE NEXT {data.ActiveSkillAttackCount} ATTACKS DEAL " +
-                $"{data.SkillAttackDamage} INNER-CROSS DAMAGE AND " +
-                $"{Mathf.Max(1, Mathf.FloorToInt(data.SkillAttackDamage * 0.5f))} " +
-                "OUTER AND DIAGONAL DAMAGE.",
-            CharacterAttackType.FireRandom =>
-                $"THE NEXT {data.ActiveSkillAttackCount} ATTACKS CHOOSE " +
-                $"{data.FireSkillTargetCount} CENTERS AND APPLY FIRE " +
-                $"FOR {data.FireDuration:0.#}s IN EACH 3x3 AREA. " +
-                "OVERLAPPING AREAS STACK DURATION.",
-            _ =>
-                $"DEALS {data.SkillAttackDamage} DAMAGE TO THE " +
-                "LOWEST-HEALTH ENEMY IMMEDIATELY.",
-        };
-    }
-
-    private static string GetAttackTypeName(CharacterAttackType attackType)
-    {
-        return attackType switch
+            SelectCharacter(Mathf.Clamp(
+                _selectedIndex,
+                0,
+                _entries.Count - 1));
+        }
+        else
         {
-            CharacterAttackType.RandomMultiple => "RANDOM MULTIPLE",
-            CharacterAttackType.CrossHighestHealth => "CROSS AREA",
-            CharacterAttackType.FireRandom => "FIRE STATUS",
-            _ => "LOWEST HEALTH",
-        };
+            ShowEmptyState();
+        }
     }
 
     private void HandleBackClicked()

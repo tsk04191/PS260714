@@ -1,3 +1,4 @@
+using PS260714.Localization;
 using UnityEngine;
 
 [DisallowMultipleComponent]
@@ -15,17 +16,42 @@ public sealed class MainPage : RuntimeMenuPageBase
     protected override string PageTitle => "MAIN";
     protected override string PageDescription =>
         "CHOOSE A DESTINATION";
+    protected override string PageTitleLocalizationKey =>
+        LocalizationKeys.UiMainTitle;
+    protected override string PageDescriptionLocalizationKey =>
+        LocalizationKeys.UiMainDescription;
     protected override Vector2 PanelSize => new(620f, 820f);
 
     protected override void BuildButtons()
     {
-        CreateMenuButton("PLAY", HandlePlayClicked);
-        CreateMenuButton("CODEX", () => OpenPage(codexPage));
-        CreateMenuButton("ROSTER", () => OpenPage(rosterPage));
-        CreateMenuButton("SHOP", () => OpenPage(shopPage));
-        CreateMenuButton("QUEST", () => OpenPage(questPage));
-        CreateMenuButton("STORAGE", () => OpenPage(storagePage));
-        CreateOverlayMenuButton("SETTINGS", HandleSettingsClicked);
+        CreateLocalizedMenuButton(
+            "btnPLAY",
+            LocalizationKeys.UiCommonPlay,
+            HandlePlayClicked);
+        CreateLocalizedMenuButton(
+            "btnCODEX",
+            LocalizationKeys.UiCommonCodex,
+            () => OpenPage(codexPage));
+        CreateLocalizedMenuButton(
+            "btnROSTER",
+            LocalizationKeys.UiCommonRoster,
+            () => OpenPage(rosterPage));
+        CreateLocalizedMenuButton(
+            "btnSHOP",
+            LocalizationKeys.UiCommonShop,
+            () => OpenPage(shopPage));
+        CreateLocalizedMenuButton(
+            "btnQUEST",
+            LocalizationKeys.UiCommonQuest,
+            () => OpenPage(questPage));
+        CreateLocalizedMenuButton(
+            "btnSTORAGE",
+            LocalizationKeys.UiCommonStorage,
+            () => OpenPage(storagePage));
+        CreateLocalizedOverlayMenuButton(
+            "btnSETTINGSOverlay",
+            LocalizationKeys.UiCommonSettings,
+            HandleSettingsClicked);
     }
 
     private void HandlePlayClicked()

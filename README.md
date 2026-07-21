@@ -9,6 +9,7 @@ Unity 프로젝트에서 사용하는 C# 스크립트를 공유하고 버전 관
 
 - `Assets/Scripts` 아래의 C# 스크립트
 - 스크립트 GUID를 유지하는 데 필요한 관련 `.meta` 파일
+- `Assets/LocalizationSource`의 로컬라이제이션 원본 CSV와 관련 `.meta` 파일
 - 저장소 사용 방법을 설명하는 문서와 Git 설정
 
 씬, 프리팹, ScriptableObject 데이터, 이미지, 오디오, 애니메이션,
@@ -34,6 +35,56 @@ Unity가 생성하는 `Library`, `Temp`, IDE 프로젝트 파일과 로컬 에�
 - Unity 6
 - C#
 - Visual Studio Code
+
+## 로컬라이제이션
+
+게임 문구는 Unity 기본 Localization 패키지 대신, CSV를 원본으로 사용하는
+프로젝트 전용 로컬라이제이션 기능으로 관리합니다. 빌드에서는 CSV를 직접
+읽지 않고 에디터에서 생성한 C# 테이블을 사용합니다.
+
+- `Assets/LocalizationSource/locales.csv`는 언어 코드, 표시 이름, 대체 언어,
+  기본 글꼴 역할을 정의합니다.
+- `Assets/LocalizationSource/strings.csv`는 `key`, `context`, `font_role`,
+  `note` 뒤에 언어별 열을 두어 문구를 정의합니다. 파일은 UTF-8/RFC 4180
+  형식이며 쉼표, 따옴표, 여러 줄을 포함한 값은 CSV 규칙대로 인용합니다.
+- `Assets/Scripts/Localization/Generated` 아래의 `*.g.cs`는 CSV에서 자동
+  생성되는 런타임 테이블과 키 상수입니다. 직접 수정하지 않습니다.
+
+Unity 메뉴의 `Tools/PS260714/Localization Editor`에서 Strings와 Locales를
+편집하고 `Save CSV`, `Validate`, `Generate C#`을 실행할 수 있습니다. CSV를
+가져오면 생성이 자동 예약되며, 새 locale 행을 저장하면 `strings.csv`의 번역
+열도 자동으로 추가됩니다. 플레이 모드 진입과 빌드 전에도 유효성 및
+생성본 갱신 여부를 검사합니다. CSV 수정으로 C#이 다시 생성된 경우 컴파일이
+끝난 뒤 플레이 또는 빌드를 한 번 더 실행합니다.
+
+문구 안에서는 다음의 제한된 마크업을 사용할 수 있습니다.
+
+- `[style=fire]내용[/style]`: 등록된 의미 기반 스타일 적용
+- `[icon=fire]`: TMP 스프라이트 이름과 연결된 아이콘 표시
+- `[br]`: 줄바꿈
+- `{duration:0.#}`: 이름 기반 인자와 선택적 숫자 형식 지정
+
+원문에 직접 넣은 TMP 태그와 실행 중 전달한 인자의 마크업 문자는 이스케이프해
+임의 태그 삽입을 막습니다. 화면의 TMP 텍스트에는 `LocalizedText`를 붙여 키와
+인자를 연결하거나, 코드에서 `LocalizationKeys`와 `LocalizationService`를
+사용합니다. 스타일 및 아이콘 별칭은 `LocalizationMarkupCatalog`에서 실제
+표현과 TMP Sprite Asset에 연결합니다. 아이콘은 Sprite Asset에 대응하는
+스프라이트 이름이 있을 때 표시되며, 없을 때는 `[FIRE]`, `[FOCUS]` 같은
+읽을 수 있는 텍스트로 대체됩니다.
+
+글꼴은 UI 루트의 `LocalizationFontResolver`가 일반 TMP 텍스트와 동적으로
+생성되는 텍스트까지 일괄 적용합니다. `LocalizationFontCatalog`에서 게임 전체
+기본 글꼴, 언어별 기본 글꼴, `body`·`title`·`tooltip` 같은 역할별 글꼴,
+fallback 글꼴과 플레이어 선택 가능 글꼴을 설정할 수 있습니다. 설정 화면의
+GAME 탭에서 언어와 글꼴을 변경하면 즉시 UI에 반영되고 다음 실행을 위해
+저장됩니다. 한국어 글리프가 없는 경우에는 등록된 fallback을 거쳐 지원되는
+OS 글꼴을 동적으로 찾습니다.
+
+Font/Markup Catalog는 Unity 에셋 참조를 담으므로 이 스크립트 전용 저장소에는
+포함하지 않습니다. `Localization Editor`의 Font & Markup 탭에서 로컬 에셋을
+만들면 `Assets/Resources/Localization`에 저장되어 런타임에 자동으로 로드됩니다.
+씬의 `LocalizationFontResolver`에 직접 지정한 카탈로그는 이 기본값을 덮어씁니다.
+해당 카탈로그와 TMP Font/Sprite Asset은 씬·프리팹 등과 함께 별도 백업해야 합니다.
 
 ## 페이지 구성
 

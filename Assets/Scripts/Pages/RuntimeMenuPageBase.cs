@@ -1,4 +1,5 @@
 using System;
+using PS260714.Localization;
 using TMPro;
 using UnityEngine;
 using UnityEngine.UI;
@@ -19,10 +20,15 @@ public abstract class RuntimeMenuPageBase : MonoBehaviour, IPage
     private RectTransform _runtimeRoot;
     private RectTransform _panel;
     private RectTransform _buttonRoot;
+    private TextMeshProUGUI _titleText;
+    private TextMeshProUGUI _descriptionText;
     private bool _initialized;
+    private bool _localeEventBound;
 
     protected abstract string PageTitle { get; }
     protected virtual string PageDescription => string.Empty;
+    protected virtual string PageTitleLocalizationKey => string.Empty;
+    protected virtual string PageDescriptionLocalizationKey => string.Empty;
     protected virtual Vector2 PanelSize => new(520f, 560f);
     protected RectTransform ButtonRoot => _buttonRoot;
 
@@ -30,7 +36,13 @@ public abstract class RuntimeMenuPageBase : MonoBehaviour, IPage
 
     protected virtual void Awake()
     {
+        BindLocaleEvent();
         Init();
+    }
+
+    protected virtual void OnDestroy()
+    {
+        UnbindLocaleEvent();
     }
 
     protected virtual void OnRectTransformDimensionsChange()
@@ -44,6 +56,7 @@ public abstract class RuntimeMenuPageBase : MonoBehaviour, IPage
         gameObject.SetActive(true);
         if (!_initialized)
             Init();
+        RefreshPageLocalization();
         RefreshLayout();
     }
 
@@ -60,6 +73,7 @@ public abstract class RuntimeMenuPageBase : MonoBehaviour, IPage
         BuildRuntimeUi();
         BuildButtons();
         _initialized = true;
+        RefreshPageLocalization();
         RefreshLayout();
     }
 
@@ -79,12 +93,30 @@ public abstract class RuntimeMenuPageBase : MonoBehaviour, IPage
             72f);
     }
 
+    protected Button CreateLocalizedMenuButton(
+        string stableName,
+        string localizationKey,
+        Action action)
+    {
+        if (_buttonRoot == null)
+            return null;
+
+        return CreateStyledButton(
+            _buttonRoot,
+            stableName,
+            LocalizationService.Get(localizationKey),
+            action,
+            72f,
+            localizationKey);
+    }
+
     protected Button CreateStyledButton(
         Transform parent,
         string objectName,
         string label,
         Action action,
-        float preferredHeight = 60f)
+        float preferredHeight = 60f,
+        string localizationKey = null)
     {
         if (parent == null)
             return null;
@@ -143,7 +175,7 @@ public abstract class RuntimeMenuPageBase : MonoBehaviour, IPage
         textRect.anchorMax = Vector2.one;
         textRect.offsetMin = new Vector2(16f, 4f);
         textRect.offsetMax = new Vector2(-16f, -4f);
-        text.text = label;
+        ApplyLocalizedText(text, localizationKey, label);
         return button;
     }
 
@@ -174,10 +206,35 @@ public abstract class RuntimeMenuPageBase : MonoBehaviour, IPage
 
     protected Button CreateOverlayMenuButton(string label, Action action)
     {
+        string objectName = $"btn{label.Replace(" ", string.Empty)}Overlay";
+        return CreateOverlayMenuButtonCore(
+            objectName,
+            label,
+            null,
+            action);
+    }
+
+    protected Button CreateLocalizedOverlayMenuButton(
+        string stableName,
+        string localizationKey,
+        Action action)
+    {
+        return CreateOverlayMenuButtonCore(
+            stableName,
+            LocalizationService.Get(localizationKey),
+            localizationKey,
+            action);
+    }
+
+    private Button CreateOverlayMenuButtonCore(
+        string objectName,
+        string label,
+        string localizationKey,
+        Action action)
+    {
         if (_runtimeRoot == null)
             return null;
 
-        string objectName = $"btn{label.Replace(" ", string.Empty)}Overlay";
         Transform existingButton = _runtimeRoot.Find(objectName);
         GameObject buttonObject;
         if (existingButton != null &&
@@ -237,7 +294,7 @@ public abstract class RuntimeMenuPageBase : MonoBehaviour, IPage
         textRect.anchorMax = Vector2.one;
         textRect.offsetMin = new Vector2(12f, 4f);
         textRect.offsetMax = new Vector2(-12f, -4f);
-        text.text = label;
+        ApplyLocalizedText(text, localizationKey, label);
         return button;
     }
 
@@ -259,7 +316,10 @@ public abstract class RuntimeMenuPageBase : MonoBehaviour, IPage
     private void BuildRuntimeUi()
     {
         if (TryBindExistingUi())
+        {
+            RefreshPageLocalization();
             return;
+        }
 
         GameObject rootObject = new(
             RuntimeRootObjectName,
@@ -301,24 +361,31 @@ public abstract class RuntimeMenuPageBase : MonoBehaviour, IPage
         panelLayout.childControlHeight = true;
         panelLayout.childForceExpandHeight = false;
 
-        TextMeshProUGUI title = CreateText(
+        _titleText = CreateText(
             _panel,
             "txtPageTitle",
             46f,
             82f,
             true);
-        title.text = PageTitle;
+        ApplyLocalizedText(
+            _titleText,
+            PageTitleLocalizationKey,
+            PageTitle);
 
-        if (!string.IsNullOrWhiteSpace(PageDescription))
+        if (!string.IsNullOrWhiteSpace(PageDescriptionLocalizationKey) ||
+            !string.IsNullOrWhiteSpace(PageDescription))
         {
-            TextMeshProUGUI description = CreateText(
+            _descriptionText = CreateText(
                 _panel,
                 "txtPageDescription",
                 20f,
                 64f,
                 true);
-            description.fontStyle = FontStyles.Normal;
-            description.text = PageDescription;
+            _descriptionText.fontStyle = FontStyles.Normal;
+            ApplyLocalizedText(
+                _descriptionText,
+                PageDescriptionLocalizationKey,
+                PageDescription);
         }
 
         GameObject buttonRootObject = new(
@@ -362,6 +429,10 @@ public abstract class RuntimeMenuPageBase : MonoBehaviour, IPage
         _runtimeRoot = rootRect;
         _panel = panelRect;
         _buttonRoot = buttonRootRect;
+        _titleText = existingPanel.Find("txtPageTitle")
+            ?.GetComponent<TextMeshProUGUI>();
+        _descriptionText = existingPanel.Find("txtPageDescription")
+            ?.GetComponent<TextMeshProUGUI>();
         return true;
     }
 
@@ -378,9 +449,12 @@ public abstract class RuntimeMenuPageBase : MonoBehaviour, IPage
         _runtimeRoot = null;
         _panel = null;
         _buttonRoot = null;
+        _titleText = null;
+        _descriptionText = null;
         _initialized = false;
         BuildRuntimeUi();
         BuildButtons();
+        RefreshPageLocalization();
         RefreshLayout();
         UnityEditor.EditorUtility.SetDirty(this);
         UnityEditor.SceneManagement.EditorSceneManager.MarkSceneDirty(
@@ -410,6 +484,61 @@ public abstract class RuntimeMenuPageBase : MonoBehaviour, IPage
             Mathf.Min(PanelSize.y, Mathf.Max(340f, availableHeight)));
     }
 
+    private void BindLocaleEvent()
+    {
+        if (_localeEventBound)
+            return;
+
+        LocalizationService.LocaleChanged += HandleLocaleChanged;
+        _localeEventBound = true;
+    }
+
+    private void UnbindLocaleEvent()
+    {
+        if (!_localeEventBound)
+            return;
+
+        LocalizationService.LocaleChanged -= HandleLocaleChanged;
+        _localeEventBound = false;
+    }
+
+    private void HandleLocaleChanged(string unusedLocale)
+    {
+        RefreshPageLocalization();
+    }
+
+    private void RefreshPageLocalization()
+    {
+        ApplyLocalizedText(
+            _titleText,
+            PageTitleLocalizationKey,
+            PageTitle);
+        ApplyLocalizedText(
+            _descriptionText,
+            PageDescriptionLocalizationKey,
+            PageDescription);
+    }
+
+    private static void ApplyLocalizedText(
+        TMP_Text text,
+        string localizationKey,
+        string fallbackText)
+    {
+        if (text == null)
+            return;
+
+        if (string.IsNullOrWhiteSpace(localizationKey))
+        {
+            text.text = fallbackText ?? string.Empty;
+            return;
+        }
+
+        LocalizedText localizedText = text.GetComponent<LocalizedText>();
+        if (localizedText == null)
+            localizedText = text.gameObject.AddComponent<LocalizedText>();
+        localizedText.SetKey(localizationKey);
+    }
+
     protected static TextMeshProUGUI CreateText(
         Transform parent,
         string objectName,
@@ -433,6 +562,7 @@ public abstract class RuntimeMenuPageBase : MonoBehaviour, IPage
         }
 
         TextMeshProUGUI text = textObject.GetComponent<TextMeshProUGUI>();
+        LocalizationFontResolver.ApplyGameDefault(text);
         text.fontSize = fontSize;
         text.fontSizeMax = fontSize;
         text.fontSizeMin = Mathf.Max(14f, fontSize - 10f);

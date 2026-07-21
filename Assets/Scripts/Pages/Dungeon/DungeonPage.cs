@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using PS260714.Localization;
 using TMPro;
 using UnityEngine;
 using UnityEngine.EventSystems;
@@ -261,6 +262,7 @@ public class DungeonPage : MonoBehaviour, IPage
     {
         UnbindFlowEvents();
         battleTab?.Teardown();
+        _eventTab?.Teardown();
 
         if (_battleManager != null)
         {
@@ -1684,6 +1686,16 @@ public sealed class DungeonEventTab
         BattleItem,
     }
 
+    private enum EViewMode
+    {
+        None,
+        StartingSelection,
+        StartingConfigurationError,
+        RunResult,
+        RewardSelection,
+        ReplacementSelection,
+    }
+
     private readonly struct RewardOption
     {
         public ERewardOptionType Type { get; }
@@ -1793,7 +1805,13 @@ public sealed class DungeonEventTab
     private GridLayoutGroup _rewardCardLayout;
     private RectTransform _buttonRoot;
     private readonly List<RewardOption> _currentRewardOptions = new();
+    private readonly List<CharacterSO> _startingChoices = new();
+    private EViewMode _viewMode;
+    private int _startingAvailableCount;
+    private EDungeonRunResult _currentRunResult;
+    private CharacterSO _replacementDefinition;
     private bool _initialized;
+    private bool _localizationEventsBound;
 
     public void Initialize(GameObject root, DungeonPage page)
     {
@@ -1803,7 +1821,10 @@ public sealed class DungeonEventTab
         _root = root;
         _page = page;
         if (_initialized)
+        {
+            BindLocalizationEvents();
             return;
+        }
 
         foreach (TextMeshProUGUI text in
                  _root.GetComponentsInChildren<TextMeshProUGUI>(true))
@@ -1814,6 +1835,25 @@ public sealed class DungeonEventTab
 
         BuildRuntimeUi();
         _initialized = true;
+        BindLocalizationEvents();
+    }
+
+    public void Teardown()
+    {
+        UnbindLocalizationEvents();
+        _startingChoices.Clear();
+        _currentRewardOptions.Clear();
+        _replacementDefinition = null;
+        _viewMode = EViewMode.None;
+        _initialized = false;
+        _titleText = null;
+        _descriptionText = null;
+        _rewardCardRoot = null;
+        _rewardCardLayout = null;
+        _buttonRoot = null;
+        _panel = null;
+        _root = null;
+        _page = null;
     }
 
     public void ShowUpgradeEvent()
@@ -1822,7 +1862,8 @@ public sealed class DungeonEventTab
             return;
 
         GenerateRewardOptions();
-        ShowCurrentRewardOptions();
+        _viewMode = EViewMode.RewardSelection;
+        RenderRewardSelection();
     }
 
     public void ShowStartingCharacterSelection(
@@ -1831,23 +1872,35 @@ public sealed class DungeonEventTab
         if (!EnsureInitialized())
             return;
 
+        _startingChoices.Clear();
+        if (choices != null)
+        {
+            for (int index = 0; index < choices.Count; index++)
+                _startingChoices.Add(choices[index]);
+        }
+        _viewMode = EViewMode.StartingSelection;
+        RenderStartingCharacterSelection();
+    }
+
+    private void RenderStartingCharacterSelection()
+    {
+        if (!EnsureInitialized())
+            return;
+
         ClearButtons();
         SetRewardCardMode(true);
         RefreshRuntimeLayout();
-        _titleText.text = "CHOOSE STARTING TURRET";
-        _descriptionText.text =
-            "SELECT 1 OF 3 TURRETS\n" +
-            "THE FIRST BATTLE IS A 30 SECOND TUTORIAL";
-
-        if (choices == null)
-            return;
+        _titleText.text = LocalizationService.Get(
+            LocalizationKeys.UiDungeonStartTitle);
+        _descriptionText.text = LocalizationService.Get(
+            LocalizationKeys.UiDungeonStartDescription);
 
         int choiceCount = Mathf.Min(
             DungeonPage.StartingCharacterChoiceCount,
-            choices.Count);
+            _startingChoices.Count);
         for (int index = 0; index < choiceCount; index++)
         {
-            CharacterSO selectedDefinition = choices[index];
+            CharacterSO selectedDefinition = _startingChoices[index];
             if (selectedDefinition == null)
                 continue;
 
@@ -1862,17 +1915,12 @@ public sealed class DungeonEventTab
         if (!EnsureInitialized())
             return;
 
-        ClearButtons();
-        SetRewardCardMode(false);
-        RefreshRuntimeLayout();
-        _titleText.text = "STARTING TURRET SETUP ERROR";
-        _descriptionText.text =
-            $"3 DIFFERENT TURRETS ARE REQUIRED\n" +
-            $"AVAILABLE DEFINITIONS: {Mathf.Max(0, availableCount)}";
-        CreateButton("RETRY", _page.StartNewDungeonRun);
+        _startingAvailableCount = Mathf.Max(0, availableCount);
+        _viewMode = EViewMode.StartingConfigurationError;
+        RenderStartingCharacterConfigurationError();
     }
 
-    public void ShowRunResult(EDungeonRunResult result)
+    private void RenderStartingCharacterConfigurationError()
     {
         if (!EnsureInitialized())
             return;
@@ -1880,14 +1928,55 @@ public sealed class DungeonEventTab
         ClearButtons();
         SetRewardCardMode(false);
         RefreshRuntimeLayout();
-        bool cleared = result == EDungeonRunResult.Clear;
-        _titleText.text = cleared ? "DUNGEON CLEAR" : "DEFEAT";
+        _titleText.text = LocalizationService.Get(
+            LocalizationKeys.UiDungeonStartErrorTitle);
+        _descriptionText.text = LocalizationService.Get(
+            LocalizationKeys.UiDungeonStartErrorDescription,
+            LocalizationService.Arg("count", _startingAvailableCount));
+        CreateButton(
+            LocalizationService.Get(LocalizationKeys.UiDungeonStartRetry),
+            _page.StartNewDungeonRun);
+    }
+
+    public void ShowRunResult(EDungeonRunResult result)
+    {
+        if (!EnsureInitialized())
+            return;
+
+        _currentRunResult = result;
+        _viewMode = EViewMode.RunResult;
+        RenderRunResult();
+    }
+
+    private void RenderRunResult()
+    {
+        if (!EnsureInitialized())
+            return;
+
+        ClearButtons();
+        SetRewardCardMode(false);
+        RefreshRuntimeLayout();
+        bool cleared = _currentRunResult == EDungeonRunResult.Clear;
+        _titleText.text = LocalizationService.Get(cleared
+            ? LocalizationKeys.UiDungeonResultClearTitle
+            : LocalizationKeys.UiDungeonDefeat);
         _descriptionText.text = cleared
-            ? $"ALL {_page.TotalBattleCount} BATTLES CLEARED"
-            : "THE RUN WAS RESET\nCHOOSE A NEW STARTING TURRET";
-        CreateButton("START NEW RUN", _page.StartNewDungeonRun);
+            ? LocalizationService.Get(
+                LocalizationKeys.UiDungeonResultClearDescription,
+                LocalizationService.Arg("count", _page.TotalBattleCount))
+            : LocalizationService.Get(
+                LocalizationKeys.UiDungeonResultResetDescription);
+        CreateButton(
+            LocalizationService.Get(
+                LocalizationKeys.UiDungeonResultStartNewRun),
+            _page.StartNewDungeonRun);
         if (!cleared)
-            CreateButton("RETURN TO MAIN", _page.ReturnToMain);
+        {
+            CreateButton(
+                LocalizationService.Get(
+                    LocalizationKeys.UiDungeonResultReturnMain),
+                _page.ReturnToMain);
+        }
     }
 
     private void GenerateRewardOptions()
@@ -1948,15 +2037,31 @@ public sealed class DungeonEventTab
 
     private void ShowCurrentRewardOptions()
     {
+        _replacementDefinition = null;
+        _viewMode = EViewMode.RewardSelection;
+        RenderRewardSelection();
+    }
+
+    private void RenderRewardSelection()
+    {
+        if (!EnsureInitialized())
+            return;
+
         ClearButtons();
         SetRewardCardMode(true);
         RefreshRuntimeLayout();
-        _titleText.text = "CHOOSE REWARD";
-        _descriptionText.text =
-            $"BATTLE {_page.CurrentBattleNumber} / {_page.TotalBattleCount} CLEAR " +
-            $"(SCALE {_page.CurrentDifficultyScale})\n" +
-            $"NEXT SCALE {_page.GetBattleDifficultyScale(_page.CurrentBattleNumber + 1)}\n" +
-            $"CHOOSE 1 OF {_currentRewardOptions.Count}";
+        _titleText.text = LocalizationService.Get(
+            LocalizationKeys.UiDungeonRewardTitle);
+        _descriptionText.text = LocalizationService.Get(
+            LocalizationKeys.UiDungeonRewardSummary,
+            LocalizationService.Arg("current", _page.CurrentBattleNumber),
+            LocalizationService.Arg("total", _page.TotalBattleCount),
+            LocalizationService.Arg("scale", _page.CurrentDifficultyScale),
+            LocalizationService.Arg(
+                "next",
+                _page.GetBattleDifficultyScale(
+                    _page.CurrentBattleNumber + 1)),
+            LocalizationService.Arg("count", _currentRewardOptions.Count));
 
         foreach (RewardOption option in _currentRewardOptions)
         {
@@ -1975,14 +2080,33 @@ public sealed class DungeonEventTab
             bool maximumEnergy = option.EnergyUpgradeType ==
                                  EDungeonEnergyUpgradeType.MaximumEnergy;
             return new RewardCardContent(
-                "ENERGY UPGRADE",
-                maximumEnergy ? "MAX ENERGY +1" : "RECHARGE -0.5s",
+                LocalizationService.Get(
+                    LocalizationKeys.UiDungeonRewardCategoryEnergy),
+                LocalizationService.Get(maximumEnergy
+                    ? LocalizationKeys.UiDungeonRewardEnergyMaxTitle
+                    : LocalizationKeys.UiDungeonRewardEnergyRechargeTitle),
                 maximumEnergy
-                    ? $"MAX {_page.MaximumEnergy}  >  " +
-                      $"{_page.MaximumEnergy + 1}"
-                    : $"{_page.EnergyRechargeDuration:0.0}s  >  " +
-                      $"{Mathf.Max(DungeonPage.MinimumEnergyRechargeDuration, _page.EnergyRechargeDuration - DungeonPage.EnergyRechargeUpgradeAmount):0.0}s",
-                "APPLIES FOR THIS RUN",
+                    ? LocalizationService.Get(
+                        LocalizationKeys.UiDungeonRewardEnergyMaxChange,
+                        LocalizationService.Arg(
+                            "before",
+                            _page.MaximumEnergy),
+                        LocalizationService.Arg(
+                            "after",
+                            _page.MaximumEnergy + 1))
+                    : LocalizationService.Get(
+                        LocalizationKeys.UiDungeonRewardEnergyRechargeChange,
+                        LocalizationService.Arg(
+                            "before",
+                            _page.EnergyRechargeDuration),
+                        LocalizationService.Arg(
+                            "after",
+                            Mathf.Max(
+                                DungeonPage.MinimumEnergyRechargeDuration,
+                                _page.EnergyRechargeDuration -
+                                DungeonPage.EnergyRechargeUpgradeAmount))),
+                LocalizationService.Get(
+                    LocalizationKeys.UiDungeonRewardRunFooter),
                 new Color(0.82f, 0.64f, 0.2f, 1f));
         }
 
@@ -1991,10 +2115,15 @@ public sealed class DungeonEventTab
             BattleItemDefinition item = BattleItemCatalog.Get(
                 option.BattleItemType);
             return new RewardCardContent(
-                "CONSUMABLE ITEM",
+                LocalizationService.Get(
+                    LocalizationKeys.UiDungeonRewardCategoryItem),
                 item.DisplayName,
                 item.Description,
-                $"OWNED x{_page.GetBattleItemCount(item.Type)}  |  GAIN x1",
+                LocalizationService.Get(
+                    LocalizationKeys.UiDungeonRewardItemFooter,
+                    LocalizationService.Arg(
+                        "owned",
+                        _page.GetBattleItemCount(item.Type))),
                 new Color(0.8f, 0.35f, 0.22f, 1f));
         }
 
@@ -2003,21 +2132,46 @@ public sealed class DungeonEventTab
             CharacterData newTurretData =
                 option.TurretDefinition?.CreateData();
             string description = newTurretData == null
-                ? "ADD A NEW TURRET"
+                ? LocalizationService.Get(
+                    LocalizationKeys
+                        .UiDungeonRewardNewTurretEmptyDescription)
                 : newTurretData.AttackType == CharacterAttackType.FireRandom
-                    ? $"FIRE {newTurretData.FireDuration:0.#}s\n" +
-                      $"SKILL TARGETS x{newTurretData.FireSkillTargetCount}"
-                    : $"ATK {newTurretData.AttackDamage}\n" +
-                      $"SKILL {newTurretData.SkillAttackDamage}";
+                    ? LocalizationService.Get(
+                        LocalizationKeys
+                            .UiDungeonRewardNewTurretFireDescription,
+                        LocalizationService.Arg(
+                            "duration",
+                            newTurretData.FireDuration),
+                        LocalizationService.Arg(
+                            "targets",
+                            newTurretData.FireSkillTargetCount))
+                    : LocalizationService.Get(
+                        LocalizationKeys
+                            .UiDungeonRewardNewTurretDamageDescription,
+                        LocalizationService.Arg(
+                            "attack",
+                            newTurretData.AttackDamage),
+                        LocalizationService.Arg(
+                            "skill",
+                            newTurretData.SkillAttackDamage));
             string footer = newTurretData != null
-                ? $"SKILL C{newTurretData.ActiveSkillCost}  |  " +
-                  $"ATTACK CD {newTurretData.AttackCooldown:0.#}s"
-                : "EMPTY PARTY SLOT REQUIRED";
+                ? LocalizationService.Get(
+                    LocalizationKeys.UiDungeonRewardNewTurretFooter,
+                    LocalizationService.Arg(
+                        "cost",
+                        newTurretData.ActiveSkillCost),
+                    LocalizationService.Arg(
+                        "cooldown",
+                        newTurretData.AttackCooldown))
+                : LocalizationService.Get(
+                    LocalizationKeys.UiDungeonRewardNewTurretEmptySlot);
             return new RewardCardContent(
-                "NEW TURRET",
-                option.TurretDefinition != null
-                    ? option.TurretDefinition.CharacterName
-                    : "UNKNOWN TURRET",
+                LocalizationService.Get(
+                    LocalizationKeys.UiDungeonRewardCategoryNewTurret),
+                newTurretData != null
+                    ? CharacterLocalization.GetName(newTurretData)
+                    : LocalizationService.Get(
+                        LocalizationKeys.UiDungeonRewardUnknownTurret),
                 description,
                 footer,
                 new Color(0.25f, 0.52f, 0.78f, 1f));
@@ -2029,20 +2183,28 @@ public sealed class DungeonEventTab
             turrets[slotIndex]?.Data == null)
         {
             return new RewardCardContent(
-                "TURRET UPGRADE",
-                "UNKNOWN UPGRADE",
-                "TURRET DATA IS UNAVAILABLE",
+                LocalizationService.Get(
+                    LocalizationKeys.UiDungeonRewardCategoryTurretUpgrade),
+                LocalizationService.Get(
+                    LocalizationKeys.UiDungeonRewardUnknownUpgrade),
+                LocalizationService.Get(
+                    LocalizationKeys.UiDungeonRewardTurretUnavailable),
                 string.Empty,
                 new Color(0.3f, 0.68f, 0.4f, 1f));
         }
 
         CharacterData data = turrets[slotIndex].Data;
         return new RewardCardContent(
-            $"TURRET UPGRADE  |  S{slotIndex + 1}",
-            GetUpgradeCardTitle(data, option.UpgradeType),
-            $"{data.CharacterName}\n" +
-            data.GetUpgradeLabel(option.UpgradeType),
-            "PERMANENT FOR THIS RUN",
+            LocalizationService.Get(
+                LocalizationKeys.UiDungeonRewardCategoryTurretUpgradeSlot,
+                LocalizationService.Arg("slot", slotIndex + 1)),
+            CharacterLocalization.GetUpgradeTitle(data, option.UpgradeType),
+            CharacterLocalization.GetName(data) + "\n" +
+            CharacterLocalization.GetUpgradeDescription(
+                data,
+                option.UpgradeType),
+            LocalizationService.Get(
+                LocalizationKeys.UiDungeonRewardPermanentFooter),
             new Color(0.3f, 0.68f, 0.4f, 1f));
     }
 
@@ -2053,26 +2215,33 @@ public sealed class DungeonEventTab
         if (data == null)
         {
             return new RewardCardContent(
-                "STARTING TURRET",
-                "UNKNOWN TURRET",
-                "TURRET DATA IS UNAVAILABLE",
+                LocalizationService.Get(
+                    LocalizationKeys.UiDungeonRewardCategoryStartingTurret),
+                LocalizationService.Get(
+                    LocalizationKeys.UiDungeonRewardUnknownTurret),
+                LocalizationService.Get(
+                    LocalizationKeys.UiDungeonRewardTurretUnavailable),
                 string.Empty,
                 new Color(0.25f, 0.52f, 0.78f, 1f));
         }
 
         string description = data.AttackType switch
         {
-            CharacterAttackType.RandomMultiple =>
-                $"RANDOM TARGETS x{data.TargetCount}\n" +
-                $"ATK {data.AttackDamage} EACH",
-            CharacterAttackType.CrossHighestHealth =>
-                $"CROSS AREA ATTACK\nATK {data.AttackDamage}",
-            CharacterAttackType.FireRandom =>
-                $"FIRE {data.FireDuration:0.#}s\n" +
-                $"{data.FireTickDamage} DMG / " +
-                $"{data.FireTickInterval:0.#}s",
-            _ =>
-                $"LOWEST HEALTH TARGET\nATK {data.AttackDamage}",
+            CharacterAttackType.RandomMultiple => LocalizationService.Get(
+                LocalizationKeys.UiDungeonRewardStartRandom,
+                LocalizationService.Arg("count", data.TargetCount),
+                LocalizationService.Arg("attack", data.AttackDamage)),
+            CharacterAttackType.CrossHighestHealth => LocalizationService.Get(
+                LocalizationKeys.UiDungeonRewardStartCross,
+                LocalizationService.Arg("attack", data.AttackDamage)),
+            CharacterAttackType.FireRandom => LocalizationService.Get(
+                LocalizationKeys.UiDungeonRewardStartFire,
+                LocalizationService.Arg("duration", data.FireDuration),
+                LocalizationService.Arg("damage", data.FireTickDamage),
+                LocalizationService.Arg("interval", data.FireTickInterval)),
+            _ => LocalizationService.Get(
+                LocalizationKeys.UiDungeonRewardStartLowest,
+                LocalizationService.Arg("attack", data.AttackDamage)),
         };
         Color accent = data.AttackType switch
         {
@@ -2085,32 +2254,15 @@ public sealed class DungeonEventTab
             _ => new Color(0.25f, 0.52f, 0.78f, 1f),
         };
         return new RewardCardContent(
-            "STARTING TURRET",
-            data.CharacterName,
+            LocalizationService.Get(
+                LocalizationKeys.UiDungeonRewardCategoryStartingTurret),
+            CharacterLocalization.GetName(data),
             description,
-            $"SKILL C{data.ActiveSkillCost}  |  " +
-            $"ATTACK CD {data.AttackCooldown:0.#}s\nCLICK TO START",
+            LocalizationService.Get(
+                LocalizationKeys.UiDungeonRewardStartFooter,
+                LocalizationService.Arg("cost", data.ActiveSkillCost),
+                LocalizationService.Arg("cooldown", data.AttackCooldown)),
             accent);
-    }
-
-    private static string GetUpgradeCardTitle(
-        CharacterData data,
-        ETurretUpgradeType upgradeType)
-    {
-        return upgradeType switch
-        {
-            ETurretUpgradeType.PrimaryPower
-                when data.AttackType == CharacterAttackType.FireRandom =>
-                "FIRE DURATION",
-            ETurretUpgradeType.PrimaryPower => "ATTACK POWER",
-            ETurretUpgradeType.AttackSpeed => "ATTACK SPEED",
-            ETurretUpgradeType.SkillPower
-                when data.AttackType == CharacterAttackType.FireRandom =>
-                "SKILL TARGETS",
-            ETurretUpgradeType.SkillPower => "SKILL POWER",
-            ETurretUpgradeType.SkillCost => "SKILL COST",
-            _ => "TURRET UPGRADE",
-        };
     }
 
     private void SelectRewardOption(RewardOption option)
@@ -2147,13 +2299,30 @@ public sealed class DungeonEventTab
 
     private void ShowReplacementSelection(CharacterSO newDefinition)
     {
+        _replacementDefinition = newDefinition;
+        _viewMode = EViewMode.ReplacementSelection;
+        RenderReplacementSelection();
+    }
+
+    private void RenderReplacementSelection()
+    {
+        if (!EnsureInitialized() || _replacementDefinition == null)
+            return;
+
         ClearButtons();
         SetRewardCardMode(false);
         RefreshRuntimeLayout();
-        _titleText.text = "REPLACE TURRET";
-        _descriptionText.text =
-            $"NEW: {newDefinition.CharacterName}\n" +
-            "THE REPLACED TURRET'S UPGRADES WILL BE LOST";
+        CharacterSO selectedDefinition = _replacementDefinition;
+        CharacterData newData = selectedDefinition.CreateData();
+        string newName = newData != null
+            ? CharacterLocalization.GetName(newData)
+            : LocalizationService.Get(
+                LocalizationKeys.UiDungeonRewardUnknownTurret);
+        _titleText.text = LocalizationService.Get(
+            LocalizationKeys.UiDungeonReplaceTitle);
+        _descriptionText.text = LocalizationService.Get(
+            LocalizationKeys.UiDungeonReplaceDescription,
+            LocalizationService.Arg("name", newName));
 
         IReadOnlyList<CharacterRuntime> turrets = _page.OwnedTurrets;
         for (int index = 0; index < turrets.Count; index++)
@@ -2161,9 +2330,65 @@ public sealed class DungeonEventTab
             int slotIndex = index;
             CreateButton(
                 GetTurretSummary(slotIndex, turrets[index]),
-                () => _page.TryAcquireTurret(newDefinition, slotIndex));
+                () => _page.TryAcquireTurret(
+                    selectedDefinition,
+                    slotIndex));
         }
-        CreateButton("BACK", ShowCurrentRewardOptions);
+        CreateButton(
+            LocalizationService.Get(LocalizationKeys.UiCommonBack),
+            ShowCurrentRewardOptions);
+    }
+
+    private void BindLocalizationEvents()
+    {
+        if (_localizationEventsBound)
+            return;
+
+        LocalizationService.LocaleChanged += HandleLocalizationChanged;
+        LocalizationService.FontChanged += HandleLocalizationChanged;
+        _localizationEventsBound = true;
+    }
+
+    private void UnbindLocalizationEvents()
+    {
+        if (!_localizationEventsBound)
+            return;
+
+        LocalizationService.LocaleChanged -= HandleLocalizationChanged;
+        LocalizationService.FontChanged -= HandleLocalizationChanged;
+        _localizationEventsBound = false;
+    }
+
+    private void HandleLocalizationChanged(string unusedValue)
+    {
+        if (!_initialized)
+            return;
+
+        LocalizationFontResolver.ApplyGameDefault(_titleText);
+        LocalizationFontResolver.ApplyGameDefault(_descriptionText);
+        RenderCurrentView();
+    }
+
+    private void RenderCurrentView()
+    {
+        switch (_viewMode)
+        {
+            case EViewMode.StartingSelection:
+                RenderStartingCharacterSelection();
+                break;
+            case EViewMode.StartingConfigurationError:
+                RenderStartingCharacterConfigurationError();
+                break;
+            case EViewMode.RunResult:
+                RenderRunResult();
+                break;
+            case EViewMode.RewardSelection:
+                RenderRewardSelection();
+                break;
+            case EViewMode.ReplacementSelection:
+                RenderReplacementSelection();
+                break;
+        }
     }
 
     private bool EnsureInitialized()
@@ -2177,13 +2402,31 @@ public sealed class DungeonEventTab
     {
         CharacterData data = turret?.Data;
         if (data == null)
-            return $"SLOT {slotIndex + 1}";
+        {
+            return LocalizationService.Get(
+                LocalizationKeys.UiDungeonReplaceEmptySlot,
+                LocalizationService.Arg("slot", slotIndex + 1));
+        }
 
         return data.AttackType == CharacterAttackType.FireRandom
-            ? $"S{slotIndex + 1} {data.CharacterName} | " +
-              $"FIRE {data.FireDuration:0.#}s | TARGET x{data.FireSkillTargetCount}"
-            : $"S{slotIndex + 1} {data.CharacterName} | " +
-              $"ATK {data.AttackDamage} | SK {data.SkillAttackDamage}";
+            ? LocalizationService.Get(
+                LocalizationKeys.UiDungeonReplaceFireSlot,
+                LocalizationService.Arg("slot", slotIndex + 1),
+                LocalizationService.Arg(
+                    "name",
+                    CharacterLocalization.GetName(data)),
+                LocalizationService.Arg("duration", data.FireDuration),
+                LocalizationService.Arg(
+                    "targets",
+                    data.FireSkillTargetCount))
+            : LocalizationService.Get(
+                LocalizationKeys.UiDungeonReplaceDamageSlot,
+                LocalizationService.Arg("slot", slotIndex + 1),
+                LocalizationService.Arg(
+                    "name",
+                    CharacterLocalization.GetName(data)),
+                LocalizationService.Arg("attack", data.AttackDamage),
+                LocalizationService.Arg("skill", data.SkillAttackDamage));
     }
 
     private void BuildRuntimeUi()
@@ -2326,6 +2569,7 @@ public sealed class DungeonEventTab
             typeof(LayoutElement));
         textObject.transform.SetParent(parent, false);
         TextMeshProUGUI text = textObject.GetComponent<TextMeshProUGUI>();
+        LocalizationFontResolver.ApplyGameDefault(text);
         text.fontSize = fontSize;
         text.color = _textColor;
         text.alignment = TextAlignmentOptions.Center;
@@ -2441,6 +2685,7 @@ public sealed class DungeonEventTab
         textRect.offsetMax = new Vector2(-14f, -4f);
 
         TextMeshProUGUI text = textObject.GetComponent<TextMeshProUGUI>();
+        LocalizationFontResolver.ApplyGameDefault(text);
         text.fontSize = maximumFontSize;
         text.fontSizeMax = maximumFontSize;
         text.fontSizeMin = Mathf.Max(11f, maximumFontSize - 6f);

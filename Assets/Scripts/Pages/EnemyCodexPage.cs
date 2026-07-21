@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using PS260714.Localization;
 using TMPro;
 using UnityEngine;
 using UnityEngine.UI;
@@ -18,19 +19,12 @@ public sealed class EnemyCodexPage : RuntimeMenuPageBase
         public float SpawnIntervalMultiplier { get; }
         public float ThreatCost { get; }
         public bool TargetPriorityExcluded { get; }
-        public float InitialArmorMultiplier { get; }
-        public int GuardedHitCount { get; }
-        public int CompanionSpawnCount { get; }
-        public float AbilityCooldown { get; }
-        public int AbilityPower { get; }
-        public float DisableDuration { get; }
+        public string AbilityDescription { get; }
 
         public EnemyCodexEntry(EnemySO definition)
         {
             EnemyId = definition.EnemyId;
-            DisplayName = string.IsNullOrWhiteSpace(definition.DisplayName)
-                ? EnemyTypeDisplay.GetName(definition.Type)
-                : definition.DisplayName;
+            DisplayName = EnemyLocalization.GetName(definition.Type);
             CardCode = definition.CardCode;
             Grade = definition.Grade;
             Type = definition.Type;
@@ -38,12 +32,7 @@ public sealed class EnemyCodexPage : RuntimeMenuPageBase
             SpawnIntervalMultiplier = definition.SpawnIntervalMultiplier;
             ThreatCost = definition.ThreatCost;
             TargetPriorityExcluded = definition.TargetPriorityExcluded;
-            InitialArmorMultiplier = definition.InitialArmorMultiplier;
-            GuardedHitCount = definition.GuardedHitCount;
-            CompanionSpawnCount = definition.CompanionSpawnCount;
-            AbilityCooldown = definition.AbilityCooldown;
-            AbilityPower = definition.AbilityPower;
-            DisableDuration = definition.DisableDuration;
+            AbilityDescription = EnemyLocalization.GetAbility(definition);
         }
     }
 
@@ -61,12 +50,15 @@ public sealed class EnemyCodexPage : RuntimeMenuPageBase
     private TextMeshProUGUI _detailTitle;
     private TextMeshProUGUI _identityText;
     private TextMeshProUGUI _statText;
+    private TextMeshProUGUI _abilityTitleText;
     private TextMeshProUGUI _abilityText;
+    private Button _backButton;
     private int _selectedIndex;
 
-    protected override string PageTitle => "ENEMY CODEX";
+    protected override string PageTitle => LocalizationService.Get(
+        LocalizationKeys.CodexEnemyTitle);
     protected override string PageDescription =>
-        "SELECT AN ENEMY TAB TO VIEW ITS INFORMATION";
+        LocalizationService.Get(LocalizationKeys.CodexEnemyDescription);
     protected override Vector2 PanelSize => new(1220f, 860f);
 
     protected override void BuildButtons()
@@ -74,7 +66,12 @@ public sealed class EnemyCodexPage : RuntimeMenuPageBase
         RefreshEntries();
         BuildEnemyTabStrip();
         BuildDetailPanel();
-        CreateMenuButton("BACK TO CODEX", HandleBackClicked);
+        _backButton = CreateStyledButton(
+            ButtonRoot,
+            "btnBACKTOCODEX",
+            LocalizationService.Get(LocalizationKeys.UiCommonBack),
+            HandleBackClicked,
+            72f);
 
         if (_entries.Count > 0)
             SelectEnemy(Mathf.Clamp(_selectedIndex, 0, _entries.Count - 1));
@@ -264,10 +261,10 @@ public sealed class EnemyCodexPage : RuntimeMenuPageBase
             string.Empty,
             22f,
             92f);
-        CreateContentText(
+        _abilityTitleText = CreateContentText(
             detailObject.transform,
             "txtAbilityTitle",
-            "ABILITY",
+            LocalizationService.Get(LocalizationKeys.CodexEnemyAbility),
             20f,
             32f,
             FontStyles.Bold);
@@ -308,62 +305,151 @@ public sealed class EnemyCodexPage : RuntimeMenuPageBase
             ? "--"
             : entry.CardCode;
         _detailTitle.text = $"{entry.DisplayName}  [{cardCode}]";
-        _identityText.text =
-            $"ID {entry.EnemyId}   |   " +
-            $"GRADE {entry.Grade.ToString().ToUpperInvariant()}   |   " +
-            $"TYPE {EnemyTypeDisplay.GetName(entry.Type)}";
-        _statText.text =
-            $"BASE HEALTH  {entry.BaseHealth}     " +
-            $"THREAT  {entry.ThreatCost:0.##}\n" +
-            $"SPAWN INTERVAL  x{entry.SpawnIntervalMultiplier:0.##}     " +
-            $"TARGET PRIORITY  " +
-            $"{(entry.TargetPriorityExcluded ? "EXCLUDED" : "NORMAL")}";
-        _abilityText.text = GetAbilityDescription(entry);
+        _identityText.text = LocalizationService.Get(
+            LocalizationKeys.CodexEnemyIdentity,
+            LocalizationService.Arg("id", entry.EnemyId),
+            LocalizationService.Arg(
+                "grade",
+                EnemyLocalization.GetGrade(entry.Grade)),
+            LocalizationService.Arg(
+                "type",
+                EnemyLocalization.GetName(entry.Type)));
+        _statText.text = LocalizationService.Get(
+            LocalizationKeys.CodexEnemyStats,
+            LocalizationService.Arg("health", entry.BaseHealth),
+            LocalizationService.Arg("threat", entry.ThreatCost),
+            LocalizationService.Arg(
+                "interval",
+                entry.SpawnIntervalMultiplier),
+            LocalizationService.Arg(
+                "priority",
+                EnemyLocalization.GetPriority(
+                    entry.TargetPriorityExcluded)));
+        _abilityText.text = entry.AbilityDescription;
+
+        ApplyLocalizedFont(_detailTitle, "title");
+        ApplyLocalizedFont(_identityText, "body");
+        ApplyLocalizedFont(_statText, "number");
+        ApplyLocalizedFont(_abilityTitleText, "title");
+        ApplyLocalizedFont(_abilityText, "body");
     }
 
     private void ShowEmptyState()
     {
         if (_detailTitle != null)
-            _detailTitle.text = "NO ENEMY DATA";
+            _detailTitle.text = LocalizationService.Get(
+                LocalizationKeys.CodexEnemyEmptyTitle);
         if (_identityText != null)
             _identityText.text = string.Empty;
         if (_statText != null)
-            _statText.text = "NO ENEMY DEFINITIONS ARE AVAILABLE.";
+            _statText.text = LocalizationService.Get(
+                LocalizationKeys.CodexEnemyEmptyBody);
         if (_abilityText != null)
             _abilityText.text = string.Empty;
     }
 
-    private static string GetAbilityDescription(EnemyCodexEntry entry)
+    private void OnEnable()
     {
-        return entry.Type switch
+        LocalizationService.LocaleChanged += HandleLocaleChanged;
+        LocalizationService.FontChanged += HandleFontChanged;
+        RefreshLocalizedView();
+    }
+
+    private void OnDisable()
+    {
+        LocalizationService.LocaleChanged -= HandleLocaleChanged;
+        LocalizationService.FontChanged -= HandleFontChanged;
+    }
+
+    private void HandleLocaleChanged(string unusedLocale)
+    {
+        RefreshLocalizedView();
+    }
+
+    private void HandleFontChanged(string unusedFontId)
+    {
+        RefreshLocalizedView();
+    }
+
+    private void RefreshLocalizedView()
+    {
+        if (_detailTitle == null)
+            return;
+
+        RefreshEntries();
+        for (int index = 0;
+             index < _tabButtons.Count && index < _entries.Count;
+             index++)
         {
-            EEnemyType.Assault =>
-                $"RAPID DEPLOYMENT\n" +
-                $"SPAWN INTERVAL IS MULTIPLIED BY " +
-                $"{entry.SpawnIntervalMultiplier:0.##}.",
-            EEnemyType.Heavy =>
-                $"GUARD\nTHE FIRST {entry.GuardedHitCount} HITS " +
-                "ARE REDUCED TO 1 DAMAGE.",
-            EEnemyType.Medic =>
-                $"FIELD HEAL\nEVERY {entry.AbilityCooldown:0.#}s, " +
-                $"HEALS EACH ORTHOGONALLY ADJACENT ENEMY BY " +
-                $"{entry.AbilityPower}.",
-            EEnemyType.Mechanic =>
-                $"SYSTEM DISABLE\nEVERY {entry.AbilityCooldown:0.#}s, " +
-                "DISABLES THE HIGHEST-DAMAGE TURRET FOR " +
-                $"{entry.DisableDuration:0.#}s.",
-            EEnemyType.Pointman =>
-                $"FORMATION ENTRY\nSPAWNS TOGETHER WITH " +
-                $"{entry.CompanionSpawnCount} COMPANIONS.",
-            EEnemyType.ShieldBearer =>
-                $"SHIELD FORMATION\nSTARTS WITH " +
-                $"{entry.InitialArmorMultiplier * 100f:0.#}% MAX HP " +
-                "AS ARMOR AND TAKES DAMAGE FOR ADJACENT ENEMIES.",
-            EEnemyType.Infiltrator =>
-                "STEALTH\nEXCLUDED FROM NORMAL TARGET PRIORITY " +
-                "WHILE ANOTHER VALID TARGET EXISTS.",
-            _ => "NO SPECIAL ABILITY.",
-        };
+            TextMeshProUGUI label = _tabButtons[index]
+                .GetComponentInChildren<TextMeshProUGUI>(true);
+            if (label == null)
+                continue;
+
+            label.text = _entries[index].DisplayName;
+            ApplyLocalizedFont(label, "title");
+        }
+
+        Transform runtimeRoot = transform.Find(RuntimeRootObjectName);
+        Transform panel = runtimeRoot != null
+            ? runtimeRoot.Find("grpMenuPanel")
+            : null;
+        if (panel != null)
+        {
+            TextMeshProUGUI title = panel.Find("txtPageTitle")
+                ?.GetComponent<TextMeshProUGUI>();
+            TextMeshProUGUI description = panel.Find("txtPageDescription")
+                ?.GetComponent<TextMeshProUGUI>();
+            if (title != null)
+            {
+                title.text = PageTitle;
+                ApplyLocalizedFont(title, "title");
+            }
+
+            if (description != null)
+            {
+                description.text = PageDescription;
+                ApplyLocalizedFont(description, "body");
+            }
+        }
+
+        if (_abilityTitleText != null)
+        {
+            _abilityTitleText.text = LocalizationService.Get(
+                LocalizationKeys.CodexEnemyAbility);
+            ApplyLocalizedFont(_abilityTitleText, "title");
+        }
+
+        if (_backButton != null)
+        {
+            TextMeshProUGUI backLabel = _backButton
+                .GetComponentInChildren<TextMeshProUGUI>(true);
+            if (backLabel != null)
+            {
+                backLabel.text = LocalizationService.Get(
+                    LocalizationKeys.UiCommonBack);
+                ApplyLocalizedFont(backLabel, "body");
+            }
+        }
+
+        if (_entries.Count > 0)
+        {
+            SelectEnemy(Mathf.Clamp(
+                _selectedIndex,
+                0,
+                _entries.Count - 1));
+        }
+        else
+        {
+            ShowEmptyState();
+        }
+    }
+
+    private static void ApplyLocalizedFont(
+        TMP_Text text,
+        string fontRole)
+    {
+        LocalizationFontResolver.ApplyGameDefault(text, fontRole);
     }
 
     private void HandleBackClicked()

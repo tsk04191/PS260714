@@ -1,3 +1,4 @@
+using PS260714.Localization;
 using UnityEngine;
 
 [DisallowMultipleComponent]
@@ -9,12 +10,25 @@ public sealed class TitlePage : RuntimeMenuPageBase
 
     protected override string PageTitle => "TITLE";
     protected override string PageDescription => "PS260714";
+    protected override string PageTitleLocalizationKey =>
+        LocalizationKeys.UiTitleTitle;
+    protected override string PageDescriptionLocalizationKey =>
+        LocalizationKeys.UiTitleDescription;
 
     protected override void BuildButtons()
     {
-        CreateMenuButton("START", HandleStartClicked);
-        CreateMenuButton("SETTINGS", HandleSettingsClicked);
-        CreateMenuButton("QUIT", HandleQuitClicked);
+        CreateLocalizedMenuButton(
+            "btnSTART",
+            LocalizationKeys.UiCommonStart,
+            HandleStartClicked);
+        CreateLocalizedMenuButton(
+            "btnSETTINGS",
+            LocalizationKeys.UiCommonSettings,
+            HandleSettingsClicked);
+        CreateLocalizedMenuButton(
+            "btnQUIT",
+            LocalizationKeys.UiCommonQuit,
+            HandleQuitClicked);
     }
 
     private void HandleStartClicked()

@@ -115,6 +115,7 @@ public sealed class DungeonTileView : MonoBehaviour, IPointerClickHandler
             return false;
 
         EnemyCard card = Instantiate(enemyCardPrefab, stackRoot);
+        card.ApplyGameDefaultFont();
         card.name = $"grpEnemyCard_{_cards.Count + 1}";
         card.Bind(enemy);
         card.Clicked += HandleEnemyCardClicked;

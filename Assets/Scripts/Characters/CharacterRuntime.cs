@@ -1,3 +1,4 @@
+using PS260714.Localization;
 using TMPro;
 using UnityEngine;
 using UnityEngine.EventSystems;
@@ -55,8 +56,16 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
         Initialize();
     }
 
+    private void OnEnable()
+    {
+        LocalizationService.LocaleChanged += HandleLocaleChanged;
+        if (_initialized)
+            RefreshUi();
+    }
+
     private void OnDestroy()
     {
+        LocalizationService.LocaleChanged -= HandleLocaleChanged;
         _itemTargetHandler = null;
         BindBattle(null, null);
     }
@@ -72,6 +81,10 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
             Debug.LogError("CharacterRuntime references are incomplete.", this);
             return false;
         }
+
+        LocalizationFontResolver.ApplyGameDefault(nameText);
+        LocalizationFontResolver.ApplyGameDefault(attackText);
+        LocalizationFontResolver.ApplyGameDefault(cooldownText);
 
         Data = original.CreateData();
         InitializeAttackSfxSpeaker();
@@ -91,6 +104,7 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
 
     private void OnDisable()
     {
+        LocalizationService.LocaleChanged -= HandleLocaleChanged;
         _skillTooltip?.SetActive(false);
     }
 
@@ -565,6 +579,12 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
         RefreshUi();
     }
 
+    private void HandleLocaleChanged(string unusedLocale)
+    {
+        RefreshUi();
+        RefreshSkillTooltip();
+    }
+
     private void EnsureSkillTooltip()
     {
         if (_skillTooltip != null && _skillTooltipText != null)
@@ -615,6 +635,7 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
             _skillTooltipText = textObject.GetComponent<TextMeshProUGUI>();
         }
 
+        LocalizationFontResolver.ApplyGameDefault(_skillTooltipText);
         RectTransform textRect = _skillTooltipText.rectTransform;
         textRect.anchorMin = Vector2.zero;
         textRect.anchorMax = Vector2.one;
@@ -666,35 +687,20 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
         if (_skillTooltipText == null || Data == null)
             return;
 
-        string effect = Data.AttackType switch
-        {
-            CharacterAttackType.RandomMultiple =>
-                $"For {Data.ActiveSkillDuration:0.#}s, attacks target " +
-                $"{Data.TargetCount + 2} enemies and deal " +
-                $"{Data.SkillAttackDamage} damage each.",
-            CharacterAttackType.CrossHighestHealth =>
-                $"Next {Data.ActiveSkillAttackCount} attacks deal " +
-                $"{Data.SkillAttackDamage} damage in the inner cross and " +
-                $"{Mathf.Max(1, Mathf.FloorToInt(Data.SkillAttackDamage * 0.5f))} " +
-                "damage to the outer and diagonal tiles.",
-            CharacterAttackType.FireRandom =>
-                $"Next {Data.ActiveSkillAttackCount} attacks choose " +
-                $"{Data.FireSkillTargetCount} centers and apply fire for " +
-                $"{GetEffectiveFireDuration():0.#}s in each 3x3 area. " +
-                "Overlapping areas stack duration.",
-            _ =>
-                $"Deal {Data.SkillAttackDamage} damage to the " +
-                "lowest-health enemy.",
-        };
-        string status = IsActiveSkillPending()
-            ? "ACTIVE"
-            : _activeSkillResource != null &&
-              _activeSkillResource.Current >= Data.ActiveSkillCost
-                ? "READY"
-                : "NOT ENOUGH ENERGY";
+        bool hasEnoughEnergy = _activeSkillResource != null &&
+                               _activeSkillResource.Current >=
+                               Data.ActiveSkillCost;
+        string status = CharacterLocalization.GetTurretStatus(
+            IsActiveSkillPending(),
+            hasEnoughEnergy);
         _skillTooltipText.text =
-            $"ACTIVE SKILL  [C{Data.ActiveSkillCost}]  {status}\n" +
-            effect + "\nCLICK TURRET TO ACTIVATE";
+            CharacterLocalization.GetTurretSkillHeader(
+                Data.ActiveSkillCost,
+                status) + "\n" +
+            CharacterLocalization.GetActiveSkillDescription(
+                Data,
+                GetEffectiveFireDuration()) + "\n" +
+            CharacterLocalization.GetTurretClickActivate();
     }
 
     private void RefreshUi()
@@ -705,23 +711,22 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
         string slotLabel = PartySlotIndex >= 0
             ? $"[S{PartySlotNumber}] "
             : string.Empty;
-        nameText.text =
-            $"{slotLabel}{Data.CharacterName} [C{Data.ActiveSkillCost}]";
+        nameText.text = slotLabel + CharacterLocalization.GetTurretName(Data);
         nameText.color = EffectColor;
-        attackText.text = Data.AttackType == CharacterAttackType.FireRandom
-            ? $"FIRE {Data.FireDuration:0.#}s | SK x{Data.FireSkillTargetCount}"
-            : $"ATK {Data.AttackDamage} | SK {Data.SkillAttackDamage}";
+        attackText.text = CharacterLocalization.GetTurretAttack(Data);
         if (_disabledTimeRemaining > 0f)
         {
             float displayedTime =
                 TimePrecision.FloorToTenth(_disabledTimeRemaining);
-            cooldownText.text = $"STOP {displayedTime:0.0}s";
+            cooldownText.text =
+                CharacterLocalization.GetCooldownStop(displayedTime);
         }
         else if (_attackRecoveryRemaining > 0f)
         {
             float displayedRecovery =
                 TimePrecision.FloorToTenth(_attackRecoveryRemaining);
-            cooldownText.text = $"RECOVERY {displayedRecovery:0.0}s";
+            cooldownText.text =
+                CharacterLocalization.GetCooldownRecovery(displayedRecovery);
         }
         else
         {
@@ -731,21 +736,27 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
             {
                 float displayedSkillTime =
                     TimePrecision.FloorToTenth(_dualSkillTimeRemaining);
-                cooldownText.text = $"ACTIVE {displayedSkillTime:0.0}s";
+                cooldownText.text =
+                    CharacterLocalization.GetCooldownActiveTime(
+                        displayedSkillTime);
             }
             else if (_areaSkillAttackCount > 0)
             {
-                cooldownText.text = $"ACTIVE x{_areaSkillAttackCount}";
+                cooldownText.text =
+                    CharacterLocalization.GetCooldownActiveCount(
+                        _areaSkillAttackCount);
             }
             else if (_fireSkillAttackCount > 0)
             {
-                cooldownText.text = $"ACTIVE x{_fireSkillAttackCount}";
+                cooldownText.text =
+                    CharacterLocalization.GetCooldownActiveCount(
+                        _fireSkillAttackCount);
             }
             else
             {
                 cooldownText.text = _remainingCooldown > 0f
-                    ? $"CD {displayedCooldown:0.0}s"
-                    : "READY";
+                    ? CharacterLocalization.GetCooldownWait(displayedCooldown)
+                    : CharacterLocalization.GetReadyStatus();
             }
         }
         float effectiveAttackCooldown = GetEffectiveAttackCooldown();

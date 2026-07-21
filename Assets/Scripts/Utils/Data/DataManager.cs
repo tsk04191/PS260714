@@ -1,12 +1,22 @@
 using System.Collections.Generic;
+using PS260714.Localization;
+using TMPro;
 using UnityEngine;
 using UnityEngine.UI;
 
 public class DataManager : MonoBehaviour
 {
+    public static DataManager Current { get; private set; }
+
     [HideInInspector] public bool IsSetupDone = false;
 
     public Image imgBrightness;
+
+    [Header("Client UI")]
+    [Tooltip(
+        "Game-wide TMP font. When empty, the global font from " +
+        "LocalizationFontCatalog is used.")]
+    [SerializeField] private TMP_FontAsset clientDefaultFont;
 
     [HideInInspector] public DisplayData DisplayDatas;
     [HideInInspector] public AudioData AudioDatas;
@@ -18,9 +28,22 @@ public class DataManager : MonoBehaviour
 
     private GameEventManager _events;
 
+    public TMP_FontAsset ClientDefaultFont => clientDefaultFont;
+
+    [RuntimeInitializeOnLoadMethod(
+        RuntimeInitializeLoadType.SubsystemRegistration)]
+    private static void ResetStatics()
+    {
+        Current = null;
+    }
+
     void Awake()
     {
+        if (Current == null || Current == this)
+            Current = this;
+
         IsSetupDone = false;
+        LocalizationFontResolver.RefreshAllClientText();
     }
 
     void Start()
@@ -40,6 +63,14 @@ public class DataManager : MonoBehaviour
     private void OnDestroy()
     {
         SetEventManager(null);
+        if (Current == this)
+            Current = null;
+    }
+
+    private void OnValidate()
+    {
+        if (Application.isPlaying)
+            LocalizationFontResolver.RefreshAllClientText();
     }
 
     private void SetEventManager(GameEventManager events)

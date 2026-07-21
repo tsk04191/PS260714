@@ -1,5 +1,7 @@
 using System;
 using System.Collections.Generic;
+using PS260714.Localization;
+using TMPro;
 using UnityEngine;
 
 public enum EDungeonPhase
@@ -49,6 +51,19 @@ public sealed class DungeonFlowController : MonoBehaviour
 
         if (!ValidateConfiguration())
             return false;
+
+        BindLocalizedPlaceholder(
+            eventTab,
+            "txtEventPlaceholder",
+            LocalizationKeys.UiDungeonEvent);
+        BindLocalizedPlaceholder(
+            restTab,
+            "txtRestPlaceholder",
+            LocalizationKeys.UiDungeonRest);
+        BindLocalizedPlaceholder(
+            shopTab,
+            "txtShopPlaceholder",
+            LocalizationKeys.UiCommonShop);
 
         _initialized = true;
         CurrentStepIndex = 0;
@@ -207,5 +222,29 @@ public sealed class DungeonFlowController : MonoBehaviour
         }
 
         return true;
+    }
+
+    private static void BindLocalizedPlaceholder(
+        GameObject tab,
+        string objectName,
+        string localizationKey)
+    {
+        if (tab == null)
+            return;
+
+        TextMeshProUGUI[] texts =
+            tab.GetComponentsInChildren<TextMeshProUGUI>(true);
+        for (int index = 0; index < texts.Length; index++)
+        {
+            TextMeshProUGUI text = texts[index];
+            if (text == null || text.name != objectName)
+                continue;
+
+            LocalizedText localizedText = text.GetComponent<LocalizedText>();
+            if (localizedText == null)
+                localizedText = text.gameObject.AddComponent<LocalizedText>();
+            localizedText.SetKey(localizationKey);
+            return;
+        }
     }
 }

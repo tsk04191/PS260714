@@ -1,0 +1,248 @@
+key,context,font_role,note,ko-KR,en-US
+ui.settings.language,설정 UI,body,,언어,Language
+ui.settings.font,설정 UI,body,,글꼴,Font
+skill.focus.name,기술 이름,title,,집중,Focus
+skill.focus.effect,기술 설명,tooltip,지속시간·쿨타임·코스트 변수,[icon=focus] [style=focus]집중[/style]: 선택한 적을 {duration:0.#}초 동안 무조건 최우선 대상으로 지정합니다. 재사용 대기시간 {cooldown:0.#}초.,[icon=focus] [style=focus]Focus[/style]: Force the selected enemy to become the highest-priority target for {duration:0.#} seconds. Cooldown: {cooldown:0.#} seconds.
+skill.focus.usage,기술 사용 정보,number,에너지 코스트,[style=energy]코스트 {cost}[/style] | 재사용 가능,[style=energy]Cost {cost}[/style] | Reusable
+item.molotov.name,아이템 이름,title,,화염병,Molotov
+item.molotov.effect,아이템 설명,tooltip,화염 지속시간,선택한 적에게 [icon=fire] [style=fire]화염[/style]을 {duration:0.#}초 부여합니다.,Apply [icon=fire] [style=fire]Fire[/style] to the selected enemy for {duration:0.#} seconds.
+item.molotov.usage,아이템 사용 정보,number,에너지 코스트,[style=energy]코스트 {cost}[/style] | 소모형,[style=energy]Cost {cost}[/style] | Consumable
+item.precision_shot.name,아이템 이름,title,,지정 사격,Precision Shot
+item.precision_shot.effect,아이템 설명,tooltip,직접 피해,선택한 적에게 [icon=damage] [style=damage]{damage} 피해[/style]를 즉시 줍니다.,Immediately deal [icon=damage] [style=damage]{damage} damage[/style] to the selected enemy.
+item.precision_shot.usage,아이템 사용 정보,number,에너지 코스트,[style=energy]코스트 {cost}[/style] | 소모형,[style=energy]Cost {cost}[/style] | Consumable
+item.over_supply.name,아이템 이름,title,,과잉 보급,Over Supply
+item.over_supply.effect,아이템 설명,tooltip,공격 속도 강화,선택한 터렛의 [icon=speed] [style=positive]공격 속도를 {multiplier:0.#}배[/style]로 {duration:0.#}초 동안 증가시킵니다.,Increase the selected turret's [icon=speed] [style=positive]attack speed to x{multiplier:0.#}[/style] for {duration:0.#} seconds.
+item.over_supply.usage,아이템 사용 정보,number,에너지 코스트,[style=energy]코스트 {cost}[/style] | 소모형,[style=energy]Cost {cost}[/style] | Consumable
+item.overheat.name,아이템 이름,title,,과열,Overheat
+item.overheat.effect,아이템 설명,tooltip,공격력 또는 화염 지속시간 강화,선택한 터렛의 [style=damage]공격력을 {multiplier:0.#}배[/style]로 {duration:0.#}초 동안 증가시킵니다. 화염 터렛은 공격력 대신 [icon=fire] [style=fire]화염 지속시간[/style]이 증가합니다.,Increase the selected turret's [style=damage]attack power to x{multiplier:0.#}[/style] for {duration:0.#} seconds. A Fire Turret increases [icon=fire] [style=fire]Fire duration[/style] instead.
+item.overheat.usage,아이템 사용 정보,number,에너지 코스트,[style=energy]코스트 {cost}[/style] | 소모형,[style=energy]Cost {cost}[/style] | Consumable
+codex.skill.title,기술 도감 제목,title,,기술 도감,Skill Codex
+codex.skill.description,기술 도감 설명,body,,재사용 가능한 전투 기술,Reusable Battle Skills
+codex.item.title,아이템 도감 제목,title,,아이템 도감,Item Codex
+codex.item.description,아이템 도감 설명,body,,소모형 전투 아이템,Consumable Battle Items
+codex.battle.back,코덱스 돌아가기 버튼,body,,코덱스로 돌아가기,Back to Codex
+codex.battle.classification.reusable,전투 카드 분류,body,,재사용 기술,Reusable Skill
+codex.battle.classification.consumable,전투 카드 분류,body,,소모형 아이템,Consumable Item
+codex.battle.target.enemy,전투 카드 대상,body,,적 1기,One Enemy
+codex.battle.target.turret,전투 카드 대상,body,,터렛 1기,One Turret
+codex.battle.resource.reusable,전투 카드 자원 정보,number,,[style=energy]에너지 코스트 {cost}[/style] | 대상 {target} | 쿨다운 {cooldown:0.#}초,[style=energy]Energy Cost {cost}[/style] | Target {target} | Cooldown {cooldown:0.#}s
+codex.battle.resource.consumable,전투 카드 자원 정보,number,,[style=energy]에너지 코스트 {cost}[/style] | 대상 {target},[style=energy]Energy Cost {cost}[/style] | Target {target}
+codex.battle.effect_title,전투 카드 효과 제목,title,,효과,Effect
+codex.battle.usage.reusable,전투 카드 사용 규칙,body,,효과 적용에 성공하면 쿨다운이 시작되며 사용 후에도 기술이 유지됩니다.,The cooldown starts after a successful use and the skill remains available.
+codex.battle.usage.consumable,전투 카드 사용 규칙,body,,이벤트 보상으로 중복 획득할 수 있으며 효과 적용에 성공한 경우에만 1개를 소모합니다.,Copies can stack from event rewards and one is consumed only after a successful use.
+codex.battle.empty_title,전투 카드 빈 상태 제목,title,,도감 항목 없음,No Codex Entries
+codex.battle.empty_effect,전투 카드 빈 상태 설명,body,,표시 가능한 데이터가 없습니다.,No data is available.
+ui.common.start,공통 버튼,body,,시작,START
+ui.common.settings,공통 버튼,body,,설정,SETTINGS
+ui.common.quit,공통 버튼,body,,종료,QUIT
+ui.common.back,공통 버튼,body,,뒤로,BACK
+ui.common.ok,공통 버튼,body,,확인,OK
+ui.common.cancel,공통 버튼,body,,취소,CANCEL
+ui.common.play,공통 버튼,body,,플레이,PLAY
+ui.common.codex,공통 버튼,body,,도감,CODEX
+ui.common.roster,공통 버튼,body,,목록,ROSTER
+ui.common.shop,공통 버튼,body,,상점,SHOP
+ui.common.quest,공통 버튼,body,,퀘스트,QUEST
+ui.common.storage,공통 버튼,body,,보관함,STORAGE
+ui.common.enemies,공통 버튼,body,,적,ENEMIES
+ui.common.characters,공통 버튼,body,,캐릭터,CHARACTERS
+ui.common.skills,공통 버튼,body,,기술,SKILLS
+ui.common.items,공통 버튼,body,,아이템,ITEMS
+ui.common.events,공통 버튼,body,,이벤트,EVENTS
+ui.common.resources,공통 버튼,body,,자원,RESOURCES
+ui.common.consumable_items,공통 버튼,body,,소모형 아이템,CONSUMABLE ITEMS
+ui.common.tickets,공통 버튼,body,,티켓,TICKETS
+ui.title.title,타이틀 페이지 제목,title,,타이틀,TITLE
+ui.title.description,타이틀 페이지 설명,body,,PS260714,PS260714
+ui.main.title,메인 페이지 제목,title,,메인,MAIN
+ui.main.description,메인 페이지 설명,body,,이동할 메뉴를 선택하세요,CHOOSE A DESTINATION
+ui.codex.title,도감 허브 제목,title,,도감,CODEX
+ui.codex.description,도감 허브 설명,body,,적 | 캐릭터 | 기술 | 아이템 | 이벤트,ENEMIES | CHARACTERS | SKILLS | ITEMS | EVENTS
+ui.roster.title,목록 페이지 제목,title,,목록,ROSTER
+ui.roster.description,목록 페이지 설명,body,,보유 캐릭터,OWNED CHARACTERS
+ui.roster.empty,목록 빈 상태,body,,보유 캐릭터 없음,OWNED CHARACTERS - EMPTY
+ui.shop.title,상점 페이지 제목,title,,상점,SHOP
+ui.shop.description,상점 페이지 설명,body,,던전 클리어 재화 상점,DUNGEON CLEAR CURRENCY SHOP
+ui.shop.currency,상점 재화 표시,number,,던전 재화 - 0,DUNGEON CURRENCY - 0
+ui.shop.coming_soon,상점 빈 상태,body,,상점 상품 - 준비 중,SHOP ITEMS - COMING SOON
+ui.quest.title,퀘스트 페이지 제목,title,,퀘스트,QUEST
+ui.quest.description,퀘스트 페이지 설명,body,,퀘스트 진행도,QUEST PROGRESS
+ui.quest.empty,퀘스트 빈 상태,body,,퀘스트 목록 - 비어 있음,QUEST LIST - EMPTY
+ui.storage.title,보관함 페이지 제목,title,,보관함,STORAGE
+ui.storage.description,보관함 페이지 설명,body,,자원 | 소모형 아이템 | 티켓,RESOURCES | CONSUMABLE ITEMS | TICKETS
+ui.settings.title,설정 페이지 제목,title,,설정,SETTINGS
+ui.settings.quit_game,설정 종료 버튼,body,,게임 종료,QUIT GAME
+ui.settings.quit_confirm_title,종료 확인 제목,title,,게임을 종료하시겠습니까?,QUIT GAME?
+ui.settings.quit_confirm_message,종료 확인 설명,body,,정말 게임을 종료하시겠습니까?,Are you sure you want to quit?
+ui.settings.tab.display,설정 탭,body,,화면,DISPLAY
+ui.settings.tab.sound,설정 탭,body,,소리,SOUND
+ui.settings.tab.game,설정 탭,body,,게임,GAME
+ui.settings.tab.misc,설정 탭,body,,기타,MISC
+ui.settings.section.display,설정 섹션,body,,화면 설정,DISPLAY SETTINGS
+ui.settings.section.sound,설정 섹션,body,,소리 설정,SOUND SETTINGS
+ui.settings.section.game,설정 섹션,body,,게임 설정,GAME SETTINGS
+ui.settings.section.misc,설정 섹션,body,,기타 설정,MISC SETTINGS
+ui.settings.resolution,화면 설정 라벨,body,,해상도,RESOLUTION
+ui.settings.display_mode,화면 설정 라벨,body,,화면 모드,DISPLAY MODE
+ui.settings.frame_rate,화면 설정 라벨,body,,프레임률,FRAME RATE
+ui.settings.brightness,화면 설정 라벨,body,,밝기,BRIGHTNESS
+ui.settings.master_volume,소리 설정 라벨,body,,전체 음량,MASTER
+ui.settings.music_volume,소리 설정 라벨,body,,음악,MUSIC
+ui.settings.sfx_volume,소리 설정 라벨,body,,효과음,SFX
+ui.settings.ui_volume,소리 설정 라벨,body,,UI,UI
+ui.settings.mute_background,소리 설정 라벨,body,,백그라운드 상태에서 음소거,MUTE WHEN GAME IS IN BACKGROUND
+ui.settings.option,드롭다운 기본 항목,body,,옵션,OPTION
+ui.settings.mode.fullscreen,화면 모드 선택지,body,,전체 화면,FULLSCREEN
+ui.settings.mode.borderless,화면 모드 선택지,body,,테두리 없는 창,BORDERLESS
+ui.settings.mode.windowed,화면 모드 선택지,body,,창 모드,WINDOWED
+ui.settings.fps.unlimited,프레임률 선택지,body,,제한 없음,UNLIMITED
+ui.settings.font_auto,글꼴 선택지,body,,자동,AUTO
+ui.dungeon.event,던전 탭,body,,이벤트,EVENT
+ui.dungeon.rest,던전 탭,body,,휴식,REST
+ui.dungeon.party_info,던전 HUD 제목,title,,파티 정보,PARTY INFO
+ui.dungeon.enemy_queue,던전 HUD 제목,title,,적 대기열,ENEMY QUEUE
+ui.dungeon.pause,던전 상태,body,,일시정지,PAUSE
+ui.dungeon.resume,던전 상태,body,,계속,RESUME
+ui.dungeon.defeat,던전 상태,title,,패배,DEFEAT
+ui.dungeon.energy_full,에너지 상태,number,,가득 참,FULL
+ui.dungeon.energy_recharge,에너지 상태,number,,"+1까지 {seconds:0.0}초","+1 IN {seconds:0.0}s"
+ui.dungeon.energy_status,에너지 HUD,number,,"에너지 {current}/{max} | {recharge}","ENERGY {current}/{max} | {recharge}"
+ui.dungeon.energy_scale,에너지 HUD,number,,"에너지 {current}/{max} | {recharge} | 난이도 {scale}","ENERGY {current}/{max} | {recharge} | SCALE {scale}"
+ui.dungeon.energy_tutorial,에너지 HUD,tooltip,,"에너지 {current}/{max} | {recharge} | 난이도 {scale}[br]튜토리얼: 터렛에 마우스를 올려 기술 정보 확인 | 터렛을 클릭해 기술 사용","ENERGY {current}/{max} | {recharge} | SCALE {scale}[br]TUTORIAL: HOVER A TURRET FOR SKILL INFO | CLICK A TURRET TO USE ITS SKILL"
+ui.dungeon.queue.board_full,적 대기열 상태,body,,"필드 가득 참 | {count}기 대기","BOARD FULL | {count} WAITING"
+ui.dungeon.queue.empty,적 대기열 상태,body,,대기열 비어 있음,QUEUE EMPTY
+ui.dungeon.queue.next,적 대기열 상태,number,,"다음 {seconds:0.0}초 | {count}기 대기","NEXT {seconds:0.0}s | {count} WAITING"
+ui.dungeon.queue.enemy,적 대기열 항목,number,,"{name} | HP {health}","{name} | HP {health}"
+ui.dungeon.queue.enemy_empty,적 대기열 항목,number,,HP -,HP -
+ui.dungeon.item_hand,아이템 패 제목,title,,아이템 패,ITEM HAND
+ui.dungeon.item_select_enemy,아이템 대상 안내,body,,"{item}: 적 선택","{item}: SELECT ENEMY"
+ui.dungeon.item_select_turret,아이템 대상 안내,body,,"{item}: 터렛 선택","{item}: SELECT TURRET"
+ui.dungeon.item_card_header,아이템 카드 머리말,number,,{name} · C{cost},{name} · C{cost}
+ui.dungeon.item_reusable,아이템 카드 상태,body,,"재사용 가능 | 쿨다운 {cooldown:0.#}초","REUSABLE | CD {cooldown:0.#}s"
+ui.dungeon.item_consumable,아이템 카드 상태,body,,소모형,CONSUMABLE
+ui.dungeon.item_count,아이템 카드 상태,number,,x{count},x{count}
+ui.dungeon.item_cooldown,아이템 카드 상태,number,,"쿨다운 {cooldown:0.0}초","CD {cooldown:0.0}s"
+character.basic.name,캐릭터 이름,title,,기본 터렛,Basic Turret
+character.dual.name,캐릭터 이름,title,,듀얼 터렛,Dual Tower
+character.area.name,캐릭터 이름,title,,범위 터렛,Area Tower
+character.flame.name,캐릭터 이름,title,,화염 터렛,Flame Tower
+codex.character.title,캐릭터 도감 제목,title,,캐릭터 도감,CHARACTER CODEX
+codex.character.description,캐릭터 도감 설명,body,,캐릭터 탭을 선택해 정보를 확인하세요,SELECT A CHARACTER TAB TO VIEW ITS INFORMATION
+codex.character.normal_attack,캐릭터 도감 섹션,title,,일반 공격,NORMAL ATTACK
+codex.character.active_skill,캐릭터 도감 섹션,title,,액티브 기술,ACTIVE SKILL
+codex.character.active_skill_cost,캐릭터 도감 섹션,number,,액티브 기술 · 코스트 {cost},ACTIVE SKILL · COST {cost}
+codex.character.identity,캐릭터 도감 식별 정보,body,,"에셋 {asset} | 유형 {type}","ASSET {asset} | TYPE {type}"
+codex.character.stats.attack,캐릭터 도감 능력치,number,,"공격 피해 {attack} | 공격 쿨다운 {cooldown:0.#}초[br]기술 피해 {skill} | 위력 배율 x{weight:0.##}","ATTACK DAMAGE {attack} | ATTACK COOLDOWN {cooldown:0.#}s[br]SKILL DAMAGE {skill} | POWER WEIGHT x{weight:0.##}"
+codex.character.stats.fire,캐릭터 도감 능력치,number,,"공격 쿨다운 {cooldown:0.#}초 | 화염 지속 {duration:0.#}초[br]화염 틱 {damage} 피해 / {interval:0.#}초 | 위력 배율 x{weight:0.##}","ATTACK COOLDOWN {cooldown:0.#}s | FIRE DURATION {duration:0.#}s[br]FIRE TICK {damage} DAMAGE / {interval:0.#}s | POWER WEIGHT x{weight:0.##}"
+codex.character.attack.lowest,캐릭터 일반 공격 설명,body,,"우선순위 대상 중 체력이 가장 낮은 적에게 {damage} 피해를 줍니다.","DEALS {damage} DAMAGE TO THE LOWEST-HEALTH PRIORITY TARGET."
+codex.character.attack.multiple,캐릭터 일반 공격 설명,body,,"우선순위 대상 중 무작위 {count}기에게 각각 {damage} 피해를 줍니다.","ATTACKS {count} RANDOM PRIORITY TARGETS FOR {damage} DAMAGE EACH."
+codex.character.attack.cross,캐릭터 일반 공격 설명,body,,"체력이 가장 높은 적을 중심으로 십자 범위에 {damage} 피해를 줍니다.","ATTACKS THE CROSS-SHAPED AREA AROUND THE HIGHEST-HEALTH ENEMY FOR {damage} DAMAGE."
+codex.character.attack.fire,캐릭터 일반 공격 설명,body,,"무작위 우선순위 대상 1기에게 {duration:0.#}초 화염을 부여합니다. 화염은 {interval:0.#}초마다 {damage} 피해를 줍니다.","APPLIES FIRE TO ONE RANDOM PRIORITY TARGET FOR {duration:0.#}s. FIRE DEALS {damage} DAMAGE EVERY {interval:0.#}s."
+codex.character.skill.lowest,캐릭터 기술 설명,body,,"체력이 가장 낮은 적에게 즉시 {damage} 피해를 줍니다.","DEALS {damage} DAMAGE TO THE LOWEST-HEALTH ENEMY IMMEDIATELY."
+codex.character.skill.multiple,캐릭터 기술 설명,body,,"{duration:0.#}초 동안 대상 수가 {count}기로 증가하고 각각 {damage} 피해를 줍니다.","FOR {duration:0.#}s, ATTACKS {count} TARGETS AND DEALS {damage} DAMAGE EACH."
+codex.character.skill.cross,캐릭터 기술 설명,body,,"다음 {count}회 공격이 내부 십자에 {inner} 피해, 외곽과 대각선에 {outer} 피해를 줍니다.","THE NEXT {count} ATTACKS DEAL {inner} INNER-CROSS DAMAGE AND {outer} OUTER AND DIAGONAL DAMAGE."
+codex.character.skill.fire,캐릭터 기술 설명,body,,"다음 {count}회 공격이 중심 {centers}곳을 선택해 각 3x3 범위에 {duration:0.#}초 화염을 부여합니다. 겹친 범위는 지속시간이 합산됩니다.","THE NEXT {count} ATTACKS CHOOSE {centers} CENTERS AND APPLY FIRE FOR {duration:0.#}s IN EACH 3x3 AREA. OVERLAPPING AREAS STACK DURATION."
+codex.character.type.lowest,캐릭터 공격 유형,body,,최저 체력,LOWEST HEALTH
+codex.character.type.multiple,캐릭터 공격 유형,body,,무작위 다중,RANDOM MULTIPLE
+codex.character.type.cross,캐릭터 공격 유형,body,,십자 범위,CROSS AREA
+codex.character.type.fire,캐릭터 공격 유형,body,,화염 상태,FIRE STATUS
+codex.character.empty_title,캐릭터 도감 빈 상태,title,,캐릭터 데이터 없음,NO CHARACTER DATA
+codex.character.empty_body,캐릭터 도감 빈 상태,body,,사용 가능한 캐릭터 정의가 없습니다.,NO CHARACTER DEFINITIONS ARE AVAILABLE.
+ui.turret.skill_header,터렛 기술 툴팁,number,,액티브 기술 · C{cost} · {status},ACTIVE SKILL · C{cost} · {status}
+ui.turret.click_activate,터렛 기술 툴팁,body,,터렛을 클릭해 발동,CLICK TURRET TO ACTIVATE
+ui.turret.status.active,터렛 상태,body,,발동 중,ACTIVE
+ui.turret.status.ready,터렛 상태,body,,사용 가능,READY
+ui.turret.status.not_enough_energy,터렛 상태,body,,에너지 부족,NOT ENOUGH ENERGY
+ui.turret.name,터렛 슬롯 정보,number,,{name} · C{cost},{name} · C{cost}
+ui.turret.attack.fire,터렛 슬롯 정보,number,,"화염 {duration:0.#}초 | 기술 x{targets}","FIRE {duration:0.#}s | SK x{targets}"
+ui.turret.attack.damage,터렛 슬롯 정보,number,,"공격 {attack} | 기술 {skill}","ATK {attack} | SK {skill}"
+ui.turret.cooldown.stop,터렛 쿨다운,number,,"정지 {seconds:0.0}초","STOP {seconds:0.0}s"
+ui.turret.cooldown.recovery,터렛 쿨다운,number,,"회복 {seconds:0.0}초","RECOVERY {seconds:0.0}s"
+ui.turret.cooldown.active_time,터렛 쿨다운,number,,"발동 {seconds:0.0}초","ACTIVE {seconds:0.0}s"
+ui.turret.cooldown.active_count,터렛 쿨다운,number,,발동 x{count},ACTIVE x{count}
+ui.turret.cooldown.wait,터렛 쿨다운,number,,"쿨다운 {seconds:0.0}초","CD {seconds:0.0}s"
+enemy.basic.name,적 이름,title,,기본,BASIC
+enemy.assault.name,적 이름,title,,돌격병,ASSAULT
+enemy.heavy.name,적 이름,title,,중장갑,HEAVY
+enemy.medic.name,적 이름,title,,의무병,MEDIC
+enemy.mechanic.name,적 이름,title,,정비공,MECHANIC
+enemy.pointman.name,적 이름,title,,선봉대,POINTMAN
+enemy.shield_bearer.name,적 이름,title,,방패병,SHIELD BEARER
+enemy.infiltrator.name,적 이름,title,,잠입병,INFILTRATOR
+codex.enemy.title,적 도감 제목,title,,적 도감,ENEMY CODEX
+codex.enemy.description,적 도감 설명,body,,적 탭을 선택해 정보를 확인하세요,SELECT AN ENEMY TAB TO VIEW ITS INFORMATION
+codex.enemy.ability,적 도감 섹션,title,,능력,ABILITY
+codex.enemy.identity,적 도감 식별 정보,body,,"ID {id} | 등급 {grade} | 유형 {type}","ID {id} | GRADE {grade} | TYPE {type}"
+codex.enemy.stats,적 도감 능력치,number,,"기본 체력 {health} | 위협도 {threat:0.##}[br]생성 간격 x{interval:0.##} | 타겟 우선순위 {priority}","BASE HEALTH {health} | THREAT {threat:0.##}[br]SPAWN INTERVAL x{interval:0.##} | TARGET PRIORITY {priority}"
+codex.enemy.priority.normal,적 타겟 우선순위,body,,일반,NORMAL
+codex.enemy.priority.excluded,적 타겟 우선순위,body,,제외,EXCLUDED
+codex.enemy.grade.normal,적 등급,body,,일반,NORMAL
+codex.enemy.grade.special,적 등급,body,,특수,SPECIAL
+codex.enemy.grade.elite,적 등급,body,,정예,ELITE
+codex.enemy.grade.boss,적 등급,body,,보스,BOSS
+codex.enemy.ability.basic,적 능력 설명,body,,특수 능력이 없습니다.,NO SPECIAL ABILITY.
+codex.enemy.ability.assault,적 능력 설명,body,,"신속 배치[br]생성 간격이 x{interval:0.##}로 변경됩니다.","RAPID DEPLOYMENT[br]SPAWN INTERVAL IS MULTIPLIED BY {interval:0.##}."
+codex.enemy.ability.heavy,적 능력 설명,body,,"방어[br]처음 {hits}회의 피격 피해가 1로 감소합니다.","GUARD[br]THE FIRST {hits} HITS ARE REDUCED TO 1 DAMAGE."
+codex.enemy.ability.medic,적 능력 설명,body,,"야전 치료[br]{cooldown:0.#}초마다 상하좌우로 인접한 적을 각각 {power} 회복합니다.","FIELD HEAL[br]EVERY {cooldown:0.#}s, HEALS EACH ORTHOGONALLY ADJACENT ENEMY BY {power}."
+codex.enemy.ability.mechanic,적 능력 설명,body,,"시스템 정지[br]{cooldown:0.#}초마다 공격력이 가장 높은 터렛을 {duration:0.#}초 동안 정지시킵니다.","SYSTEM DISABLE[br]EVERY {cooldown:0.#}s, DISABLES THE HIGHEST-DAMAGE TURRET FOR {duration:0.#}s."
+codex.enemy.ability.pointman,적 능력 설명,body,,"대형 진입[br]동료 {count}기와 함께 생성됩니다.","FORMATION ENTRY[br]SPAWNS TOGETHER WITH {count} COMPANIONS."
+codex.enemy.ability.shield_bearer,적 능력 설명,body,,"방패 대형[br]최대 체력의 {armor:0.#}%만큼 방어력을 얻고 인접한 적의 피해를 대신 받습니다.","SHIELD FORMATION[br]STARTS WITH {armor:0.#}% MAX HP AS ARMOR AND TAKES DAMAGE FOR ADJACENT ENEMIES."
+codex.enemy.ability.infiltrator,적 능력 설명,body,,은신[br]다른 유효한 대상이 있으면 일반 타겟 우선순위에서 제외됩니다.,STEALTH[br]EXCLUDED FROM NORMAL TARGET PRIORITY WHILE ANOTHER VALID TARGET EXISTS.
+codex.enemy.empty_title,적 도감 빈 상태,title,,적 데이터 없음,NO ENEMY DATA
+codex.enemy.empty_body,적 도감 빈 상태,body,,사용 가능한 적 정의가 없습니다.,NO ENEMY DEFINITIONS ARE AVAILABLE.
+ui.dungeon.start.title,시작 터렛 선택 제목,title,,시작 터렛 선택,CHOOSE STARTING TURRET
+ui.dungeon.start.description,시작 터렛 선택 설명,body,,3개 중 하나를 선택하세요.[br]첫 전투는 30초 튜토리얼입니다.,SELECT 1 OF 3 TURRETS[br]THE FIRST BATTLE IS A 30 SECOND TUTORIAL
+ui.dungeon.start.error_title,시작 터렛 설정 오류 제목,title,,시작 터렛 설정 오류,STARTING TURRET SETUP ERROR
+ui.dungeon.start.error_description,시작 터렛 설정 오류 설명,body,,서로 다른 터렛 3개가 필요합니다.[br]사용 가능한 정의: {count},3 DIFFERENT TURRETS ARE REQUIRED[br]AVAILABLE DEFINITIONS: {count}
+ui.dungeon.start.retry,시작 터렛 다시 시도 버튼,body,,다시 시도,RETRY
+ui.dungeon.result.clear_title,던전 클리어 제목,title,,던전 클리어,DUNGEON CLEAR
+ui.dungeon.result.clear_description,던전 클리어 설명,body,,모든 전투 {count}회를 클리어했습니다.,ALL {count} BATTLES CLEARED
+ui.dungeon.result.reset_description,던전 패배 설명,body,,이번 진행이 초기화되었습니다.[br]새 시작 터렛을 선택하세요.,THE RUN WAS RESET[br]CHOOSE A NEW STARTING TURRET
+ui.dungeon.result.start_new_run,던전 결과 버튼,body,,새로 시작,START NEW RUN
+ui.dungeon.result.return_main,던전 결과 버튼,body,,메인으로 돌아가기,RETURN TO MAIN
+ui.dungeon.reward.title,던전 보상 선택 제목,title,,보상 선택,CHOOSE REWARD
+ui.dungeon.reward.summary,던전 보상 선택 설명,body,,전투 {current} / {total} 클리어 (스케일 {scale})[br]다음 스케일 {next}[br]{count}개 중 하나를 선택하세요.,BATTLE {current} / {total} CLEAR (SCALE {scale})[br]NEXT SCALE {next}[br]CHOOSE 1 OF {count}
+ui.dungeon.reward.category.energy,던전 보상 분류,title,,에너지 강화,ENERGY UPGRADE
+ui.dungeon.reward.category.item,던전 보상 분류,title,,소모형 아이템,CONSUMABLE ITEM
+ui.dungeon.reward.category.new_turret,던전 보상 분류,title,,새 터렛,NEW TURRET
+ui.dungeon.reward.category.turret_upgrade,던전 보상 분류,title,,터렛 강화,TURRET UPGRADE
+ui.dungeon.reward.category.turret_upgrade_slot,던전 보상 분류,number,,터렛 강화 | S{slot},TURRET UPGRADE | S{slot}
+ui.dungeon.reward.category.starting_turret,던전 보상 분류,title,,시작 터렛,STARTING TURRET
+ui.dungeon.reward.energy.max_title,에너지 보상 제목,title,,최대 에너지 +1,MAX ENERGY +1
+ui.dungeon.reward.energy.recharge_title,에너지 보상 제목,title,,충전 시간 -0.5초,RECHARGE -0.5s
+ui.dungeon.reward.energy.max_change,에너지 보상 설명,number,,최대 {before} → {after},MAX {before} → {after}
+ui.dungeon.reward.energy.recharge_change,에너지 보상 설명,number,,{before:0.0}초 → {after:0.0}초,{before:0.0}s → {after:0.0}s
+ui.dungeon.reward.run_footer,던전 보상 꼬리말,body,,이번 진행에 적용,APPLIES FOR THIS RUN
+ui.dungeon.reward.item_footer,아이템 보상 꼬리말,number,,보유 x{owned} | 획득 x1,OWNED x{owned} | GAIN x1
+ui.dungeon.reward.new_turret.empty_description,새 터렛 보상 설명,body,,새 터렛을 파티에 추가합니다.,ADD A NEW TURRET
+ui.dungeon.reward.new_turret.fire_description,새 터렛 보상 설명,number,,화염 {duration:0.#}초[br]기술 대상 x{targets},FIRE {duration:0.#}s[br]SKILL TARGETS x{targets}
+ui.dungeon.reward.new_turret.damage_description,새 터렛 보상 설명,number,,공격 {attack}[br]기술 {skill},ATK {attack}[br]SKILL {skill}
+ui.dungeon.reward.new_turret.footer,새 터렛 보상 꼬리말,number,,기술 C{cost} | 공격 쿨다운 {cooldown:0.#}초,SKILL C{cost} | ATTACK CD {cooldown:0.#}s
+ui.dungeon.reward.new_turret.empty_slot,새 터렛 보상 꼬리말,body,,빈 파티 슬롯 필요,EMPTY PARTY SLOT REQUIRED
+ui.dungeon.reward.unknown_turret,던전 보상 오류 제목,title,,알 수 없는 터렛,UNKNOWN TURRET
+ui.dungeon.reward.unknown_upgrade,던전 보상 오류 제목,title,,알 수 없는 강화,UNKNOWN UPGRADE
+ui.dungeon.reward.turret_unavailable,던전 보상 오류 설명,body,,터렛 데이터를 사용할 수 없습니다.,TURRET DATA IS UNAVAILABLE
+ui.dungeon.reward.permanent_footer,터렛 강화 보상 꼬리말,body,,이번 진행 동안 영구 적용,PERMANENT FOR THIS RUN
+ui.dungeon.reward.start.random,시작 터렛 설명,number,,무작위 대상 x{count}[br]각각 공격 {attack},RANDOM TARGETS x{count}[br]ATK {attack} EACH
+ui.dungeon.reward.start.cross,시작 터렛 설명,number,,십자 범위 공격[br]공격 {attack},CROSS AREA ATTACK[br]ATK {attack}
+ui.dungeon.reward.start.fire,시작 터렛 설명,number,,화염 {duration:0.#}초[br]{damage} 피해 / {interval:0.#}초,FIRE {duration:0.#}s[br]{damage} DMG / {interval:0.#}s
+ui.dungeon.reward.start.lowest,시작 터렛 설명,number,,최저 체력 대상[br]공격 {attack},LOWEST HEALTH TARGET[br]ATK {attack}
+ui.dungeon.reward.start.footer,시작 터렛 꼬리말,number,,기술 C{cost} | 공격 쿨다운 {cooldown:0.#}초[br]클릭하여 시작,SKILL C{cost} | ATTACK CD {cooldown:0.#}s[br]CLICK TO START
+ui.dungeon.reward.upgrade.fire_duration_title,터렛 강화 제목,title,,화염 지속시간,FIRE DURATION
+ui.dungeon.reward.upgrade.attack_power_title,터렛 강화 제목,title,,공격력,ATTACK POWER
+ui.dungeon.reward.upgrade.attack_speed_title,터렛 강화 제목,title,,공격속도,ATTACK SPEED
+ui.dungeon.reward.upgrade.skill_targets_title,터렛 강화 제목,title,,기술 대상 수,SKILL TARGETS
+ui.dungeon.reward.upgrade.skill_power_title,터렛 강화 제목,title,,기술 공격력,SKILL POWER
+ui.dungeon.reward.upgrade.skill_cost_title,터렛 강화 제목,title,,기술 코스트,SKILL COST
+ui.dungeon.reward.upgrade.generic_title,터렛 강화 제목,title,,터렛 강화,TURRET UPGRADE
+ui.dungeon.reward.upgrade.fire_duration_change,터렛 강화 설명,number,,화염 지속시간 {before:0.#}초 → {after:0.#}초,FIRE DURATION {before:0.#}s → {after:0.#}s
+ui.dungeon.reward.upgrade.attack_change,터렛 강화 설명,number,,공격 {before} → {after},ATTACK {before} → {after}
+ui.dungeon.reward.upgrade.cooldown_change,터렛 강화 설명,number,,쿨다운 {before:0.#}초 → {after:0.#}초,COOLDOWN {before:0.#}s → {after:0.#}s
+ui.dungeon.reward.upgrade.skill_targets_change,터렛 강화 설명,number,,기술 대상 {before} → {after},SKILL TARGETS {before} → {after}
+ui.dungeon.reward.upgrade.skill_attack_change,터렛 강화 설명,number,,기술 공격 {before} → {after},SKILL ATTACK {before} → {after}
+ui.dungeon.reward.upgrade.skill_cost_change,터렛 강화 설명,number,,기술 코스트 {before} → {after},SKILL COST {before} → {after}
+ui.dungeon.replace.title,터렛 교체 제목,title,,터렛 교체,REPLACE TURRET
+ui.dungeon.replace.description,터렛 교체 설명,body,,신규: {name}[br]교체된 터렛의 강화는 사라집니다.,NEW: {name}[br]THE REPLACED TURRET'S UPGRADES WILL BE LOST
+ui.dungeon.replace.empty_slot,터렛 교체 선택지,number,,슬롯 {slot},SLOT {slot}
+ui.dungeon.replace.fire_slot,터렛 교체 선택지,number,,S{slot} {name} | 화염 {duration:0.#}초 | 대상 x{targets},S{slot} {name} | FIRE {duration:0.#}s | TARGET x{targets}
+ui.dungeon.replace.damage_slot,터렛 교체 선택지,number,,S{slot} {name} | 공격 {attack} | 기술 {skill},S{slot} {name} | ATK {attack} | SK {skill}

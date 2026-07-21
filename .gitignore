@@ -486,6 +486,14 @@ $RECYCLE.BIN/
 !/README.md
 !/Assets/
 /Assets/*
+
+# Script-only repository. Localization source CSV is the only Unity data
+# exception; scenes, prefabs, catalogs and other assets stay local.
 !/Assets/Scripts/
 !/Assets/Scripts/**
 !/Assets/Scripts.meta
+!/Assets/LocalizationSource/
+/Assets/LocalizationSource/*
+!/Assets/LocalizationSource/*.csv
+!/Assets/LocalizationSource/*.csv.meta
+!/Assets/LocalizationSource.meta

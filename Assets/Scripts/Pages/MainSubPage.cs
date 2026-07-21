@@ -1,3 +1,4 @@
+using PS260714.Localization;
 using UnityEngine;
 using UnityEngine.UI;
 
@@ -44,6 +45,26 @@ public sealed class MainSubPage : RuntimeMenuPageBase
         _ => string.Empty
     };
 
+    protected override string PageTitleLocalizationKey => pageType switch
+    {
+        EMainSubPageType.Codex => LocalizationKeys.UiCodexTitle,
+        EMainSubPageType.Roster => LocalizationKeys.UiRosterTitle,
+        EMainSubPageType.Shop => LocalizationKeys.UiShopTitle,
+        EMainSubPageType.Quest => LocalizationKeys.UiQuestTitle,
+        EMainSubPageType.Storage => LocalizationKeys.UiStorageTitle,
+        _ => string.Empty
+    };
+
+    protected override string PageDescriptionLocalizationKey => pageType switch
+    {
+        EMainSubPageType.Codex => LocalizationKeys.UiCodexDescription,
+        EMainSubPageType.Roster => LocalizationKeys.UiRosterDescription,
+        EMainSubPageType.Shop => LocalizationKeys.UiShopDescription,
+        EMainSubPageType.Quest => LocalizationKeys.UiQuestDescription,
+        EMainSubPageType.Storage => LocalizationKeys.UiStorageDescription,
+        _ => string.Empty
+    };
+
     protected override Vector2 PanelSize => pageType == EMainSubPageType.Codex
         ? new Vector2(680f, 840f)
         : new Vector2(680f, 720f);
@@ -53,51 +74,79 @@ public sealed class MainSubPage : RuntimeMenuPageBase
         switch (pageType)
         {
             case EMainSubPageType.Codex:
-                CreateMenuButton(
-                    "ENEMIES",
+                CreateLocalizedMenuButton(
+                    "btnENEMIES",
+                    LocalizationKeys.UiCommonEnemies,
                     () => NavigateTo(
                         enemyCodexPage,
                         PageOpenMode.Fresh));
-                CreateMenuButton(
-                    "CHARACTERS",
+                CreateLocalizedMenuButton(
+                    "btnCHARACTERS",
+                    LocalizationKeys.UiCommonCharacters,
                     () => NavigateTo(
                         characterCodexPage,
                         PageOpenMode.Fresh));
-                CreateMenuButton(
-                    "SKILLS",
+                CreateLocalizedMenuButton(
+                    "btnSKILLS",
+                    LocalizationKeys.UiCommonSkills,
                     () => NavigateTo(
                         skillCodexPage,
                         PageOpenMode.Fresh));
-                CreateMenuButton(
-                    "ITEMS",
+                CreateLocalizedMenuButton(
+                    "btnITEMS",
+                    LocalizationKeys.UiCommonItems,
                     () => NavigateTo(
                         itemCodexPage,
                         PageOpenMode.Fresh));
-                CreatePlaceholderButton("EVENTS");
+                CreateLocalizedPlaceholderButton(
+                    "btnEVENTS",
+                    LocalizationKeys.UiCommonEvents);
                 break;
             case EMainSubPageType.Roster:
-                CreatePlaceholderButton("OWNED CHARACTERS - EMPTY");
+                CreateLocalizedPlaceholderButton(
+                    "btnOWNEDCHARACTERS-EMPTY",
+                    LocalizationKeys.UiRosterEmpty);
                 break;
             case EMainSubPageType.Shop:
-                CreatePlaceholderButton("DUNGEON CURRENCY - 0");
-                CreatePlaceholderButton("SHOP ITEMS - COMING SOON");
+                CreateLocalizedPlaceholderButton(
+                    "btnDUNGEONCURRENCY-0",
+                    LocalizationKeys.UiShopCurrency);
+                CreateLocalizedPlaceholderButton(
+                    "btnSHOPITEMS-COMINGSOON",
+                    LocalizationKeys.UiShopComingSoon);
                 break;
             case EMainSubPageType.Quest:
-                CreatePlaceholderButton("QUEST LIST - EMPTY");
+                CreateLocalizedPlaceholderButton(
+                    "btnQUESTLIST-EMPTY",
+                    LocalizationKeys.UiQuestEmpty);
                 break;
             case EMainSubPageType.Storage:
-                CreatePlaceholderButton("RESOURCES");
-                CreatePlaceholderButton("CONSUMABLE ITEMS");
-                CreatePlaceholderButton("TICKETS");
+                CreateLocalizedPlaceholderButton(
+                    "btnRESOURCES",
+                    LocalizationKeys.UiCommonResources);
+                CreateLocalizedPlaceholderButton(
+                    "btnCONSUMABLEITEMS",
+                    LocalizationKeys.UiCommonConsumableItems);
+                CreateLocalizedPlaceholderButton(
+                    "btnTICKETS",
+                    LocalizationKeys.UiCommonTickets);
                 break;
         }
 
-        CreateMenuButton("BACK", HandleBackClicked);
+        CreateLocalizedMenuButton(
+            "btnBACK",
+            LocalizationKeys.UiCommonBack,
+            HandleBackClicked);
     }
 
-    private void CreatePlaceholderButton(string label)
+    private void CreateLocalizedPlaceholderButton(
+        string stableName,
+        string localizationKey)
     {
-        Button button = CreateMenuButton(label, null);
+        Button button = CreateLocalizedMenuButton(
+            stableName,
+            localizationKey,
+            null);
         if (button != null)
             button.interactable = false;
     }

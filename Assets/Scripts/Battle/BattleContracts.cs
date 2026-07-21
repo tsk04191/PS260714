@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using PS260714.Localization;
 using UnityEngine;
 
 public enum EBattleItemType
@@ -65,32 +66,48 @@ public static class BattleItemCatalog
         {
             EBattleItemType.Molotov => new BattleItemDefinition(
                 type,
-                "MOLOTOV",
-                "Apply fire for 3 seconds to one enemy.",
+                LocalizationService.Get(LocalizationKeys.ItemMolotovName),
+                LocalizationService.Get(
+                    LocalizationKeys.ItemMolotovEffect,
+                    LocalizationService.Arg("duration", 3f)),
                 3,
                 EBattleItemTargetType.Enemy),
             EBattleItemType.PrecisionShot => new BattleItemDefinition(
                 type,
-                "PRECISION SHOT",
-                "Deal 5 damage to one enemy.",
+                LocalizationService.Get(
+                    LocalizationKeys.ItemPrecisionShotName),
+                LocalizationService.Get(
+                    LocalizationKeys.ItemPrecisionShotEffect,
+                    LocalizationService.Arg("damage", 5)),
                 2,
                 EBattleItemTargetType.Enemy),
             EBattleItemType.OverSupply => new BattleItemDefinition(
                 type,
-                "OVER SUPPLY",
-                "Double one turret's attack speed for 5 seconds.",
+                LocalizationService.Get(
+                    LocalizationKeys.ItemOverSupplyName),
+                LocalizationService.Get(
+                    LocalizationKeys.ItemOverSupplyEffect,
+                    LocalizationService.Arg("multiplier", 2f),
+                    LocalizationService.Arg("duration", 5f)),
                 3,
                 EBattleItemTargetType.Turret),
             EBattleItemType.Overheat => new BattleItemDefinition(
                 type,
-                "OVERHEAT",
-                "Double attack power for 3 seconds. Fire duration doubles instead.",
+                LocalizationService.Get(
+                    LocalizationKeys.ItemOverheatName),
+                LocalizationService.Get(
+                    LocalizationKeys.ItemOverheatEffect,
+                    LocalizationService.Arg("multiplier", 2f),
+                    LocalizationService.Arg("duration", 3f)),
                 3,
                 EBattleItemTargetType.Turret),
             _ => new BattleItemDefinition(
                 EBattleItemType.Focus,
-                "FOCUS",
-                "Force one enemy to be the first target for 5 seconds.",
+                LocalizationService.Get(LocalizationKeys.SkillFocusName),
+                LocalizationService.Get(
+                    LocalizationKeys.SkillFocusEffect,
+                    LocalizationService.Arg("duration", 5f),
+                    LocalizationService.Arg("cooldown", 10f)),
                 1,
                 EBattleItemTargetType.Enemy,
                 true,

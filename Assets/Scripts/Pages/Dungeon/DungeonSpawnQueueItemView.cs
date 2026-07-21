@@ -1,3 +1,4 @@
+using PS260714.Localization;
 using TMPro;
 using UnityEngine;
 
@@ -8,6 +9,12 @@ public sealed class DungeonSpawnQueueItemView : MonoBehaviour
     [SerializeField] private TextMeshProUGUI orderText;
     [SerializeField] private TextMeshProUGUI healthText;
 
+    internal void ApplyGameDefaultFonts()
+    {
+        LocalizationFontResolver.ApplyGameDefault(orderText);
+        LocalizationFontResolver.ApplyGameDefault(healthText);
+    }
+
     public void Setup(int order, EnemyRuntime enemy)
     {
         if (orderText != null)
@@ -16,8 +23,14 @@ public sealed class DungeonSpawnQueueItemView : MonoBehaviour
         if (healthText != null)
         {
             healthText.text = enemy != null
-                ? $"{enemy.Definition.DisplayName} | HP {enemy.Health}"
-                : "HP -";
+                ? LocalizationService.Get(
+                    LocalizationKeys.UiDungeonQueueEnemy,
+                    LocalizationService.Arg(
+                        "name",
+                        EnemyLocalization.GetName(enemy.Definition.Type)),
+                    LocalizationService.Arg("health", enemy.Health))
+                : LocalizationService.Get(
+                    LocalizationKeys.UiDungeonQueueEnemyEmpty);
         }
     }
 }

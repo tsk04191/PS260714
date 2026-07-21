@@ -33,6 +33,11 @@ public class GameEventManager
     public event Action<EAudioChannel, int> AudioVolumeChanged;
     public event Action<bool> MuteInBackgroundChanged;
 
+    public event Action<string> LocaleChangeRequested;
+    public event Action<string> FontChangeRequested;
+    public event Action<string> LocaleChanged;
+    public event Action<string> FontChanged;
+
     public event Action<string> BgmRequested;
     public event Action<string> SfxRequested;
     public event Action<AudioClip> SfxClipRequested;
@@ -122,6 +127,26 @@ public class GameEventManager
     public void NotifyMuteInBackgroundChanged(bool value)
     {
         MuteInBackgroundChanged?.Invoke(value);
+    }
+
+    public void RequestLocaleChange(string locale)
+    {
+        LocaleChangeRequested?.Invoke(locale);
+    }
+
+    public void RequestFontChange(string fontId)
+    {
+        FontChangeRequested?.Invoke(fontId);
+    }
+
+    public void NotifyLocaleChanged(string locale)
+    {
+        LocaleChanged?.Invoke(locale);
+    }
+
+    public void NotifyFontChanged(string fontId)
+    {
+        FontChanged?.Invoke(fontId);
     }
 
     public void RequestBgm(string clipName)

@@ -1,4 +1,5 @@
 using UnityEngine;
+using PS260714.Localization;
 
 public class GameManager : MonoBehaviour
 {
@@ -50,6 +51,13 @@ public class GameManager : MonoBehaviour
     {
         Events.DisplayModeChangeRequested += ApplyDisplayMode;
         Events.ResolutionChangeRequested += ApplyResolution;
+        Events.LocaleChangeRequested += ApplyLocale;
+        Events.FontChangeRequested += ApplyFont;
+        LocalizationService.LocaleChanged += NotifyLocaleChanged;
+        LocalizationService.FontChanged += NotifyFontChanged;
+
+        Events.NotifyLocaleChanged(LocalizationService.CurrentLocale);
+        Events.NotifyFontChanged(LocalizationService.CurrentFontId);
     }
 
     private void UnsubscribeEvents()
@@ -59,6 +67,30 @@ public class GameManager : MonoBehaviour
 
         Events.DisplayModeChangeRequested -= ApplyDisplayMode;
         Events.ResolutionChangeRequested -= ApplyResolution;
+        Events.LocaleChangeRequested -= ApplyLocale;
+        Events.FontChangeRequested -= ApplyFont;
+        LocalizationService.LocaleChanged -= NotifyLocaleChanged;
+        LocalizationService.FontChanged -= NotifyFontChanged;
+    }
+
+    private static void ApplyLocale(string locale)
+    {
+        LocalizationService.SetLocale(locale);
+    }
+
+    private static void ApplyFont(string fontId)
+    {
+        LocalizationService.SetFont(fontId);
+    }
+
+    private void NotifyLocaleChanged(string locale)
+    {
+        Events?.NotifyLocaleChanged(locale);
+    }
+
+    private void NotifyFontChanged(string fontId)
+    {
+        Events?.NotifyFontChanged(fontId);
     }
 
     private void ApplyDisplayMode(int mode)

@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using PS260714.Localization;
 using TMPro;
 using UnityEngine;
 using UnityEngine.UI;
@@ -27,6 +28,7 @@ public sealed class DungeonSpawnQueueView : MonoBehaviour
             return false;
         }
 
+        LocalizationFontResolver.ApplyGameDefault(timerText);
         _initialized = true;
         return true;
     }
@@ -40,6 +42,7 @@ public sealed class DungeonSpawnQueueView : MonoBehaviour
         while (_items.Count < enemies.Count)
         {
             DungeonSpawnQueueItemView item = Instantiate(itemPrefab, content);
+            item.ApplyGameDefaultFonts();
             item.name = $"grpSpawnQueueItem_{_items.Count + 1}";
             _items.Add(item);
         }
@@ -79,14 +82,23 @@ public sealed class DungeonSpawnQueueView : MonoBehaviour
             : 0f;
 
         if (boardFull)
-            timerText.text = $"BOARD FULL | {queuedEnemyCount} WAITING";
+        {
+            timerText.text = LocalizationService.Get(
+                LocalizationKeys.UiDungeonQueueBoardFull,
+                LocalizationService.Arg("count", queuedEnemyCount));
+        }
         else if (queuedEnemyCount <= 0)
-            timerText.text = "QUEUE EMPTY";
+        {
+            timerText.text = LocalizationService.Get(
+                LocalizationKeys.UiDungeonQueueEmpty);
+        }
         else
         {
             float displayedTime = TimePrecision.FloorToTenth(remainingTime);
-            timerText.text =
-                $"NEXT {displayedTime:0.0}s | {queuedEnemyCount} WAITING";
+            timerText.text = LocalizationService.Get(
+                LocalizationKeys.UiDungeonQueueNext,
+                LocalizationService.Arg("seconds", displayedTime),
+                LocalizationService.Arg("count", queuedEnemyCount));
         }
     }
 }

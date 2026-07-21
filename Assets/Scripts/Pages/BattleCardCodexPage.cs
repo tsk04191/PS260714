@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using PS260714.Localization;
 using TMPro;
 using UnityEngine;
 using UnityEngine.UI;
@@ -25,19 +26,23 @@ public sealed class BattleCardCodexPage : RuntimeMenuPageBase
     private TextMeshProUGUI _detailTitle;
     private TextMeshProUGUI _classificationText;
     private TextMeshProUGUI _resourceText;
+    private TextMeshProUGUI _effectTitleText;
     private TextMeshProUGUI _effectText;
     private TextMeshProUGUI _usageText;
+    private Button _backButton;
     private int _selectedIndex;
 
     protected override string PageTitle => category ==
         EBattleCardCodexCategory.Skills
-            ? "SKILL CODEX"
-            : "ITEM CODEX";
+            ? LocalizationService.Get(LocalizationKeys.CodexSkillTitle)
+            : LocalizationService.Get(LocalizationKeys.CodexItemTitle);
 
     protected override string PageDescription => category ==
         EBattleCardCodexCategory.Skills
-            ? "REUSABLE BATTLE SKILLS"
-            : "CONSUMABLE BATTLE ITEMS";
+            ? LocalizationService.Get(
+                LocalizationKeys.CodexSkillDescription)
+            : LocalizationService.Get(
+                LocalizationKeys.CodexItemDescription);
 
     protected override Vector2 PanelSize => new(1120f, 820f);
 
@@ -46,7 +51,12 @@ public sealed class BattleCardCodexPage : RuntimeMenuPageBase
         RefreshEntries();
         BuildTabStrip();
         BuildDetailPanel();
-        CreateMenuButton("BACK TO CODEX", HandleBackClicked);
+        _backButton = CreateStyledButton(
+            ButtonRoot,
+            "btnBACKTOCODEX",
+            LocalizationService.Get(LocalizationKeys.CodexBattleBack),
+            HandleBackClicked,
+            72f);
 
         if (_entries.Count > 0)
         {
@@ -201,10 +211,11 @@ public sealed class BattleCardCodexPage : RuntimeMenuPageBase
             string.Empty,
             21f,
             52f);
-        CreateContentText(
+        _effectTitleText = CreateContentText(
             detailObject.transform,
             "txtBattleCardEffectTitle",
-            "EFFECT",
+            LocalizationService.Get(
+                LocalizationKeys.CodexBattleEffectTitle),
             19f,
             28f,
             FontStyles.Bold);
@@ -250,65 +261,156 @@ public sealed class BattleCardCodexPage : RuntimeMenuPageBase
         }
 
         _detailTitle.text = definition.DisplayName;
-        _classificationText.text = definition.IsReusable
-            ? "REUSABLE SKILL"
-            : "CONSUMABLE ITEM";
-        _resourceText.text =
-            $"ENERGY COST  {definition.EnergyCost}     " +
-            $"TARGET  {GetTargetName(definition.TargetType)}" +
-            (definition.IsReusable
-                ? $"     COOLDOWN  {definition.Cooldown:0.#}s"
-                : string.Empty);
-        _effectText.text = GetEffectDescription(definition.Type);
-        _usageText.text = definition.IsReusable
-            ? "REMAINS AVAILABLE AFTER USE. THE COOLDOWN STARTS ONLY " +
-              "AFTER THE EFFECT IS SUCCESSFULLY APPLIED."
-            : "GAINED FROM EVENT REWARDS AND CAN STACK. ONE COPY IS " +
-              "CONSUMED ONLY WHEN THE EFFECT IS SUCCESSFULLY APPLIED.";
+        _classificationText.text = LocalizationService.Get(
+            definition.IsReusable
+                ? LocalizationKeys.CodexBattleClassificationReusable
+                : LocalizationKeys.CodexBattleClassificationConsumable);
+
+        LocalizationArgument cost = LocalizationService.Arg(
+            "cost",
+            definition.EnergyCost);
+        LocalizationArgument target = LocalizationService.Arg(
+            "target",
+            GetTargetName(definition.TargetType));
+        _resourceText.text = definition.IsReusable
+            ? LocalizationService.Get(
+                LocalizationKeys.CodexBattleResourceReusable,
+                cost,
+                target,
+                LocalizationService.Arg(
+                    "cooldown",
+                    definition.Cooldown))
+            : LocalizationService.Get(
+                LocalizationKeys.CodexBattleResourceConsumable,
+                cost,
+                target);
+        _effectText.text = definition.Description;
+        _usageText.text = LocalizationService.Get(
+            definition.IsReusable
+                ? LocalizationKeys.CodexBattleUsageReusable
+                : LocalizationKeys.CodexBattleUsageConsumable);
+
+        ApplyLocalizedFont(_detailTitle, "title");
+        ApplyLocalizedFont(_classificationText, "body");
+        ApplyLocalizedFont(_resourceText, "number");
+        ApplyLocalizedFont(_effectText, "tooltip");
+        ApplyLocalizedFont(_usageText, "body");
     }
 
     private void ShowEmptyState()
     {
         if (_detailTitle != null)
-            _detailTitle.text = "NO CODEX ENTRIES";
+            _detailTitle.text = LocalizationService.Get(
+                LocalizationKeys.CodexBattleEmptyTitle);
         if (_classificationText != null)
             _classificationText.text = string.Empty;
         if (_resourceText != null)
             _resourceText.text = string.Empty;
         if (_effectText != null)
-            _effectText.text = "NO DATA IS AVAILABLE.";
+            _effectText.text = LocalizationService.Get(
+                LocalizationKeys.CodexBattleEmptyEffect);
         if (_usageText != null)
             _usageText.text = string.Empty;
     }
 
-    private static string GetEffectDescription(EBattleItemType type)
-    {
-        return type switch
-        {
-            EBattleItemType.Focus =>
-                "FORCES THE SELECTED ENEMY TO BE EVERY TURRET'S " +
-                "FIRST-PRIORITY TARGET FOR 5 SECONDS.",
-            EBattleItemType.Molotov =>
-                "APPLIES FIRE TO ONE ENEMY FOR 3 SECONDS. FIRE DEALS " +
-                "1 DAMAGE EVERY 1 SECOND.",
-            EBattleItemType.PrecisionShot =>
-                "DEALS 5 DAMAGE DIRECTLY TO ONE SELECTED ENEMY.",
-            EBattleItemType.OverSupply =>
-                "DOUBLES ONE SELECTED TURRET'S ATTACK SPEED FOR " +
-                "5 SECONDS.",
-            EBattleItemType.Overheat =>
-                "DOUBLES ONE SELECTED TURRET'S ATTACK POWER FOR " +
-                "3 SECONDS. FOR A FIRE TURRET, FIRE DURATION IS " +
-                "DOUBLED INSTEAD.",
-            _ => BattleItemCatalog.Get(type).Description.ToUpperInvariant(),
-        };
-    }
-
     private static string GetTargetName(EBattleItemTargetType targetType)
     {
-        return targetType == EBattleItemTargetType.Turret
-            ? "ONE TURRET"
-            : "ONE ENEMY";
+        return LocalizationService.Get(
+            targetType == EBattleItemTargetType.Turret
+                ? LocalizationKeys.CodexBattleTargetTurret
+                : LocalizationKeys.CodexBattleTargetEnemy);
+    }
+
+    private void OnEnable()
+    {
+        LocalizationService.LocaleChanged += HandleLocaleChanged;
+        LocalizationService.FontChanged += HandleFontChanged;
+        RefreshLocalizedView();
+    }
+
+    private void OnDisable()
+    {
+        LocalizationService.LocaleChanged -= HandleLocaleChanged;
+        LocalizationService.FontChanged -= HandleFontChanged;
+    }
+
+    private void HandleLocaleChanged(string unusedLocale)
+    {
+        RefreshLocalizedView();
+    }
+
+    private void HandleFontChanged(string unusedFontId)
+    {
+        RefreshLocalizedView();
+    }
+
+    private void RefreshLocalizedView()
+    {
+        if (_detailTitle == null)
+            return;
+
+        RefreshEntries();
+        for (int index = 0;
+             index < _tabButtons.Count && index < _entries.Count;
+             index++)
+        {
+            TextMeshProUGUI label = _tabButtons[index]
+                .GetComponentInChildren<TextMeshProUGUI>(true);
+            if (label != null)
+                label.text = _entries[index].DisplayName;
+        }
+
+        Transform runtimeRoot = transform.Find(RuntimeRootObjectName);
+        Transform panel = runtimeRoot != null
+            ? runtimeRoot.Find("grpMenuPanel")
+            : null;
+        if (panel != null)
+        {
+            TextMeshProUGUI title = panel.Find("txtPageTitle")
+                ?.GetComponent<TextMeshProUGUI>();
+            TextMeshProUGUI description = panel.Find("txtPageDescription")
+                ?.GetComponent<TextMeshProUGUI>();
+            if (title != null)
+                title.text = PageTitle;
+            if (description != null)
+                description.text = PageDescription;
+        }
+
+        if (_effectTitleText != null)
+        {
+            _effectTitleText.text = LocalizationService.Get(
+                LocalizationKeys.CodexBattleEffectTitle);
+        }
+
+        if (_backButton != null)
+        {
+            TextMeshProUGUI backLabel = _backButton
+                .GetComponentInChildren<TextMeshProUGUI>(true);
+            if (backLabel != null)
+            {
+                backLabel.text = LocalizationService.Get(
+                    LocalizationKeys.CodexBattleBack);
+            }
+        }
+
+        if (_entries.Count > 0)
+        {
+            SelectEntry(Mathf.Clamp(
+                _selectedIndex,
+                0,
+                _entries.Count - 1));
+        }
+        else
+        {
+            ShowEmptyState();
+        }
+    }
+
+    private static void ApplyLocalizedFont(
+        TMP_Text text,
+        string fontRole)
+    {
+        LocalizationFontResolver.Current?.Apply(text, fontRole);
     }
 
     private void HandleBackClicked()

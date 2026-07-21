@@ -1,4 +1,5 @@
 using System;
+using PS260714.Localization;
 using TMPro;
 using UnityEngine;
 using UnityEngine.EventSystems;
@@ -21,6 +22,24 @@ public sealed class EnemyCard : MonoBehaviour, IPointerClickHandler
     public RectTransform RectTransform =>
         _rectTransform != null ? _rectTransform : _rectTransform = (RectTransform)transform;
 
+    internal void ApplyGameDefaultFont()
+    {
+        LocalizationFontResolver.ApplyGameDefault(healthText, "number");
+    }
+
+    private void OnEnable()
+    {
+        LocalizationService.LocaleChanged += HandleLocaleChanged;
+        LocalizationService.FontChanged += HandleFontChanged;
+        RefreshHealth();
+    }
+
+    private void OnDisable()
+    {
+        LocalizationService.LocaleChanged -= HandleLocaleChanged;
+        LocalizationService.FontChanged -= HandleFontChanged;
+    }
+
     public void Bind(EnemyRuntime runtime)
     {
         if (runtime == null)
@@ -38,12 +57,15 @@ public sealed class EnemyCard : MonoBehaviour, IPointerClickHandler
         if (healthText != null && Runtime != null)
         {
             string typeCode = Runtime.Definition.CardCode;
+            string displayName = EnemyLocalization.GetName(
+                Runtime.Definition.Type);
             string health = Runtime.Armor > 0
                 ? $"{Runtime.Health} A{Runtime.Armor}"
                 : Runtime.Health.ToString();
             healthText.text = string.IsNullOrEmpty(typeCode)
-                ? health
-                : $"{typeCode} {health}";
+                ? $"{displayName}\n{health}"
+                : $"{displayName}\n{typeCode} {health}";
+            ApplyGameDefaultFont();
         }
 
         RefreshStatus();
@@ -81,6 +103,16 @@ public sealed class EnemyCard : MonoBehaviour, IPointerClickHandler
         {
             Clicked?.Invoke(Runtime);
         }
+    }
+
+    private void HandleLocaleChanged(string unusedLocale)
+    {
+        RefreshHealth();
+    }
+
+    private void HandleFontChanged(string unusedFontId)
+    {
+        ApplyGameDefaultFont();
     }
 
     private void CacheFaceImage()

@@ -1,4 +1,6 @@
+using System;
 using System.Collections.Generic;
+using PS260714.Localization;
 using TMPro;
 using UnityEngine;
 using UnityEngine.UI;
@@ -10,18 +12,18 @@ public sealed class SettingPage : MonoBehaviour, IPage
         new(0.18f, 0.36f, 0.32f, 1f);
     private static readonly Color UnselectedTabColor =
         new(0.08f, 0.16f, 0.15f, 1f);
-    private static readonly string[] DisplayModeLabels =
+    private static readonly string[] DisplayModeLocalizationKeys =
     {
-        "FULLSCREEN",
-        "BORDERLESS",
-        "WINDOWED",
+        LocalizationKeys.UiSettingsModeFullscreen,
+        LocalizationKeys.UiSettingsModeBorderless,
+        LocalizationKeys.UiSettingsModeWindowed,
     };
-    private static readonly string[] FrameRateLabels =
+    private static readonly int[] FrameRateValues =
     {
-        "UNLIMITED",
-        "120 FPS",
-        "60 FPS",
-        "30 FPS",
+        0,
+        120,
+        60,
+        30,
     };
 
     [Header("Navigation")]
@@ -58,6 +60,9 @@ public sealed class SettingPage : MonoBehaviour, IPage
     [SerializeField] private TextMeshProUGUI uiVolumeValueText;
     [SerializeField] private ToggleSliderController muteInBackgroundToggle;
 
+    [Header("Game Controls (Optional - generated at runtime)")]
+    [SerializeField] private TMP_Dropdown localeDropdown;
+
     [Header("Quit Confirmation")]
     [SerializeField] private Button quitButton;
     [SerializeField] private GameObject quitConfirmationPopup;
@@ -73,6 +78,8 @@ public sealed class SettingPage : MonoBehaviour, IPage
     private GameEventManager _gameEvents;
     private DataManager _dataManager;
     private readonly List<string> _supportedResolutions = new();
+    private readonly List<string> _supportedLocaleIds = new();
+    private TextMeshProUGUI _localeLabelText;
 
     public AudioSource Speaker { get; set; }
 
@@ -151,8 +158,11 @@ public sealed class SettingPage : MonoBehaviour, IPage
         if (_initialized)
             return;
 
+        EnsureLocalizationControls();
         if (!ValidateReferences())
             return;
+
+        BindSceneLocalizedTexts();
 
         ResolveSettingManagers();
         _returnPage ??= dungeonPage;
@@ -211,6 +221,9 @@ public sealed class SettingPage : MonoBehaviour, IPage
         sfxVolumeSlider.onValueChanged.AddListener(HandleSfxVolumeChanged);
         uiVolumeSlider.onValueChanged.AddListener(HandleUiVolumeChanged);
         muteInBackgroundToggle.ValueChanged += HandleMuteInBackgroundChanged;
+        localeDropdown?.onValueChanged.AddListener(HandleLocaleSelected);
+        LocalizationService.LocaleChanged +=
+            HandleLocalizationLocaleChanged;
         quitButton.onClick.AddListener(HandleQuitClicked);
         quitOkButton.onClick.AddListener(HandleQuitOkClicked);
         quitCancelButton.onClick.AddListener(HideQuitConfirmation);
@@ -224,6 +237,7 @@ public sealed class SettingPage : MonoBehaviour, IPage
             _gameEvents.DisplayBrightnessChanged += RefreshBrightness;
             _gameEvents.AudioVolumeChanged += RefreshAudioVolume;
             _gameEvents.MuteInBackgroundChanged += RefreshMuteInBackground;
+            _gameEvents.LocaleChanged += RefreshLocale;
         }
 
         _eventsBound = true;
@@ -262,6 +276,10 @@ public sealed class SettingPage : MonoBehaviour, IPage
             uiVolumeSlider.onValueChanged.RemoveListener(HandleUiVolumeChanged);
         if (muteInBackgroundToggle != null)
             muteInBackgroundToggle.ValueChanged -= HandleMuteInBackgroundChanged;
+        if (localeDropdown != null)
+            localeDropdown.onValueChanged.RemoveListener(HandleLocaleSelected);
+        LocalizationService.LocaleChanged -=
+            HandleLocalizationLocaleChanged;
         if (quitButton != null)
             quitButton.onClick.RemoveListener(HandleQuitClicked);
         if (quitOkButton != null)
@@ -278,6 +296,7 @@ public sealed class SettingPage : MonoBehaviour, IPage
             _gameEvents.DisplayBrightnessChanged -= RefreshBrightness;
             _gameEvents.AudioVolumeChanged -= RefreshAudioVolume;
             _gameEvents.MuteInBackgroundChanged -= RefreshMuteInBackground;
+            _gameEvents.LocaleChanged -= RefreshLocale;
         }
 
         _eventsBound = false;
@@ -392,6 +411,38 @@ public sealed class SettingPage : MonoBehaviour, IPage
             _dataManager?.SetMuteInBackground(value);
     }
 
+    private void HandleLocaleSelected(int index)
+    {
+        if (_isRefreshingControls || index < 0 ||
+            index >= _supportedLocaleIds.Count)
+        {
+            return;
+        }
+
+        string locale = _supportedLocaleIds[index];
+        if (_gameEvents != null)
+        {
+            _gameEvents.RequestLocaleChange(locale);
+        }
+        else if (LocalizationService.SetLocale(locale))
+        {
+            RefreshLocale(LocalizationService.CurrentLocale);
+        }
+    }
+
+    private void HandleLocalizationLocaleChanged(string locale)
+    {
+        bool wasRefreshing = _isRefreshingControls;
+        _isRefreshingControls = true;
+
+        RebuildLocalizedDisplayOptions();
+        BuildLocaleOptionList();
+        RefreshLocale(locale);
+        RefreshLocalizationPresentation();
+
+        _isRefreshingControls = wasRefreshing;
+    }
+
     private void HandleQuitClicked()
     {
         quitConfirmationPopup.SetActive(true);
@@ -464,10 +515,90 @@ public sealed class SettingPage : MonoBehaviour, IPage
 
         resolutionDropdown.ClearOptions();
         resolutionDropdown.AddOptions(_supportedResolutions);
-        displayModeDropdown.ClearOptions();
-        displayModeDropdown.AddOptions(new List<string>(DisplayModeLabels));
-        frameRateDropdown.ClearOptions();
-        frameRateDropdown.AddOptions(new List<string>(FrameRateLabels));
+        RebuildLocalizedDisplayOptions();
+    }
+
+    private void RebuildLocalizedDisplayOptions()
+    {
+        int displayModeIndex = displayModeDropdown != null
+            ? displayModeDropdown.value
+            : 0;
+        int frameRateIndex = frameRateDropdown != null
+            ? frameRateDropdown.value
+            : 0;
+
+        List<string> displayModeLabels = new(
+            DisplayModeLocalizationKeys.Length);
+        for (int index = 0;
+             index < DisplayModeLocalizationKeys.Length;
+             index++)
+        {
+            displayModeLabels.Add(LocalizationService.Get(
+                DisplayModeLocalizationKeys[index]));
+        }
+
+        List<string> frameRateLabels = new(FrameRateValues.Length);
+        for (int index = 0; index < FrameRateValues.Length; index++)
+        {
+            int frameRate = FrameRateValues[index];
+            frameRateLabels.Add(frameRate <= 0
+                ? LocalizationService.Get(
+                    LocalizationKeys.UiSettingsFpsUnlimited)
+                : $"{frameRate} FPS");
+        }
+
+        ReplaceDropdownOptions(
+            displayModeDropdown,
+            displayModeLabels,
+            displayModeIndex);
+        ReplaceDropdownOptions(
+            frameRateDropdown,
+            frameRateLabels,
+            frameRateIndex);
+    }
+
+    private static void ReplaceDropdownOptions(
+        TMP_Dropdown dropdown,
+        List<string> labels,
+        int stableIndex)
+    {
+        if (dropdown == null)
+            return;
+
+        dropdown.ClearOptions();
+        dropdown.AddOptions(labels);
+        if (labels.Count > 0)
+        {
+            dropdown.SetValueWithoutNotify(Mathf.Clamp(
+                stableIndex,
+                0,
+                labels.Count - 1));
+        }
+
+        dropdown.RefreshShownValue();
+    }
+
+    private void BuildLocaleOptionList()
+    {
+        _supportedLocaleIds.Clear();
+        List<string> localeLabels = new();
+        IReadOnlyList<LocalizationLocaleInfo> locales =
+            LocalizationService.SupportedLocales;
+        for (int index = 0; index < locales.Count; index++)
+        {
+            LocalizationLocaleInfo locale = locales[index];
+            if (string.IsNullOrWhiteSpace(locale.Locale))
+                continue;
+
+            _supportedLocaleIds.Add(locale.Locale);
+            localeLabels.Add(string.IsNullOrWhiteSpace(locale.DisplayName)
+                ? locale.Locale
+                : locale.DisplayName);
+        }
+
+        localeDropdown?.ClearOptions();
+        localeDropdown?.AddOptions(localeLabels);
+        RefreshLocale(LocalizationService.CurrentLocale);
     }
 
     private void RefreshSettingsControls()
@@ -479,6 +610,7 @@ public sealed class SettingPage : MonoBehaviour, IPage
         AudioData audio = _dataManager != null ? _dataManager.AudioDatas : null;
 
         _isRefreshingControls = true;
+        BuildLocaleOptionList();
         RefreshResolution(display != null ? display.resolution : DisplayData.GetCurrentResolution());
         RefreshDisplayMode(display != null ? display.displayMode : 1);
         RefreshFrameRate(display != null ? display.fps : DisplayData.DefaultFpsMode);
@@ -488,6 +620,8 @@ public sealed class SettingPage : MonoBehaviour, IPage
         RefreshAudioVolume(EAudioChannel.SFX, audio != null ? audio.sfx : 100);
         RefreshAudioVolume(EAudioChannel.UI, audio != null ? audio.ui : 100);
         RefreshMuteInBackground(audio != null && audio.mute_in_bg);
+        RefreshLocale(LocalizationService.CurrentLocale);
+        RefreshLocalizationPresentation();
         _isRefreshingControls = false;
     }
 
@@ -513,14 +647,17 @@ public sealed class SettingPage : MonoBehaviour, IPage
 
     private void RefreshDisplayMode(int mode)
     {
-        int index = Mathf.Clamp(mode, 0, DisplayModeLabels.Length - 1);
+        int index = Mathf.Clamp(
+            mode,
+            0,
+            DisplayModeLocalizationKeys.Length - 1);
         displayModeDropdown?.SetValueWithoutNotify(index);
         displayModeDropdown?.RefreshShownValue();
     }
 
     private void RefreshFrameRate(int mode)
     {
-        int index = Mathf.Clamp(mode, 0, FrameRateLabels.Length - 1);
+        int index = Mathf.Clamp(mode, 0, FrameRateValues.Length - 1);
         frameRateDropdown?.SetValueWithoutNotify(index);
         frameRateDropdown?.RefreshShownValue();
     }
@@ -586,6 +723,311 @@ public sealed class SettingPage : MonoBehaviour, IPage
         _isRefreshingControls = true;
         muteInBackgroundToggle.SetValue(value);
         _isRefreshingControls = wasRefreshing;
+    }
+
+    private void RefreshLocale(string locale)
+    {
+        if (localeDropdown == null || _supportedLocaleIds.Count == 0)
+            return;
+
+        int index = IndexOfStableId(_supportedLocaleIds, locale);
+        localeDropdown.SetValueWithoutNotify(Mathf.Max(0, index));
+        localeDropdown.RefreshShownValue();
+    }
+
+    private void EnsureLocalizationControls()
+    {
+        if (gameTab == null || resolutionDropdown == null)
+            return;
+
+        HideGameTabPlaceholder();
+        RemoveLegacyFontControls();
+        localeDropdown = ResolveOrCloneDropdown(
+            localeDropdown,
+            "drdLocale",
+            new Vector2(0.38f, 0.64f),
+            new Vector2(0.9f, 0.64f));
+
+        _localeLabelText = EnsureControlLabel(
+            "txtLocaleLabel",
+            LocalizationKeys.UiSettingsLanguage,
+            new Vector2(0.08f, 0.64f),
+            new Vector2(0.34f, 0.64f));
+
+        RefreshLocalizationPresentation();
+    }
+
+    private void RemoveLegacyFontControls()
+    {
+        RemoveRuntimeControl("drdFont");
+        RemoveRuntimeControl("txtFontLabel");
+    }
+
+    private void RemoveRuntimeControl(string objectName)
+    {
+        Transform legacyControl = gameTab.transform.Find(objectName);
+        if (legacyControl == null)
+            return;
+
+        legacyControl.gameObject.SetActive(false);
+        if (Application.isPlaying)
+            Destroy(legacyControl.gameObject);
+        else
+            DestroyImmediate(legacyControl.gameObject);
+    }
+
+    private void BindSceneLocalizedTexts()
+    {
+        BindLocalizedTextHierarchy(transform);
+        if (quitConfirmationPopup != null &&
+            !quitConfirmationPopup.transform.IsChildOf(transform))
+        {
+            BindLocalizedTextHierarchy(quitConfirmationPopup.transform);
+        }
+    }
+
+    private void BindLocalizedTextHierarchy(Transform root)
+    {
+        if (root == null)
+            return;
+
+        TextMeshProUGUI[] texts =
+            root.GetComponentsInChildren<TextMeshProUGUI>(true);
+        for (int index = 0; index < texts.Length; index++)
+        {
+            TextMeshProUGUI text = texts[index];
+            string localizationKey = GetSceneLocalizationKey(text);
+            if (string.IsNullOrWhiteSpace(localizationKey))
+                continue;
+
+            LocalizedText localizedText =
+                text.GetComponent<LocalizedText>();
+            if (localizedText == null)
+                localizedText = text.gameObject.AddComponent<LocalizedText>();
+            localizedText.SetKey(localizationKey);
+        }
+    }
+
+    private string GetSceneLocalizationKey(TextMeshProUGUI text)
+    {
+        if (text == null)
+            return string.Empty;
+
+        if (string.Equals(
+            text.name,
+            "Item Label",
+            StringComparison.Ordinal))
+        {
+            // TMP_Dropdown clones this template and owns each option label.
+            // Adding LocalizedText here would make every cloned entry refresh
+            // to the same placeholder when the locale changes.
+            return string.Empty;
+        }
+
+        return text.name switch
+        {
+            "txtSettingTitle" => LocalizationKeys.UiSettingsTitle,
+            "txtBACK" => LocalizationKeys.UiCommonBack,
+            "txtDISPLAY" => LocalizationKeys.UiSettingsTabDisplay,
+            "txtSOUND" => LocalizationKeys.UiSettingsTabSound,
+            "txtGAME" => LocalizationKeys.UiSettingsTabGame,
+            "txtMISC" => LocalizationKeys.UiSettingsTabMisc,
+            "txtDisplayPlaceholder" =>
+                LocalizationKeys.UiSettingsSectionDisplay,
+            "txtSoundPlaceholder" =>
+                LocalizationKeys.UiSettingsSectionSound,
+            "txtGamePlaceholder" =>
+                LocalizationKeys.UiSettingsSectionGame,
+            "txtMiscPlaceholder" =>
+                LocalizationKeys.UiSettingsSectionMisc,
+            "txtQUITGAME" => LocalizationKeys.UiSettingsQuitGame,
+            "txtQuitConfirmationTitle" =>
+                LocalizationKeys.UiSettingsQuitConfirmTitle,
+            "txtQuitConfirmationMessage" =>
+                LocalizationKeys.UiSettingsQuitConfirmMessage,
+            "txtOK" => LocalizationKeys.UiCommonOk,
+            "txtCANCEL" => LocalizationKeys.UiCommonCancel,
+            "txtResolutionLabel" =>
+                LocalizationKeys.UiSettingsResolution,
+            "txtDisplayModeLabel" =>
+                LocalizationKeys.UiSettingsDisplayMode,
+            "txtFrameRateLabel" =>
+                LocalizationKeys.UiSettingsFrameRate,
+            "txtBrightnessLabel" =>
+                LocalizationKeys.UiSettingsBrightness,
+            "txtMasterVolumeLabel" =>
+                LocalizationKeys.UiSettingsMasterVolume,
+            "txtMusicVolumeLabel" =>
+                LocalizationKeys.UiSettingsMusicVolume,
+            "txtSfxVolumeLabel" =>
+                LocalizationKeys.UiSettingsSfxVolume,
+            "txtUiVolumeLabel" =>
+                LocalizationKeys.UiSettingsUiVolume,
+            "txtMuteInBackgroundLabel" =>
+                LocalizationKeys.UiSettingsMuteBackground,
+            _ => string.Empty,
+        };
+    }
+
+    private TMP_Dropdown ResolveOrCloneDropdown(
+        TMP_Dropdown current,
+        string objectName,
+        Vector2 anchorMin,
+        Vector2 anchorMax)
+    {
+        TMP_Dropdown dropdown = current;
+        if (dropdown == null)
+        {
+            Transform existing = gameTab.transform.Find(objectName);
+            if (existing != null)
+                dropdown = existing.GetComponent<TMP_Dropdown>();
+        }
+
+        if (dropdown == null)
+        {
+            dropdown = Instantiate(
+                resolutionDropdown,
+                gameTab.transform,
+                false);
+            dropdown.name = objectName;
+            dropdown.onValueChanged.RemoveAllListeners();
+        }
+
+        RectTransform rect = dropdown.transform as RectTransform;
+        if (rect != null)
+        {
+            rect.anchorMin = anchorMin;
+            rect.anchorMax = anchorMax;
+            rect.pivot = new Vector2(0.5f, 0.5f);
+            rect.anchoredPosition = Vector2.zero;
+            rect.sizeDelta = new Vector2(0f, 72f);
+            rect.localScale = Vector3.one;
+        }
+
+        Navigation navigation = dropdown.navigation;
+        navigation.mode = Navigation.Mode.Automatic;
+        dropdown.navigation = navigation;
+        dropdown.gameObject.SetActive(true);
+        ApplyDropdownFont(dropdown);
+        return dropdown;
+    }
+
+    private TextMeshProUGUI EnsureControlLabel(
+        string objectName,
+        string localizationKey,
+        Vector2 anchorMin,
+        Vector2 anchorMax)
+    {
+        Transform existing = gameTab.transform.Find(objectName);
+        TextMeshProUGUI text = existing != null
+            ? existing.GetComponent<TextMeshProUGUI>()
+            : null;
+        if (text == null)
+        {
+            GameObject labelObject = new(
+                objectName,
+                typeof(RectTransform),
+                typeof(CanvasRenderer),
+                typeof(TextMeshProUGUI));
+            labelObject.layer = gameTab.layer;
+            labelObject.transform.SetParent(gameTab.transform, false);
+            text = labelObject.GetComponent<TextMeshProUGUI>();
+
+            TMP_Text template = resolutionDropdown.captionText;
+            if (template != null)
+            {
+                text.font = template.font;
+                text.fontSize = template.fontSize;
+                text.color = template.color;
+            }
+
+            text.raycastTarget = false;
+            text.alignment = TextAlignmentOptions.MidlineLeft;
+        }
+
+        LocalizedText localizedText = text.GetComponent<LocalizedText>();
+        if (localizedText == null)
+            localizedText = text.gameObject.AddComponent<LocalizedText>();
+        localizedText.SetKey(localizationKey);
+
+        RectTransform rect = text.rectTransform;
+        rect.anchorMin = anchorMin;
+        rect.anchorMax = anchorMax;
+        rect.pivot = new Vector2(0.5f, 0.5f);
+        rect.anchoredPosition = Vector2.zero;
+        rect.sizeDelta = new Vector2(0f, 72f);
+        rect.localScale = Vector3.one;
+        text.gameObject.SetActive(true);
+        return text;
+    }
+
+    private void RefreshLocalizationPresentation()
+    {
+        RefreshLocalizedTextHierarchy(transform);
+        if (quitConfirmationPopup != null &&
+            !quitConfirmationPopup.transform.IsChildOf(transform))
+        {
+            RefreshLocalizedTextHierarchy(quitConfirmationPopup.transform);
+        }
+
+        resolutionDropdown?.RefreshShownValue();
+        displayModeDropdown?.RefreshShownValue();
+        frameRateDropdown?.RefreshShownValue();
+        localeDropdown?.RefreshShownValue();
+        ApplyDropdownFont(resolutionDropdown);
+        ApplyDropdownFont(displayModeDropdown);
+        ApplyDropdownFont(frameRateDropdown);
+        ApplyDropdownFont(localeDropdown);
+    }
+
+    private static void RefreshLocalizedTextHierarchy(Transform root)
+    {
+        if (root == null)
+            return;
+
+        LocalizedText[] localizedTexts =
+            root.GetComponentsInChildren<LocalizedText>(true);
+        for (int index = 0; index < localizedTexts.Length; index++)
+            localizedTexts[index].Refresh();
+    }
+
+    private static void ApplyDropdownFont(TMP_Dropdown dropdown)
+    {
+        if (dropdown == null)
+            return;
+
+        LocalizationFontResolver.ApplyGameDefault(dropdown.captionText);
+        LocalizationFontResolver.ApplyGameDefault(dropdown.itemText);
+    }
+
+    private void HideGameTabPlaceholder()
+    {
+        for (int index = 0; index < gameTab.transform.childCount; index++)
+        {
+            Transform child = gameTab.transform.GetChild(index);
+            if (child.name.IndexOf(
+                "placeholder",
+                StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                child.gameObject.SetActive(false);
+            }
+        }
+    }
+
+    private static int IndexOfStableId(List<string> values, string value)
+    {
+        for (int index = 0; index < values.Count; index++)
+        {
+            if (string.Equals(
+                values[index],
+                value,
+                StringComparison.OrdinalIgnoreCase))
+            {
+                return index;
+            }
+        }
+
+        return -1;
     }
 
     private static void SetTabButtonColor(Button button, bool selected)

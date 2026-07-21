@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using PS260714.Localization;
 using TMPro;
 using UnityEngine;
 using UnityEngine.EventSystems;
@@ -36,6 +37,7 @@ public sealed class DungeonBattleTab : MonoBehaviour
     private bool _initialized;
     private bool _controlEventsBound;
     private bool _battleEventsBound;
+    private bool _localizationEventsBound;
 
     private void OnEnable()
     {
@@ -44,6 +46,7 @@ public sealed class DungeonBattleTab : MonoBehaviour
 
         BindControlEvents();
         BindBattleEvents();
+        BindLocalizationEvents();
         Refresh();
     }
 
@@ -51,6 +54,7 @@ public sealed class DungeonBattleTab : MonoBehaviour
     {
         UnbindControlEvents();
         UnbindBattleEvents();
+        UnbindLocalizationEvents();
     }
 
     private void OnDestroy()
@@ -85,6 +89,7 @@ public sealed class DungeonBattleTab : MonoBehaviour
         {
             BindControlEvents();
             BindBattleEvents();
+            BindLocalizationEvents();
             Refresh();
         }
 
@@ -95,6 +100,7 @@ public sealed class DungeonBattleTab : MonoBehaviour
     {
         UnbindControlEvents();
         UnbindBattleEvents();
+        UnbindLocalizationEvents();
         _itemHandView?.Teardown();
         _battleManager = null;
         _page = null;
@@ -114,16 +120,36 @@ public sealed class DungeonBattleTab : MonoBehaviour
         _pauseOverlayText = pauseOverlay != null
             ? pauseOverlay.GetComponentInChildren<TextMeshProUGUI>(true)
             : null;
-        if (activeSkillResourceText == null)
+        TextMeshProUGUI[] initialTexts =
+            GetComponentsInChildren<TextMeshProUGUI>(true);
+        for (int index = 0; index < initialTexts.Length; index++)
         {
-            foreach (TextMeshProUGUI text in
-                     GetComponentsInChildren<TextMeshProUGUI>(true))
+            TextMeshProUGUI text = initialTexts[index];
+            LocalizationFontResolver.ApplyGameDefault(text);
+            if (activeSkillResourceText != null ||
+                text.name != "txtPlayerPartyInfoTitle")
             {
-                if (text.name != "txtPlayerPartyInfoTitle")
-                    continue;
+                continue;
+            }
 
-                activeSkillResourceText = text;
-                break;
+            activeSkillResourceText = text;
+        }
+
+        if (settingsButton != null)
+        {
+            TextMeshProUGUI settingsLabel =
+                settingsButton.GetComponentInChildren<TextMeshProUGUI>(true);
+            if (settingsLabel != null)
+            {
+                LocalizedText localizedText =
+                    settingsLabel.GetComponent<LocalizedText>();
+                if (localizedText == null)
+                {
+                    localizedText = settingsLabel.gameObject
+                        .AddComponent<LocalizedText>();
+                }
+
+                localizedText.SetKey(LocalizationKeys.UiCommonSettings);
             }
         }
 
@@ -205,6 +231,36 @@ public sealed class DungeonBattleTab : MonoBehaviour
         _battleEventsBound = false;
     }
 
+    private void BindLocalizationEvents()
+    {
+        if (_localizationEventsBound)
+            return;
+
+        LocalizationService.LocaleChanged += HandleLocalizationChanged;
+        LocalizationService.FontChanged += HandleLocalizationChanged;
+        _localizationEventsBound = true;
+    }
+
+    private void UnbindLocalizationEvents()
+    {
+        if (!_localizationEventsBound)
+            return;
+
+        LocalizationService.LocaleChanged -= HandleLocalizationChanged;
+        LocalizationService.FontChanged -= HandleLocalizationChanged;
+        _localizationEventsBound = false;
+    }
+
+    private void HandleLocalizationChanged(string unusedValue)
+    {
+        TextMeshProUGUI[] texts =
+            GetComponentsInChildren<TextMeshProUGUI>(true);
+        for (int index = 0; index < texts.Length; index++)
+            LocalizationFontResolver.ApplyGameDefault(texts[index]);
+
+        Refresh();
+    }
+
     private void HandleSpeedClicked()
     {
         _battleManager?.CycleGameSpeed();
@@ -272,7 +328,12 @@ public sealed class DungeonBattleTab : MonoBehaviour
         if (speedText != null)
             speedText.text = $"{gameSpeed:0.#}X";
         if (pauseText != null)
-            pauseText.text = isPaused ? "RESUME" : "PAUSE";
+        {
+            pauseText.text = LocalizationService.Get(
+                isPaused
+                    ? LocalizationKeys.UiDungeonResume
+                    : LocalizationKeys.UiDungeonPause);
+        }
         if (_pauseOverlayText == null && pauseOverlay != null)
         {
             _pauseOverlayText =
@@ -280,7 +341,12 @@ public sealed class DungeonBattleTab : MonoBehaviour
         }
 
         if (_pauseOverlayText != null)
-            _pauseOverlayText.text = isDefeated ? "DEFEAT" : "PAUSE";
+        {
+            _pauseOverlayText.text = LocalizationService.Get(
+                isDefeated
+                    ? LocalizationKeys.UiDungeonDefeat
+                    : LocalizationKeys.UiDungeonPause);
+        }
         if (pauseOverlay != null)
             pauseOverlay.SetActive(isPaused || isDefeated);
     }
@@ -318,16 +384,26 @@ public sealed class DungeonBattleTab : MonoBehaviour
             ? _battleManager.ActiveSkillRechargeRemaining
             : 0f;
         string recharge = resource >= maximumResource
-            ? "FULL"
-            : $"+1 IN {rechargeRemaining:0.0}s";
+            ? LocalizationService.Get(LocalizationKeys.UiDungeonEnergyFull)
+            : LocalizationService.Get(
+                LocalizationKeys.UiDungeonEnergyRecharge,
+                LocalizationService.Arg("seconds", rechargeRemaining));
         activeSkillResourceText.text = _page != null
-            ? $"ENERGY {resource}/{maximumResource} | {recharge} | " +
-              $"SCALE {_page.CurrentDifficultyScale}" +
-              (_page.IsTutorialBattle
-                  ? "\nTUTORIAL: HOVER A TURRET FOR SKILL INFO | " +
-                    "CLICK A TURRET TO USE ITS SKILL"
-                  : string.Empty)
-            : $"ENERGY {resource}/{maximumResource} | {recharge}";
+            ? LocalizationService.Get(
+                _page.IsTutorialBattle
+                    ? LocalizationKeys.UiDungeonEnergyTutorial
+                    : LocalizationKeys.UiDungeonEnergyScale,
+                LocalizationService.Arg("current", resource),
+                LocalizationService.Arg("max", maximumResource),
+                LocalizationService.Arg("recharge", recharge),
+                LocalizationService.Arg(
+                    "scale",
+                    _page.CurrentDifficultyScale))
+            : LocalizationService.Get(
+                LocalizationKeys.UiDungeonEnergyStatus,
+                LocalizationService.Arg("current", resource),
+                LocalizationService.Arg("max", maximumResource),
+                LocalizationService.Arg("recharge", recharge));
     }
 
     private void EnsureItemHandView()
@@ -392,6 +468,8 @@ public sealed class DungeonItemHandView : MonoBehaviour
         _page.BattleItemsChanged += RebuildCards;
         _battleManager.ActiveSkillResourceChanged += HandleEnergyChanged;
         _battleManager.StateChanged += HandleBattleStateChanged;
+        LocalizationService.LocaleChanged += HandleLocalizationChanged;
+        LocalizationService.FontChanged += HandleLocalizationChanged;
         if (_page.Board != null)
             _page.Board.BindItemTargetHandler(HandleEnemyClicked);
         _previousBattleState = _battleManager.State;
@@ -413,6 +491,8 @@ public sealed class DungeonItemHandView : MonoBehaviour
             _battleManager.ActiveSkillResourceChanged -= HandleEnergyChanged;
             _battleManager.StateChanged -= HandleBattleStateChanged;
         }
+        LocalizationService.LocaleChanged -= HandleLocalizationChanged;
+        LocalizationService.FontChanged -= HandleLocalizationChanged;
         UnbindTurrets();
         _page = null;
         _battleManager = null;
@@ -467,6 +547,7 @@ public sealed class DungeonItemHandView : MonoBehaviour
         instructionRect.anchoredPosition = new Vector2(0f, 0f);
         instructionRect.sizeDelta = new Vector2(310f, 46f);
         _instructionText = instructionObject.GetComponent<TextMeshProUGUI>();
+        LocalizationFontResolver.ApplyGameDefault(_instructionText);
         _instructionText.fontSize = 18f;
         _instructionText.fontStyle = FontStyles.Bold;
         _instructionText.color = new Color(0.94f, 0.91f, 0.78f, 1f);
@@ -648,6 +729,15 @@ public sealed class DungeonItemHandView : MonoBehaviour
         RefreshCards();
     }
 
+    private void HandleLocalizationChanged(string unusedValue)
+    {
+        if (!_initialized)
+            return;
+
+        LocalizationFontResolver.ApplyGameDefault(_instructionText);
+        RebuildCards();
+    }
+
     private void RefreshTurretBindings()
     {
         UnbindTurrets();
@@ -678,16 +768,18 @@ public sealed class DungeonItemHandView : MonoBehaviour
 
         if (!_selectedItem.HasValue)
         {
-            _instructionText.text = "ITEM HAND";
+            _instructionText.text = LocalizationService.Get(
+                LocalizationKeys.UiDungeonItemHand);
             return;
         }
 
         BattleItemDefinition definition = BattleItemCatalog.Get(
             _selectedItem.Value);
-        _instructionText.text = definition.TargetType ==
-                                EBattleItemTargetType.Enemy
-            ? $"{definition.DisplayName}: SELECT ENEMY"
-            : $"{definition.DisplayName}: SELECT TURRET";
+        _instructionText.text = LocalizationService.Get(
+            definition.TargetType == EBattleItemTargetType.Enemy
+                ? LocalizationKeys.UiDungeonItemSelectEnemy
+                : LocalizationKeys.UiDungeonItemSelectTurret,
+            LocalizationService.Arg("item", definition.DisplayName));
     }
 }
 
@@ -755,11 +847,17 @@ public sealed class DungeonItemCardView : MonoBehaviour,
             new Vector2(-12f, -8f),
             17f,
             TextAlignmentOptions.MidlineLeft);
-        detailText.text = $"{definition.DisplayName} [C{definition.EnergyCost}]\n" +
-                          definition.Description +
-                          (definition.IsReusable
-                              ? $"\nREUSABLE | CD {definition.Cooldown:0.#}s"
-                              : "\nCONSUMABLE");
+        string header = LocalizationService.Get(
+            LocalizationKeys.UiDungeonItemCardHeader,
+            LocalizationService.Arg("name", definition.DisplayName),
+            LocalizationService.Arg("cost", definition.EnergyCost));
+        string footer = definition.IsReusable
+            ? LocalizationService.Get(
+                LocalizationKeys.UiDungeonItemReusable,
+                LocalizationService.Arg("cooldown", definition.Cooldown))
+            : LocalizationService.Get(
+                LocalizationKeys.UiDungeonItemConsumable);
+        detailText.text = $"{header}\n{definition.Description}\n{footer}";
         _popup.SetActive(false);
     }
 
@@ -781,12 +879,25 @@ public sealed class DungeonItemCardView : MonoBehaviour,
                 : DisabledColor;
 
         string state = cooldown > 0f
-            ? $"CD {TimePrecision.FloorToTenth(cooldown):0.0}s"
+            ? LocalizationService.Get(
+                LocalizationKeys.UiDungeonItemCooldown,
+                LocalizationService.Arg(
+                    "cooldown",
+                    TimePrecision.FloorToTenth(cooldown)))
             : _definition.IsReusable
-                ? "REUSABLE"
-                : $"x{count}";
-        _summaryText.text =
-            $"C{_definition.EnergyCost}  {_definition.DisplayName}\n{state}";
+                ? LocalizationService.Get(
+                    LocalizationKeys.UiDungeonItemReusable,
+                    LocalizationService.Arg(
+                        "cooldown",
+                        _definition.Cooldown))
+                : LocalizationService.Get(
+                    LocalizationKeys.UiDungeonItemCount,
+                    LocalizationService.Arg("count", count));
+        string header = LocalizationService.Get(
+            LocalizationKeys.UiDungeonItemCardHeader,
+            LocalizationService.Arg("name", _definition.DisplayName),
+            LocalizationService.Arg("cost", _definition.EnergyCost));
+        _summaryText.text = $"{header}\n{state}";
     }
 
     private void Update()
@@ -843,6 +954,7 @@ public sealed class DungeonItemCardView : MonoBehaviour,
         rect.offsetMin = offsetMin;
         rect.offsetMax = offsetMax;
         TextMeshProUGUI text = textObject.GetComponent<TextMeshProUGUI>();
+        LocalizationFontResolver.ApplyGameDefault(text);
         text.fontSize = fontSize;
         text.fontStyle = FontStyles.Bold;
         text.color = new Color(0.94f, 0.91f, 0.78f, 1f);
