@@ -42,7 +42,7 @@ namespace PS260714.Localization.Editor
         private bool showFontCatalog = true;
         private bool showMarkupCatalog = true;
 
-        [MenuItem("Tools/PS260714/Localization Editor")]
+        [MenuItem(PS260714EditorMenu.LocalizationEditor)]
         public static void Open()
         {
             GetWindow<LocalizationEditorWindow>("Localization");

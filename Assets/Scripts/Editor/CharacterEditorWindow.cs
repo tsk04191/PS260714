@@ -6,7 +6,7 @@ using UnityEngine;
 
 public sealed class CharacterEditorWindow : EditorWindow
 {
-    public const string MenuPath = "Tools/Dungeon/Character Editor";
+    public const string MenuPath = PS260714EditorMenu.CharacterEditor;
 
     private const string CharacterFolder = "Assets/Resources/Characters";
     private const string CharacterLocalizationPrefix = "character.";

@@ -2996,7 +2996,9 @@ public static class StatusEffectDefinitionValidator
                 $"{path}.value",
                 "Multiplicative ratio cannot be less than -1.");
         }
-        if (!definition.CanTargetAlly)
+        bool supportsEnemy =
+            modifier.StatType == StatusEffectStatType.IncomingDamage;
+        if (!definition.CanTargetAlly && !supportsEnemy)
         {
             AddWarning(
                 result,

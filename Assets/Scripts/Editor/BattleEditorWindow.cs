@@ -6,11 +6,6 @@ using UnityEngine.UI;
 
 public sealed class BattleEditorWindow : EditorWindow
 {
-    public const string MenuPath = "Tools/Dungeon/First Battle Editor";
-
-    private const string FirstBattlePath =
-        "Assets/Data/Battles/FirstBattle.asset";
-
     private BattleSO _battle;
     private SerializedObject _serializedBattle;
     private Vector2 _scrollPosition;
@@ -51,19 +46,6 @@ public sealed class BattleEditorWindow : EditorWindow
         Debug.Log(
             $"[FirstBattleEditor] Window shown. Instance: " +
             $"{window.GetInstanceID()}");
-    }
-
-    [MenuItem(MenuPath)]
-    public static void OpenFromMenu()
-    {
-        BattleSO battle = Selection.activeObject as BattleSO;
-        if (battle == null)
-        {
-            battle = AssetDatabase.LoadAssetAtPath<BattleSO>(
-                FirstBattlePath);
-        }
-
-        Open(battle);
     }
 
     private void OnEnable()
@@ -671,8 +653,6 @@ public sealed class BattleEditorWindow : EditorWindow
 
 public static class FireStatusEffectAssetGenerator
 {
-    private const string MenuPath =
-        "Tools/Dungeon/Effects/Create Fire Status Effect";
     private const string EffectFolder =
         "Assets/Animations/Battle/FireStatus";
     private const string HiddenClipPath =
@@ -708,12 +688,6 @@ public static class FireStatusEffectAssetGenerator
         EditorApplication.playModeStateChanged += HandlePlayModeStateChanged;
     }
 
-    [MenuItem(MenuPath)]
-    public static void GenerateFromMenu()
-    {
-        Generate(true);
-    }
-
     private static void HandlePlayModeStateChanged(PlayModeStateChange state)
     {
         if (state != PlayModeStateChange.EnteredEditMode)
@@ -732,7 +706,7 @@ public static class FireStatusEffectAssetGenerator
             return;
         }
 
-        Generate(false);
+        Generate();
     }
 
     private static bool IsGenerationRequired()
@@ -761,7 +735,7 @@ public static class FireStatusEffectAssetGenerator
                    3);
     }
 
-    private static void Generate(bool showCompletionDialog)
+    private static void Generate()
     {
         try
         {
@@ -779,15 +753,6 @@ public static class FireStatusEffectAssetGenerator
             AssetDatabase.SaveAssets();
             AssetDatabase.Refresh();
 
-            if (showCompletionDialog)
-            {
-                EditorUtility.DisplayDialog(
-                    "Fire Status Effect",
-                    "Fire status animation and DungeonTile flame layers are " +
-                    "ready. Assign the flame Sprite to DungeonTile prefab " +
-                    "> Fire Status Sprite.",
-                    "OK");
-            }
         }
         catch (System.Exception exception)
         {

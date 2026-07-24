@@ -7,7 +7,7 @@ using UnityEngine;
 
 public sealed class StatusEffectEditorWindow : EditorWindow
 {
-    public const string MenuPath = "Tools/Dungeon/Status Effect Editor";
+    public const string MenuPath = PS260714EditorMenu.StatusEffectEditor;
 
     private const string AssetFolder = "Assets/Resources/StatusEffects";
     private const string LocalizationPrefix = "status.";
@@ -130,7 +130,8 @@ public sealed class StatusEffectEditorWindow : EditorWindow
     private static readonly string[] StatTypeOptions =
     {
         "공격력",
-        "공격 속도"
+        "공격 속도",
+        "받는 피해"
     };
 
     private static readonly string[] StatModifierModeOptions =
@@ -219,10 +220,11 @@ public sealed class StatusEffectEditorWindow : EditorWindow
         if (_isRenaming)
             DrawRenameRow();
 
-        EditorGUILayout.BeginHorizontal();
-        DrawAssetList();
-        DrawEditor();
-        EditorGUILayout.EndHorizontal();
+        using (new EditorGUILayout.HorizontalScope())
+        {
+            DrawAssetList();
+            DrawEditor();
+        }
     }
 
     private void DrawToolbar()
@@ -321,16 +323,20 @@ public sealed class StatusEffectEditorWindow : EditorWindow
 
     private void DrawAssetList()
     {
-        EditorGUILayout.BeginVertical(
-            EditorStyles.helpBox,
-            GUILayout.Width(ListWidth),
-            GUILayout.ExpandHeight(true));
+        using (new EditorGUILayout.VerticalScope(
+                   EditorStyles.helpBox,
+                   GUILayout.Width(ListWidth),
+                   GUILayout.ExpandHeight(true)))
+        {
         _searchText = EditorGUILayout.TextField(
             _searchText,
             EditorStyles.toolbarSearchField);
-        _listScroll = EditorGUILayout.BeginScrollView(_listScroll);
-
         int visibleCount = 0;
+        using (EditorGUILayout.ScrollViewScope scrollView =
+               new(_listScroll))
+        {
+            _listScroll = scrollView.scrollPosition;
+
         foreach (StatusEffectSO definition in _definitions)
         {
             if (definition == null || !MatchesSearch(definition))
@@ -342,7 +348,9 @@ public sealed class StatusEffectEditorWindow : EditorWindow
                 ? EditorStyles.miniButtonMid
                 : EditorStyles.miniButton;
             if (GUILayout.Button(
-                    new GUIContent(definition.name, definition.Icon?.texture),
+                    new GUIContent(
+                        definition.name,
+                        GetIconTexture(definition)),
                     style,
                     GUILayout.Height(26f)))
             {
@@ -359,11 +367,20 @@ public sealed class StatusEffectEditorWindow : EditorWindow
                 MessageType.Info);
         }
 
-        EditorGUILayout.EndScrollView();
+        }
         EditorGUILayout.LabelField(
             $"{visibleCount} / {_definitions.Count}",
             EditorStyles.centeredGreyMiniLabel);
-        EditorGUILayout.EndVertical();
+        }
+    }
+
+    private static Texture GetIconTexture(StatusEffectSO definition)
+    {
+        if (definition == null)
+            return null;
+
+        Sprite icon = definition.Icon;
+        return icon != null ? icon.texture : null;
     }
 
     private void DrawEditor()

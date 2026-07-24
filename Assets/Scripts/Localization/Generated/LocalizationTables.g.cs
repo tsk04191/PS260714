@@ -9,7 +9,7 @@ namespace PS260714.Localization
 {
     public static class GeneratedLocalizationTables
     {
-        public const string SourceHash = "a8c0509c651ee7c055b737f9d7e7ab7981e317788fbaf2522df05baab09db694";
+        public const string SourceHash = "f49b19460e5c78b3cf936ba3f1b79e24d125e6fbb5eac94918ce65d382153407";
         public const string ReferenceLocale = "en-US";
 
         private static readonly LocalizationLocaleInfo[] LocaleData =
@@ -31,6 +31,8 @@ namespace PS260714.Localization
                 { "status.stun.description", new LocalizationEntry("\uD589\uB3D9\uD560 \uC218 \uC5C6\uC2B5\uB2C8\uB2E4.", "tooltip") },
                 { "status.emergency_kit.name", new LocalizationEntry("\uC751\uAE09 \uD0A4\uD2B8", "title") },
                 { "status.emergency_kit.description", new LocalizationEntry("\uD6A8\uACFC \uC5C6\uC774 \uC2A4\uD0DD\uB9CC \uB204\uC801\uB418\uB294 \uC601\uAD6C \uC0C1\uD0DC\uC785\uB2C8\uB2E4.", "tooltip") },
+                { "status.opening.name", new LocalizationEntry("\uBE48\uD2C8", "title") },
+                { "status.opening.description", new LocalizationEntry("\uBC1B\uB294 \uD53C\uD574\uAC00 10% \uC99D\uAC00\uD569\uB2C8\uB2E4.", "tooltip") },
                 { "ui.settings.language", new LocalizationEntry("\uC5B8\uC5B4", "body") },
                 { "ui.settings.font", new LocalizationEntry("\uAE00\uAF34", "body") },
                 { "skill.focus.name", new LocalizationEntry("\uC9D1\uC911", "title") },
@@ -277,6 +279,8 @@ namespace PS260714.Localization
                 { "status.stun.description", new LocalizationEntry("Cannot act.", "tooltip") },
                 { "status.emergency_kit.name", new LocalizationEntry("Emergency Kit", "title") },
                 { "status.emergency_kit.description", new LocalizationEntry("A permanent status that only stores stacks.", "tooltip") },
+                { "status.opening.name", new LocalizationEntry("Opening", "title") },
+                { "status.opening.description", new LocalizationEntry("Takes 10% more damage.", "tooltip") },
                 { "ui.settings.language", new LocalizationEntry("Language", "body") },
                 { "ui.settings.font", new LocalizationEntry("Font", "body") },
                 { "skill.focus.name", new LocalizationEntry("Focus", "title") },

@@ -5,6 +5,8 @@ status.stun.name,상태 이름,title,,기절,Stun
 status.stun.description,상태 설명,tooltip,,행동할 수 없습니다.,Cannot act.
 status.emergency_kit.name,상태 이름,title,,응급 키트,Emergency Kit
 status.emergency_kit.description,상태 설명,tooltip,,효과 없이 스택만 누적되는 영구 상태입니다.,A permanent status that only stores stacks.
+status.opening.name,상태 이름,title,,빈틈,Opening
+status.opening.description,상태 설명,tooltip,,받는 피해가 10% 증가합니다.,Takes 10% more damage.
 ui.settings.language,설정 UI,body,,언어,Language
 ui.settings.font,설정 UI,body,,글꼴,Font
 skill.focus.name,기술 이름,title,,집중,Focus

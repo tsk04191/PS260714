@@ -115,6 +115,10 @@ public sealed class EnemyRuntime
         if (damage <= 0 || Health <= 0)
             return 0;
 
+        damage = ResolveIncomingDamage(damage);
+        if (damage <= 0)
+            return 0;
+
         if (damageType == CharacterAttackDamageType.StatusEffect ||
             damageType == CharacterAttackDamageType.StatusRemoval)
             return 0;
@@ -159,6 +163,47 @@ public sealed class EnemyRuntime
         int healthDamage = Mathf.Min(Health, damage);
         Health -= healthDamage;
         return appliedDamage + healthDamage;
+    }
+
+    private int ResolveIncomingDamage(int damage)
+    {
+        StatusEffectStatAccumulator accumulator = default;
+        foreach (StatusEffectRuntimeState state in _statusEffects.Values)
+        {
+            if (state == null || !state.HasStacks ||
+                state.Definition == null)
+            {
+                continue;
+            }
+
+            IReadOnlyList<StatusEffectStatModifierDefinition> modifiers =
+                state.Definition.StatModifiers;
+            if (modifiers == null)
+                continue;
+
+            int stacks = Mathf.Max(1, state.StackCount);
+            foreach (StatusEffectStatModifierDefinition modifier in
+                     modifiers)
+            {
+                if (modifier != null &&
+                    modifier.StatType ==
+                    StatusEffectStatType.IncomingDamage)
+                {
+                    accumulator.Add(modifier, stacks);
+                }
+            }
+        }
+
+        float modifiedDamage = accumulator.Evaluate(damage);
+        if (float.IsNaN(modifiedDamage) || modifiedDamage <= 0f)
+            return 0;
+        if (float.IsInfinity(modifiedDamage) ||
+            modifiedDamage >= int.MaxValue)
+        {
+            return int.MaxValue;
+        }
+
+        return Mathf.Max(0, Mathf.RoundToInt(modifiedDamage));
     }
 
     public int Heal(int amount)

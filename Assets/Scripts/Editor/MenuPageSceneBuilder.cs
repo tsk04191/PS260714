@@ -15,12 +15,6 @@ public static class MenuPageSceneBuilder
         EditorApplication.update += BuildWhenSceneIsReady;
     }
 
-    [MenuItem("Tools/PS260714/Rebuild Main Menu Pages")]
-    public static void RebuildClientPages()
-    {
-        BuildClientPages(true);
-    }
-
     private static void BuildIfMissing()
     {
         if (EditorApplication.isPlayingOrWillChangePlaymode)

@@ -19,6 +19,8 @@ public sealed class CharacterP0RegressionTests
         "Assets/Resources/StatusEffects/EmergencyKit.asset";
     private const string FireAssetPath =
         "Assets/Resources/StatusEffects/Fire.asset";
+    private const string OpeningAssetPath =
+        "Assets/Resources/StatusEffects/Opening.asset";
     private const string StunAssetPath =
         "Assets/Resources/StatusEffects/Stun.asset";
 
@@ -3012,6 +3014,81 @@ public sealed class CharacterP0RegressionTests
         Assert.That(emergencyKit.TriggerBlocks, Is.Empty);
         Assert.That(emergencyKit.StatModifiers, Is.Empty);
         Assert.That(emergencyKit.ControlEffects, Is.Empty);
+    }
+
+    [Test]
+    public void OpeningStatus_IncreasesEnemyIncomingDamageByTenPercent()
+    {
+        StatusEffectSO opening =
+            LoadAsset<StatusEffectSO>(OpeningAssetPath);
+
+        Assert.That(opening.StatusId, Is.EqualTo(StatusEffectIds.Opening));
+        Assert.That(
+            opening.Alignment,
+            Is.EqualTo(StatusEffectAlignment.Debuff));
+        Assert.That(opening.CanTargetEnemy, Is.True);
+        Assert.That(opening.CanTargetAlly, Is.False);
+        Assert.That(opening.DefaultDuration, Is.EqualTo(5f));
+        Assert.That(
+            opening.StackMode,
+            Is.EqualTo(StatusEffectStackMode.Replace));
+        Assert.That(opening.MaximumStacks, Is.EqualTo(1));
+        Assert.That(opening.StatModifiers, Has.Count.EqualTo(1));
+
+        StatusEffectStatModifierDefinition modifier =
+            opening.StatModifiers[0];
+        Assert.That(
+            modifier.StatType,
+            Is.EqualTo(StatusEffectStatType.IncomingDamage));
+        Assert.That(
+            modifier.Mode,
+            Is.EqualTo(StatusEffectStatModifierMode.AdditiveRatio));
+        Assert.That(modifier.Value, Is.EqualTo(0.1f));
+        Assert.That(modifier.ScaleWithStacks, Is.False);
+
+        CharacterAttackDamageType[] damageTypes =
+        {
+            CharacterAttackDamageType.Physical,
+            CharacterAttackDamageType.Magical,
+            CharacterAttackDamageType.Fixed,
+        };
+        foreach (CharacterAttackDamageType damageType in damageTypes)
+        {
+            EnemyRuntime enemy = CreateEnemyRuntime(100);
+            Assert.That(
+                ApplyEnemyStatus(
+                    enemy,
+                    opening,
+                    5f,
+                    1,
+                    null,
+                    opening.TickInterval),
+                Is.True);
+            Assert.That(
+                TakeEnemyDamage(enemy, 10, damageType),
+                Is.EqualTo(11),
+                damageType.ToString());
+        }
+
+        EnemyRuntime expired = CreateEnemyRuntime(100);
+        Assert.That(
+            ApplyEnemyStatus(
+                expired,
+                opening,
+                1f,
+                1,
+                null,
+                opening.TickInterval),
+            Is.True);
+        Assert.That(
+            TickEnemyStatuses(expired, 1f, null),
+            Is.True);
+        Assert.That(
+            TakeEnemyDamage(
+                expired,
+                10,
+                CharacterAttackDamageType.Physical),
+            Is.EqualTo(10));
     }
 
     [Test]

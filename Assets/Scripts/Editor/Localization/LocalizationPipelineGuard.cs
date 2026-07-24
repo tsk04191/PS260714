@@ -89,7 +89,7 @@ namespace PS260714.Localization.Editor
                 LocalizationPipelineLog.Write(validation, "build validation");
                 throw new BuildFailedException(
                     "Localization CSV validation failed. Open " +
-                    "Tools/PS260714/Localization Editor.");
+                    PS260714EditorMenu.LocalizationEditor + ".");
             }
 
             if (LocalizationCodeGenerator.IsStale(
@@ -114,7 +114,7 @@ namespace PS260714.Localization.Editor
             EditorApplication.playModeStateChanged += HandlePlayModeChanged;
         }
 
-        [MenuItem("Tools/PS260714/Localization/Validate CSV")]
+        [MenuItem(PS260714EditorMenu.ValidateLocalization)]
         private static void ValidateMenu()
         {
             LocalizationValidationResult result =
@@ -122,7 +122,7 @@ namespace PS260714.Localization.Editor
             LocalizationPipelineLog.Write(result, "manual validation");
         }
 
-        [MenuItem("Tools/PS260714/Localization/Generate C#")]
+        [MenuItem(PS260714EditorMenu.GenerateLocalization)]
         private static void GenerateMenu()
         {
             LocalizationValidationResult result =

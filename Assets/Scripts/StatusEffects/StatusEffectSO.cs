@@ -67,7 +67,8 @@ public enum StatusEffectValueMode
 public enum StatusEffectStatType
 {
     AttackPower = 0,
-    AttackSpeed = 1
+    AttackSpeed = 1,
+    IncomingDamage = 2
 }
 
 public enum StatusEffectStatModifierMode
@@ -90,6 +91,7 @@ public static class StatusEffectIds
     public const string Fire = "fire";
     public const string Stun = "stun";
     public const string EmergencyKit = "emergency_kit";
+    public const string Opening = "opening";
 }
 
 [Serializable]

@@ -85,6 +85,8 @@ namespace PS260714.Localization
         public const string StatusEmergencyKitName = "status.emergency_kit.name";
         public const string StatusFireDescription = "status.fire.description";
         public const string StatusFireName = "status.fire.name";
+        public const string StatusOpeningDescription = "status.opening.description";
+        public const string StatusOpeningName = "status.opening.name";
         public const string StatusStunDescription = "status.stun.description";
         public const string StatusStunName = "status.stun.name";
         public const string UiCharacterCompactSummary = "ui.character.compact_summary";

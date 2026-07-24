@@ -97,7 +97,8 @@ public sealed class StatusEffectEditorTests
         AssertOptions(
             "StatTypeOptions",
             "공격력",
-            "공격 속도");
+            "공격 속도",
+            "받는 피해");
         AssertOptions(
             "StatModifierModeOptions",
             "고정 가산",
@@ -153,6 +154,89 @@ public sealed class StatusEffectEditorTests
         Assert.That(
             Guid.TryParseExact(_definition.StatusId, "N", out _),
             Is.True);
+    }
+
+    [Test]
+    public void GetIconTexture_UnassignedIconReturnsNull()
+    {
+        MethodInfo getIconTexture =
+            typeof(StatusEffectEditorWindow).GetMethod(
+                "GetIconTexture",
+                PrivateStatic);
+
+        Assert.That(getIconTexture, Is.Not.Null);
+        Assert.That(
+            getIconTexture.Invoke(null, new object[] { _definition }),
+            Is.Null);
+    }
+
+    [Test]
+    public void GetIconTexture_DestroyedIconReferenceReturnsNull()
+    {
+        Texture2D texture = new(1, 1);
+        Sprite icon = Sprite.Create(
+            texture,
+            new Rect(0f, 0f, 1f, 1f),
+            Vector2.zero);
+        SerializedObject serialized = new(_definition);
+        serialized.FindProperty("icon").objectReferenceValue = icon;
+        serialized.ApplyModifiedPropertiesWithoutUndo();
+        UnityEngine.Object.DestroyImmediate(icon);
+
+        try
+        {
+            MethodInfo getIconTexture =
+                typeof(StatusEffectEditorWindow).GetMethod(
+                    "GetIconTexture",
+                    PrivateStatic);
+
+            Assert.That(getIconTexture, Is.Not.Null);
+            Assert.That(
+                getIconTexture.Invoke(
+                    null,
+                    new object[] { _definition }),
+                Is.Null);
+        }
+        finally
+        {
+            UnityEngine.Object.DestroyImmediate(texture);
+        }
+    }
+
+    [Test]
+    public void EditorMenus_UseSingleProjectRoot()
+    {
+        Assert.That(
+            CharacterEditorWindow.MenuPath,
+            Is.EqualTo("PS260714/Character Editor"));
+        Assert.That(
+            StatusEffectEditorWindow.MenuPath,
+            Is.EqualTo("PS260714/Status Effect Editor"));
+        Assert.That(
+            PS260714EditorMenu.LocalizationEditor,
+            Is.EqualTo(
+                "PS260714/Localization/Localization Editor"));
+        Assert.That(
+            PS260714EditorMenu.ValidateLocalization,
+            Is.EqualTo("PS260714/Localization/Validate CSV"));
+        Assert.That(
+            PS260714EditorMenu.GenerateLocalization,
+            Is.EqualTo("PS260714/Localization/Generate C#"));
+        Assert.That(
+            typeof(BattleEditorWindow).GetMethod(
+                "OpenFromMenu",
+                BindingFlags.Public | BindingFlags.Static),
+            Is.Null);
+        Assert.That(
+            typeof(MenuPageSceneBuilder).GetMethod(
+                "RebuildClientPages",
+                BindingFlags.Public | BindingFlags.Static),
+            Is.Null);
+        Assert.That(
+            typeof(FireStatusEffectAssetGenerator).GetMethod(
+                "GenerateFromMenu",
+                BindingFlags.Public | BindingFlags.Static),
+            Is.Null);
     }
 
     [Test]

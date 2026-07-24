@@ -420,6 +420,10 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
         if (amount <= 0 || _currentHealth <= 0)
             return 0;
 
+        amount = ResolveIncomingDamage(amount);
+        if (amount <= 0)
+            return 0;
+
         int appliedDamage = 0;
         if (_currentShield > 0)
         {
@@ -3173,6 +3177,23 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
         return attackSpeed > 0f ? 1f / attackSpeed : 0f;
     }
 
+    private int ResolveIncomingDamage(int amount)
+    {
+        float modifiedDamage = GetStatusModifiedStat(
+            amount,
+            StatusEffectStatType.IncomingDamage,
+            null);
+        if (float.IsNaN(modifiedDamage) || modifiedDamage <= 0f)
+            return 0;
+        if (float.IsInfinity(modifiedDamage) ||
+            modifiedDamage >= int.MaxValue)
+        {
+            return int.MaxValue;
+        }
+
+        return Mathf.Max(0, Mathf.RoundToInt(modifiedDamage));
+    }
+
     private float GetEffectiveAttackPower()
     {
         if (Data == null)
@@ -3233,7 +3254,7 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
     private float GetStatusModifiedStat(
         float baseValue,
         StatusEffectStatType statType,
-        StatusEffectOperationType operationType)
+        StatusEffectOperationType? operationType)
     {
         StatusEffectStatAccumulator accumulator = default;
         foreach (StatusEffectRuntimeState state in _statusEffects.Values)
@@ -3262,14 +3283,14 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
 
             IReadOnlyList<StatusEffectOperationDefinition> operations =
                 state.Definition.Operations;
-            if (operations == null)
+            if (!operationType.HasValue || operations == null)
                 continue;
             foreach (StatusEffectOperationDefinition operation in operations)
             {
                 if (operation == null ||
                     operation.Trigger !=
                         StatusEffectOperationTrigger.OnApply ||
-                    operation.OperationType != operationType ||
+                    operation.OperationType != operationType.Value ||
                     float.IsNaN(operation.Value) ||
                     float.IsInfinity(operation.Value))
                 {
