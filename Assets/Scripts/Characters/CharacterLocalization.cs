@@ -1,3 +1,6 @@
+using System;
+using System.Collections.Generic;
+using System.Text;
 using PS260714.Localization;
 using UnityEngine;
 
@@ -5,131 +8,63 @@ public static class CharacterLocalization
 {
     public static string GetName(CharacterData data)
     {
-        return data == null
-            ? string.Empty
-            : GetName(data.AttackType);
+        if (data == null)
+            return string.Empty;
+
+        if (!string.IsNullOrWhiteSpace(data.NameLocalizationKey))
+            return LocalizationService.Get(data.NameLocalizationKey);
+
+        return !string.IsNullOrWhiteSpace(data.CharacterName)
+            ? data.CharacterName
+            : LocalizationService.Get(LocalizationKeys.CharacterUnnamedName);
     }
 
-    public static string GetName(CharacterAttackType attackType)
+    public static string GetDescription(CharacterData data)
     {
-        return LocalizationService.Get(attackType switch
-        {
-            CharacterAttackType.RandomMultiple =>
-                LocalizationKeys.CharacterDualName,
-            CharacterAttackType.CrossHighestHealth =>
-                LocalizationKeys.CharacterAreaName,
-            CharacterAttackType.FireRandom =>
-                LocalizationKeys.CharacterFlameName,
-            _ => LocalizationKeys.CharacterBasicName,
-        });
+        if (data == null)
+            return string.Empty;
+
+        return !string.IsNullOrWhiteSpace(
+            data.DescriptionLocalizationKey)
+            ? LocalizationService.Get(data.DescriptionLocalizationKey)
+            : data.CharacterDescription ?? string.Empty;
     }
 
-    public static string GetTypeName(CharacterAttackType attackType)
-    {
-        return LocalizationService.Get(attackType switch
-        {
-            CharacterAttackType.RandomMultiple =>
-                LocalizationKeys.CodexCharacterTypeMultiple,
-            CharacterAttackType.CrossHighestHealth =>
-                LocalizationKeys.CodexCharacterTypeCross,
-            CharacterAttackType.FireRandom =>
-                LocalizationKeys.CodexCharacterTypeFire,
-            _ => LocalizationKeys.CodexCharacterTypeLowest,
-        });
-    }
-
-    public static string GetUpgradeTitle(
-        CharacterData data,
-        ETurretUpgradeType upgradeType)
+    public static string GetDungeonUpgradeTitle(
+        CharacterDungeonUpgradeType upgradeType)
     {
         string key = upgradeType switch
         {
-            ETurretUpgradeType.PrimaryPower
-                when data != null &&
-                     data.AttackType == CharacterAttackType.FireRandom =>
-                LocalizationKeys.UiDungeonRewardUpgradeFireDurationTitle,
-            ETurretUpgradeType.PrimaryPower =>
+            CharacterDungeonUpgradeType.AttackPower =>
                 LocalizationKeys.UiDungeonRewardUpgradeAttackPowerTitle,
-            ETurretUpgradeType.AttackSpeed =>
+            CharacterDungeonUpgradeType.Speed =>
                 LocalizationKeys.UiDungeonRewardUpgradeAttackSpeedTitle,
-            ETurretUpgradeType.SkillPower
-                when data != null &&
-                     data.AttackType == CharacterAttackType.FireRandom =>
-                LocalizationKeys.UiDungeonRewardUpgradeSkillTargetsTitle,
-            ETurretUpgradeType.SkillPower =>
+            CharacterDungeonUpgradeType.AttackDamage =>
+                LocalizationKeys.UiDungeonRewardUpgradeAttackPowerTitle,
+            CharacterDungeonUpgradeType.SkillDamage =>
                 LocalizationKeys.UiDungeonRewardUpgradeSkillPowerTitle,
-            ETurretUpgradeType.SkillCost =>
+            CharacterDungeonUpgradeType.SkillCostReduction =>
                 LocalizationKeys.UiDungeonRewardUpgradeSkillCostTitle,
             _ => LocalizationKeys.UiDungeonRewardUpgradeGenericTitle,
         };
         return LocalizationService.Get(key);
     }
 
-    public static string GetUpgradeDescription(
+    public static string GetDungeonUpgradeDescription(
         CharacterData data,
-        ETurretUpgradeType upgradeType)
+        CharacterDungeonUpgradeType upgradeType)
+    {
+        return data?.GetDungeonUpgradeLabel(upgradeType) ?? string.Empty;
+    }
+
+    public static string GetIdentity(string assetName, CharacterData data)
     {
         if (data == null)
             return string.Empty;
 
-        switch (upgradeType)
-        {
-            case ETurretUpgradeType.PrimaryPower
-                when data.AttackType == CharacterAttackType.FireRandom:
-                return GetUpgradeChange(
-                    LocalizationKeys
-                        .UiDungeonRewardUpgradeFireDurationChange,
-                    data.FireDuration,
-                    data.FireDuration + 1f);
-            case ETurretUpgradeType.PrimaryPower:
-                return GetUpgradeChange(
-                    LocalizationKeys.UiDungeonRewardUpgradeAttackChange,
-                    data.AttackDamage,
-                    Mathf.Max(
-                        1,
-                        Mathf.RoundToInt(
-                            (data.AttackPower + 1) * data.AttackWeight)));
-            case ETurretUpgradeType.AttackSpeed:
-                return GetUpgradeChange(
-                    LocalizationKeys.UiDungeonRewardUpgradeCooldownChange,
-                    data.AttackCooldown,
-                    Mathf.Max(
-                        TimePrecision.Step,
-                        data.AttackCooldown - TimePrecision.Step));
-            case ETurretUpgradeType.SkillPower
-                when data.AttackType == CharacterAttackType.FireRandom:
-                return GetUpgradeChange(
-                    LocalizationKeys
-                        .UiDungeonRewardUpgradeSkillTargetsChange,
-                    data.FireSkillTargetCount,
-                    data.FireSkillTargetCount + 1);
-            case ETurretUpgradeType.SkillPower:
-                return GetUpgradeChange(
-                    LocalizationKeys.UiDungeonRewardUpgradeSkillAttackChange,
-                    data.SkillAttackDamage,
-                    Mathf.Max(
-                        1,
-                        Mathf.RoundToInt(
-                            (data.SkillAttackPower + 1) *
-                            data.AttackWeight)));
-            case ETurretUpgradeType.SkillCost:
-                return GetUpgradeChange(
-                    LocalizationKeys.UiDungeonRewardUpgradeSkillCostChange,
-                    data.ActiveSkillCost,
-                    Mathf.Max(1, data.ActiveSkillCost - 1));
-            default:
-                return string.Empty;
-        }
-    }
-
-    public static string GetIdentity(
-        string assetName,
-        CharacterAttackType attackType)
-    {
         return LocalizationService.Get(
             LocalizationKeys.CodexCharacterIdentity,
-            LocalizationService.Arg("asset", assetName),
-            LocalizationService.Arg("type", GetTypeName(attackType)));
+            LocalizationService.Arg("asset", assetName));
     }
 
     public static string GetStats(CharacterData data)
@@ -137,23 +72,134 @@ public static class CharacterLocalization
         if (data == null)
             return string.Empty;
 
-        if (data.AttackType == CharacterAttackType.FireRandom)
+        return UsesKoreanLocale
+            ? $"공격력 {data.AttackPower:0.##}  |  " +
+              $"공격 간격 {data.AttackCooldown:0.##}초  |  " +
+              $"패시브 {data.PassiveDefinitions.Count} / " +
+              $"공격 {data.AttackDefinitions.Count} / " +
+              $"기술 {data.SkillDefinitions.Count}"
+            : $"ATK {data.AttackPower:0.##}  |  " +
+              $"INTERVAL {data.AttackCooldown:0.##}s  |  " +
+              $"PASSIVE {data.PassiveDefinitions.Count} / " +
+              $"ATTACK {data.AttackDefinitions.Count} / " +
+              $"SKILL {data.SkillDefinitions.Count}";
+    }
+
+    public static string GetOwnership(CharacterData data)
+    {
+        if (data == null)
+            return string.Empty;
+
+        return data.IsOwned
+            ? (UsesKoreanLocale ? "보유" : "OWNED")
+            : (UsesKoreanLocale ? "미보유" : "NOT OWNED");
+    }
+
+    public static string GetPassiveDescription(CharacterData data)
+    {
+        if (data == null || !data.HasCustomPassiveDefinitions)
+            return string.Empty;
+
+        return GetCustomPassiveDescription(data);
+    }
+
+    public static string GetCumulativeUpgradeDescription(CharacterData data)
+    {
+        if (data == null)
         {
-            return LocalizationService.Get(
-                LocalizationKeys.CodexCharacterStatsFire,
-                LocalizationService.Arg("cooldown", data.AttackCooldown),
-                LocalizationService.Arg("duration", data.FireDuration),
-                LocalizationService.Arg("damage", data.FireTickDamage),
-                LocalizationService.Arg("interval", data.FireTickInterval),
-                LocalizationService.Arg("weight", data.AttackWeight));
+            return UsesKoreanLocale
+                ? "적용된 누적 업그레이드 없음"
+                : "No cumulative upgrades applied";
         }
 
-        return LocalizationService.Get(
-            LocalizationKeys.CodexCharacterStatsAttack,
-            LocalizationService.Arg("attack", data.AttackDamage),
-            LocalizationService.Arg("cooldown", data.AttackCooldown),
-            LocalizationService.Arg("skill", data.SkillAttackDamage),
-            LocalizationService.Arg("weight", data.AttackWeight));
+        StringBuilder builder = new();
+        HashSet<string> configuredIds = new(StringComparer.Ordinal);
+        foreach (CharacterCumulativeUpgradeDefinition definition in
+                 data.CumulativeUpgradeDefinitions)
+        {
+            if (definition == null ||
+                string.IsNullOrWhiteSpace(definition.UpgradeId) ||
+                !configuredIds.Add(definition.UpgradeId))
+            {
+                continue;
+            }
+
+            int level = data.GetCumulativeUpgradeLevel(
+                definition.UpgradeId);
+            if (level <= 0)
+                continue;
+
+            string maximum = definition.HasUnlimitedMaxLevel
+                ? string.Empty
+                : $"/{definition.MaxLevel}";
+            AppendCodexLine(
+                builder,
+                $"{definition.UpgradeId}  Lv.{level}{maximum}");
+        }
+
+        foreach (CharacterCumulativeUpgradeProgress progress in
+                 data.CumulativeUpgrades)
+        {
+            if (progress == null ||
+                progress.Level <= 0 ||
+                string.IsNullOrWhiteSpace(progress.UpgradeId) ||
+                configuredIds.Contains(progress.UpgradeId))
+            {
+                continue;
+            }
+
+            AppendCodexLine(
+                builder,
+                $"{progress.UpgradeId}  Lv.{progress.Level}");
+        }
+
+        return builder.Length > 0
+            ? builder.ToString()
+            : (UsesKoreanLocale
+                ? "적용된 누적 업그레이드 없음"
+                : "No cumulative upgrades applied");
+    }
+
+    public static string GetDungeonUpgradeDescription(CharacterData data)
+    {
+        if (data == null || !data.HasCustomDungeonUpgrades)
+        {
+            return UsesKoreanLocale
+                ? "설정된 던전 업그레이드 없음"
+                : "No dungeon upgrades configured";
+        }
+
+        StringBuilder builder = new();
+        int groupIndex = 1;
+        foreach (CharacterDungeonUpgradeDefinition definition in
+                 data.DungeonUpgradeDefinitions)
+        {
+            if (definition == null)
+                continue;
+
+            AppendCodexLine(
+                builder,
+                UsesKoreanLocale
+                    ? $"목록 {groupIndex++} (합계 {definition.TotalProbability:0.##}%)"
+                    : $"POOL {groupIndex++} (TOTAL {definition.TotalProbability:0.##}%)");
+            foreach (CharacterDungeonUpgradeEntry entry in definition.Entries)
+            {
+                if (entry == null)
+                    continue;
+
+                string limit = entry.HasUnlimitedLimit
+                    ? (UsesKoreanLocale ? "무제한" : "Unlimited")
+                    : (UsesKoreanLocale
+                        ? $"최대 {entry.Limit}회"
+                        : $"Limit {entry.Limit}");
+                AppendCodexLine(
+                    builder,
+                    $"  {GetDungeonUpgradeName(entry.Type)}  " +
+                    $"{entry.Probability:0.##}% / {limit}");
+            }
+        }
+
+        return builder.ToString();
     }
 
     public static string GetNormalAttackDescription(CharacterData data)
@@ -161,24 +207,7 @@ public static class CharacterLocalization
         if (data == null)
             return string.Empty;
 
-        return data.AttackType switch
-        {
-            CharacterAttackType.RandomMultiple => LocalizationService.Get(
-                LocalizationKeys.CodexCharacterAttackMultiple,
-                LocalizationService.Arg("count", data.TargetCount),
-                LocalizationService.Arg("damage", data.AttackDamage)),
-            CharacterAttackType.CrossHighestHealth => LocalizationService.Get(
-                LocalizationKeys.CodexCharacterAttackCross,
-                LocalizationService.Arg("damage", data.AttackDamage)),
-            CharacterAttackType.FireRandom => LocalizationService.Get(
-                LocalizationKeys.CodexCharacterAttackFire,
-                LocalizationService.Arg("duration", data.FireDuration),
-                LocalizationService.Arg("damage", data.FireTickDamage),
-                LocalizationService.Arg("interval", data.FireTickInterval)),
-            _ => LocalizationService.Get(
-                LocalizationKeys.CodexCharacterAttackLowest,
-                LocalizationService.Arg("damage", data.AttackDamage)),
-        };
+        return GetCustomAttackDescription(data);
     }
 
     public static string GetActiveSkillDescription(
@@ -188,33 +217,7 @@ public static class CharacterLocalization
         if (data == null)
             return string.Empty;
 
-        return data.AttackType switch
-        {
-            CharacterAttackType.RandomMultiple => LocalizationService.Get(
-                LocalizationKeys.CodexCharacterSkillMultiple,
-                LocalizationService.Arg("duration", data.ActiveSkillDuration),
-                LocalizationService.Arg("count", data.TargetCount + 2),
-                LocalizationService.Arg("damage", data.SkillAttackDamage)),
-            CharacterAttackType.CrossHighestHealth => LocalizationService.Get(
-                LocalizationKeys.CodexCharacterSkillCross,
-                LocalizationService.Arg("count", data.ActiveSkillAttackCount),
-                LocalizationService.Arg("inner", data.SkillAttackDamage),
-                LocalizationService.Arg(
-                    "outer",
-                    Mathf.Max(
-                        1,
-                        Mathf.FloorToInt(data.SkillAttackDamage * 0.5f)))),
-            CharacterAttackType.FireRandom => LocalizationService.Get(
-                LocalizationKeys.CodexCharacterSkillFire,
-                LocalizationService.Arg("count", data.ActiveSkillAttackCount),
-                LocalizationService.Arg("centers", data.FireSkillTargetCount),
-                LocalizationService.Arg(
-                    "duration",
-                    fireDurationOverride ?? data.FireDuration)),
-            _ => LocalizationService.Get(
-                LocalizationKeys.CodexCharacterSkillLowest,
-                LocalizationService.Arg("damage", data.SkillAttackDamage)),
-        };
+        return GetCustomSkillDescription(data);
     }
 
     public static string GetActiveSkillTitle(int cost)
@@ -222,6 +225,12 @@ public static class CharacterLocalization
         return LocalizationService.Get(
             LocalizationKeys.CodexCharacterActiveSkillCost,
             LocalizationService.Arg("cost", cost));
+    }
+
+    public static string GetNormalAttackTitle(CharacterData data)
+    {
+        return LocalizationService.Get(
+            LocalizationKeys.CodexCharacterNormalAttack);
     }
 
     public static string GetTurretStatus(
@@ -262,18 +271,19 @@ public static class CharacterLocalization
 
     public static string GetTurretAttack(CharacterData data)
     {
+        return GetCompactSummary(data);
+    }
+
+    public static string GetCompactSummary(CharacterData data)
+    {
         if (data == null)
             return string.Empty;
 
-        return data.AttackType == CharacterAttackType.FireRandom
-            ? LocalizationService.Get(
-                LocalizationKeys.UiTurretAttackFire,
-                LocalizationService.Arg("duration", data.FireDuration),
-                LocalizationService.Arg("targets", data.FireSkillTargetCount))
-            : LocalizationService.Get(
-                LocalizationKeys.UiTurretAttackDamage,
-                LocalizationService.Arg("attack", data.AttackDamage),
-                LocalizationService.Arg("skill", data.SkillAttackDamage));
+        return LocalizationService.Get(
+            LocalizationKeys.UiCharacterCompactSummary,
+            LocalizationService.Arg("attack", data.AttackPower),
+            LocalizationService.Arg("cost", data.ActiveSkillCost),
+            LocalizationService.Arg("count", data.SkillDefinitions.Count));
     }
 
     public static string GetCooldownStop(float seconds)
@@ -286,20 +296,6 @@ public static class CharacterLocalization
         return GetSecondsText(
             LocalizationKeys.UiTurretCooldownRecovery,
             seconds);
-    }
-
-    public static string GetCooldownActiveTime(float seconds)
-    {
-        return GetSecondsText(
-            LocalizationKeys.UiTurretCooldownActiveTime,
-            seconds);
-    }
-
-    public static string GetCooldownActiveCount(int count)
-    {
-        return LocalizationService.Get(
-            LocalizationKeys.UiTurretCooldownActiveCount,
-            LocalizationService.Arg("count", count));
     }
 
     public static string GetCooldownWait(float seconds)
@@ -319,14 +315,855 @@ public static class CharacterLocalization
             LocalizationService.Arg("seconds", seconds));
     }
 
-    private static string GetUpgradeChange(
-        string key,
-        object before,
-        object after)
+    private static string GetCustomPassiveDescription(
+        CharacterData data)
     {
-        return LocalizationService.Get(
-            key,
-            LocalizationService.Arg("before", before),
-            LocalizationService.Arg("after", after));
+        StringBuilder builder = new();
+        int index = 1;
+        foreach (CharacterPassiveDefinition definition in
+                 data.PassiveDefinitions)
+        {
+            if (definition == null)
+                continue;
+
+            CharacterAttackSubject subject = definition.HasSection(
+                CharacterPassiveSectionType.Subject)
+                ? definition.Subject
+                : CharacterAttackSubject.Random;
+            string subjectDescription =
+                definition.Trigger ==
+                CharacterPassiveTrigger.OnStatusAcquired &&
+                subject == CharacterAttackSubject.None
+                    ? (UsesKoreanLocale
+                        ? "상태가 적용된 대상"
+                        : "Target of the status event")
+                    : FormatSubject(
+                        definition.TargetFaction,
+                        subject,
+                        definition.SubjectMetric,
+                        definition.SubjectCount);
+            string abilityDescription = definition.HasExplicitEffects
+                ? FormatEffects(
+                    definition.Effects,
+                    effect => data.CalculatePassiveDamage(effect))
+                : FormatAbility(
+                    definition.DamageType,
+                    definition.DamageAmountMode,
+                    definition.DamageAmount,
+                    definition.AppliedStatusEffect,
+                    definition.StatusDuration,
+                    definition.StatusStacks,
+                    definition.StatusRemovalEffect,
+                    definition.StatusRemovalTarget,
+                    definition.StatusRemovalCount,
+                    data.CalculatePassiveDamage(definition));
+            AppendCodexLine(
+                builder,
+                $"{(UsesKoreanLocale ? "패시브" : "PASSIVE")} {index++}: " +
+                FormatPassiveTrigger(definition) +
+                (definition.Trigger == CharacterPassiveTrigger.OnAttack
+                    ? FormatLinkage(
+                        definition.HasSection(
+                            CharacterPassiveSectionType.Linkage),
+                        definition.Linkage)
+                    : string.Empty) +
+                FormatNumericConditions(
+                    definition.HasSection(
+                        CharacterPassiveSectionType.Condition),
+                    definition.ConditionMatchMode,
+                    definition.NumericConditions) +
+                FormatPassiveStatusCost(definition) +
+                subjectDescription +
+                FormatArea(definition.AreaOffsets) + " → " +
+                abilityDescription);
+        }
+
+        return builder.Length > 0
+            ? builder.ToString()
+            : (UsesKoreanLocale
+                ? "설정된 패시브 없음"
+                : "No configured passives");
     }
+
+    private static string GetCustomAttackDescription(CharacterData data)
+    {
+        StringBuilder builder = new();
+        int index = 1;
+        foreach (CharacterAttackDefinition definition in
+                 data.AttackDefinitions)
+        {
+            if (definition == null)
+                continue;
+
+            string abilityDescription = definition.HasExplicitEffects
+                ? FormatEffects(
+                    definition.Effects,
+                    effect => data.CalculateAttackDamage(effect))
+                : FormatAbility(
+                    definition.DamageType,
+                    definition.DamageAmountMode,
+                    definition.DamageAmount,
+                    definition.AppliedStatusEffect,
+                    definition.StatusDuration,
+                    definition.StatusStacks,
+                    definition.StatusRemovalEffect,
+                    definition.StatusRemovalTarget,
+                    definition.StatusRemovalCount,
+                    data.CalculateAttackDamage(definition));
+            AppendCodexLine(
+                builder,
+                $"{(UsesKoreanLocale ? "공격" : "ATTACK")} {index++}: " +
+                FormatLinkage(
+                    definition.HasSection(
+                        CharacterAttackSectionType.Linkage),
+                    definition.Linkage) +
+                FormatNumericConditions(
+                    definition.HasSection(
+                        CharacterAttackSectionType.Condition),
+                    definition.ConditionMatchMode,
+                    definition.NumericConditions) +
+                FormatSubject(
+                    definition.TargetFaction,
+                    definition.Subject,
+                    definition.SubjectMetric,
+                    definition.SubjectCount) +
+                FormatArea(definition.AreaOffsets) + " → " +
+                abilityDescription);
+        }
+
+        return builder.Length > 0
+            ? builder.ToString()
+            : (UsesKoreanLocale ? "설정된 공격 없음" : "No configured attacks");
+    }
+
+    private static string GetCustomSkillDescription(CharacterData data)
+    {
+        StringBuilder builder = new();
+        int index = 1;
+        foreach (CharacterSkillDefinition definition in data.SkillDefinitions)
+        {
+            if (definition == null)
+                continue;
+
+            CharacterAttackSubject subject = definition.HasSection(
+                CharacterSkillSectionType.Subject)
+                ? definition.Subject
+                : CharacterAttackSubject.Random;
+            bool hasNoRequiredActionTarget =
+                subject == CharacterAttackSubject.None &&
+                CanExecuteEffectsWithoutActionTargets(definition.Effects);
+            string subjectDescription = hasNoRequiredActionTarget
+                ? (UsesKoreanLocale
+                    ? "행동 대상 불필요"
+                    : "No action target required")
+                : FormatSubject(
+                    definition.TargetFaction,
+                    subject,
+                    definition.SubjectMetric,
+                    definition.SubjectCount);
+            string cost = definition.HasSection(CharacterSkillSectionType.Cost)
+                ? (UsesKoreanLocale
+                    ? $"코스트 {data.GetSkillCost(definition)}, "
+                    : $"Cost {data.GetSkillCost(definition)}, ")
+                : string.Empty;
+            string abilityDescription = definition.HasExplicitEffects
+                ? FormatEffects(
+                    definition.Effects,
+                    effect => data.CalculateSkillDamage(effect))
+                : FormatAbility(
+                    definition.DamageType,
+                    definition.DamageAmountMode,
+                    definition.DamageAmount,
+                    definition.AppliedStatusEffect,
+                    definition.StatusDuration,
+                    definition.StatusStacks,
+                    definition.StatusRemovalEffect,
+                    definition.StatusRemovalTarget,
+                    definition.StatusRemovalCount,
+                    data.CalculateSkillDamage(definition));
+            AppendCodexLine(
+                builder,
+                $"{(UsesKoreanLocale ? "기술" : "SKILL")} {index++}: " +
+                cost +
+                FormatLinkage(
+                    definition.HasSection(
+                        CharacterSkillSectionType.Linkage),
+                    definition.Linkage) +
+                FormatNumericConditions(
+                    definition.HasSection(
+                        CharacterSkillSectionType.Condition),
+                    definition.ConditionMatchMode,
+                    definition.NumericConditions) +
+                subjectDescription +
+                FormatArea(definition.AreaOffsets) + " → " +
+                abilityDescription);
+        }
+
+        return builder.Length > 0
+            ? builder.ToString()
+            : (UsesKoreanLocale ? "설정된 기술 없음" : "No configured skills");
+    }
+
+    private static string FormatPassiveTrigger(
+        CharacterPassiveDefinition definition)
+    {
+        if (definition == null)
+            return string.Empty;
+
+        switch (definition.Trigger)
+        {
+            case CharacterPassiveTrigger.OnCooldown:
+                return UsesKoreanLocale
+                    ? $"매 {definition.Cooldown:0.##}초마다, "
+                    : $"Every {definition.Cooldown:0.##}s, ";
+            case CharacterPassiveTrigger.OnStatusAcquired:
+            {
+                string targetName = definition.StatusTarget switch
+                {
+                    CharacterPassiveStatusTarget.Ally =>
+                        UsesKoreanLocale ? "아군" : "an ally",
+                    CharacterPassiveStatusTarget.Enemy =>
+                        UsesKoreanLocale ? "적" : "an enemy",
+                    _ => UsesKoreanLocale ? "누군가" : "any combatant"
+                };
+                string statusName = definition.TriggerStatusEffect != null
+                    ? GetStatusEffectName(definition.TriggerStatusEffect)
+                    : (UsesKoreanLocale ? "상태" : "a status");
+                return UsesKoreanLocale
+                    ? $"{targetName}에게 {statusName} 적용 시, "
+                    : $"When {targetName} gains {statusName}, ";
+            }
+            default:
+                return UsesKoreanLocale ? "공격 시, " : "On attack, ";
+        }
+    }
+
+    private static string FormatPassiveStatusCost(
+        CharacterPassiveDefinition definition)
+    {
+        if (definition == null || !definition.HasSelfStatusCost)
+            return string.Empty;
+
+        CharacterStatusStackCostDefinition cost =
+            definition.SelfStatusCost;
+        string statusName = GetStatusEffectName(cost.StatusEffect);
+        return UsesKoreanLocale
+            ? $"비용: 자신의 {statusName} {cost.RequiredStacks}스택 필요, " +
+              $"성공 시 {cost.ConsumedStacks}스택 소비, "
+            : $"Cost: requires {cost.RequiredStacks} self {statusName} " +
+              $"stack(s), consumes {cost.ConsumedStacks} on success, ";
+    }
+
+    private static string FormatLinkage(
+        bool hasLinkage,
+        CharacterActionLinkage linkage)
+    {
+        if (!hasLinkage || linkage == CharacterActionLinkage.None)
+            return string.Empty;
+
+        return linkage switch
+        {
+            CharacterActionLinkage.PreviousAttackSucceeded =>
+                UsesKoreanLocale
+                    ? "연동: 앞선 공격 성공 시, "
+                    : "After previous success, ",
+            CharacterActionLinkage.SimultaneousWithPreviousAttack =>
+                UsesKoreanLocale
+                    ? "연동: 앞선 공격과 동시에, "
+                    : "Alongside previous attack, ",
+            _ => string.Empty,
+        };
+    }
+
+    private static string FormatNumericConditions(
+        bool hasCondition,
+        CharacterConditionMatchMode matchMode,
+        IReadOnlyList<CharacterNumericCondition> conditions)
+    {
+        if (!hasCondition || conditions == null || conditions.Count == 0)
+            return string.Empty;
+
+        StringBuilder builder = new();
+        string separator = matchMode == CharacterConditionMatchMode.All
+            ? (UsesKoreanLocale ? " 그리고 " : " AND ")
+            : (UsesKoreanLocale ? " 또는 " : " OR ");
+        foreach (CharacterNumericCondition condition in conditions)
+        {
+            if (condition == null)
+                continue;
+            if (builder.Length > 0)
+                builder.Append(separator);
+
+            if (condition.Type == CharacterConditionType.HasStatus)
+            {
+                string statusName = GetStatusEffectName(
+                    condition.StatusEffect);
+                builder.Append(UsesKoreanLocale
+                    ? $"{statusName} 보유"
+                    : $"Has {statusName}");
+                continue;
+            }
+
+            string metric = condition.Metric switch
+            {
+                CharacterNumericConditionMetric.HealthPercentage =>
+                    UsesKoreanLocale ? "체력 비율" : "health percentage",
+                CharacterNumericConditionMetric.StackCount =>
+                    UsesKoreanLocale ? "스택" : "stack",
+                CharacterNumericConditionMetric.AttackPower =>
+                    UsesKoreanLocale ? "공격력" : "attack power",
+                CharacterNumericConditionMetric.AttackSpeed =>
+                    UsesKoreanLocale ? "속도" : "speed",
+                CharacterNumericConditionMetric.Shield =>
+                    UsesKoreanLocale ? "보호막" : "shield",
+                _ => UsesKoreanLocale ? "체력" : "health"
+            };
+            string comparison = condition.Comparison switch
+            {
+                CharacterNumericComparison.GreaterThanOrEqual =>
+                    UsesKoreanLocale ? "이상" : "or more",
+                CharacterNumericComparison.LessThanOrEqual =>
+                    UsesKoreanLocale ? "이하" : "or less",
+                CharacterNumericComparison.GreaterThan =>
+                    UsesKoreanLocale ? "초과" : "greater than",
+                CharacterNumericComparison.LessThan =>
+                    UsesKoreanLocale ? "미만" : "less than",
+                CharacterNumericComparison.Equal =>
+                    UsesKoreanLocale ? "같음" : "equal to",
+                CharacterNumericComparison.NotEqual =>
+                    UsesKoreanLocale ? "다름" : "not equal to",
+                _ => string.Empty
+            };
+            string value = condition.Metric ==
+                           CharacterNumericConditionMetric.HealthPercentage
+                ? $"{condition.Threshold:0.##}%"
+                : $"{condition.Threshold:0.##}";
+            builder.Append(UsesKoreanLocale
+                ? $"{metric} {value} {comparison}"
+                : $"{metric} {comparison} {value}");
+        }
+
+        if (builder.Length == 0)
+            return string.Empty;
+        return UsesKoreanLocale
+            ? $"조건: {builder}, "
+            : $"Condition: {builder}, ";
+    }
+
+    private static string FormatSubject(
+        CharacterTargetFaction faction,
+        CharacterAttackSubject subject,
+        CharacterAttackSubjectMetric metric,
+        int count)
+    {
+        count = Mathf.Max(1, count);
+        if (subject == CharacterAttackSubject.None)
+        {
+            return UsesKoreanLocale
+                ? "앞선 공격과 동일한 대상"
+                : "Same target(s) as the previous attack";
+        }
+
+        if (faction == CharacterTargetFaction.Ally)
+        {
+            if (subject == CharacterAttackSubject.Self)
+                return UsesKoreanLocale ? "자신" : "Self";
+            if (subject == CharacterAttackSubject.RandomExceptSelf)
+            {
+                return UsesKoreanLocale
+                    ? $"자신을 제외한 무작위 아군 {count}명"
+                    : $"{count} random ally target(s) except self";
+            }
+            if (subject == CharacterAttackSubject.AllExceptSelf)
+            {
+                return UsesKoreanLocale
+                    ? "자신을 제외한 아군 전체"
+                    : "All allies except self";
+            }
+            if (subject == CharacterAttackSubject.All)
+            {
+                return UsesKoreanLocale
+                    ? "자신을 포함한 아군 전체"
+                    : "All allies including self";
+            }
+        }
+
+        string factionName = faction == CharacterTargetFaction.Ally
+            ? (UsesKoreanLocale ? "아군" : "ally")
+            : (UsesKoreanLocale ? "적" : "enemy");
+        if (subject == CharacterAttackSubject.All)
+        {
+            return UsesKoreanLocale
+                ? $"{factionName} 전체"
+                : $"All {factionName} targets";
+        }
+
+        string metricName = metric switch
+        {
+            CharacterAttackSubjectMetric.StackCount =>
+                UsesKoreanLocale ? "스택" : "stack",
+            CharacterAttackSubjectMetric.AttackPower =>
+                UsesKoreanLocale ? "공격력" : "attack power",
+            CharacterAttackSubjectMetric.AttackSpeed =>
+                UsesKoreanLocale ? "속도" : "speed",
+            CharacterAttackSubjectMetric.Shield =>
+                UsesKoreanLocale ? "보호막" : "shield",
+            _ => UsesKoreanLocale ? "체력" : "health"
+        };
+        return subject switch
+        {
+            CharacterAttackSubject.HighestValue => UsesKoreanLocale
+                ? $"{metricName}이 가장 높은 {factionName} {count}명"
+                : $"{count} {factionName} target(s) with highest {metricName}",
+            CharacterAttackSubject.LowestValue => UsesKoreanLocale
+                ? $"{metricName}이 가장 낮은 {factionName} {count}명"
+                : $"{count} {factionName} target(s) with lowest {metricName}",
+            _ => UsesKoreanLocale
+                ? $"무작위 {factionName} {count}명"
+                : $"{count} random {factionName} target(s)",
+        };
+    }
+
+    private static string GetDungeonUpgradeName(
+        CharacterDungeonUpgradeType upgradeType)
+    {
+        return upgradeType switch
+        {
+            CharacterDungeonUpgradeType.AttackPower =>
+                UsesKoreanLocale ? "공격력 +0.5" : "Attack Power +0.5",
+            CharacterDungeonUpgradeType.Speed =>
+                UsesKoreanLocale ? "공격 간격 -0.1초" : "Interval -0.1s",
+            CharacterDungeonUpgradeType.PassiveDamage =>
+                UsesKoreanLocale ? "패시브 피해량 +0.5" : "Passive Damage +0.5",
+            CharacterDungeonUpgradeType.AttackDamage =>
+                UsesKoreanLocale ? "공격 피해량 +0.5" : "Attack Damage +0.5",
+            CharacterDungeonUpgradeType.SkillDamage =>
+                UsesKoreanLocale ? "기술 피해량 +1" : "Skill Damage +1",
+            CharacterDungeonUpgradeType.SkillCostReduction =>
+                UsesKoreanLocale ? "기술 코스트 -1" : "Skill Cost -1",
+            _ => upgradeType.ToString(),
+        };
+    }
+
+    private static string FormatAbility(
+        CharacterAttackDamageType damageType,
+        CharacterDamageAmountMode amountMode,
+        float amount,
+        StatusEffectSO appliedStatusEffect,
+        float statusDuration,
+        float statusStacks,
+        StatusEffectSO statusRemovalEffect,
+        CharacterStatusRemovalTarget statusRemovalTarget,
+        int statusRemovalCount,
+        int finalDamage,
+        bool includeFinalDamage = true)
+    {
+        string typeName = damageType switch
+        {
+            CharacterAttackDamageType.Magical =>
+                UsesKoreanLocale ? "마법" : "Magical",
+            CharacterAttackDamageType.Fixed =>
+                UsesKoreanLocale ? "고정" : "Fixed",
+            CharacterAttackDamageType.StatusEffect =>
+                UsesKoreanLocale ? "상태 부여" : "Status",
+            _ => UsesKoreanLocale ? "물리" : "Physical",
+        };
+        if (damageType == CharacterAttackDamageType.StatusEffect)
+        {
+            string statusName = GetStatusEffectName(appliedStatusEffect);
+            string durationText = appliedStatusEffect != null &&
+                                  appliedStatusEffect.DurationMode ==
+                                  StatusEffectDurationMode.Permanent
+                ? (UsesKoreanLocale ? "영구" : "Permanent")
+                : (UsesKoreanLocale
+                    ? $"{statusDuration:0.##}초"
+                    : $"{statusDuration:0.##}s");
+            return UsesKoreanLocale
+                ? $"{typeName}: {statusName} / " +
+                  $"{durationText} / {statusStacks:0.##}스택"
+                : $"{typeName}: {statusName} / " +
+                  $"{durationText} / {statusStacks:0.##} stacks";
+        }
+
+        if (damageType == CharacterAttackDamageType.StatusRemoval)
+        {
+            string targetName = statusRemovalTarget switch
+            {
+                CharacterStatusRemovalTarget.Random =>
+                    UsesKoreanLocale ? "랜덤 상태" : "Random status",
+                CharacterStatusRemovalTarget.All =>
+                    UsesKoreanLocale ? "전체 상태" : "All statuses",
+                _ => GetStatusEffectName(statusRemovalEffect)
+            };
+            string countName = statusRemovalCount == 0
+                ? (UsesKoreanLocale ? "전부" : "all stacks")
+                : (UsesKoreanLocale
+                    ? $"{statusRemovalCount}스택"
+                    : $"{statusRemovalCount} stack(s)");
+            return UsesKoreanLocale
+                ? $"상태 제거: {targetName} / {countName}"
+                : $"Remove: {targetName} / {countName}";
+        }
+
+        string amountText = amountMode == CharacterDamageAmountMode.Ratio
+            ? (UsesKoreanLocale
+                ? $"공격력 × {amount:0.##}"
+                : $"ATK × {amount:0.##}")
+            : (UsesKoreanLocale
+                ? $"고정 {amount:0.##}"
+                : $"Fixed {amount:0.##}");
+        if (!includeFinalDamage)
+            return $"{typeName} / {amountText}";
+
+        return UsesKoreanLocale
+            ? $"{typeName} / {amountText} (피해 {finalDamage})"
+            : $"{typeName} / {amountText} (Damage {finalDamage})";
+    }
+
+    private static string FormatEffects(
+        IReadOnlyList<CharacterEffectDefinition> effects,
+        Func<CharacterEffectDefinition, int> calculateDamage)
+    {
+        if (effects == null || effects.Count == 0)
+            return string.Empty;
+
+        StringBuilder builder = new();
+        foreach (CharacterEffectDefinition effect in effects)
+        {
+            if (effect == null)
+                continue;
+
+            if (builder.Length > 0)
+                builder.Append(" + ");
+            if (effect.PreconditionFailurePolicy ==
+                CharacterEffectPreconditionFailurePolicy.SkipEffect)
+            {
+                builder.Append(
+                    UsesKoreanLocale
+                        ? "선택 효과: "
+                        : "Optional: ");
+            }
+            if (effect.TargetMode == CharacterEffectTargetMode.Source)
+            {
+                builder.Append(
+                    UsesKoreanLocale
+                        ? "자신에게 "
+                        : "Self: ");
+            }
+            else if (effect.TargetMode ==
+                     CharacterEffectTargetMode.FreshSelection)
+            {
+                builder.Append(FormatFreshEffectSelector(
+                    effect.TargetSelector));
+            }
+
+            int finalDamage = calculateDamage?.Invoke(effect) ?? 0;
+            switch (effect.Type)
+            {
+                case CharacterEffectType.ApplyStatus:
+                    builder.Append(FormatAbility(
+                        CharacterAttackDamageType.StatusEffect,
+                        effect.DamageAmountMode,
+                        effect.DamageAmount,
+                        effect.StatusEffect,
+                        effect.StatusDuration,
+                        effect.StatusStacks,
+                        null,
+                        effect.StatusRemovalTarget,
+                        effect.StatusRemovalCount,
+                        finalDamage));
+                    break;
+                case CharacterEffectType.RemoveStatus:
+                    builder.Append(FormatAbility(
+                        CharacterAttackDamageType.StatusRemoval,
+                        effect.DamageAmountMode,
+                        effect.DamageAmount,
+                        null,
+                        effect.StatusDuration,
+                        effect.StatusStacks,
+                        effect.StatusEffect,
+                        effect.StatusRemovalTarget,
+                        effect.StatusRemovalCount,
+                        finalDamage));
+                    break;
+                case CharacterEffectType.GainResource:
+                    builder.Append(FormatResourceGain(effect));
+                    break;
+                case CharacterEffectType.SpendResource:
+                    builder.Append(FormatResourceSpend(effect));
+                    break;
+                case CharacterEffectType.Heal:
+                    builder.Append(FormatHeal(effect));
+                    break;
+                case CharacterEffectType.Shield:
+                    builder.Append(FormatShield(effect));
+                    break;
+                case CharacterEffectType.SpendHealth:
+                    builder.Append(FormatHealthSpend(effect));
+                    break;
+                default:
+                    bool hasRuntimeScaling =
+                        effect.SourceResourceScale != 0f ||
+                        effect.TargetCurrentHealthScale != 0f ||
+                        effect.TargetMaxHealthScale != 0f ||
+                        effect.SourceStatusStacksScale != 0f ||
+                        effect.TargetStatusStacksScale != 0f;
+                    string damageText = FormatAbility(
+                        effect.DamageType,
+                        effect.DamageAmountMode,
+                        effect.DamageAmount,
+                        null,
+                        effect.StatusDuration,
+                        effect.StatusStacks,
+                        null,
+                        effect.StatusRemovalTarget,
+                        effect.StatusRemovalCount,
+                        finalDamage,
+                        !hasRuntimeScaling);
+                    builder.Append(AppendScalingTerms(
+                        damageText,
+                        effect,
+                        true));
+                    break;
+            }
+
+            if (effect.FailurePolicy ==
+                CharacterEffectFailurePolicy.StopRemainingEffects)
+            {
+                builder.Append(
+                    UsesKoreanLocale
+                        ? " (실패 시 후속 효과 중단)"
+                        : " (stop remaining effects on failure)");
+            }
+        }
+
+        return builder.ToString();
+    }
+
+    private static string FormatFreshEffectSelector(
+        CharacterEffectTargetSelector selector)
+    {
+        if (selector == null)
+        {
+            return UsesKoreanLocale
+                ? "별도 대상 미지정 → "
+                : "Fresh target unassigned → ";
+        }
+
+        string subject = FormatSubject(
+            selector.TargetFaction,
+            selector.Subject,
+            selector.SubjectMetric,
+            selector.SubjectCount);
+        string conditions = FormatNumericConditions(
+                selector.HasNumericConditions,
+                selector.ConditionMatchMode,
+                selector.NumericConditions)
+            .TrimEnd(' ', ',');
+        string details = subject + FormatArea(selector.AreaOffsets);
+        if (!string.IsNullOrWhiteSpace(conditions))
+            details += $", {conditions}";
+
+        return UsesKoreanLocale
+            ? $"별도 선택({details}) → "
+            : $"Fresh selection ({details}) → ";
+    }
+
+    private static bool CanExecuteEffectsWithoutActionTargets(
+        IReadOnlyList<CharacterEffectDefinition> effects)
+    {
+        if (effects == null)
+            return false;
+
+        bool hasEffect = false;
+        foreach (CharacterEffectDefinition effect in effects)
+        {
+            if (effect == null)
+                continue;
+            if (effect.RequiresActionTargets &&
+                effect.PreconditionFailurePolicy !=
+                CharacterEffectPreconditionFailurePolicy.SkipEffect)
+            {
+                return false;
+            }
+            hasEffect = true;
+        }
+
+        return hasEffect;
+    }
+
+    private static string FormatResourceGain(
+        CharacterEffectDefinition effect)
+    {
+        string baseAmount = effect.AmountMode ==
+                            CharacterDamageAmountMode.Ratio
+            ? (UsesKoreanLocale
+                ? $"공격력 × {effect.Amount:0.##}"
+                : $"ATK × {effect.Amount:0.##}")
+            : $"{effect.Amount:0.##}";
+        string formula = AppendScalingTerms(
+            baseAmount,
+            effect,
+            false);
+        return UsesKoreanLocale
+            ? $"자원 획득: {formula}"
+            : $"Gain Resource: {formula}";
+    }
+
+    private static string FormatResourceSpend(
+        CharacterEffectDefinition effect)
+    {
+        return UsesKoreanLocale
+            ? $"자원 소비: {Mathf.Max(0f, effect.Amount):0.##}"
+            : $"Spend Resource: {Mathf.Max(0f, effect.Amount):0.##}";
+    }
+
+    private static string FormatHeal(
+        CharacterEffectDefinition effect)
+    {
+        string baseAmount = effect.AmountMode ==
+                            CharacterDamageAmountMode.Ratio
+            ? (UsesKoreanLocale
+                ? $"공격력 × {effect.Amount:0.##}"
+                : $"ATK × {effect.Amount:0.##}")
+            : $"{effect.Amount:0.##}";
+        string formula = AppendScalingTerms(
+            baseAmount,
+            effect,
+            true);
+        return UsesKoreanLocale
+            ? $"체력 회복: {formula}"
+            : $"Heal: {formula}";
+    }
+
+    private static string FormatHealthSpend(
+        CharacterEffectDefinition effect)
+    {
+        return UsesKoreanLocale
+            ? $"체력 소비: {Mathf.Max(0f, effect.Amount):0.##}"
+            : $"Spend Health: {Mathf.Max(0f, effect.Amount):0.##}";
+    }
+
+    private static string FormatShield(
+        CharacterEffectDefinition effect)
+    {
+        string baseAmount = effect.AmountMode ==
+                            CharacterDamageAmountMode.Ratio
+            ? (UsesKoreanLocale
+                ? $"공격력 × {effect.Amount:0.##}"
+                : $"ATK × {effect.Amount:0.##}")
+            : $"{effect.Amount:0.##}";
+        string formula = AppendScalingTerms(
+            baseAmount,
+            effect,
+            true);
+        return UsesKoreanLocale
+            ? $"보호막 부여: {formula}"
+            : $"Grant Shield: {formula}";
+    }
+
+    private static string AppendScalingTerms(
+        string text,
+        CharacterEffectDefinition effect,
+        bool includeTargetTerms)
+    {
+        if (effect == null)
+            return text;
+
+        StringBuilder builder = new(text ?? string.Empty);
+        AppendScalingTerm(
+            builder,
+            effect.SourceResourceScale,
+            UsesKoreanLocale ? "현재 자원" : "Current Resource");
+        string sourceStatusName = GetStatusEffectName(
+            effect.SourceStatusScalingEffect);
+        AppendScalingTerm(
+            builder,
+            effect.SourceStatusStacksScale,
+            UsesKoreanLocale
+                ? $"시전자 {sourceStatusName} 스택"
+                : $"Source {sourceStatusName} Stacks");
+        if (!includeTargetTerms)
+            return builder.ToString();
+
+        AppendScalingTerm(
+            builder,
+            effect.TargetCurrentHealthScale,
+            UsesKoreanLocale ? "대상 현재 체력" : "Target Current HP");
+        AppendScalingTerm(
+            builder,
+            effect.TargetMaxHealthScale,
+            UsesKoreanLocale ? "대상 최대 체력" : "Target Maximum HP");
+        string targetStatusName = GetStatusEffectName(
+            effect.TargetStatusScalingEffect);
+        AppendScalingTerm(
+            builder,
+            effect.TargetStatusStacksScale,
+            UsesKoreanLocale
+                ? $"대상 {targetStatusName} 스택"
+                : $"Target {targetStatusName} Stacks");
+        return builder.ToString();
+    }
+
+    private static void AppendScalingTerm(
+        StringBuilder builder,
+        float scale,
+        string label)
+    {
+        if (float.IsNaN(scale) || float.IsInfinity(scale) ||
+            scale == 0f)
+        {
+            return;
+        }
+
+        if (builder.Length > 0)
+            builder.Append(scale < 0f ? " - " : " + ");
+        else if (scale < 0f)
+            builder.Append('-');
+
+        builder.Append(
+            $"{label} × {Mathf.Abs(scale):0.##}");
+    }
+
+    private static string GetStatusEffectName(StatusEffectSO definition)
+    {
+        if (definition != null)
+        {
+            if (!string.IsNullOrWhiteSpace(definition.NameLocalizationKey))
+                return LocalizationService.Get(definition.NameLocalizationKey);
+            return definition.name;
+        }
+
+        return UsesKoreanLocale ? "미지정 상태" : "Unassigned status";
+    }
+
+    private static string FormatArea(
+        IReadOnlyList<CharacterTargetAreaOffset> offsets)
+    {
+        if (offsets == null || offsets.Count == 0)
+            return string.Empty;
+
+        int cellCount = 1;
+        foreach (CharacterTargetAreaOffset offset in offsets)
+        {
+            if (offset != null && !offset.IsCenter)
+                cellCount++;
+        }
+
+        return UsesKoreanLocale
+            ? $" / 범위 {cellCount}칸"
+            : $" / Area {cellCount} cells";
+    }
+
+    private static void AppendCodexLine(StringBuilder builder, string line)
+    {
+        if (builder.Length > 0)
+            builder.Append('\n');
+        builder.Append(line);
+    }
+
+    private static bool UsesKoreanLocale =>
+        LocalizationService.CurrentLocale?.StartsWith(
+            "ko",
+            StringComparison.OrdinalIgnoreCase) == true;
 }

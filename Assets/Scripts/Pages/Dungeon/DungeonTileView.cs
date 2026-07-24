@@ -8,14 +8,10 @@ using UnityEngine.UI;
 [RequireComponent(typeof(RectTransform), typeof(Image))]
 public sealed class DungeonTileView : MonoBehaviour, IPointerClickHandler
 {
-    private const byte TargetEffectAlpha = 155;
     private const float AttackRangeDisplayDuration = 0.5f;
     private const byte AttackRangeMinimumAlpha = 100;
     private const byte AttackRangeAlphaStep = 50;
     private const byte AttackRangeMaximumAlpha = 250;
-    private const string BasicAimStateName = "BasicAimIn";
-    private const string BasicFireStateName = "BasicFire";
-    private const string BasicHiddenStateName = "BasicHidden";
     private const string FireStatusLoopStateName = "FireStatusLoop";
     private const string FireStatusHiddenStateName = "FireStatusHidden";
 
@@ -29,12 +25,6 @@ public sealed class DungeonTileView : MonoBehaviour, IPointerClickHandler
     [SerializeField] private Image slotSurface;
     [SerializeField] private RectTransform stackRoot;
     [SerializeField] private EnemyCard enemyCardPrefab;
-
-    [Header("Basic Target Effect")]
-    [SerializeField] private Image[] basicTargetEffectImages =
-        new Image[DungeonPage.MaximumPartySize];
-    [SerializeField] private Animator[] basicTargetEffectAnimators =
-        new Animator[DungeonPage.MaximumPartySize];
 
     [Header("Fire Status Effect")]
     [SerializeField] private Sprite fireStatusSprite;
@@ -55,8 +45,6 @@ public sealed class DungeonTileView : MonoBehaviour, IPointerClickHandler
     public EnemyRuntime TopEnemy =>
         _enemies.Count > 0 ? _enemies[^1] : null;
     public int TopEnemyHealth => TopEnemy != null ? TopEnemy.Health : 0;
-    public bool TopEnemyHasFire =>
-        TopEnemy != null && TopEnemy.HasFire;
     public bool IsFull => _enemies.Count >= _maximumStackSize;
     public event Action<EnemyRuntime> EnemyClicked;
     internal bool CanAddEnemy =>
@@ -82,7 +70,6 @@ public sealed class DungeonTileView : MonoBehaviour, IPointerClickHandler
 
         EnsureAttackRangeOverlay();
         ClearAttackRangeIndicator();
-        InitializeBasicTargetEffects();
         InitializeFireStatusEffects();
     }
 
@@ -139,11 +126,18 @@ public sealed class DungeonTileView : MonoBehaviour, IPointerClickHandler
 
     internal int TryDamageTop(int damage)
     {
+        return TryDamageTop(damage, CharacterAttackDamageType.Physical);
+    }
+
+    internal int TryDamageTop(
+        int damage,
+        CharacterAttackDamageType damageType)
+    {
         if (_enemies.Count == 0 || damage <= 0)
             return 0;
 
         EnemyRuntime topEnemy = TopEnemy;
-        int appliedDamage = topEnemy.TakeDamage(damage);
+        int appliedDamage = topEnemy.TakeDamage(damage, damageType);
         if (appliedDamage <= 0)
             return 0;
 
@@ -167,19 +161,134 @@ public sealed class DungeonTileView : MonoBehaviour, IPointerClickHandler
         return healedAmount;
     }
 
+    internal int TryGrantShieldTop(int amount)
+    {
+        if (_enemies.Count == 0 || amount <= 0)
+            return 0;
+
+        int grantedAmount = TopEnemy.GainShield(amount);
+        if (grantedAmount > 0)
+            _cards[^1]?.RefreshHealth();
+
+        return grantedAmount;
+    }
+
     internal bool TryApplyFireToTop(
         IBattleCharacter source,
         float duration,
         float tickInterval,
         int tickDamage)
     {
-        if (_enemies.Count == 0)
+        return TryApplyFireToTop(
+            source,
+            duration,
+            tickInterval,
+            tickDamage,
+            null);
+    }
+
+    internal bool TryApplyFireToTop(
+        IBattleCharacter source,
+        float duration,
+        float tickInterval,
+        int tickDamage,
+        Func<DungeonTileView, int, int> applyDamage)
+    {
+        StatusEffectSO fire =
+            StatusEffectDefinitionCatalog.FindById(StatusEffectIds.Fire);
+        if (fire == null)
             return false;
 
-        TopEnemy.ApplyFire(duration, tickInterval, tickDamage, source);
-        _cards[^1]?.RefreshStatus();
+        return TryApplyStatusToTop(
+            fire,
+            duration,
+            tickDamage,
+            source,
+            tickInterval,
+            applyDamage);
+    }
+
+    internal bool TryApplyStatusToTop(
+        StatusEffectSO statusEffect,
+        float duration,
+        int stacks,
+        IBattleCharacter source = null,
+        float tickInterval = 0f)
+    {
+        return TryApplyStatusToTop(
+            statusEffect,
+            duration,
+            stacks,
+            source,
+            tickInterval,
+            null);
+    }
+
+    internal bool TryApplyStatusToTop(
+        StatusEffectSO statusEffect,
+        float duration,
+        int stacks,
+        IBattleCharacter source,
+        float tickInterval,
+        Func<DungeonTileView, int, int> applyDamage)
+    {
+        if (_enemies.Count == 0 || statusEffect == null)
+            return false;
+
+        EnemyRuntime target = TopEnemy;
+        bool applied = target.ApplyStatusEffect(
+            statusEffect,
+            duration,
+            stacks,
+            source,
+            tickInterval,
+            CreateStatusDamageCallback(target, applyDamage));
+        if (applied && ReferenceEquals(TopEnemy, target))
+        {
+            _cards[^1]?.RefreshStatus();
+            RefreshFireStatusEffect();
+        }
+        else if (applied)
+        {
+            RefreshFireStatusEffect();
+        }
+        return applied;
+    }
+
+    internal int TryRemoveStatusFromTop(
+        CharacterStatusRemovalTarget removalTarget,
+        StatusEffectSO statusEffect,
+        int removalCount)
+    {
+        return TryRemoveStatusFromTop(
+            removalTarget,
+            statusEffect,
+            removalCount,
+            null);
+    }
+
+    internal int TryRemoveStatusFromTop(
+        CharacterStatusRemovalTarget removalTarget,
+        StatusEffectSO statusEffect,
+        int removalCount,
+        Func<DungeonTileView, int, int> applyDamage)
+    {
+        if (_enemies.Count == 0)
+            return 0;
+
+        EnemyRuntime target = TopEnemy;
+        int removed = target.RemoveStatusEffects(
+            removalTarget,
+            statusEffect,
+            removalCount,
+            CreateStatusDamageCallback(target, applyDamage));
+        if (removed <= 0)
+            return 0;
+
+        if (ReferenceEquals(TopEnemy, target))
+            _cards[^1]?.RefreshStatus();
         RefreshFireStatusEffect();
-        return true;
+        return removed;
     }
 
     internal void ShowAttackRange(int overlapCount = 1)
@@ -194,58 +303,6 @@ public sealed class DungeonTileView : MonoBehaviour, IPointerClickHandler
         RefreshAttackRangeIndicator();
     }
 
-    internal void PlayBasicTargetAim(IBattleCharacter source)
-    {
-        if (!TryGetBasicTargetEffect(
-                source,
-                out Image image,
-                out Animator animator))
-        {
-            return;
-        }
-
-        image.color = GetTargetEffectColor(source.EffectColor);
-        image.sprite = source.TargetEffectSprite;
-        image.enabled = true;
-        animator.Play(BasicAimStateName, 0, 0f);
-    }
-
-    internal void PlayBasicTargetFire(IBattleCharacter source)
-    {
-        if (!TryGetBasicTargetEffect(
-                source,
-                out Image image,
-                out Animator animator))
-        {
-            return;
-        }
-
-        image.color = GetTargetEffectColor(source.EffectColor);
-        image.sprite = source.TargetEffectSprite;
-        image.enabled = true;
-        animator.Play(BasicFireStateName, 0, 0f);
-    }
-
-    internal void HideBasicTargetEffect(IBattleCharacter source)
-    {
-        if (!TryGetBasicTargetEffect(
-                source,
-                out _,
-                out Animator animator))
-        {
-            return;
-        }
-
-        if (animator.isActiveAndEnabled)
-            animator.Play(BasicHiddenStateName, 0, 0f);
-        else
-        {
-            CanvasGroup canvasGroup = animator.GetComponent<CanvasGroup>();
-            if (canvasGroup != null)
-                canvasGroup.alpha = 0f;
-        }
-    }
-
     internal void TickStatusEffects(
         float deltaTime,
         Func<DungeonTileView, int, int> applyDamage)
@@ -253,28 +310,42 @@ public sealed class DungeonTileView : MonoBehaviour, IPointerClickHandler
         if (deltaTime <= 0f || _enemies.Count == 0 || applyDamage == null)
             return;
 
-        EnemyRuntime burningEnemy = TopEnemy;
-        bool hadFire = burningEnemy.HasFire;
-        burningEnemy.TickFire(deltaTime, (damage, source) =>
-        {
-            if (!ReferenceEquals(TopEnemy, burningEnemy))
-                return false;
+        EnemyRuntime statusEnemy = TopEnemy;
+        bool hadFire = statusEnemy.HasFire;
+        bool statusChanged = statusEnemy.TickStatusEffects(
+            deltaTime,
+            CreateStatusDamageCallback(statusEnemy, applyDamage));
 
-            int appliedDamage = applyDamage(this, damage);
-            if (appliedDamage > 0)
-                source?.RecordDamageDealt(appliedDamage);
-            return ReferenceEquals(TopEnemy, burningEnemy);
-        });
-
-        if (!ReferenceEquals(TopEnemy, burningEnemy))
+        if (!ReferenceEquals(TopEnemy, statusEnemy))
         {
             RefreshFireStatusEffect();
             return;
         }
 
-        if (hadFire != burningEnemy.HasFire)
+        if (statusChanged)
+            _cards[^1]?.RefreshStatus();
+        if (hadFire != statusEnemy.HasFire)
             _cards[^1]?.RefreshHealth();
         RefreshFireStatusEffect();
+    }
+
+    private Func<int, IBattleCharacter, bool> CreateStatusDamageCallback(
+        EnemyRuntime target,
+        Func<DungeonTileView, int, int> applyDamage)
+    {
+        if (target == null || applyDamage == null)
+            return null;
+
+        return (damage, source) =>
+        {
+            if (!ReferenceEquals(TopEnemy, target))
+                return false;
+
+            int appliedDamage = applyDamage(this, damage);
+            if (appliedDamage > 0)
+                source?.RecordDamageDealt(appliedDamage);
+            return ReferenceEquals(TopEnemy, target);
+        };
     }
 
     public bool TryRemoveTop()
@@ -312,7 +383,6 @@ public sealed class DungeonTileView : MonoBehaviour, IPointerClickHandler
         _enemies.Clear();
         _cards.Clear();
         ClearAttackRangeIndicator();
-        HideAllBasicTargetEffects();
         HideFireStatusEffect();
     }
 
@@ -435,26 +505,6 @@ public sealed class DungeonTileView : MonoBehaviour, IPointerClickHandler
         }
     }
 
-    private void InitializeBasicTargetEffects()
-    {
-        int effectCount = Mathf.Min(
-            basicTargetEffectImages?.Length ?? 0,
-            basicTargetEffectAnimators?.Length ?? 0);
-        for (int index = 0; index < effectCount; index++)
-        {
-            Image image = basicTargetEffectImages[index];
-            Animator animator = basicTargetEffectAnimators[index];
-            if (image != null)
-            {
-                image.raycastTarget = false;
-            }
-
-            if (animator != null && animator.runtimeAnimatorController != null &&
-                animator.isActiveAndEnabled)
-                animator.Play(BasicHiddenStateName, 0, 0f);
-        }
-    }
-
     private void InitializeFireStatusEffects()
     {
         int effectCount = Mathf.Min(
@@ -558,45 +608,4 @@ public sealed class DungeonTileView : MonoBehaviour, IPointerClickHandler
             canvasGroup.alpha = alpha;
     }
 
-    private static Color32 GetTargetEffectColor(Color sourceColor)
-    {
-        Color32 color = sourceColor;
-        color.a = TargetEffectAlpha;
-        return color;
-    }
-
-    private bool TryGetBasicTargetEffect(
-        IBattleCharacter source,
-        out Image image,
-        out Animator animator)
-    {
-        image = null;
-        animator = null;
-        if (source == null || source.PartySlotIndex < 0 ||
-            basicTargetEffectImages == null ||
-            basicTargetEffectAnimators == null ||
-            source.PartySlotIndex >= basicTargetEffectImages.Length ||
-            source.PartySlotIndex >= basicTargetEffectAnimators.Length)
-        {
-            return false;
-        }
-
-        image = basicTargetEffectImages[source.PartySlotIndex];
-        animator = basicTargetEffectAnimators[source.PartySlotIndex];
-        return image != null && animator != null &&
-               animator.runtimeAnimatorController != null;
-    }
-
-    private void HideAllBasicTargetEffects()
-    {
-        if (basicTargetEffectAnimators == null)
-            return;
-
-        foreach (Animator animator in basicTargetEffectAnimators)
-        {
-            if (animator != null && animator.runtimeAnimatorController != null &&
-                animator.isActiveAndEnabled)
-                animator.Play(BasicHiddenStateName, 0, 0f);
-        }
-    }
 }

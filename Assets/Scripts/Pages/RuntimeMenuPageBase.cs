@@ -578,4 +578,32 @@ public abstract class RuntimeMenuPageBase : MonoBehaviour, IPage
         layout.preferredHeight = preferredHeight;
         return text;
     }
+
+    protected static void SyncIndexedChildren(
+        Transform parent,
+        string objectNamePrefix,
+        int activeCount)
+    {
+        if (parent == null || string.IsNullOrEmpty(objectNamePrefix))
+            return;
+
+        activeCount = Mathf.Max(0, activeCount);
+        for (int childIndex = 0; childIndex < parent.childCount; childIndex++)
+        {
+            Transform child = parent.GetChild(childIndex);
+            if (child == null ||
+                !child.name.StartsWith(
+                    objectNamePrefix,
+                    StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            string suffix = child.name.Substring(objectNamePrefix.Length);
+            if (!int.TryParse(suffix, out int index))
+                continue;
+
+            child.gameObject.SetActive(index >= 0 && index < activeCount);
+        }
+    }
 }

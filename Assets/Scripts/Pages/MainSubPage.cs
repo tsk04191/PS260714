@@ -36,7 +36,7 @@ public sealed class MainSubPage : RuntimeMenuPageBase
     protected override string PageDescription => pageType switch
     {
         EMainSubPageType.Codex =>
-            "ENEMIES | CHARACTERS | SKILLS | ITEMS | EVENTS",
+            "ENEMIES | CHARACTERS | SKILLS | ITEMS",
         EMainSubPageType.Roster => "OWNED CHARACTERS",
         EMainSubPageType.Shop => "DUNGEON CLEAR CURRENCY SHOP",
         EMainSubPageType.Quest => "QUEST PROGRESS",
@@ -98,9 +98,9 @@ public sealed class MainSubPage : RuntimeMenuPageBase
                     () => NavigateTo(
                         itemCodexPage,
                         PageOpenMode.Fresh));
-                CreateLocalizedPlaceholderButton(
-                    "btnEVENTS",
-                    LocalizationKeys.UiCommonEvents);
+                Transform obsoleteEventsButton = ButtonRoot.Find("btnEVENTS");
+                if (obsoleteEventsButton != null)
+                    obsoleteEventsButton.gameObject.SetActive(false);
                 break;
             case EMainSubPageType.Roster:
                 CreateLocalizedPlaceholderButton(

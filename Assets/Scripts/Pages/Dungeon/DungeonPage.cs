@@ -217,6 +217,12 @@ public class DungeonPage : MonoBehaviour, IPage
     {
         List<CharacterSO> definitions = new();
         HashSet<CharacterSO> uniqueDefinitions = new();
+        foreach (CharacterSO definition in CharacterDefinitionCatalog.GetAll())
+        {
+            if (definition != null && uniqueDefinitions.Add(definition))
+                definitions.Add(definition);
+        }
+
         if (playerCharacters != null)
         {
             foreach (CharacterRuntime character in playerCharacters)
@@ -694,9 +700,10 @@ public class DungeonPage : MonoBehaviour, IPage
         return false;
     }
 
-    public bool TryApplyTurretUpgrade(
+    public bool TryApplyCharacterDungeonUpgrade(
         int slotIndex,
-        ETurretUpgradeType upgradeType)
+        int definitionIndex,
+        CharacterDungeonUpgradeType upgradeType)
     {
         if (!_eventRewardPending || slotIndex < 0 ||
             slotIndex >= _ownedTurrets.Count)
@@ -704,9 +711,13 @@ public class DungeonPage : MonoBehaviour, IPage
             return false;
         }
 
-        CharacterRuntime turret = _ownedTurrets[slotIndex];
-        if (turret == null || !turret.ApplyUpgrade(upgradeType))
+        CharacterRuntime character = _ownedTurrets[slotIndex];
+        if (character == null || !character.ApplyDungeonUpgrade(
+                definitionIndex,
+                upgradeType))
+        {
             return false;
+        }
 
         CompleteEventReward();
         return true;
@@ -1232,9 +1243,8 @@ public class DungeonPage : MonoBehaviour, IPage
             return false;
         }
 
-        CharacterData startingData = _startingTurret != null
-            ? _startingTurret.CreateData()
-            : null;
+        CharacterData startingData =
+            CreateCharacterPreviewData(_startingTurret);
         int totalHealth = CalculateTutorialTotalEnemyHealth(startingData);
         System.Random random = new(plan.RandomSeed);
         IReadOnlyList<int> healthValues =
@@ -1287,10 +1297,7 @@ public class DungeonPage : MonoBehaviour, IPage
 
         float attackCycle = Mathf.Max(
             0.1f,
-            data.AttackCooldown +
-            (data.AttackType == CharacterAttackType.FireRandom
-                ? 0f
-                : CharacterRuntime.TargetAttackRecoveryDuration));
+            data.AttackCooldown + data.AttackRecoveryDuration);
         int expectedAttackCount = Mathf.Max(
             1,
             Mathf.FloorToInt(
@@ -1325,32 +1332,35 @@ public class DungeonPage : MonoBehaviour, IPage
         if (data == null)
             return 1f;
 
-        return data.AttackType switch
+        float estimatedDamage = 0f;
+        foreach (CharacterAttackDefinition definition in
+                 data.AttackDefinitions)
         {
-            CharacterAttackType.RandomMultiple =>
-                data.AttackDamage * Mathf.Max(1, data.TargetCount),
-            CharacterAttackType.CrossHighestHealth =>
-                data.AttackDamage * 2f,
-            CharacterAttackType.FireRandom =>
-                data.FireTickDamage * Mathf.Max(
-                    1,
-                    Mathf.FloorToInt(
-                        data.FireDuration /
-                        Mathf.Max(0.1f, data.FireTickInterval))),
-            _ => data.AttackDamage,
-        };
+            if (definition == null ||
+                definition.DamageType == CharacterAttackDamageType.StatusEffect ||
+                definition.DamageType == CharacterAttackDamageType.StatusRemoval)
+            {
+                continue;
+            }
+
+            int selectedTargets = Mathf.Max(1, definition.SubjectCount);
+            int areaTargets = definition.AreaOffsets != null
+                ? 1 + definition.AreaOffsets.Count
+                : 1;
+            estimatedDamage += data.CalculateAttackDamage(definition) *
+                               selectedTargets * areaTargets;
+        }
+
+        return Mathf.Max(1f, estimatedDamage);
     }
 
     private int CalculateBaselineEnemyHealth()
     {
-        CharacterData startingData = _startingTurret != null
-            ? _startingTurret.CreateData()
-            : null;
+        CharacterData startingData =
+            CreateCharacterPreviewData(_startingTurret);
         float attackCycle = startingData != null
             ? startingData.AttackCooldown +
-              (startingData.AttackType == CharacterAttackType.FireRandom
-                  ? 0f
-                  : CharacterRuntime.TargetAttackRecoveryDuration)
+              startingData.AttackRecoveryDuration
             : 1.5f;
         float timeLimit = firstBattle != null
             ? firstBattle.TimeLimit
@@ -1385,6 +1395,21 @@ public class DungeonPage : MonoBehaviour, IPage
         }
 
         return GetNormalEnemyPool();
+    }
+
+    internal static CharacterData CreateCharacterPreviewData(
+        CharacterSO definition)
+    {
+        if (definition == null)
+            return null;
+
+        CharacterCollectionData collection =
+            DataManager.Current?.CharacterDatas;
+        return collection != null
+            ? collection.CreatePreviewData(definition)
+            : definition.CreateData(new CharacterProgressData(
+                definition.CharacterId,
+                definition.InitiallyOwned));
     }
 
     private static EnemySO SelectScaledEnemy(
@@ -1802,14 +1827,36 @@ public class DungeonPage : MonoBehaviour, IPage
         EnsurePlayerCharacterSlots();
         EnsurePartySlotColors();
         _availableTurrets.Clear();
-        bool hasCharacter = false;
+        IReadOnlyList<CharacterSO> catalog =
+            CharacterDefinitionCatalog.GetAll();
+        foreach (CharacterSO definition in catalog)
+        {
+            if (definition != null && !_availableTurrets.Contains(definition))
+                _availableTurrets.Add(definition);
+        }
+
+        bool hasCharacter = _availableTurrets.Count > 0;
         for (int index = 0; index < playerCharacters.Length; index++)
         {
             CharacterRuntime character = playerCharacters[index];
             if (character == null)
                 continue;
 
-            hasCharacter = true;
+            CharacterSO definition = character.Definition;
+            if (definition == null && index < catalog.Count)
+            {
+                definition = catalog[index];
+                character.ConfigureDefinition(definition);
+            }
+
+            if (definition == null)
+            {
+                _slotDefaultDefinitions[index] = null;
+                character.ConfigurePartySlot(index, partySlotColors[index]);
+                character.gameObject.SetActive(false);
+                continue;
+            }
+
             if (!character.Initialize())
             {
                 Debug.LogError(
@@ -1819,7 +1866,6 @@ public class DungeonPage : MonoBehaviour, IPage
             }
 
             character.ConfigurePartySlot(index, partySlotColors[index]);
-            CharacterSO definition = character.Definition;
             _slotDefaultDefinitions[index] = definition;
             if (definition != null && !_availableTurrets.Contains(definition))
                 _availableTurrets.Add(definition);
@@ -2102,14 +2148,6 @@ public sealed class DungeonEventTab
     private const int RewardChoiceCount = 3;
     private const int RewardSeedSalt = unchecked((int)0xA511E9B3);
 
-    private static readonly ETurretUpgradeType[] UpgradeTypes =
-    {
-        ETurretUpgradeType.PrimaryPower,
-        ETurretUpgradeType.AttackSpeed,
-        ETurretUpgradeType.SkillPower,
-        ETurretUpgradeType.SkillCost,
-    };
-
     private enum ERewardOptionType
     {
         TurretUpgrade,
@@ -2132,7 +2170,8 @@ public sealed class DungeonEventTab
     {
         public ERewardOptionType Type { get; }
         public int TurretSlotIndex { get; }
-        public ETurretUpgradeType UpgradeType { get; }
+        public int DungeonUpgradeDefinitionIndex { get; }
+        public CharacterDungeonUpgradeType DungeonUpgradeType { get; }
         public CharacterSO TurretDefinition { get; }
         public EDungeonEnergyUpgradeType EnergyUpgradeType { get; }
         public EBattleItemType BattleItemType { get; }
@@ -2140,26 +2179,30 @@ public sealed class DungeonEventTab
         private RewardOption(
             ERewardOptionType type,
             int turretSlotIndex,
-            ETurretUpgradeType upgradeType,
+            int dungeonUpgradeDefinitionIndex,
+            CharacterDungeonUpgradeType dungeonUpgradeType,
             CharacterSO turretDefinition,
             EDungeonEnergyUpgradeType energyUpgradeType,
             EBattleItemType battleItemType)
         {
             Type = type;
             TurretSlotIndex = turretSlotIndex;
-            UpgradeType = upgradeType;
+            DungeonUpgradeDefinitionIndex = dungeonUpgradeDefinitionIndex;
+            DungeonUpgradeType = dungeonUpgradeType;
             TurretDefinition = turretDefinition;
             EnergyUpgradeType = energyUpgradeType;
             BattleItemType = battleItemType;
         }
 
-        public static RewardOption CreateUpgrade(
+        public static RewardOption CreateDungeonUpgrade(
             int turretSlotIndex,
-            ETurretUpgradeType upgradeType)
+            int definitionIndex,
+            CharacterDungeonUpgradeType upgradeType)
         {
             return new RewardOption(
                 ERewardOptionType.TurretUpgrade,
                 turretSlotIndex,
+                definitionIndex,
                 upgradeType,
                 null,
                 default,
@@ -2170,6 +2213,7 @@ public sealed class DungeonEventTab
         {
             return new RewardOption(
                 ERewardOptionType.NewTurret,
+                -1,
                 -1,
                 default,
                 definition,
@@ -2183,6 +2227,7 @@ public sealed class DungeonEventTab
             return new RewardOption(
                 ERewardOptionType.EnergyUpgrade,
                 -1,
+                -1,
                 default,
                 null,
                 upgradeType,
@@ -2193,6 +2238,7 @@ public sealed class DungeonEventTab
         {
             return new RewardOption(
                 ERewardOptionType.BattleItem,
+                -1,
                 -1,
                 default,
                 null,
@@ -2424,6 +2470,13 @@ public sealed class DungeonEventTab
 
     private void GenerateRewardOptions()
     {
+        int battlePlanIndex = _page.CurrentBattleNumber - 1;
+        int rewardSeed = battlePlanIndex >= 0 &&
+                         battlePlanIndex < _page.BattlePlans.Count
+            ? _page.BattlePlans[battlePlanIndex].RandomSeed ^ RewardSeedSalt
+            : Environment.TickCount;
+        System.Random random = new(rewardSeed);
+
         List<RewardOption> candidates = new();
         IReadOnlyList<CharacterRuntime> turrets = _page.OwnedTurrets;
         for (int index = 0; index < turrets.Count; index++)
@@ -2432,12 +2485,18 @@ public sealed class DungeonEventTab
             if (data == null)
                 continue;
 
-            foreach (ETurretUpgradeType upgradeType in UpgradeTypes)
+            for (int definitionIndex = 0;
+                 definitionIndex < data.DungeonUpgradeDefinitions.Count;
+                 definitionIndex++)
             {
-                if (data.CanApplyUpgrade(upgradeType))
+                if (data.TryRollDungeonUpgrade(
+                        definitionIndex,
+                        random,
+                        out CharacterDungeonUpgradeType upgradeType))
                 {
-                    candidates.Add(RewardOption.CreateUpgrade(
+                    candidates.Add(RewardOption.CreateDungeonUpgrade(
                         index,
+                        definitionIndex,
                         upgradeType));
                 }
             }
@@ -2462,12 +2521,6 @@ public sealed class DungeonEventTab
             candidates.Add(RewardOption.CreateBattleItem(itemType));
 
         _currentRewardOptions.Clear();
-        int battlePlanIndex = _page.CurrentBattleNumber - 1;
-        int rewardSeed = battlePlanIndex >= 0 &&
-                         battlePlanIndex < _page.BattlePlans.Count
-            ? _page.BattlePlans[battlePlanIndex].RandomSeed ^ RewardSeedSalt
-            : Environment.TickCount;
-        System.Random random = new(rewardSeed);
         int choiceCount = Mathf.Min(RewardChoiceCount, candidates.Count);
         for (int index = 0; index < choiceCount; index++)
         {
@@ -2573,30 +2626,13 @@ public sealed class DungeonEventTab
         if (option.Type == ERewardOptionType.NewTurret)
         {
             CharacterData newTurretData =
-                option.TurretDefinition?.CreateData();
+                DungeonPage.CreateCharacterPreviewData(
+                    option.TurretDefinition);
             string description = newTurretData == null
                 ? LocalizationService.Get(
                     LocalizationKeys
                         .UiDungeonRewardNewTurretEmptyDescription)
-                : newTurretData.AttackType == CharacterAttackType.FireRandom
-                    ? LocalizationService.Get(
-                        LocalizationKeys
-                            .UiDungeonRewardNewTurretFireDescription,
-                        LocalizationService.Arg(
-                            "duration",
-                            newTurretData.FireDuration),
-                        LocalizationService.Arg(
-                            "targets",
-                            newTurretData.FireSkillTargetCount))
-                    : LocalizationService.Get(
-                        LocalizationKeys
-                            .UiDungeonRewardNewTurretDamageDescription,
-                        LocalizationService.Arg(
-                            "attack",
-                            newTurretData.AttackDamage),
-                        LocalizationService.Arg(
-                            "skill",
-                            newTurretData.SkillAttackDamage));
+                : CharacterLocalization.GetCompactSummary(newTurretData);
             string footer = newTurretData != null
                 ? LocalizationService.Get(
                     LocalizationKeys.UiDungeonRewardNewTurretFooter,
@@ -2641,20 +2677,22 @@ public sealed class DungeonEventTab
             LocalizationService.Get(
                 LocalizationKeys.UiDungeonRewardCategoryTurretUpgradeSlot,
                 LocalizationService.Arg("slot", slotIndex + 1)),
-            CharacterLocalization.GetUpgradeTitle(data, option.UpgradeType),
+            CharacterLocalization.GetDungeonUpgradeTitle(
+                option.DungeonUpgradeType),
             CharacterLocalization.GetName(data) + "\n" +
-            CharacterLocalization.GetUpgradeDescription(
+            CharacterLocalization.GetDungeonUpgradeDescription(
                 data,
-                option.UpgradeType),
+                option.DungeonUpgradeType),
             LocalizationService.Get(
-                LocalizationKeys.UiDungeonRewardPermanentFooter),
+                LocalizationKeys.UiDungeonRewardRunFooter),
             new Color(0.3f, 0.68f, 0.4f, 1f));
     }
 
     private static RewardCardContent GetStartingTurretCardContent(
         CharacterSO definition)
     {
-        CharacterData data = definition?.CreateData();
+        CharacterData data =
+            DungeonPage.CreateCharacterPreviewData(definition);
         if (data == null)
         {
             return new RewardCardContent(
@@ -2668,34 +2706,9 @@ public sealed class DungeonEventTab
                 new Color(0.25f, 0.52f, 0.78f, 1f));
         }
 
-        string description = data.AttackType switch
-        {
-            CharacterAttackType.RandomMultiple => LocalizationService.Get(
-                LocalizationKeys.UiDungeonRewardStartRandom,
-                LocalizationService.Arg("count", data.TargetCount),
-                LocalizationService.Arg("attack", data.AttackDamage)),
-            CharacterAttackType.CrossHighestHealth => LocalizationService.Get(
-                LocalizationKeys.UiDungeonRewardStartCross,
-                LocalizationService.Arg("attack", data.AttackDamage)),
-            CharacterAttackType.FireRandom => LocalizationService.Get(
-                LocalizationKeys.UiDungeonRewardStartFire,
-                LocalizationService.Arg("duration", data.FireDuration),
-                LocalizationService.Arg("damage", data.FireTickDamage),
-                LocalizationService.Arg("interval", data.FireTickInterval)),
-            _ => LocalizationService.Get(
-                LocalizationKeys.UiDungeonRewardStartLowest,
-                LocalizationService.Arg("attack", data.AttackDamage)),
-        };
-        Color accent = data.AttackType switch
-        {
-            CharacterAttackType.RandomMultiple =>
-                new Color(0.55f, 0.38f, 0.82f, 1f),
-            CharacterAttackType.CrossHighestHealth =>
-                new Color(0.25f, 0.68f, 0.48f, 1f),
-            CharacterAttackType.FireRandom =>
-                new Color(0.88f, 0.32f, 0.16f, 1f),
-            _ => new Color(0.25f, 0.52f, 0.78f, 1f),
-        };
+        string description =
+            CharacterLocalization.GetNormalAttackDescription(data);
+        Color accent = new(0.25f, 0.52f, 0.78f, 1f);
         return new RewardCardContent(
             LocalizationService.Get(
                 LocalizationKeys.UiDungeonRewardCategoryStartingTurret),
@@ -2712,9 +2725,10 @@ public sealed class DungeonEventTab
     {
         if (option.Type == ERewardOptionType.TurretUpgrade)
         {
-            _page.TryApplyTurretUpgrade(
+            _page.TryApplyCharacterDungeonUpgrade(
                 option.TurretSlotIndex,
-                option.UpgradeType);
+                option.DungeonUpgradeDefinitionIndex,
+                option.DungeonUpgradeType);
             return;
         }
 
@@ -2756,7 +2770,8 @@ public sealed class DungeonEventTab
         SetRewardCardMode(false);
         RefreshRuntimeLayout();
         CharacterSO selectedDefinition = _replacementDefinition;
-        CharacterData newData = selectedDefinition.CreateData();
+        CharacterData newData =
+            DungeonPage.CreateCharacterPreviewData(selectedDefinition);
         string newName = newData != null
             ? CharacterLocalization.GetName(newData)
             : LocalizationService.Get(
@@ -2851,25 +2866,8 @@ public sealed class DungeonEventTab
                 LocalizationService.Arg("slot", slotIndex + 1));
         }
 
-        return data.AttackType == CharacterAttackType.FireRandom
-            ? LocalizationService.Get(
-                LocalizationKeys.UiDungeonReplaceFireSlot,
-                LocalizationService.Arg("slot", slotIndex + 1),
-                LocalizationService.Arg(
-                    "name",
-                    CharacterLocalization.GetName(data)),
-                LocalizationService.Arg("duration", data.FireDuration),
-                LocalizationService.Arg(
-                    "targets",
-                    data.FireSkillTargetCount))
-            : LocalizationService.Get(
-                LocalizationKeys.UiDungeonReplaceDamageSlot,
-                LocalizationService.Arg("slot", slotIndex + 1),
-                LocalizationService.Arg(
-                    "name",
-                    CharacterLocalization.GetName(data)),
-                LocalizationService.Arg("attack", data.AttackDamage),
-                LocalizationService.Arg("skill", data.SkillAttackDamage));
+        return $"S{slotIndex + 1} {CharacterLocalization.GetName(data)} | " +
+               CharacterLocalization.GetCompactSummary(data);
     }
 
     private void BuildRuntimeUi()

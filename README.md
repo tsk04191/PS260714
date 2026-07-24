@@ -107,8 +107,8 @@ Font/Markup Catalog는 Unity 에셋 참조를 담으므로 이 스크립트 전�
 - `pagCodex`의 `CHARACTERS`는 `pagCharacterCodex`로 이동합니다. 캐릭터
   코덱스는 프로젝트의 모든 `CharacterSO`를 수집해 캐릭터별 가로 스크롤 탭을
   만들고, 공격 방식·최종 공격력·공격 주기·화염 수치·기술 코스트와 실제 기술
-  효과를 표시합니다. 현재 캐릭터는 Basic Turret, Dual Tower, Area Tower,
-  Flame Tower입니다.
+  효과를 표시합니다. 현재 캐릭터는 CharacterSO의 조립식 공격·패시브·기술
+  정의를 기준으로 표시합니다.
 - `pagCodex`의 `SKILLS`와 `ITEMS`는 각각 `pagSkillCodex`와
   `pagItemCodex`로 이동합니다. 기술 코덱스에는 재사용 기술 Focus, 아이템
   코덱스에는 소모형 아이템 Molotov, Precision Shot, Over Supply, Overheat가

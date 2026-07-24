@@ -1,0 +1,5363 @@
+using System;
+using System.Collections.Generic;
+using System.Reflection;
+using NUnit.Framework;
+using TMPro;
+using UnityEditor;
+using UnityEngine;
+using UnityEngine.UI;
+
+public sealed class CharacterP0RegressionTests
+{
+    private const string SuirenAssetPath =
+        "Assets/Resources/Characters/2_Suiren.asset";
+    private const string AislingAssetPath =
+        "Assets/Resources/Characters/2_Aisling.asset";
+    private const string SaenaAssetPath =
+        "Assets/Resources/Characters/2_Saena.asset";
+    private const string EmergencyKitAssetPath =
+        "Assets/Resources/StatusEffects/EmergencyKit.asset";
+    private const string FireAssetPath =
+        "Assets/Resources/StatusEffects/Fire.asset";
+    private const string StunAssetPath =
+        "Assets/Resources/StatusEffects/Stun.asset";
+
+    private readonly List<CharacterRuntime> _characters = new();
+    private readonly List<UnityEngine.Object> _createdObjects = new();
+
+    [TearDown]
+    public void TearDown()
+    {
+        foreach (CharacterRuntime character in _characters)
+        {
+            if (character != null)
+                character.BindBattle(null, null);
+        }
+
+        for (int index = _createdObjects.Count - 1; index >= 0; index--)
+        {
+            if (_createdObjects[index] != null)
+                UnityEngine.Object.DestroyImmediate(_createdObjects[index]);
+        }
+
+        _characters.Clear();
+        _createdObjects.Clear();
+    }
+
+    [Test]
+    public void SuirenCooldownPassive_ChargesEmergencyKitUpToThreeStacks()
+    {
+        CharacterRuntime suiren = CreateCharacter(SuirenAssetPath);
+        StatusEffectSO emergencyKit =
+            LoadAsset<StatusEffectSO>(EmergencyKitAssetPath);
+        FakeBattleBoard board = new();
+        suiren.BindBattle(null, board);
+
+        for (int expectedStacks = 1; expectedStacks <= 3; expectedStacks++)
+        {
+            suiren.TickBattle(10f, board);
+            Assert.That(
+                suiren.GetStatusStackCount(emergencyKit),
+                Is.EqualTo(expectedStacks));
+        }
+
+        suiren.TickBattle(10f, board);
+
+        Assert.That(
+            suiren.GetStatusStackCount(emergencyKit),
+            Is.EqualTo(3));
+    }
+
+    [Test]
+    public void SuirenStatusPassive_CleansExactStunnedAlly_AndConsumesOneKit()
+    {
+        CharacterRuntime suiren = CreateCharacter(SuirenAssetPath);
+        CharacterRuntime ally = CreateCharacter(SuirenAssetPath);
+        StatusEffectSO emergencyKit =
+            LoadAsset<StatusEffectSO>(EmergencyKitAssetPath);
+        StatusEffectSO stun = LoadAsset<StatusEffectSO>(StunAssetPath);
+        FakeBattleBoard board = new();
+        suiren.BindBattle(null, board);
+        ally.BindBattle(null, board);
+
+        Assert.That(
+            suiren.ApplyStatusEffect(emergencyKit, 1f, 2),
+            Is.True);
+        Assert.That(ally.ApplyStatusEffect(stun, 5f, 1), Is.True);
+
+        Assert.That(ally.DisabledTimeRemaining, Is.Zero);
+        Assert.That(ally.HasStatusEffect(stun), Is.False);
+        Assert.That(
+            suiren.GetStatusStackCount(emergencyKit),
+            Is.EqualTo(1));
+        Assert.That(
+            board.LastAlliedStatusRemovalTargets,
+            Is.EquivalentTo(new IBattleCharacter[] { ally }));
+    }
+
+    [Test]
+    public void SuirenStatusPassive_IgnoresEnemyOtherStatusAndMissingKit()
+    {
+        CharacterRuntime suiren = CreateCharacter(SuirenAssetPath);
+        CharacterRuntime ally = CreateCharacter(SuirenAssetPath);
+        StatusEffectSO emergencyKit =
+            LoadAsset<StatusEffectSO>(EmergencyKitAssetPath);
+        StatusEffectSO stun = LoadAsset<StatusEffectSO>(StunAssetPath);
+        FakeBattleBoard board = new();
+        suiren.BindBattle(null, board);
+        ally.BindBattle(null, board);
+
+        Assert.That(
+            suiren.ApplyStatusEffect(emergencyKit, 1f, 1),
+            Is.True);
+
+        EnemyRuntime enemy = CreateEnemyRuntime();
+        board.RaiseStatusApplied(
+            new BattleStatusAppliedEvent(
+                BattleStatusTarget.FromEnemy(enemy),
+                stun,
+                0,
+                1));
+        Assert.That(
+            suiren.GetStatusStackCount(emergencyKit),
+            Is.EqualTo(1));
+
+        board.RaiseStatusApplied(
+            new BattleStatusAppliedEvent(
+                BattleStatusTarget.FromAlly(ally),
+                emergencyKit,
+                0,
+                1));
+        Assert.That(
+            suiren.GetStatusStackCount(emergencyKit),
+            Is.EqualTo(1));
+        Assert.That(board.AlliedStatusRemovalCallCount, Is.Zero);
+
+        Assert.That(
+            suiren.TryConsumeStatusStacks(emergencyKit, 1),
+            Is.True);
+        Assert.That(ally.ApplyStatusEffect(stun, 5f, 1), Is.True);
+
+        Assert.That(ally.HasStatusEffect(stun), Is.True);
+        Assert.That(ally.DisabledTimeRemaining, Is.EqualTo(5f));
+        Assert.That(board.AlliedStatusRemovalCallCount, Is.Zero);
+    }
+
+    [Test]
+    public void MultipleSuirens_OnlySuccessfulCleanserConsumesEmergencyKit()
+    {
+        CharacterRuntime firstSuiren = CreateCharacter(SuirenAssetPath);
+        CharacterRuntime secondSuiren = CreateCharacter(SuirenAssetPath);
+        CharacterRuntime ally = CreateCharacter(SuirenAssetPath);
+        StatusEffectSO emergencyKit =
+            LoadAsset<StatusEffectSO>(EmergencyKitAssetPath);
+        StatusEffectSO stun = LoadAsset<StatusEffectSO>(StunAssetPath);
+        FakeBattleBoard board = new();
+        firstSuiren.BindBattle(null, board);
+        secondSuiren.BindBattle(null, board);
+        ally.BindBattle(null, board);
+
+        Assert.That(
+            firstSuiren.ApplyStatusEffect(emergencyKit, 1f, 1),
+            Is.True);
+        Assert.That(
+            secondSuiren.ApplyStatusEffect(emergencyKit, 1f, 1),
+            Is.True);
+        Assert.That(ally.ApplyStatusEffect(stun, 5f, 1), Is.True);
+
+        int remainingKits =
+            firstSuiren.GetStatusStackCount(emergencyKit) +
+            secondSuiren.GetStatusStackCount(emergencyKit);
+        Assert.That(ally.HasStatusEffect(stun), Is.False);
+        Assert.That(remainingKits, Is.EqualTo(1));
+        Assert.That(
+            board.AlliedStatusRemovalCallCount,
+            Is.EqualTo(2),
+            "The second passive may try, but its failed removal must " +
+            "not consume a kit.");
+    }
+
+    [Test]
+    public void SuirenActiveSkill_UsesConfiguredCustomDefinition()
+    {
+        CharacterRuntime suiren = CreateCharacter(SuirenAssetPath);
+        CharacterData data = suiren.Data;
+
+        Assert.That(data.HasCustomSkillDefinitions, Is.True);
+        Assert.That(data.SkillDefinitions, Has.Count.GreaterThan(0));
+
+        CharacterSkillDefinition definition = data.SkillDefinitions[0];
+        Assert.That(
+            definition.HasSection(CharacterSkillSectionType.Cost),
+            Is.True);
+        Assert.That(
+            definition.HasSection(CharacterSkillSectionType.Subject),
+            Is.True);
+        Assert.That(
+            definition.HasSection(CharacterSkillSectionType.Ability),
+            Is.True);
+        Assert.That(definition.TargetFaction, Is.EqualTo(
+            CharacterTargetFaction.Enemy));
+        Assert.That(definition.Subject, Is.EqualTo(
+            CharacterAttackSubject.LowestValue));
+        Assert.That(definition.SubjectMetric, Is.EqualTo(
+            CharacterAttackSubjectMetric.Health));
+        Assert.That(data.ActiveSkillCost, Is.EqualTo(1));
+        Assert.That(data.SkillAttackDamage, Is.EqualTo(2));
+
+        string description =
+            CharacterLocalization.GetActiveSkillDescription(data);
+        Assert.That(description, Is.Not.Empty);
+
+        EnemyRuntime target = CreateEnemyRuntime();
+        FakeActiveSkillResource resource = new(10);
+        FakeBattleBoard board = new()
+        {
+            LivingEnemyCountValue = 1,
+            SelectedEnemyTargets = new[] { target },
+        };
+        suiren.BindBattle(resource, board);
+
+        bool activated = suiren.TryActivateActiveSkill();
+
+        Assert.That(activated, Is.True);
+        Assert.That(resource.Current, Is.EqualTo(9));
+        Assert.That(suiren.TotalDamageDealt, Is.EqualTo(2));
+        Assert.That(board.DamageTargetSnapshots, Has.Count.EqualTo(1));
+        Assert.That(board.DamageTargetSnapshots[0], Does.Contain(target));
+    }
+
+    [Test]
+    public void ScalingValue_FromLegacyPreservesFixedAndRatioSemantics()
+    {
+        EffectContext context = EffectContext.ForPreview(
+            CharacterActionKind.Skill,
+            8f);
+        ScalingValue fixedValue = ScalingValue.FromLegacy(
+            CharacterDamageAmountMode.Fixed,
+            3f);
+        ScalingValue ratioValue = ScalingValue.FromLegacy(
+            CharacterDamageAmountMode.Ratio,
+            1.5f);
+
+        Assert.That(fixedValue.FixedAmount, Is.EqualTo(3f));
+        Assert.That(fixedValue.SourceAttackPowerScale, Is.Zero);
+        Assert.That(
+            fixedValue.Evaluate(default),
+            Is.EqualTo(3f).Within(0.0001f));
+        Assert.That(ratioValue.FixedAmount, Is.Zero);
+        Assert.That(
+            ratioValue.SourceAttackPowerScale,
+            Is.EqualTo(1.5f));
+        Assert.That(
+            ratioValue.Evaluate(context),
+            Is.EqualTo(12f).Within(0.0001f));
+        Assert.That(
+            (ScalingValue.Fixed(2f) +
+             ScalingValue.SourceAttackPower(0.5f)).Evaluate(context),
+            Is.EqualTo(6f).Within(0.0001f));
+
+        ScalingValue unsupported = ScalingValue.FromLegacy(
+            (CharacterDamageAmountMode)999,
+            1f);
+        Assert.That(unsupported.IsFinite, Is.False);
+        Assert.That(unsupported.Evaluate(context), Is.Zero);
+    }
+
+    [Test]
+    public void ScalingValue_SourceResourceScale_EvaluatesCombinedFormula()
+    {
+        EffectContext context = EffectContext.ForPreview(
+            CharacterActionKind.Skill,
+            8f,
+            4,
+            10);
+        ScalingValue value =
+            ScalingValue.Fixed(2f) +
+            ScalingValue.SourceAttackPower(0.5f) +
+            ScalingValue.SourceResource(1.5f);
+
+        Assert.That(context.SourceResource, Is.EqualTo(4));
+        Assert.That(context.SourceResourceMaximum, Is.EqualTo(10));
+        Assert.That(value.SourceResourceScale, Is.EqualTo(1.5f));
+        Assert.That(value.IsFinite, Is.True);
+        Assert.That(value.HasPositiveTerm, Is.True);
+        Assert.That(
+            value.Evaluate(context),
+            Is.EqualTo(12f).Within(0.0001f));
+    }
+
+    [Test]
+    public void ActualSaenaSkill_UsesSourceAttackPowerContextAndPreservesDamage()
+    {
+        CharacterRuntime saena = CreateCharacter(SaenaAssetPath);
+        CharacterSkillDefinition skill = saena.Data.SkillDefinitions[0];
+        CharacterEffectDefinition damageEffect = skill.Effects[0];
+        EnemyRuntime target = CreateEnemyRuntime();
+        FakeActiveSkillResource resource = new(10);
+        FakeBattleBoard board = new()
+        {
+            LivingEnemyCountValue = 1,
+            SelectedEnemyTargets = new[] { target },
+        };
+        saena.BindBattle(resource, board);
+
+        Assert.That(saena.Data.AttackPower, Is.EqualTo(5f));
+        Assert.That(saena.Data.ActiveSkillCost, Is.EqualTo(3));
+        Assert.That(damageEffect.Type, Is.EqualTo(
+            CharacterEffectType.Damage));
+        Assert.That(damageEffect.DamageType, Is.EqualTo(
+            CharacterAttackDamageType.Fixed));
+        Assert.That(damageEffect.DamageAmountMode, Is.EqualTo(
+            CharacterDamageAmountMode.Ratio));
+        Assert.That(damageEffect.DamageAmount, Is.EqualTo(3f));
+
+        Assert.That(saena.TryActivateActiveSkill(), Is.True);
+
+        Assert.That(resource.Current, Is.EqualTo(7));
+        Assert.That(resource.TrySpendCallCount, Is.EqualTo(1));
+        Assert.That(saena.TotalDamageDealt, Is.EqualTo(15));
+        Assert.That(
+            board.CharacterTargetSelectionCallCount,
+            Is.EqualTo(1));
+        Assert.That(board.DamageTargetSnapshots, Has.Count.EqualTo(1));
+        Assert.That(board.DamageTargetSnapshots[0], Does.Contain(target));
+    }
+
+    [Test]
+    public void GainResourceSkill_UsesPostCostSnapshot_AndRunsOnce()
+    {
+        CharacterSO definition = CreateResourceGainCharacter(
+            fixedAmount: 0f,
+            sourceResourceScale: 1f,
+            targetCount: 2);
+        CharacterDefinitionValidationResult validation =
+            CharacterDefinitionValidator.Validate(definition);
+        Assert.That(
+            validation.IsValid,
+            Is.True,
+            string.Join("\n", validation.Diagnostics));
+
+        CharacterRuntime character = CreateCharacter(definition);
+        Assert.That(
+            CharacterLocalization.GetActiveSkillDescription(character.Data),
+            Does.Contain("× 1"));
+        EnemyRuntime firstTarget = CreateEnemyRuntime();
+        EnemyRuntime secondTarget = CreateEnemyRuntime();
+        FakeActiveSkillResource resource = new(6, 10);
+        FakeBattleBoard board = new()
+        {
+            LivingEnemyCountValue = 2,
+            SelectedEnemyTargets = new[] { firstTarget, secondTarget },
+        };
+        character.BindBattle(resource, board);
+
+        bool activated = character.TryActivateActiveSkill();
+
+        // Cost 2 is paid before the context snapshot: 6 - 2 = 4,
+        // then CurrentResource x 1 restores 4 exactly once.
+        Assert.That(activated, Is.True);
+        Assert.That(resource.Current, Is.EqualTo(8));
+        Assert.That(resource.TrySpendCallCount, Is.EqualTo(1));
+        Assert.That(resource.TryGainCallCount, Is.EqualTo(1));
+        Assert.That(
+            board.CharacterTargetSelectionCallCount,
+            Is.EqualTo(1));
+        Assert.That(board.DamageTargetSnapshots, Is.Empty);
+        Assert.That(character.TotalDamageDealt, Is.Zero);
+
+        // A second activation snapshots 6 after paying its cost, requests
+        // another gain of 6, and the resource contract clamps that to 10.
+        Assert.That(character.TryActivateActiveSkill(), Is.True);
+        Assert.That(resource.Current, Is.EqualTo(10));
+        Assert.That(resource.TrySpendCallCount, Is.EqualTo(2));
+        Assert.That(resource.TryGainCallCount, Is.EqualTo(2));
+        Assert.That(
+            board.CharacterTargetSelectionCallCount,
+            Is.EqualTo(2));
+    }
+
+    [Test]
+    public void GainResourceValidator_AcceptsResourceScale_AndRejectsEmptyFormula()
+    {
+        CharacterSO definition = CreateResourceGainCharacter(
+            fixedAmount: 0f,
+            sourceResourceScale: 1f,
+            targetCount: 1);
+
+        CharacterDefinitionValidationResult validResult =
+            CharacterDefinitionValidator.Validate(definition);
+        Assert.That(
+            validResult.IsValid,
+            Is.True,
+            string.Join("\n", validResult.Diagnostics));
+
+        SerializedObject serialized = new(definition);
+        SerializedProperty effect = serialized
+            .FindProperty("skillDefinitions")
+            .GetArrayElementAtIndex(0)
+            .FindPropertyRelative("effects")
+            .GetArrayElementAtIndex(0);
+        effect.FindPropertyRelative("damageAmount").floatValue = 0f;
+        effect.FindPropertyRelative("sourceResourceScale").floatValue = 0f;
+        serialized.ApplyModifiedPropertiesWithoutUndo();
+
+        CharacterDefinitionValidationResult invalidResult =
+            CharacterDefinitionValidator.Validate(definition);
+        Assert.That(invalidResult.IsValid, Is.False);
+        Assert.That(
+            HasDiagnostic(
+                invalidResult,
+                "effect.resource_gain_invalid"),
+            Is.True,
+            string.Join("\n", invalidResult.Diagnostics));
+    }
+
+    [Test]
+    public void TargetScaledDamage_UsesPerEffectSnapshots_AndSeesPriorStatus()
+    {
+        StatusEffectSO fire = LoadAsset<StatusEffectSO>(FireAssetPath);
+        StatusEffectSO emergencyKit =
+            LoadAsset<StatusEffectSO>(EmergencyKitAssetPath);
+        CharacterSO definition = CreateTargetScalingCharacter(
+            fire,
+            emergencyKit);
+        CharacterDefinitionValidationResult validation =
+            CharacterDefinitionValidator.Validate(definition);
+        Assert.That(
+            validation.IsValid,
+            Is.True,
+            string.Join("\n", validation.Diagnostics));
+
+        CharacterRuntime character = CreateCharacter(definition);
+        Assert.That(
+            character.ApplyStatusEffect(emergencyKit, 1f, 2),
+            Is.True);
+        Assert.That(
+            CharacterLocalization.GetActiveSkillDescription(character.Data),
+            Does.Contain(" - "));
+
+        EnemyRuntime firstTarget = CreateEnemyRuntime(20);
+        EnemyRuntime secondTarget = CreateEnemyRuntime(40);
+        SetEnemyHealth(firstTarget, 10);
+        SetEnemyHealth(secondTarget, 20);
+        Assert.That(
+            ApplyEnemyStatus(
+                firstTarget,
+                fire,
+                3f,
+                1,
+                character,
+                fire.TickInterval),
+            Is.True);
+
+        bool mutatedAfterFirstDamage = false;
+        FakeBattleBoard board = new()
+        {
+            LivingEnemyCountValue = 2,
+            SelectedEnemyTargets =
+                new[] { firstTarget, secondTarget },
+            ApplyEffectsToEnemyRuntime = true,
+        };
+        board.TargetDamageApplied = (_, _) =>
+        {
+            if (mutatedAfterFirstDamage)
+                return;
+
+            mutatedAfterFirstDamage = true;
+            ApplyEnemyStatus(
+                secondTarget,
+                fire,
+                3f,
+                5,
+                character,
+                fire.TickInterval);
+        };
+        FakeActiveSkillResource resource = new(10);
+        character.BindBattle(resource, board);
+
+        Assert.That(character.TryActivateActiveSkill(), Is.True);
+
+        // ApplyStatus adds 2 stacks before Damage. The damage formula is:
+        // missing HP x 0.5 + source EmergencyKit stacks x 1
+        // + target Fire stacks x 1.
+        // First: 5 + 2 + 3 = 10. Second: 10 + 2 + 2 = 14.
+        // The callback adds 5 Fire stacks to the second target after the
+        // first damage is applied, but its snapshotted damage stays 14.
+        Assert.That(resource.Current, Is.EqualTo(9));
+        Assert.That(board.StatusApplyCallCount, Is.EqualTo(1));
+        Assert.That(
+            board.DamageAmounts,
+            Is.EqualTo(new[] { 10, 14 }));
+        Assert.That(board.DamageTargetSnapshots, Has.Count.EqualTo(2));
+        Assert.That(character.TotalDamageDealt, Is.EqualTo(24));
+        Assert.That(GetEnemyStatusStacks(secondTarget, fire), Is.EqualTo(7));
+    }
+
+    [Test]
+    public void TargetOnlyDamageScaling_RemainsUsableWithoutPreviewTarget()
+    {
+        CharacterSO definition = CreateTargetOnlyScalingCharacter();
+        CharacterDefinitionValidationResult validation =
+            CharacterDefinitionValidator.Validate(definition);
+        Assert.That(
+            validation.IsValid,
+            Is.True,
+            string.Join("\n", validation.Diagnostics));
+
+        CharacterRuntime character = CreateCharacter(definition);
+        EnemyRuntime target = CreateEnemyRuntime(20);
+        SetEnemyHealth(target, 12);
+        FakeActiveSkillResource resource = new(10);
+        FakeBattleBoard board = new()
+        {
+            LivingEnemyCountValue = 1,
+            SelectedEnemyTargets = new[] { target },
+            ApplyEffectsToEnemyRuntime = true,
+        };
+        character.BindBattle(resource, board);
+
+        Assert.That(character.TryActivateActiveSkill(), Is.True);
+
+        Assert.That(resource.Current, Is.EqualTo(9));
+        Assert.That(resource.TrySpendCallCount, Is.EqualTo(1));
+        Assert.That(board.DamageAmounts, Is.EqualTo(new[] { 3 }));
+        Assert.That(character.TotalDamageDealt, Is.EqualTo(3));
+    }
+
+    [Test]
+    public void TargetScalingValidator_RejectsMissingStatusAndOneShotTargetTerms()
+    {
+        CharacterSO definition = CreateTargetOnlyScalingCharacter();
+        Assert.That(
+            CharacterDefinitionValidator.Validate(definition).IsValid,
+            Is.True);
+
+        SerializedObject serialized = new(definition);
+        SerializedProperty skill = serialized
+            .FindProperty("skillDefinitions")
+            .GetArrayElementAtIndex(0);
+        SerializedProperty effect = skill
+            .FindPropertyRelative("effects")
+            .GetArrayElementAtIndex(0);
+        effect.FindPropertyRelative(
+            "targetStatusStacksScale").floatValue = 1f;
+        serialized.ApplyModifiedPropertiesWithoutUndo();
+
+        CharacterDefinitionValidationResult missingStatusResult =
+            CharacterDefinitionValidator.Validate(definition);
+        Assert.That(
+            HasDiagnostic(
+                missingStatusResult,
+                "effect.target_status_scaling_status_required"),
+            Is.True,
+            string.Join("\n", missingStatusResult.Diagnostics));
+
+        effect.FindPropertyRelative(
+            "targetStatusStacksScale").floatValue = 0f;
+        skill.FindPropertyRelative("targetFaction").enumValueIndex =
+            (int)CharacterTargetFaction.Ally;
+        serialized.ApplyModifiedPropertiesWithoutUndo();
+
+        CharacterDefinitionValidationResult allyHealthResult =
+            CharacterDefinitionValidator.Validate(definition);
+        Assert.That(
+            HasDiagnostic(
+                allyHealthResult,
+                "effect.target_health_scaling_unsupported"),
+            Is.False,
+            string.Join("\n", allyHealthResult.Diagnostics));
+        Assert.That(
+            HasDiagnostic(
+                allyHealthResult,
+                "effect.ally_damage_unsupported"),
+            Is.True,
+            string.Join("\n", allyHealthResult.Diagnostics));
+
+        CharacterSO resourceDefinition = CreateResourceGainCharacter(
+            fixedAmount: 1f,
+            sourceResourceScale: 0f,
+            targetCount: 1);
+        SerializedObject serializedResource = new(resourceDefinition);
+        serializedResource
+            .FindProperty("skillDefinitions")
+            .GetArrayElementAtIndex(0)
+            .FindPropertyRelative("effects")
+            .GetArrayElementAtIndex(0)
+            .FindPropertyRelative("targetMaxHealthScale")
+            .floatValue = 0.5f;
+        serializedResource.ApplyModifiedPropertiesWithoutUndo();
+
+        CharacterDefinitionValidationResult resourceResult =
+            CharacterDefinitionValidator.Validate(resourceDefinition);
+        Assert.That(
+            HasDiagnostic(
+                resourceResult,
+                "effect.target_scaling_unsupported"),
+            Is.True,
+            string.Join("\n", resourceResult.Diagnostics));
+    }
+
+    [Test]
+    public void ActualExplicitEffects_DefaultToInheritActionTarget()
+    {
+        string[] characterGuids = AssetDatabase.FindAssets(
+            "t:CharacterSO",
+            new[] { "Assets/Resources/Characters" });
+        Assert.That(characterGuids, Is.Not.Empty);
+
+        int explicitEffectCount = 0;
+        foreach (string guid in characterGuids)
+        {
+            string assetPath = AssetDatabase.GUIDToAssetPath(guid);
+            CharacterSO definition =
+                AssetDatabase.LoadAssetAtPath<CharacterSO>(assetPath);
+            Assert.That(
+                definition,
+                Is.Not.Null,
+                $"Failed to load CharacterSO at '{assetPath}'.");
+
+            foreach (CharacterAttackDefinition attack in
+                     definition.AttackDefinitions)
+            {
+                Assert.That(
+                    attack,
+                    Is.Not.Null,
+                    $"{assetPath} contains a null attack definition.");
+                AssertEffectsInheritActionTarget(
+                    attack.Effects,
+                    $"{assetPath}.attack",
+                    ref explicitEffectCount);
+            }
+
+            foreach (CharacterPassiveDefinition passive in
+                     definition.PassiveDefinitions)
+            {
+                Assert.That(
+                    passive,
+                    Is.Not.Null,
+                    $"{assetPath} contains a null passive definition.");
+                AssertEffectsInheritActionTarget(
+                    passive.Effects,
+                    $"{assetPath}.passive",
+                    ref explicitEffectCount);
+            }
+
+            foreach (CharacterSkillDefinition skill in
+                     definition.SkillDefinitions)
+            {
+                Assert.That(
+                    skill,
+                    Is.Not.Null,
+                    $"{assetPath} contains a null skill definition.");
+                AssertEffectsInheritActionTarget(
+                    skill.Effects,
+                    $"{assetPath}.skill",
+                    ref explicitEffectCount);
+            }
+        }
+
+        Assert.That(
+            explicitEffectCount,
+            Is.GreaterThan(0),
+            "At least one actual explicit effect must protect the " +
+            "serialized InheritAction default.");
+    }
+
+    [Test]
+    public void SourceStatusThenInheritedDamage_RetargetsOnlyFirstEffect()
+    {
+        StatusEffectSO emergencyKit =
+            LoadAsset<StatusEffectSO>(EmergencyKitAssetPath);
+        CharacterSO definition =
+            CreateSourceRetargetCharacter(emergencyKit);
+        CharacterDefinitionValidationResult validation =
+            CharacterDefinitionValidator.Validate(definition);
+        Assert.That(
+            validation.IsValid,
+            Is.True,
+            string.Join("\n", validation.Diagnostics));
+
+        CharacterRuntime character = CreateCharacter(definition);
+        EnemyRuntime enemy = CreateEnemyRuntime();
+        FakeActiveSkillResource resource = new(6, 10);
+        FakeBattleBoard board = new()
+        {
+            LivingEnemyCountValue = 1,
+            SelectedEnemyTargets = new[] { enemy },
+        };
+        character.BindBattle(resource, board);
+
+        Assert.That(character.TryActivateActiveSkill(), Is.True);
+
+        // Cost 2 is paid before the shared action context is snapshotted.
+        // Source ApplyStatus must not replace that context or consume the
+        // inherited enemy range visualization.
+        Assert.That(resource.Current, Is.EqualTo(4));
+        Assert.That(resource.TrySpendCallCount, Is.EqualTo(1));
+        Assert.That(
+            character.GetStatusStackCount(emergencyKit),
+            Is.EqualTo(1));
+        Assert.That(GetEnemyStatusStacks(enemy, emergencyKit), Is.Zero);
+        Assert.That(board.StatusApplyCallCount, Is.Zero);
+        Assert.That(board.DamageTargetSnapshots, Has.Count.EqualTo(1));
+        Assert.That(
+            board.DamageTargetSnapshots[0],
+            Is.EqualTo(new[] { enemy }));
+        Assert.That(board.DamageAmounts, Is.EqualTo(new[] { 4 }));
+        Assert.That(
+            board.DamageShowAttackRangeSnapshots,
+            Is.EqualTo(new[] { true }));
+        Assert.That(character.TotalDamageDealt, Is.EqualTo(4));
+        Assert.That(
+            board.CharacterTargetSelectionCallCount,
+            Is.EqualTo(1));
+    }
+
+    [Test]
+    public void EffectTargetModeValidator_RejectsInvalidAndUnsupportedSourceEffects()
+    {
+        StatusEffectSO emergencyKit =
+            LoadAsset<StatusEffectSO>(EmergencyKitAssetPath);
+        StatusEffectSO fire = LoadAsset<StatusEffectSO>(FireAssetPath);
+
+        CharacterSO invalidModeDefinition =
+            CreateSourceRetargetCharacter(emergencyKit);
+        SerializedObject invalidModeSerialized =
+            new(invalidModeDefinition);
+        SerializedProperty invalidModeEffect = invalidModeSerialized
+            .FindProperty("skillDefinitions")
+            .GetArrayElementAtIndex(0)
+            .FindPropertyRelative("effects")
+            .GetArrayElementAtIndex(0);
+        invalidModeEffect.FindPropertyRelative("targetMode").intValue = 999;
+        invalidModeSerialized.ApplyModifiedPropertiesWithoutUndo();
+
+        CharacterDefinitionValidationResult invalidModeResult =
+            CharacterDefinitionValidator.Validate(invalidModeDefinition);
+        Assert.That(invalidModeResult.IsValid, Is.False);
+        Assert.That(
+            HasDiagnostic(
+                invalidModeResult,
+                "effect.target_mode_invalid"),
+            Is.True,
+            string.Join("\n", invalidModeResult.Diagnostics));
+
+        CharacterSO sourceDamageDefinition =
+            CreateSourceRetargetCharacter(emergencyKit);
+        SerializedObject sourceDamageSerialized =
+            new(sourceDamageDefinition);
+        SerializedProperty sourceDamageEffect = sourceDamageSerialized
+            .FindProperty("skillDefinitions")
+            .GetArrayElementAtIndex(0)
+            .FindPropertyRelative("effects")
+            .GetArrayElementAtIndex(0);
+        sourceDamageEffect.FindPropertyRelative("type").enumValueIndex =
+            (int)CharacterEffectType.Damage;
+        sourceDamageEffect.FindPropertyRelative(
+            "damageType").enumValueIndex =
+            (int)CharacterAttackDamageType.Fixed;
+        sourceDamageEffect.FindPropertyRelative(
+            "damageAmountMode").enumValueIndex =
+            (int)CharacterDamageAmountMode.Fixed;
+        sourceDamageEffect.FindPropertyRelative(
+            "damageAmount").floatValue = 1f;
+        sourceDamageSerialized.ApplyModifiedPropertiesWithoutUndo();
+
+        CharacterDefinitionValidationResult sourceDamageResult =
+            CharacterDefinitionValidator.Validate(sourceDamageDefinition);
+        Assert.That(sourceDamageResult.IsValid, Is.False);
+        Assert.That(
+            HasDiagnostic(
+                sourceDamageResult,
+                "effect.ally_damage_unsupported"),
+            Is.True,
+            string.Join("\n", sourceDamageResult.Diagnostics));
+
+        CharacterSO incompatibleStatusDefinition =
+            CreateSourceRetargetCharacter(fire);
+        CharacterDefinitionValidationResult incompatibleStatusResult =
+            CharacterDefinitionValidator.Validate(
+                incompatibleStatusDefinition);
+        Assert.That(incompatibleStatusResult.IsValid, Is.False);
+        Assert.That(
+            HasDiagnostic(
+                incompatibleStatusResult,
+                "effect.status_faction_mismatch"),
+            Is.True,
+            string.Join("\n", incompatibleStatusResult.Diagnostics));
+    }
+
+    [Test]
+    public void TargetlessSourceSkill_ActivatesWithoutEnemiesOrSelection()
+    {
+        StatusEffectSO emergencyKit =
+            LoadAsset<StatusEffectSO>(EmergencyKitAssetPath);
+        CharacterSO definition =
+            CreateTargetlessSourceCharacter(emergencyKit);
+        CharacterDefinitionValidationResult validation =
+            CharacterDefinitionValidator.Validate(definition);
+        Assert.That(
+            validation.IsValid,
+            Is.True,
+            string.Join("\n", validation.Diagnostics));
+
+        CharacterRuntime character = CreateCharacter(definition);
+        string description =
+            CharacterLocalization.GetActiveSkillDescription(character.Data);
+        Assert.That(
+            description,
+            Does.Contain("행동 대상 불필요")
+                .Or.Contain("No action target required"));
+        FakeActiveSkillResource resource = new(6, 10);
+        FakeBattleBoard board = new()
+        {
+            LivingEnemyCountValue = 0,
+        };
+        character.BindBattle(resource, board);
+
+        Assert.That(character.TryActivateActiveSkill(), Is.True);
+
+        Assert.That(resource.Current, Is.EqualTo(4));
+        Assert.That(resource.TrySpendCallCount, Is.EqualTo(1));
+        Assert.That(
+            character.GetStatusStackCount(emergencyKit),
+            Is.EqualTo(1));
+        Assert.That(board.CharacterTargetSelectionCallCount, Is.Zero);
+        Assert.That(
+            board.AlliedCharacterTargetSelectionCallCount,
+            Is.Zero);
+        Assert.That(board.DamageTargetSnapshots, Is.Empty);
+    }
+
+    [Test]
+    public void TargetlessGainResourceSkill_UsesPostCostSnapshotOnce()
+    {
+        CharacterSO definition = CreateResourceGainCharacter(
+            fixedAmount: 0f,
+            sourceResourceScale: 1f,
+            targetCount: 1);
+        SetFirstSkillSubject(
+            definition,
+            CharacterAttackSubject.None);
+        CharacterDefinitionValidationResult validation =
+            CharacterDefinitionValidator.Validate(definition);
+        Assert.That(
+            validation.IsValid,
+            Is.True,
+            string.Join("\n", validation.Diagnostics));
+
+        CharacterRuntime character = CreateCharacter(definition);
+        FakeActiveSkillResource resource = new(6, 10);
+        FakeBattleBoard board = new()
+        {
+            LivingEnemyCountValue = 0,
+        };
+        character.BindBattle(resource, board);
+
+        Assert.That(character.TryActivateActiveSkill(), Is.True);
+
+        // Cost 2 is paid first, then the targetless resource effect uses the
+        // post-cost action snapshot (4) exactly once: 6 - 2 + 4 = 8.
+        Assert.That(resource.Current, Is.EqualTo(8));
+        Assert.That(resource.TrySpendCallCount, Is.EqualTo(1));
+        Assert.That(resource.TryGainCallCount, Is.EqualTo(1));
+        Assert.That(board.CharacterTargetSelectionCallCount, Is.Zero);
+        Assert.That(board.DamageTargetSnapshots, Is.Empty);
+    }
+
+    [Test]
+    public void MixedSourceAndInheritedEffects_NoTargets_DoesNotPayPartially()
+    {
+        StatusEffectSO emergencyKit =
+            LoadAsset<StatusEffectSO>(EmergencyKitAssetPath);
+        CharacterSO definition =
+            CreateSourceRetargetCharacter(emergencyKit);
+        SetFirstSkillSubject(
+            definition,
+            CharacterAttackSubject.None);
+        CharacterDefinitionValidationResult validation =
+            CharacterDefinitionValidator.Validate(definition);
+        Assert.That(
+            validation.IsValid,
+            Is.True,
+            string.Join("\n", validation.Diagnostics));
+
+        CharacterRuntime character = CreateCharacter(definition);
+        FakeActiveSkillResource resource = new(6, 10);
+        FakeBattleBoard board = new()
+        {
+            LivingEnemyCountValue = 0,
+        };
+        character.BindBattle(resource, board);
+
+        Assert.That(character.TryActivateActiveSkill(), Is.False);
+
+        Assert.That(resource.Current, Is.EqualTo(6));
+        Assert.That(resource.TrySpendCallCount, Is.Zero);
+        Assert.That(
+            character.GetStatusStackCount(emergencyKit),
+            Is.Zero);
+        Assert.That(board.CharacterTargetSelectionCallCount, Is.Zero);
+        Assert.That(board.DamageTargetSnapshots, Is.Empty);
+    }
+
+    [Test]
+    public void AllySelfSkill_ActivatesWithoutLivingEnemies()
+    {
+        StatusEffectSO emergencyKit =
+            LoadAsset<StatusEffectSO>(EmergencyKitAssetPath);
+        CharacterSO definition =
+            CreateAllySelfCharacter(emergencyKit);
+        CharacterDefinitionValidationResult validation =
+            CharacterDefinitionValidator.Validate(definition);
+        Assert.That(
+            validation.IsValid,
+            Is.True,
+            string.Join("\n", validation.Diagnostics));
+
+        CharacterRuntime character = CreateCharacter(definition);
+        FakeActiveSkillResource resource = new(6, 10);
+        FakeBattleBoard board = new()
+        {
+            LivingEnemyCountValue = 0,
+        };
+        character.BindBattle(resource, board);
+
+        Assert.That(character.TryActivateActiveSkill(), Is.True);
+
+        Assert.That(resource.Current, Is.EqualTo(4));
+        Assert.That(
+            character.GetStatusStackCount(emergencyKit),
+            Is.EqualTo(1));
+        Assert.That(board.CharacterTargetSelectionCallCount, Is.Zero);
+        Assert.That(
+            board.AlliedCharacterTargetSelectionCallCount,
+            Is.EqualTo(1));
+    }
+
+    [Test]
+    public void FreshSelectionSkill_PreparesOnceAndKeepsDistinctTargets()
+    {
+        CharacterSO definition = CreateFreshSelectionCharacter();
+        CharacterDefinitionValidationResult validation =
+            CharacterDefinitionValidator.Validate(definition);
+        Assert.That(
+            validation.IsValid,
+            Is.True,
+            string.Join("\n", validation.Diagnostics));
+
+        CharacterRuntime character = CreateCharacter(definition);
+        string description =
+            CharacterLocalization.GetActiveSkillDescription(character.Data);
+        Assert.That(
+            description,
+            Does.Contain("별도 선택")
+                .Or.Contain("Fresh selection"));
+
+        EnemyRuntime actionTarget = CreateEnemyRuntime();
+        EnemyRuntime freshTarget = CreateEnemyRuntime();
+        FakeActiveSkillResource resource = new(6, 10);
+        FakeBattleBoard board = new()
+        {
+            LivingEnemyCountValue = 2,
+        };
+        board.PlannedEnemySelections.Enqueue(
+            new[] { actionTarget });
+        board.PlannedEnemySelections.Enqueue(
+            new[] { freshTarget });
+        character.BindBattle(resource, board);
+
+        Assert.That(character.TryActivateActiveSkill(), Is.True);
+
+        Assert.That(resource.Current, Is.EqualTo(4));
+        Assert.That(resource.TrySpendCallCount, Is.EqualTo(1));
+        Assert.That(
+            board.CharacterTargetSelectionCallCount,
+            Is.EqualTo(2));
+        Assert.That(board.DamageTargetSnapshots, Has.Count.EqualTo(2));
+        Assert.That(
+            board.DamageTargetSnapshots[0],
+            Is.EqualTo(new[] { actionTarget }));
+        Assert.That(
+            board.DamageTargetSnapshots[1],
+            Is.EqualTo(new[] { freshTarget }));
+        Assert.That(board.DamageAmounts, Is.EqualTo(new[] { 2, 3 }));
+        Assert.That(
+            board.DamageShowAttackRangeSnapshots,
+            Is.EqualTo(new[] { true, true }));
+        Assert.That(character.TotalDamageDealt, Is.EqualTo(5));
+    }
+
+    [Test]
+    public void FreshSelectionSkill_ExecutesWithoutActionTarget()
+    {
+        CharacterSO definition = CreateFreshSelectionCharacter();
+        SerializedObject serialized = new(definition);
+        SerializedProperty skill = serialized
+            .FindProperty("skillDefinitions")
+            .GetArrayElementAtIndex(0);
+        skill.FindPropertyRelative("subject").enumValueIndex =
+            (int)CharacterAttackSubject.None;
+        skill.FindPropertyRelative("effects")
+            .DeleteArrayElementAtIndex(0);
+        serialized.ApplyModifiedPropertiesWithoutUndo();
+
+        CharacterDefinitionValidationResult validation =
+            CharacterDefinitionValidator.Validate(definition);
+        Assert.That(
+            validation.IsValid,
+            Is.True,
+            string.Join("\n", validation.Diagnostics));
+
+        CharacterRuntime character = CreateCharacter(definition);
+        EnemyRuntime freshTarget = CreateEnemyRuntime();
+        FakeActiveSkillResource resource = new(6, 10);
+        FakeBattleBoard board = new()
+        {
+            LivingEnemyCountValue = 1,
+        };
+        board.PlannedEnemySelections.Enqueue(
+            new[] { freshTarget });
+        character.BindBattle(resource, board);
+
+        Assert.That(character.TryActivateActiveSkill(), Is.True);
+
+        Assert.That(resource.Current, Is.EqualTo(4));
+        Assert.That(
+            board.CharacterTargetSelectionCallCount,
+            Is.EqualTo(1));
+        Assert.That(board.DamageTargetSnapshots, Has.Count.EqualTo(1));
+        Assert.That(
+            board.DamageTargetSnapshots[0],
+            Is.EqualTo(new[] { freshTarget }));
+        Assert.That(board.DamageAmounts, Is.EqualTo(new[] { 3 }));
+    }
+
+    [Test]
+    public void FreshSelectionAreaAndConditions_ArePreparedWithSelector()
+    {
+        CharacterSO definition = CreateFreshSelectionCharacter();
+        SerializedObject serialized = new(definition);
+        SerializedProperty skill = serialized
+            .FindProperty("skillDefinitions")
+            .GetArrayElementAtIndex(0);
+        skill.FindPropertyRelative("subject").enumValueIndex =
+            (int)CharacterAttackSubject.None;
+        SerializedProperty effects = skill.FindPropertyRelative("effects");
+        effects.DeleteArrayElementAtIndex(0);
+        SerializedProperty selector = effects
+            .GetArrayElementAtIndex(0)
+            .FindPropertyRelative("targetSelector");
+        SerializedProperty conditions = selector.FindPropertyRelative(
+            "numericConditions");
+        conditions.arraySize = 1;
+        SerializedProperty condition =
+            conditions.GetArrayElementAtIndex(0);
+        condition.FindPropertyRelative("type").enumValueIndex =
+            (int)CharacterConditionType.Numeric;
+        condition.FindPropertyRelative("metric").enumValueIndex =
+            (int)CharacterNumericConditionMetric.Health;
+        condition.FindPropertyRelative("comparison").enumValueIndex =
+            (int)CharacterNumericComparison.GreaterThanOrEqual;
+        condition.FindPropertyRelative("threshold").floatValue = 0f;
+        SerializedProperty offsets = selector.FindPropertyRelative(
+            "areaOffsets");
+        offsets.arraySize = 1;
+        offsets.GetArrayElementAtIndex(0)
+            .FindPropertyRelative("rowOffset").intValue = 0;
+        offsets.GetArrayElementAtIndex(0)
+            .FindPropertyRelative("columnOffset").intValue = 1;
+        serialized.ApplyModifiedPropertiesWithoutUndo();
+
+        CharacterDefinitionValidationResult validation =
+            CharacterDefinitionValidator.Validate(definition);
+        Assert.That(
+            validation.IsValid,
+            Is.True,
+            string.Join("\n", validation.Diagnostics));
+
+        EnemyRuntime center = CreateEnemyRuntime();
+        EnemyRuntime cross = CreateEnemyRuntime();
+        FakeBattleBoard board = new()
+        {
+            LivingEnemyCountValue = 2,
+            SimulateAislingAreaSequence = true,
+        };
+        board.ConfigureAislingTargets(
+            center,
+            cross,
+            CreateEnemyRuntime(),
+            CreateEnemyRuntime());
+        CharacterRuntime character = CreateCharacter(definition);
+        FakeActiveSkillResource resource = new(6, 10);
+        character.BindBattle(resource, board);
+
+        Assert.That(character.TryActivateActiveSkill(), Is.True);
+
+        Assert.That(
+            board.CharacterTargetSelectionCallCount,
+            Is.EqualTo(1));
+        Assert.That(
+            board.SelectionNumericConditionCounts,
+            Is.EqualTo(new[] { 1 }));
+        Assert.That(board.AreaExpansionCallCount, Is.EqualTo(1));
+        Assert.That(board.DamageTargetSnapshots, Has.Count.EqualTo(1));
+        Assert.That(
+            board.DamageTargetSnapshots[0],
+            Is.EqualTo(new[] { center, cross }));
+        Assert.That(
+            board.DamageShowAttackRangeSnapshots,
+            Is.EqualTo(new[] { false }));
+        Assert.That(character.TotalDamageDealt, Is.EqualTo(6));
+    }
+
+    [Test]
+    public void FreshSelectionValidator_RejectsNoneAndUsesSelectorFaction()
+    {
+        CharacterSO noneDefinition = CreateFreshSelectionCharacter();
+        SerializedObject noneSerialized = new(noneDefinition);
+        SerializedProperty noneSelector = noneSerialized
+            .FindProperty("skillDefinitions")
+            .GetArrayElementAtIndex(0)
+            .FindPropertyRelative("effects")
+            .GetArrayElementAtIndex(1)
+            .FindPropertyRelative("targetSelector");
+        noneSelector.FindPropertyRelative("subject").enumValueIndex =
+            (int)CharacterAttackSubject.None;
+        noneSerialized.ApplyModifiedPropertiesWithoutUndo();
+
+        CharacterDefinitionValidationResult noneResult =
+            CharacterDefinitionValidator.Validate(noneDefinition);
+        Assert.That(noneResult.IsValid, Is.False);
+        Assert.That(
+            HasDiagnostic(
+                noneResult,
+                "effect.fresh_subject_none"),
+            Is.True,
+            string.Join("\n", noneResult.Diagnostics));
+
+        CharacterSO allyDefinition = CreateFreshSelectionCharacter();
+        SerializedObject allySerialized = new(allyDefinition);
+        SerializedProperty allySelector = allySerialized
+            .FindProperty("skillDefinitions")
+            .GetArrayElementAtIndex(0)
+            .FindPropertyRelative("effects")
+            .GetArrayElementAtIndex(1)
+            .FindPropertyRelative("targetSelector");
+        allySelector.FindPropertyRelative("targetFaction").enumValueIndex =
+            (int)CharacterTargetFaction.Ally;
+        allySelector.FindPropertyRelative("subject").enumValueIndex =
+            (int)CharacterAttackSubject.Self;
+        allySerialized.ApplyModifiedPropertiesWithoutUndo();
+
+        CharacterDefinitionValidationResult allyResult =
+            CharacterDefinitionValidator.Validate(allyDefinition);
+        Assert.That(allyResult.IsValid, Is.False);
+        Assert.That(
+            HasDiagnostic(
+                allyResult,
+                "effect.ally_damage_unsupported"),
+            Is.True,
+            string.Join("\n", allyResult.Diagnostics));
+    }
+
+    [Test]
+    public void OptionalEffect_MissingTargetSkipsWithoutBlockingAction()
+    {
+        StatusEffectSO emergencyKit =
+            LoadAsset<StatusEffectSO>(EmergencyKitAssetPath);
+        CharacterSO definition =
+            CreateSourceRetargetCharacter(emergencyKit);
+        SetFirstSkillSubject(
+            definition,
+            CharacterAttackSubject.None);
+
+        SerializedObject serialized = new(definition);
+        SerializedProperty optionalDamage = serialized
+            .FindProperty("skillDefinitions")
+            .GetArrayElementAtIndex(0)
+            .FindPropertyRelative("effects")
+            .GetArrayElementAtIndex(1);
+        optionalDamage.FindPropertyRelative(
+            "preconditionFailurePolicy").enumValueIndex =
+            (int)CharacterEffectPreconditionFailurePolicy.SkipEffect;
+        serialized.ApplyModifiedPropertiesWithoutUndo();
+
+        CharacterDefinitionValidationResult validation =
+            CharacterDefinitionValidator.Validate(definition);
+        Assert.That(
+            validation.IsValid,
+            Is.True,
+            string.Join("\n", validation.Diagnostics));
+
+        CharacterRuntime character = CreateCharacter(definition);
+        Assert.That(
+            CharacterLocalization.GetActiveSkillDescription(character.Data),
+            Does.Contain("선택 효과")
+                .Or.Contain("Optional"));
+        FakeActiveSkillResource resource = new(6, 10);
+        FakeBattleBoard board = new()
+        {
+            LivingEnemyCountValue = 0,
+        };
+        character.BindBattle(resource, board);
+
+        Assert.That(character.TryActivateActiveSkill(), Is.True);
+
+        Assert.That(resource.Current, Is.EqualTo(4));
+        Assert.That(resource.TrySpendCallCount, Is.EqualTo(1));
+        Assert.That(
+            character.GetStatusStackCount(emergencyKit),
+            Is.EqualTo(1));
+        Assert.That(board.DamageTargetSnapshots, Is.Empty);
+    }
+
+    [Test]
+    public void StopOnEffectFailure_DoesNotExecuteRemainingEffects()
+    {
+        StatusEffectSO fire = LoadAsset<StatusEffectSO>(FireAssetPath);
+        CharacterSO definition =
+            CreateExplicitDamageAndStatusCharacter(fire);
+        SerializedObject serialized = new(definition);
+        SerializedProperty effects = serialized
+            .FindProperty("skillDefinitions")
+            .GetArrayElementAtIndex(0)
+            .FindPropertyRelative("effects");
+        effects.MoveArrayElement(1, 0);
+        effects.GetArrayElementAtIndex(0)
+            .FindPropertyRelative("failurePolicy").enumValueIndex =
+            (int)CharacterEffectFailurePolicy.StopRemainingEffects;
+        serialized.ApplyModifiedPropertiesWithoutUndo();
+
+        CharacterDefinitionValidationResult validation =
+            CharacterDefinitionValidator.Validate(definition);
+        Assert.That(
+            validation.IsValid,
+            Is.True,
+            string.Join("\n", validation.Diagnostics));
+
+        CharacterRuntime character = CreateCharacter(definition);
+        EnemyRuntime target = CreateEnemyRuntime();
+        FakeActiveSkillResource resource = new(6, 10);
+        FakeBattleBoard board = new()
+        {
+            LivingEnemyCountValue = 1,
+            SelectedEnemyTargets = new[] { target },
+            ForceStatusApplyFailure = true,
+        };
+        character.BindBattle(resource, board);
+
+        Assert.That(character.TryActivateActiveSkill(), Is.True);
+
+        Assert.That(resource.Current, Is.EqualTo(4));
+        Assert.That(resource.TrySpendCallCount, Is.EqualTo(1));
+        Assert.That(board.StatusApplyCallCount, Is.EqualTo(1));
+        Assert.That(board.DamageTargetSnapshots, Is.Empty);
+        Assert.That(character.TotalDamageDealt, Is.Zero);
+    }
+
+    [Test]
+    public void FirstSuccessful_SkipsUnaffordableCandidateBeforeTargeting()
+    {
+        CharacterSO definition = CreateFreshSelectionCharacter();
+        SerializedObject serialized = new(definition);
+        SerializedProperty skills =
+            serialized.FindProperty("skillDefinitions");
+        skills.InsertArrayElementAtIndex(0);
+        skills.GetArrayElementAtIndex(0)
+            .FindPropertyRelative("cost").intValue = 9;
+        skills.GetArrayElementAtIndex(1)
+            .FindPropertyRelative("cost").intValue = 2;
+        serialized.ApplyModifiedPropertiesWithoutUndo();
+
+        CharacterDefinitionValidationResult validation =
+            CharacterDefinitionValidator.Validate(definition);
+        Assert.That(
+            validation.IsValid,
+            Is.True,
+            string.Join("\n", validation.Diagnostics));
+
+        CharacterRuntime character = CreateCharacter(definition);
+        EnemyRuntime actionTarget = CreateEnemyRuntime();
+        EnemyRuntime freshTarget = CreateEnemyRuntime();
+        FakeActiveSkillResource resource = new(6, 10);
+        FakeBattleBoard board = new()
+        {
+            LivingEnemyCountValue = 2,
+        };
+        board.PlannedEnemySelections.Enqueue(
+            new[] { actionTarget });
+        board.PlannedEnemySelections.Enqueue(
+            new[] { freshTarget });
+        character.BindBattle(resource, board);
+
+        Assert.That(character.TryActivateActiveSkill(), Is.True);
+
+        Assert.That(resource.Current, Is.EqualTo(4));
+        Assert.That(resource.TrySpendCallCount, Is.EqualTo(1));
+        Assert.That(
+            board.CharacterTargetSelectionCallCount,
+            Is.EqualTo(2));
+        Assert.That(board.DamageTargetSnapshots, Has.Count.EqualTo(2));
+        Assert.That(character.TotalDamageDealt, Is.EqualTo(5));
+    }
+
+    [Test]
+    public void FreeSkill_CommitsWithoutCallingResourceSpend()
+    {
+        StatusEffectSO emergencyKit =
+            LoadAsset<StatusEffectSO>(EmergencyKitAssetPath);
+        CharacterSO definition =
+            CreateTargetlessSourceCharacter(emergencyKit);
+        SerializedObject serialized = new(definition);
+        SerializedProperty skill = serialized
+            .FindProperty("skillDefinitions")
+            .GetArrayElementAtIndex(0);
+        SetSections(
+            skill.FindPropertyRelative("sections"),
+            (int)CharacterSkillSectionType.Subject,
+            (int)CharacterSkillSectionType.Ability);
+        serialized.ApplyModifiedPropertiesWithoutUndo();
+
+        CharacterDefinitionValidationResult validation =
+            CharacterDefinitionValidator.Validate(definition);
+        Assert.That(
+            validation.IsValid,
+            Is.True,
+            string.Join("\n", validation.Diagnostics));
+
+        CharacterRuntime character = CreateCharacter(definition);
+        FakeActiveSkillResource resource = new(0, 10);
+        FakeBattleBoard board = new()
+        {
+            LivingEnemyCountValue = 0,
+        };
+        character.BindBattle(resource, board);
+
+        Assert.That(character.TryActivateActiveSkill(), Is.True);
+
+        Assert.That(resource.Current, Is.Zero);
+        Assert.That(resource.TrySpendCallCount, Is.Zero);
+        Assert.That(
+            character.GetStatusStackCount(emergencyKit),
+            Is.EqualTo(1));
+    }
+
+    [Test]
+    public void EffectFailurePolicies_RejectUnknownSerializedValues()
+    {
+        CharacterSO definition = CreateFreshSelectionCharacter();
+        SerializedObject serialized = new(definition);
+        SerializedProperty effect = serialized
+            .FindProperty("skillDefinitions")
+            .GetArrayElementAtIndex(0)
+            .FindPropertyRelative("effects")
+            .GetArrayElementAtIndex(0);
+        effect.FindPropertyRelative(
+            "preconditionFailurePolicy").intValue = 99;
+        effect.FindPropertyRelative("failurePolicy").intValue = 99;
+        serialized.ApplyModifiedPropertiesWithoutUndo();
+
+        CharacterDefinitionValidationResult validation =
+            CharacterDefinitionValidator.Validate(definition);
+
+        Assert.That(validation.IsValid, Is.False);
+        Assert.That(
+            HasDiagnostic(
+                validation,
+                "effect.precondition_policy_invalid"),
+            Is.True,
+            string.Join("\n", validation.Diagnostics));
+        Assert.That(
+            HasDiagnostic(
+                validation,
+                "effect.failure_policy_invalid"),
+            Is.True,
+            string.Join("\n", validation.Diagnostics));
+    }
+
+    [Test]
+    public void SpendResourceSkill_ReservesBaseAndMultipleEffects()
+    {
+        CharacterSO definition =
+            CreateResourceSpendCharacter(2f, 1f);
+        CharacterDefinitionValidationResult validation =
+            CharacterDefinitionValidator.Validate(definition);
+        Assert.That(
+            validation.IsValid,
+            Is.True,
+            string.Join("\n", validation.Diagnostics));
+
+        CharacterRuntime character = CreateCharacter(definition);
+        Assert.That(
+            CharacterLocalization.GetActiveSkillDescription(character.Data),
+            Does.Contain("자원 소비")
+                .Or.Contain("Spend Resource"));
+        FakeActiveSkillResource resource = new(6, 10);
+        FakeBattleBoard board = new()
+        {
+            LivingEnemyCountValue = 0,
+        };
+        character.BindBattle(resource, board);
+
+        Assert.That(character.TryActivateActiveSkill(), Is.True);
+
+        Assert.That(resource.Current, Is.EqualTo(1));
+        Assert.That(resource.TrySpendCallCount, Is.EqualTo(3));
+        Assert.That(board.CharacterTargetSelectionCallCount, Is.Zero);
+        Assert.That(board.DamageTargetSnapshots, Is.Empty);
+    }
+
+    [Test]
+    public void SpendResourceSkill_CombinedShortageDoesNotPayPartially()
+    {
+        CharacterSO definition =
+            CreateResourceSpendCharacter(2f, 1f);
+        CharacterRuntime character = CreateCharacter(definition);
+        FakeActiveSkillResource resource = new(4, 10);
+        FakeBattleBoard board = new()
+        {
+            LivingEnemyCountValue = 0,
+        };
+        character.BindBattle(resource, board);
+
+        Assert.That(character.TryActivateActiveSkill(), Is.False);
+
+        Assert.That(resource.Current, Is.EqualTo(4));
+        Assert.That(resource.TrySpendCallCount, Is.Zero);
+        Assert.That(board.CharacterTargetSelectionCallCount, Is.Zero);
+    }
+
+    [Test]
+    public void OptionalSpendResource_ShortageSkipsOnlyOptionalEffect()
+    {
+        CharacterSO definition =
+            CreateResourceSpendCharacter(2f, 3f);
+        SerializedObject serialized = new(definition);
+        serialized.FindProperty("skillDefinitions")
+            .GetArrayElementAtIndex(0)
+            .FindPropertyRelative("effects")
+            .GetArrayElementAtIndex(1)
+            .FindPropertyRelative(
+                "preconditionFailurePolicy").enumValueIndex =
+            (int)CharacterEffectPreconditionFailurePolicy.SkipEffect;
+        serialized.ApplyModifiedPropertiesWithoutUndo();
+
+        CharacterDefinitionValidationResult validation =
+            CharacterDefinitionValidator.Validate(definition);
+        Assert.That(
+            validation.IsValid,
+            Is.True,
+            string.Join("\n", validation.Diagnostics));
+
+        CharacterRuntime character = CreateCharacter(definition);
+        FakeActiveSkillResource resource = new(5, 10);
+        FakeBattleBoard board = new()
+        {
+            LivingEnemyCountValue = 0,
+        };
+        character.BindBattle(resource, board);
+
+        Assert.That(character.TryActivateActiveSkill(), Is.True);
+
+        Assert.That(resource.Current, Is.EqualTo(1));
+        Assert.That(resource.TrySpendCallCount, Is.EqualTo(2));
+    }
+
+    [Test]
+    public void StopBeforeSpend_DoesNotChargeUnreachedReservation()
+    {
+        StatusEffectSO fire = LoadAsset<StatusEffectSO>(FireAssetPath);
+        CharacterSO definition =
+            CreateExplicitDamageAndStatusCharacter(fire);
+        SerializedObject serialized = new(definition);
+        SerializedProperty effects = serialized
+            .FindProperty("skillDefinitions")
+            .GetArrayElementAtIndex(0)
+            .FindPropertyRelative("effects");
+        effects.MoveArrayElement(1, 0);
+        effects.GetArrayElementAtIndex(0)
+            .FindPropertyRelative("failurePolicy").enumValueIndex =
+            (int)CharacterEffectFailurePolicy.StopRemainingEffects;
+        ConfigureFixedResourceSpendEffect(
+            effects.GetArrayElementAtIndex(1),
+            2f);
+        serialized.ApplyModifiedPropertiesWithoutUndo();
+
+        CharacterDefinitionValidationResult validation =
+            CharacterDefinitionValidator.Validate(definition);
+        Assert.That(
+            validation.IsValid,
+            Is.True,
+            string.Join("\n", validation.Diagnostics));
+
+        CharacterRuntime character = CreateCharacter(definition);
+        FakeActiveSkillResource resource = new(6, 10);
+        FakeBattleBoard board = new()
+        {
+            LivingEnemyCountValue = 1,
+            SelectedEnemyTargets = new[] { CreateEnemyRuntime() },
+            ForceStatusApplyFailure = true,
+        };
+        character.BindBattle(resource, board);
+
+        Assert.That(character.TryActivateActiveSkill(), Is.True);
+
+        Assert.That(resource.Current, Is.EqualTo(4));
+        Assert.That(resource.TrySpendCallCount, Is.EqualTo(1));
+        Assert.That(board.StatusApplyCallCount, Is.EqualTo(1));
+    }
+
+    [Test]
+    public void GainInSameAction_DoesNotFundSpendReservation()
+    {
+        CharacterSO definition =
+            CreateResourceSpendCharacter(1f);
+        SerializedObject serialized = new(definition);
+        SerializedProperty effects = serialized
+            .FindProperty("skillDefinitions")
+            .GetArrayElementAtIndex(0)
+            .FindPropertyRelative("effects");
+        effects.InsertArrayElementAtIndex(0);
+        SerializedProperty gain = effects.GetArrayElementAtIndex(0);
+        gain.FindPropertyRelative("type").enumValueIndex =
+            (int)CharacterEffectType.GainResource;
+        gain.FindPropertyRelative("targetMode").enumValueIndex =
+            (int)CharacterEffectTargetMode.InheritAction;
+        gain.FindPropertyRelative("damageAmountMode").enumValueIndex =
+            (int)CharacterDamageAmountMode.Fixed;
+        gain.FindPropertyRelative("damageAmount").floatValue = 5f;
+        gain.FindPropertyRelative("sourceResourceScale").floatValue = 0f;
+        serialized.ApplyModifiedPropertiesWithoutUndo();
+
+        CharacterDefinitionValidationResult validation =
+            CharacterDefinitionValidator.Validate(definition);
+        Assert.That(
+            validation.IsValid,
+            Is.True,
+            string.Join("\n", validation.Diagnostics));
+
+        CharacterRuntime character = CreateCharacter(definition);
+        FakeActiveSkillResource resource = new(2, 10);
+        FakeBattleBoard board = new()
+        {
+            LivingEnemyCountValue = 0,
+        };
+        character.BindBattle(resource, board);
+
+        Assert.That(character.TryActivateActiveSkill(), Is.False);
+
+        Assert.That(resource.Current, Is.EqualTo(2));
+        Assert.That(resource.TrySpendCallCount, Is.Zero);
+        Assert.That(resource.TryGainCallCount, Is.Zero);
+    }
+
+    [Test]
+    public void SpendResourceValidator_RejectsScalingAndSubUnitAmount()
+    {
+        CharacterSO definition =
+            CreateResourceSpendCharacter(0.5f);
+        SerializedObject serialized = new(definition);
+        SerializedProperty spend = serialized
+            .FindProperty("skillDefinitions")
+            .GetArrayElementAtIndex(0)
+            .FindPropertyRelative("effects")
+            .GetArrayElementAtIndex(0);
+        spend.FindPropertyRelative("sourceResourceScale").floatValue = 1f;
+        serialized.ApplyModifiedPropertiesWithoutUndo();
+
+        CharacterDefinitionValidationResult validation =
+            CharacterDefinitionValidator.Validate(definition);
+
+        Assert.That(validation.IsValid, Is.False);
+        Assert.That(
+            HasDiagnostic(
+                validation,
+                "effect.resource_spend_invalid"),
+            Is.True,
+            string.Join("\n", validation.Diagnostics));
+    }
+
+    [Test]
+    public void AllyHeal_RestoresCharacterHealthAndResetsWithRuntime()
+    {
+        CharacterSO definition = CreateHealCharacter(
+            CharacterTargetFaction.Ally,
+            CharacterAttackSubject.Self,
+            3f);
+        CharacterDefinitionValidationResult validation =
+            CharacterDefinitionValidator.Validate(definition);
+        Assert.That(
+            validation.IsValid,
+            Is.True,
+            string.Join("\n", validation.Diagnostics));
+
+        CharacterRuntime character = CreateCharacter(definition);
+        Assert.That(character.MaximumHealth, Is.EqualTo(10));
+        Assert.That(character.TrySpendHealth(4), Is.True);
+        Assert.That(character.CurrentHealth, Is.EqualTo(6));
+        Assert.That(
+            CharacterLocalization.GetActiveSkillDescription(character.Data),
+            Does.Contain("체력 회복")
+                .Or.Contain("Heal"));
+        FakeActiveSkillResource resource = new(6, 10);
+        FakeBattleBoard board = new()
+        {
+            LivingEnemyCountValue = 0,
+        };
+        character.BindBattle(resource, board);
+
+        Assert.That(character.TryActivateActiveSkill(), Is.True);
+
+        Assert.That(character.CurrentHealth, Is.EqualTo(9));
+        Assert.That(resource.Current, Is.EqualTo(4));
+        character.ResetRuntime();
+        Assert.That(character.CurrentHealth, Is.EqualTo(10));
+    }
+
+    [Test]
+    public void EnemyHeal_UsesPerTargetMaximumHealthScaling()
+    {
+        CharacterSO definition = CreateHealCharacter(
+            CharacterTargetFaction.Enemy,
+            CharacterAttackSubject.Random,
+            0f);
+        SerializedObject serialized = new(definition);
+        SerializedProperty heal = serialized
+            .FindProperty("skillDefinitions")
+            .GetArrayElementAtIndex(0)
+            .FindPropertyRelative("effects")
+            .GetArrayElementAtIndex(0);
+        heal.FindPropertyRelative("targetMaxHealthScale").floatValue =
+            0.25f;
+        serialized.ApplyModifiedPropertiesWithoutUndo();
+
+        CharacterDefinitionValidationResult validation =
+            CharacterDefinitionValidator.Validate(definition);
+        Assert.That(
+            validation.IsValid,
+            Is.True,
+            string.Join("\n", validation.Diagnostics));
+
+        EnemyRuntime target = CreateEnemyRuntime(20);
+        SetEnemyHealth(target, 10);
+        CharacterRuntime character = CreateCharacter(definition);
+        FakeActiveSkillResource resource = new(6, 10);
+        FakeBattleBoard board = new()
+        {
+            LivingEnemyCountValue = 1,
+            SelectedEnemyTargets = new[] { target },
+        };
+        character.BindBattle(resource, board);
+
+        Assert.That(character.TryActivateActiveSkill(), Is.True);
+
+        Assert.That(target.Health, Is.EqualTo(15));
+        Assert.That(resource.Current, Is.EqualTo(4));
+    }
+
+    [Test]
+    public void SpendHealthSkill_ReservesMultipleCostsAndLeavesOneHealth()
+    {
+        CharacterSO definition =
+            CreateHealthSpendCharacter(3f, 6f);
+        CharacterRuntime character = CreateCharacter(definition);
+        FakeActiveSkillResource resource = new(6, 10);
+        FakeBattleBoard board = new()
+        {
+            LivingEnemyCountValue = 0,
+        };
+        character.BindBattle(resource, board);
+
+        Assert.That(character.TryActivateActiveSkill(), Is.True);
+
+        Assert.That(character.CurrentHealth, Is.EqualTo(1));
+        Assert.That(resource.Current, Is.EqualTo(4));
+        Assert.That(resource.TrySpendCallCount, Is.EqualTo(1));
+    }
+
+    [Test]
+    public void SpendHealthSkill_LethalCombinedCostDoesNotPayResource()
+    {
+        CharacterSO definition =
+            CreateHealthSpendCharacter(3f, 7f);
+        CharacterRuntime character = CreateCharacter(definition);
+        FakeActiveSkillResource resource = new(6, 10);
+        FakeBattleBoard board = new()
+        {
+            LivingEnemyCountValue = 0,
+        };
+        character.BindBattle(resource, board);
+
+        Assert.That(character.TryActivateActiveSkill(), Is.False);
+
+        Assert.That(character.CurrentHealth, Is.EqualTo(10));
+        Assert.That(resource.Current, Is.EqualTo(6));
+        Assert.That(resource.TrySpendCallCount, Is.Zero);
+    }
+
+    [Test]
+    public void OptionalSpendHealth_LethalCostSkipsOnlyOptionalEffect()
+    {
+        CharacterSO definition =
+            CreateHealthSpendCharacter(6f, 4f);
+        SerializedObject serialized = new(definition);
+        serialized.FindProperty("skillDefinitions")
+            .GetArrayElementAtIndex(0)
+            .FindPropertyRelative("effects")
+            .GetArrayElementAtIndex(1)
+            .FindPropertyRelative(
+                "preconditionFailurePolicy").enumValueIndex =
+            (int)CharacterEffectPreconditionFailurePolicy.SkipEffect;
+        serialized.ApplyModifiedPropertiesWithoutUndo();
+
+        CharacterRuntime character = CreateCharacter(definition);
+        FakeActiveSkillResource resource = new(6, 10);
+        FakeBattleBoard board = new()
+        {
+            LivingEnemyCountValue = 0,
+        };
+        character.BindBattle(resource, board);
+
+        Assert.That(character.TryActivateActiveSkill(), Is.True);
+
+        Assert.That(character.CurrentHealth, Is.EqualTo(4));
+        Assert.That(resource.Current, Is.EqualTo(4));
+    }
+
+    [Test]
+    public void StopBeforeSpendHealth_DoesNotChargeUnreachedCost()
+    {
+        StatusEffectSO fire = LoadAsset<StatusEffectSO>(FireAssetPath);
+        CharacterSO definition =
+            CreateExplicitDamageAndStatusCharacter(fire);
+        SerializedObject serialized = new(definition);
+        serialized.FindProperty("maximumHealth").intValue = 10;
+        SerializedProperty effects = serialized
+            .FindProperty("skillDefinitions")
+            .GetArrayElementAtIndex(0)
+            .FindPropertyRelative("effects");
+        effects.MoveArrayElement(1, 0);
+        effects.GetArrayElementAtIndex(0)
+            .FindPropertyRelative("failurePolicy").enumValueIndex =
+            (int)CharacterEffectFailurePolicy.StopRemainingEffects;
+        ConfigureFixedHealthSpendEffect(
+            effects.GetArrayElementAtIndex(1),
+            3f);
+        serialized.ApplyModifiedPropertiesWithoutUndo();
+
+        CharacterDefinitionValidationResult validation =
+            CharacterDefinitionValidator.Validate(definition);
+        Assert.That(
+            validation.IsValid,
+            Is.True,
+            string.Join("\n", validation.Diagnostics));
+
+        CharacterRuntime character = CreateCharacter(definition);
+        FakeActiveSkillResource resource = new(6, 10);
+        FakeBattleBoard board = new()
+        {
+            LivingEnemyCountValue = 1,
+            SelectedEnemyTargets = new[] { CreateEnemyRuntime() },
+            ForceStatusApplyFailure = true,
+        };
+        character.BindBattle(resource, board);
+
+        Assert.That(character.TryActivateActiveSkill(), Is.True);
+
+        Assert.That(character.CurrentHealth, Is.EqualTo(10));
+        Assert.That(resource.Current, Is.EqualTo(4));
+        Assert.That(board.StatusApplyCallCount, Is.EqualTo(1));
+    }
+
+    [Test]
+    public void HealInSameAction_DoesNotFundHealthSpendReservation()
+    {
+        CharacterSO definition =
+            CreateHealthSpendCharacter(2f);
+        SerializedObject serialized = new(definition);
+        SerializedProperty effects = serialized
+            .FindProperty("skillDefinitions")
+            .GetArrayElementAtIndex(0)
+            .FindPropertyRelative("effects");
+        effects.InsertArrayElementAtIndex(0);
+        ConfigureHealEffect(
+            effects.GetArrayElementAtIndex(0),
+            CharacterEffectTargetMode.Source,
+            5f);
+        serialized.ApplyModifiedPropertiesWithoutUndo();
+
+        CharacterRuntime character = CreateCharacter(definition);
+        Assert.That(character.TrySpendHealth(8), Is.True);
+        Assert.That(character.CurrentHealth, Is.EqualTo(2));
+        FakeActiveSkillResource resource = new(6, 10);
+        FakeBattleBoard board = new()
+        {
+            LivingEnemyCountValue = 0,
+        };
+        character.BindBattle(resource, board);
+
+        Assert.That(character.TryActivateActiveSkill(), Is.False);
+
+        Assert.That(character.CurrentHealth, Is.EqualTo(2));
+        Assert.That(resource.Current, Is.EqualTo(6));
+    }
+
+    [Test]
+    public void SpendHealthValidator_RejectsScalingAndSubUnitAmount()
+    {
+        CharacterSO definition =
+            CreateHealthSpendCharacter(0.5f);
+        SerializedObject serialized = new(definition);
+        SerializedProperty spend = serialized
+            .FindProperty("skillDefinitions")
+            .GetArrayElementAtIndex(0)
+            .FindPropertyRelative("effects")
+            .GetArrayElementAtIndex(0);
+        spend.FindPropertyRelative("targetMaxHealthScale").floatValue =
+            1f;
+        serialized.ApplyModifiedPropertiesWithoutUndo();
+
+        CharacterDefinitionValidationResult validation =
+            CharacterDefinitionValidator.Validate(definition);
+
+        Assert.That(validation.IsValid, Is.False);
+        Assert.That(
+            HasDiagnostic(
+                validation,
+                "effect.health_spend_invalid"),
+            Is.True,
+            string.Join("\n", validation.Diagnostics));
+    }
+
+    [Test]
+    public void AllyShield_StacksSurvivesHealthSpendAndResetsWithRuntime()
+    {
+        CharacterSO definition = CreateShieldCharacter(
+            CharacterTargetFaction.Ally,
+            CharacterAttackSubject.Self,
+            3f,
+            4f);
+        CharacterDefinitionValidationResult validation =
+            CharacterDefinitionValidator.Validate(definition);
+        Assert.That(
+            validation.IsValid,
+            Is.True,
+            string.Join("\n", validation.Diagnostics));
+
+        CharacterRuntime character = CreateCharacter(definition);
+        FakeActiveSkillResource resource = new(6, 10);
+        FakeBattleBoard board = new()
+        {
+            LivingEnemyCountValue = 0,
+        };
+        character.BindBattle(resource, board);
+
+        Assert.That(character.TryActivateActiveSkill(), Is.True);
+
+        Assert.That(character.CurrentShield, Is.EqualTo(7));
+        Assert.That(character.TrySpendHealth(3), Is.True);
+        Assert.That(character.CurrentShield, Is.EqualTo(7));
+        Assert.That(
+            CharacterLocalization.GetActiveSkillDescription(character.Data),
+            Does.Contain("보호막").Or.Contain("Shield"));
+        character.ResetRuntime();
+        Assert.That(character.CurrentShield, Is.Zero);
+    }
+
+    [Test]
+    public void EnemyShield_UsesPerTargetMaximumHealthScaling()
+    {
+        CharacterSO definition = CreateShieldCharacter(
+            CharacterTargetFaction.Enemy,
+            CharacterAttackSubject.Random,
+            0f);
+        SerializedObject serialized = new(definition);
+        serialized.FindProperty("skillDefinitions")
+            .GetArrayElementAtIndex(0)
+            .FindPropertyRelative("effects")
+            .GetArrayElementAtIndex(0)
+            .FindPropertyRelative("targetMaxHealthScale").floatValue =
+            0.25f;
+        serialized.ApplyModifiedPropertiesWithoutUndo();
+
+        EnemyRuntime target = CreateEnemyRuntime(20);
+        CharacterRuntime character = CreateCharacter(definition);
+        FakeActiveSkillResource resource = new(6, 10);
+        FakeBattleBoard board = new()
+        {
+            LivingEnemyCountValue = 1,
+            SelectedEnemyTargets = new[] { target },
+        };
+        character.BindBattle(resource, board);
+
+        Assert.That(character.TryActivateActiveSkill(), Is.True);
+
+        Assert.That(target.CurrentShield, Is.EqualTo(5));
+        Assert.That(resource.Current, Is.EqualTo(4));
+    }
+
+    [Test]
+    public void EnemyShield_AbsorbsPhysicalDamageBeforeArmorAndHealth()
+    {
+        EnemyRuntime target = CreateEnemyRuntime(
+            maximumHealth: 20,
+            initialArmorMultiplier: 0.5f);
+        Assert.That(target.GainShield(4), Is.EqualTo(4));
+
+        int applied = TakeEnemyDamage(
+            target,
+            7,
+            CharacterAttackDamageType.Physical);
+
+        Assert.That(applied, Is.EqualTo(7));
+        Assert.That(target.CurrentShield, Is.Zero);
+        Assert.That(target.Armor, Is.EqualTo(7));
+        Assert.That(target.Health, Is.EqualTo(20));
+    }
+
+    [Test]
+    public void AllyShield_AbsorbsDamageBeforeHealth()
+    {
+        CharacterSO definition = CreateShieldCharacter(
+            CharacterTargetFaction.Ally,
+            CharacterAttackSubject.Self,
+            1f);
+        CharacterRuntime character = CreateCharacter(definition);
+        Assert.That(character.GainShield(4), Is.EqualTo(4));
+
+        int applied = character.TakeDamage(6);
+
+        Assert.That(applied, Is.EqualTo(6));
+        Assert.That(character.CurrentShield, Is.Zero);
+        Assert.That(character.CurrentHealth, Is.EqualTo(8));
+    }
+
+    [Test]
+    public void EnemyShield_AbsorbsFixedDamageBeforeHealth()
+    {
+        EnemyRuntime target = CreateEnemyRuntime(20);
+        Assert.That(target.GainShield(4), Is.EqualTo(4));
+
+        int applied = TakeEnemyDamage(
+            target,
+            6,
+            CharacterAttackDamageType.Fixed);
+
+        Assert.That(applied, Is.EqualTo(6));
+        Assert.That(target.CurrentShield, Is.Zero);
+        Assert.That(target.Health, Is.EqualTo(18));
+    }
+
+    [Test]
+    public void ShieldThenDamage_InSameActionUsesEffectOrder()
+    {
+        CharacterSO definition = CreateShieldCharacter(
+            CharacterTargetFaction.Enemy,
+            CharacterAttackSubject.Random,
+            5f);
+        SerializedObject serialized = new(definition);
+        SerializedProperty effects = serialized
+            .FindProperty("skillDefinitions")
+            .GetArrayElementAtIndex(0)
+            .FindPropertyRelative("effects");
+        effects.InsertArrayElementAtIndex(1);
+        SerializedProperty damage = effects.GetArrayElementAtIndex(1);
+        damage.FindPropertyRelative("type").enumValueIndex =
+            (int)CharacterEffectType.Damage;
+        damage.FindPropertyRelative("damageType").enumValueIndex =
+            (int)CharacterAttackDamageType.Fixed;
+        damage.FindPropertyRelative("damageAmountMode").enumValueIndex =
+            (int)CharacterDamageAmountMode.Fixed;
+        damage.FindPropertyRelative("damageAmount").floatValue = 7f;
+        serialized.ApplyModifiedPropertiesWithoutUndo();
+
+        EnemyRuntime target = CreateEnemyRuntime(20);
+        CharacterRuntime character = CreateCharacter(definition);
+        FakeActiveSkillResource resource = new(6, 10);
+        FakeBattleBoard board = new()
+        {
+            LivingEnemyCountValue = 1,
+            SelectedEnemyTargets = new[] { target },
+            ApplyEffectsToEnemyRuntime = true,
+        };
+        character.BindBattle(resource, board);
+
+        Assert.That(character.TryActivateActiveSkill(), Is.True);
+
+        Assert.That(target.CurrentShield, Is.Zero);
+        Assert.That(target.Health, Is.EqualTo(18));
+        Assert.That(character.TotalDamageDealt, Is.EqualTo(7));
+    }
+
+    [Test]
+    public void ShieldValidator_RejectsEmptyFormula()
+    {
+        CharacterSO definition = CreateShieldCharacter(
+            CharacterTargetFaction.Ally,
+            CharacterAttackSubject.Self,
+            0f);
+
+        CharacterDefinitionValidationResult validation =
+            CharacterDefinitionValidator.Validate(definition);
+
+        Assert.That(validation.IsValid, Is.False);
+        Assert.That(
+            HasDiagnostic(validation, "effect.shield_invalid"),
+            Is.True,
+            string.Join("\n", validation.Diagnostics));
+    }
+
+    [Test]
+    public void ShieldMetrics_AreValidForEnemyAndAllyTargets()
+    {
+        CharacterSO definition = CreateShieldCharacter(
+            CharacterTargetFaction.Enemy,
+            CharacterAttackSubject.HighestValue,
+            2f);
+        SerializedObject serialized = new(definition);
+        SerializedProperty skill = serialized
+            .FindProperty("skillDefinitions")
+            .GetArrayElementAtIndex(0);
+        SetSections(
+            skill.FindPropertyRelative("sections"),
+            (int)CharacterSkillSectionType.Cost,
+            (int)CharacterSkillSectionType.Subject,
+            (int)CharacterSkillSectionType.Condition,
+            (int)CharacterSkillSectionType.Ability);
+        skill.FindPropertyRelative("subjectMetric").enumValueIndex =
+            (int)CharacterAttackSubjectMetric.Shield;
+        SerializedProperty conditions =
+            skill.FindPropertyRelative("numericConditions");
+        conditions.arraySize = 1;
+        SerializedProperty condition =
+            conditions.GetArrayElementAtIndex(0);
+        condition.FindPropertyRelative("type").enumValueIndex =
+            (int)CharacterConditionType.Numeric;
+        condition.FindPropertyRelative("metric").enumValueIndex =
+            (int)CharacterNumericConditionMetric.Shield;
+        serialized.ApplyModifiedPropertiesWithoutUndo();
+
+        CharacterDefinitionValidationResult enemyValidation =
+            CharacterDefinitionValidator.Validate(definition);
+        Assert.That(
+            enemyValidation.IsValid,
+            Is.True,
+            string.Join("\n", enemyValidation.Diagnostics));
+
+        skill.FindPropertyRelative("targetFaction").enumValueIndex =
+            (int)CharacterTargetFaction.Ally;
+        serialized.ApplyModifiedPropertiesWithoutUndo();
+        CharacterDefinitionValidationResult allyValidation =
+            CharacterDefinitionValidator.Validate(definition);
+        Assert.That(
+            allyValidation.IsValid,
+            Is.True,
+            string.Join("\n", allyValidation.Diagnostics));
+    }
+
+    [Test]
+    public void CumulativeUpgrade_AppliesCompoundModifiersFromSavedLevel()
+    {
+        CharacterSO definition = CreateCumulativeUpgradeCharacter();
+        ConfigureCumulativeUpgradeDefinition(
+            definition,
+            0,
+            "veteran",
+            5,
+            (CharacterCumulativeUpgradeModifierType.AttackPower, 1.5f),
+            (CharacterCumulativeUpgradeModifierType.MaximumHealth, 2f),
+            (CharacterCumulativeUpgradeModifierType.AttackCooldown, -0.1f),
+            (CharacterCumulativeUpgradeModifierType.PassiveDamage, 0.5f),
+            (CharacterCumulativeUpgradeModifierType.AttackDamage, 1f),
+            (CharacterCumulativeUpgradeModifierType.SkillDamage, 2f),
+            (CharacterCumulativeUpgradeModifierType.SkillCostReduction, 1f));
+        CharacterProgressData progress = new(
+            definition.CharacterId,
+            true);
+        progress.SetCumulativeUpgradeLevel("veteran", 2);
+
+        CharacterData data = definition.CreateData(progress);
+
+        Assert.That(data.GetCumulativeUpgradeLevel("veteran"), Is.EqualTo(2));
+        Assert.That(data.AttackPower, Is.EqualTo(13f).Within(0.001f));
+        Assert.That(data.MaximumHealth, Is.EqualTo(14));
+        Assert.That(data.AttackCooldown, Is.EqualTo(0.8f).Within(0.001f));
+        Assert.That(
+            data.PassiveDamageAmountBonus,
+            Is.EqualTo(1f).Within(0.001f));
+        Assert.That(
+            data.AttackDamageFlatBonus,
+            Is.EqualTo(2f).Within(0.001f));
+        Assert.That(
+            data.SkillDamageFlatBonus,
+            Is.EqualTo(4f).Within(0.001f));
+        Assert.That(data.ActiveSkillCost, Is.EqualTo(1));
+        Assert.That(
+            CharacterLocalization.GetCumulativeUpgradeDescription(data),
+            Does.Contain("veteran").And.Contain("Lv.2/5"));
+    }
+
+    [Test]
+    public void CumulativeUpgrade_SetAndAddClampAndRecalculate()
+    {
+        CharacterSO definition = CreateCumulativeUpgradeCharacter();
+        ConfigureCumulativeUpgradeDefinition(
+            definition,
+            0,
+            "power",
+            3,
+            (CharacterCumulativeUpgradeModifierType.AttackPower, 2f));
+        CharacterData data = definition.CreateData(
+            new CharacterProgressData(definition.CharacterId, true));
+        int statsChangedCount = 0;
+        data.StatsChanged += () => statsChangedCount++;
+
+        Assert.That(
+            data.AddCumulativeUpgradeLevel("power", 5),
+            Is.EqualTo(3));
+        Assert.That(data.AttackPower, Is.EqualTo(16f).Within(0.001f));
+
+        Assert.That(
+            data.AddCumulativeUpgradeLevel("power", -2),
+            Is.EqualTo(1));
+        Assert.That(data.AttackPower, Is.EqualTo(12f).Within(0.001f));
+
+        data.SetCumulativeUpgradeLevel("power", 99);
+        Assert.That(data.GetCumulativeUpgradeLevel("power"), Is.EqualTo(3));
+        Assert.That(data.AttackPower, Is.EqualTo(16f).Within(0.001f));
+        Assert.That(statsChangedCount, Is.EqualTo(3));
+    }
+
+    [Test]
+    public void CumulativeUpgrade_UnlimitedDefinitionAcceptsHighLevel()
+    {
+        CharacterSO definition = CreateCumulativeUpgradeCharacter();
+        ConfigureCumulativeUpgradeDefinition(
+            definition,
+            0,
+            "unlimited",
+            0,
+            (CharacterCumulativeUpgradeModifierType.MaximumHealth, 1f));
+        CharacterData data = definition.CreateData(
+            new CharacterProgressData(definition.CharacterId, true));
+
+        data.SetCumulativeUpgradeLevel("unlimited", 50);
+
+        Assert.That(
+            data.GetCumulativeUpgradeLevel("unlimited"),
+            Is.EqualTo(50));
+        Assert.That(data.MaximumHealth, Is.EqualTo(60));
+    }
+
+    [Test]
+    public void CumulativeUpgrade_UnknownProgressIsPreservedButNotApplied()
+    {
+        CharacterSO definition = CreateCumulativeUpgradeCharacter();
+        ConfigureCumulativeUpgradeDefinition(
+            definition,
+            0,
+            "known",
+            3,
+            (CharacterCumulativeUpgradeModifierType.AttackPower, 2f));
+        CharacterProgressData progress = new(
+            definition.CharacterId,
+            true);
+        progress.SetCumulativeUpgradeLevel("legacy_unknown", 4);
+
+        CharacterData data = definition.CreateData(progress);
+
+        Assert.That(
+            data.GetCumulativeUpgradeLevel("legacy_unknown"),
+            Is.EqualTo(4));
+        Assert.That(data.CumulativeUpgrades, Has.Count.EqualTo(1));
+        Assert.That(data.AttackPower, Is.EqualTo(10f).Within(0.001f));
+    }
+
+    [Test]
+    public void CumulativeUpgrade_DuplicateIdIsRejectedAndAppliedOnce()
+    {
+        CharacterSO definition = CreateCumulativeUpgradeCharacter();
+        ConfigureCumulativeUpgradeDefinition(
+            definition,
+            0,
+            "duplicate",
+            3,
+            (CharacterCumulativeUpgradeModifierType.AttackPower, 1f));
+        ConfigureCumulativeUpgradeDefinition(
+            definition,
+            1,
+            "duplicate",
+            3,
+            (CharacterCumulativeUpgradeModifierType.AttackPower, 100f));
+        CharacterProgressData progress = new(
+            definition.CharacterId,
+            true);
+        progress.SetCumulativeUpgradeLevel("duplicate", 1);
+
+        CharacterData data = definition.CreateData(progress);
+        CharacterDefinitionValidationResult validation =
+            CharacterDefinitionValidator.Validate(definition);
+
+        Assert.That(data.AttackPower, Is.EqualTo(11f).Within(0.001f));
+        Assert.That(validation.IsValid, Is.False);
+        Assert.That(
+            HasDiagnostic(validation, "cumulative.id_duplicate"),
+            Is.True,
+            string.Join("\n", validation.Diagnostics));
+    }
+
+    [Test]
+    public void CumulativeUpgradeValidator_RejectsInvalidDefinitions()
+    {
+        CharacterSO definition = CreateCumulativeUpgradeCharacter();
+        ConfigureCumulativeUpgradeDefinition(
+            definition,
+            0,
+            string.Empty,
+            1,
+            (CharacterCumulativeUpgradeModifierType.MaximumHealth, 0.5f),
+            (CharacterCumulativeUpgradeModifierType.AttackPower, 0f));
+        ConfigureCumulativeUpgradeDefinition(
+            definition,
+            1,
+            "empty_modifiers",
+            1);
+
+        CharacterDefinitionValidationResult validation =
+            CharacterDefinitionValidator.Validate(definition);
+
+        Assert.That(validation.IsValid, Is.False);
+        Assert.That(
+            HasDiagnostic(validation, "cumulative.id_required"),
+            Is.True);
+        Assert.That(
+            HasDiagnostic(
+                validation,
+                "cumulative.modifier_integer_required"),
+            Is.True);
+        Assert.That(
+            HasDiagnostic(
+                validation,
+                "cumulative.modifier_value_invalid"),
+            Is.True);
+        Assert.That(
+            HasDiagnostic(validation, "cumulative.modifier_required"),
+            Is.True,
+            string.Join("\n", validation.Diagnostics));
+    }
+
+    [Test]
+    public void CumulativeUpgrade_ExtremeReductionUsesRuntimeFloors()
+    {
+        CharacterSO definition = CreateCumulativeUpgradeCharacter();
+        ConfigureCumulativeUpgradeDefinition(
+            definition,
+            0,
+            "floor",
+            1,
+            (CharacterCumulativeUpgradeModifierType.MaximumHealth, -100f),
+            (CharacterCumulativeUpgradeModifierType.AttackCooldown, -10f),
+            (CharacterCumulativeUpgradeModifierType
+                .SkillCostReduction, -5f));
+        CharacterProgressData progress = new(
+            definition.CharacterId,
+            true);
+        progress.SetCumulativeUpgradeLevel("floor", 1);
+
+        CharacterData data = definition.CreateData(progress);
+
+        Assert.That(data.MaximumHealth, Is.EqualTo(1));
+        Assert.That(
+            data.AttackCooldown,
+            Is.EqualTo(TimePrecision.Step).Within(0.001f));
+        Assert.That(data.ActiveSkillCost, Is.EqualTo(2));
+    }
+
+    [Test]
+    public void CollectionUpgrade_RefreshesAllIndependentRuntimeData()
+    {
+        CharacterSO definition = CreateCumulativeUpgradeCharacter();
+        ConfigureCumulativeUpgradeDefinition(
+            definition,
+            0,
+            "shared",
+            5,
+            (CharacterCumulativeUpgradeModifierType.AttackPower, 2f));
+        CharacterCollectionData collection = new();
+        CharacterData first = collection.CreateRuntimeData(definition);
+        CharacterData second = collection.CreateRuntimeData(definition);
+        int firstChanged = 0;
+        int secondChanged = 0;
+        int collectionChanged = 0;
+        first.StatsChanged += () => firstChanged++;
+        second.StatsChanged += () => secondChanged++;
+        collection.CharacterProgressChanged += changed =>
+        {
+            if (ReferenceEquals(changed, definition))
+                collectionChanged++;
+        };
+
+        CharacterCumulativeUpgradeChangeResult result =
+            collection.TryAddCumulativeUpgradeLevel(
+                definition,
+                "shared",
+                2,
+                out int newLevel,
+                save: false);
+
+        Assert.That(first, Is.Not.SameAs(second));
+        Assert.That(
+            result,
+            Is.EqualTo(CharacterCumulativeUpgradeChangeResult.Success));
+        Assert.That(newLevel, Is.EqualTo(2));
+        Assert.That(first.AttackPower, Is.EqualTo(14f).Within(0.001f));
+        Assert.That(second.AttackPower, Is.EqualTo(14f).Within(0.001f));
+        Assert.That(firstChanged, Is.EqualTo(1));
+        Assert.That(secondChanged, Is.EqualTo(1));
+        Assert.That(collectionChanged, Is.EqualTo(1));
+    }
+
+    [Test]
+    public void CollectionUpgrade_RejectsUnownedCharacter()
+    {
+        CharacterSO definition = CreateCumulativeUpgradeCharacter();
+        SetCharacterInitiallyOwned(definition, false);
+        ConfigureCumulativeUpgradeDefinition(
+            definition,
+            0,
+            "locked",
+            2,
+            (CharacterCumulativeUpgradeModifierType.AttackPower, 1f));
+        CharacterCollectionData collection = new();
+
+        CharacterCumulativeUpgradeChangeResult result =
+            collection.TryAddCumulativeUpgradeLevel(
+                definition,
+                "locked",
+                1,
+                out int newLevel,
+                save: false);
+
+        Assert.That(
+            result,
+            Is.EqualTo(
+                CharacterCumulativeUpgradeChangeResult.CharacterNotOwned));
+        Assert.That(newLevel, Is.Zero);
+        Assert.That(
+            collection.GetOrCreate(definition).GetCumulativeUpgradeLevel(
+                "locked"),
+            Is.Zero);
+    }
+
+    [Test]
+    public void CollectionOwnershipChange_EnablesUpgrade()
+    {
+        CharacterSO definition = CreateCumulativeUpgradeCharacter();
+        SetCharacterInitiallyOwned(definition, false);
+        ConfigureCumulativeUpgradeDefinition(
+            definition,
+            0,
+            "unlock_then_upgrade",
+            2,
+            (CharacterCumulativeUpgradeModifierType.MaximumHealth, 3f));
+        CharacterCollectionData collection = new();
+        CharacterData data = collection.CreateRuntimeData(definition);
+        int progressChanged = 0;
+        collection.CharacterProgressChanged += _ => progressChanged++;
+
+        Assert.That(data.IsOwned, Is.False);
+        Assert.That(
+            collection.TrySetOwned(
+                definition,
+                true,
+                save: false),
+            Is.True);
+        CharacterCumulativeUpgradeChangeResult result =
+            collection.TryAddCumulativeUpgradeLevel(
+                definition,
+                "unlock_then_upgrade",
+                1,
+                out int newLevel,
+                save: false);
+
+        Assert.That(data.IsOwned, Is.True);
+        Assert.That(
+            result,
+            Is.EqualTo(CharacterCumulativeUpgradeChangeResult.Success));
+        Assert.That(newLevel, Is.EqualTo(1));
+        Assert.That(data.MaximumHealth, Is.EqualTo(13));
+        Assert.That(progressChanged, Is.EqualTo(2));
+    }
+
+    [Test]
+    public void CollectionUpgrade_RejectsInvalidAmountAndUnknownId()
+    {
+        CharacterSO definition = CreateCumulativeUpgradeCharacter();
+        ConfigureCumulativeUpgradeDefinition(
+            definition,
+            0,
+            "known",
+            2,
+            (CharacterCumulativeUpgradeModifierType.AttackPower, 1f));
+        CharacterCollectionData collection = new();
+
+        CharacterCumulativeUpgradeChangeResult invalidAmount =
+            collection.TryAddCumulativeUpgradeLevel(
+                definition,
+                "known",
+                0,
+                out int invalidLevel,
+                save: false);
+        CharacterCumulativeUpgradeChangeResult unknownId =
+            collection.TryAddCumulativeUpgradeLevel(
+                definition,
+                "missing",
+                1,
+                out int unknownLevel,
+                save: false);
+
+        Assert.That(
+            invalidAmount,
+            Is.EqualTo(
+                CharacterCumulativeUpgradeChangeResult.InvalidAmount));
+        Assert.That(
+            unknownId,
+            Is.EqualTo(
+                CharacterCumulativeUpgradeChangeResult.UpgradeNotFound));
+        Assert.That(invalidLevel, Is.Zero);
+        Assert.That(unknownLevel, Is.Zero);
+    }
+
+    [Test]
+    public void CollectionUpgrade_ClampsFirstIncreaseThenReportsMaximum()
+    {
+        CharacterSO definition = CreateCumulativeUpgradeCharacter();
+        ConfigureCumulativeUpgradeDefinition(
+            definition,
+            0,
+            "limited",
+            2,
+            (CharacterCumulativeUpgradeModifierType.AttackPower, 1f));
+        CharacterCollectionData collection = new();
+
+        CharacterCumulativeUpgradeChangeResult first =
+            collection.TryAddCumulativeUpgradeLevel(
+                definition,
+                "limited",
+                5,
+                out int firstLevel,
+                save: false);
+        CharacterCumulativeUpgradeChangeResult second =
+            collection.TryAddCumulativeUpgradeLevel(
+                definition,
+                "limited",
+                1,
+                out int secondLevel,
+                save: false);
+
+        Assert.That(
+            first,
+            Is.EqualTo(CharacterCumulativeUpgradeChangeResult.Success));
+        Assert.That(firstLevel, Is.EqualTo(2));
+        Assert.That(
+            second,
+            Is.EqualTo(
+                CharacterCumulativeUpgradeChangeResult.MaxLevelReached));
+        Assert.That(secondLevel, Is.EqualTo(2));
+    }
+
+    [Test]
+    public void CollectionImport_RebindsAllExistingRuntimeData()
+    {
+        CharacterSO definition = CreateCumulativeUpgradeCharacter();
+        ConfigureCumulativeUpgradeDefinition(
+            definition,
+            0,
+            "shared",
+            5,
+            (CharacterCumulativeUpgradeModifierType.AttackPower, 2f));
+        CharacterCollectionData collection = new();
+        CharacterData first = collection.CreateRuntimeData(definition);
+        CharacterData second = collection.CreateRuntimeData(definition);
+        CharacterProgressData previousProgress = first.Progress;
+        int firstChanged = 0;
+        int secondChanged = 0;
+        int collectionChanged = 0;
+        first.StatsChanged += () => firstChanged++;
+        second.StatsChanged += () => secondChanged++;
+        collection.CharacterProgressChanged += changed =>
+        {
+            if (ReferenceEquals(changed, definition))
+                collectionChanged++;
+        };
+
+        CharacterCollectionData source = new();
+        Assert.That(
+            source.TryAddCumulativeUpgradeLevel(
+                definition,
+                "shared",
+                2,
+                out _,
+                save: false),
+            Is.EqualTo(CharacterCumulativeUpgradeChangeResult.Success));
+
+        Assert.That(
+            collection.TryImportJson(source.ExportJson()),
+            Is.True);
+        Assert.That(first.Progress, Is.Not.SameAs(previousProgress));
+        Assert.That(second.Progress, Is.SameAs(first.Progress));
+        Assert.That(first.AttackPower, Is.EqualTo(14f).Within(0.001f));
+        Assert.That(second.AttackPower, Is.EqualTo(14f).Within(0.001f));
+        Assert.That(firstChanged, Is.EqualTo(1));
+        Assert.That(secondChanged, Is.EqualTo(1));
+        Assert.That(collectionChanged, Is.EqualTo(1));
+    }
+
+    [Test]
+    public void CollectionImport_NormalizesDuplicateSaveRecords()
+    {
+        CharacterSO definition = CreateCumulativeUpgradeCharacter();
+        ConfigureCumulativeUpgradeDefinition(
+            definition,
+            0,
+            "shared",
+            5,
+            (CharacterCumulativeUpgradeModifierType.AttackPower, 2f));
+        ConfigureCumulativeUpgradeDefinition(
+            definition,
+            1,
+            "vitality",
+            5,
+            (CharacterCumulativeUpgradeModifierType.MaximumHealth, 1f));
+        SetCharacterInitiallyOwned(definition, false);
+        CharacterCollectionData collection = new();
+        CharacterData data = collection.CreateRuntimeData(definition);
+        string characterId = definition.CharacterId;
+        string json =
+            "{\"characters\":[" +
+            "{\"characterId\":\" " + characterId +
+            " \",\"isOwned\":false,\"cumulativeUpgrades\":[" +
+            "{\"upgradeId\":\" shared \",\"level\":1}," +
+            "{\"upgradeId\":\"shared\",\"level\":3}," +
+            "{\"upgradeId\":\" \",\"level\":99}]}," +
+            "{\"characterId\":\"" + characterId +
+            "\",\"isOwned\":true,\"cumulativeUpgrades\":[" +
+            "{\"upgradeId\":\"shared\",\"level\":2}," +
+            "{\"upgradeId\":\"vitality\",\"level\":4}]}," +
+            "{\"characterId\":\" \",\"isOwned\":true}]}";
+
+        Assert.That(collection.TryImportJson(json), Is.True);
+
+        Assert.That(collection.Characters, Has.Count.EqualTo(1));
+        Assert.That(
+            collection.Characters[0].CumulativeUpgrades,
+            Has.Count.EqualTo(2));
+        Assert.That(data.IsOwned, Is.True);
+        Assert.That(data.GetCumulativeUpgradeLevel("shared"), Is.EqualTo(3));
+        Assert.That(data.GetCumulativeUpgradeLevel("vitality"), Is.EqualTo(4));
+        Assert.That(data.AttackPower, Is.EqualTo(16f).Within(0.001f));
+        Assert.That(data.MaximumHealth, Is.EqualTo(14));
+    }
+
+    [Test]
+    public void CollectionImport_InvalidEmptyJsonPreservesRuntimeState()
+    {
+        CharacterSO definition = CreateCumulativeUpgradeCharacter();
+        ConfigureCumulativeUpgradeDefinition(
+            definition,
+            0,
+            "stable",
+            3,
+            (CharacterCumulativeUpgradeModifierType.AttackPower, 1f));
+        CharacterCollectionData collection = new();
+        CharacterData data = collection.CreateRuntimeData(definition);
+        Assert.That(
+            collection.TryAddCumulativeUpgradeLevel(
+                definition,
+                "stable",
+                1,
+                out _,
+                save: false),
+            Is.EqualTo(CharacterCumulativeUpgradeChangeResult.Success));
+        CharacterProgressData previousProgress = data.Progress;
+        int statsChanged = 0;
+        int collectionChanged = 0;
+        data.StatsChanged += () => statsChanged++;
+        collection.CharacterProgressChanged += _ => collectionChanged++;
+
+        Assert.That(collection.TryImportJson("   "), Is.False);
+
+        Assert.That(data.Progress, Is.SameAs(previousProgress));
+        Assert.That(data.GetCumulativeUpgradeLevel("stable"), Is.EqualTo(1));
+        Assert.That(data.AttackPower, Is.EqualTo(11f).Within(0.001f));
+        Assert.That(statsChanged, Is.Zero);
+        Assert.That(collectionChanged, Is.Zero);
+    }
+
+    [Test]
+    public void CollectionImport_EmptySaveRebindsRuntimeToDefaults()
+    {
+        CharacterSO definition = CreateCumulativeUpgradeCharacter();
+        ConfigureCumulativeUpgradeDefinition(
+            definition,
+            0,
+            "reset",
+            3,
+            (CharacterCumulativeUpgradeModifierType.AttackPower, 1f));
+        CharacterCollectionData collection = new();
+        CharacterData data = collection.CreateRuntimeData(definition);
+        Assert.That(
+            collection.TryAddCumulativeUpgradeLevel(
+                definition,
+                "reset",
+                2,
+                out _,
+                save: false),
+            Is.EqualTo(CharacterCumulativeUpgradeChangeResult.Success));
+        CharacterProgressData previousProgress = data.Progress;
+        int statsChanged = 0;
+        data.StatsChanged += () => statsChanged++;
+
+        Assert.That(collection.TryImportJson("{}"), Is.True);
+
+        Assert.That(data.Progress, Is.Not.SameAs(previousProgress));
+        Assert.That(data.IsOwned, Is.True);
+        Assert.That(data.GetCumulativeUpgradeLevel("reset"), Is.Zero);
+        Assert.That(data.AttackPower, Is.EqualTo(10f).Within(0.001f));
+        Assert.That(statsChanged, Is.EqualTo(1));
+    }
+
+    [Test]
+    public void CollectionPreviewData_IsDetachedCurrentProgressSnapshot()
+    {
+        CharacterSO definition = CreateCumulativeUpgradeCharacter();
+        ConfigureCumulativeUpgradeDefinition(
+            definition,
+            0,
+            "preview",
+            5,
+            (CharacterCumulativeUpgradeModifierType.AttackPower, 2f));
+        CharacterCollectionData collection = new();
+        Assert.That(
+            collection.TryAddCumulativeUpgradeLevel(
+                definition,
+                "preview",
+                2,
+                out _,
+                save: false),
+            Is.EqualTo(CharacterCumulativeUpgradeChangeResult.Success));
+        CharacterProgressData savedProgress =
+            collection.GetOrCreate(definition);
+
+        CharacterData preview = collection.CreatePreviewData(definition);
+
+        Assert.That(preview.Progress, Is.Not.SameAs(savedProgress));
+        Assert.That(preview.GetCumulativeUpgradeLevel("preview"), Is.EqualTo(2));
+        Assert.That(preview.AttackPower, Is.EqualTo(14f).Within(0.001f));
+
+        Assert.That(
+            collection.TryAddCumulativeUpgradeLevel(
+                definition,
+                "preview",
+                1,
+                out _,
+                save: false),
+            Is.EqualTo(CharacterCumulativeUpgradeChangeResult.Success));
+        Assert.That(preview.GetCumulativeUpgradeLevel("preview"), Is.EqualTo(2));
+        Assert.That(preview.AttackPower, Is.EqualTo(14f).Within(0.001f));
+
+        CharacterData refreshed =
+            collection.CreatePreviewData(definition);
+        Assert.That(
+            refreshed.GetCumulativeUpgradeLevel("preview"),
+            Is.EqualTo(3));
+        Assert.That(refreshed.AttackPower, Is.EqualTo(16f).Within(0.001f));
+    }
+
+    [Test]
+    public void DataManager_InitializesBeforeCharacterRuntime()
+    {
+        DefaultExecutionOrder executionOrder =
+            (DefaultExecutionOrder)Attribute.GetCustomAttribute(
+                typeof(DataManager),
+                typeof(DefaultExecutionOrder));
+
+        Assert.That(executionOrder, Is.Not.Null);
+        Assert.That(executionOrder.order, Is.LessThan(0));
+    }
+
+    [Test]
+    public void DefaultCharacterDataFactories_HonorInitialOwnership()
+    {
+        CharacterSO definition = CreateCumulativeUpgradeCharacter();
+        SetCharacterInitiallyOwned(definition, true);
+        CharacterCollectionData collection = new();
+
+        CharacterData standalone = definition.CreateData();
+        CharacterProgressData saved = collection.GetOrCreate(definition);
+
+        Assert.That(standalone.IsOwned, Is.True);
+        Assert.That(saved.IsOwned, Is.True);
+    }
+
+    [Test]
+    public void ExplicitDamageAndStatusSkill_AppliesBothOnce_AndPaysOnce()
+    {
+        StatusEffectSO fire = LoadAsset<StatusEffectSO>(FireAssetPath);
+        CharacterSO definition = CreateExplicitDamageAndStatusCharacter(fire);
+        CharacterDefinitionValidationResult validation =
+            CharacterDefinitionValidator.Validate(definition);
+        Assert.That(
+            validation.IsValid,
+            Is.True,
+            string.Join(
+                "\n",
+                validation.Diagnostics));
+
+        CharacterRuntime character = CreateCharacter(definition);
+        Assert.That(
+            CharacterLocalization.GetActiveSkillDescription(character.Data),
+            Does.Contain(" + "));
+        EnemyRuntime target = CreateEnemyRuntime();
+        FakeActiveSkillResource resource = new(10);
+        FakeBattleBoard board = new()
+        {
+            LivingEnemyCountValue = 1,
+            SelectedEnemyTargets = new[] { target },
+        };
+        character.BindBattle(resource, board);
+
+        bool activated = character.TryActivateActiveSkill();
+
+        Assert.That(activated, Is.True);
+        Assert.That(resource.Current, Is.EqualTo(8));
+        Assert.That(resource.TrySpendCallCount, Is.EqualTo(1));
+        Assert.That(character.TotalDamageDealt, Is.EqualTo(4));
+        Assert.That(board.DamageTargetSnapshots, Has.Count.EqualTo(1));
+        Assert.That(board.StatusTargetSnapshots, Has.Count.EqualTo(1));
+        Assert.That(board.CharacterTargetSelectionCallCount, Is.EqualTo(1));
+        Assert.That(board.StatusApplyCallCount, Is.EqualTo(1));
+        Assert.That(board.AppliedStatuses, Is.EqualTo(new[] { fire }));
+        Assert.That(
+            board.DamageTargetSnapshots[0],
+            Is.EqualTo(board.StatusTargetSnapshots[0]));
+        Assert.That(board.DamageTargetSnapshots[0], Does.Contain(target));
+    }
+
+    [Test]
+    public void RawStatBoosts_DoNotPublishStatusAppliedEvents()
+    {
+        CharacterRuntime character = CreateCharacter(SuirenAssetPath);
+        FakeBattleBoard board = new();
+        int statusAppliedEventCount = 0;
+        board.StatusApplied += _ => statusAppliedEventCount++;
+        character.BindBattle(null, board);
+
+        Assert.That(
+            character.ApplyAttackSpeedBoost(1.5f, 3f),
+            Is.True);
+        Assert.That(
+            character.ApplyPowerBoost(2f, 3f),
+            Is.True);
+
+        Assert.That(statusAppliedEventCount, Is.Zero);
+    }
+
+    [Test]
+    public void AislingSequence_KeepsDiagonalSnapshot_WhenCrossKillsCenter()
+    {
+        CharacterRuntime aisling = CreateCharacter(AislingAssetPath);
+        FakeActiveSkillResource resource = new(10);
+        FakeBattleBoard board = new()
+        {
+            SimulateAislingAreaSequence = true,
+            LivingEnemyCountValue = 1,
+        };
+        board.ConfigureAislingTargets(
+            CreateEnemyRuntime(),
+            CreateEnemyRuntime(),
+            CreateEnemyRuntime(),
+            CreateEnemyRuntime());
+        aisling.BindBattle(resource, board);
+
+        bool activated = aisling.TryActivateActiveSkill();
+
+        Assert.That(activated, Is.True);
+        Assert.That(resource.Current, Is.EqualTo(5));
+        Assert.That(
+            board.DamageTargetSnapshots,
+            Has.Count.EqualTo(2),
+            "Both simultaneous area steps must be snapshotted before " +
+            "the first step removes the center enemy.");
+        Assert.That(
+            board.AreaExpansionCountAtFirstDamage,
+            Is.EqualTo(2),
+            "All simultaneous target areas must be resolved before the " +
+            "first effect executes.");
+        Assert.That(
+            board.DamageTargetSnapshots[1],
+            Does.Contain(board.DiagonalTarget));
+        Assert.That(
+            new List<EnemyRuntime>(board.DamageTargetSnapshots[1]).Contains(
+                board.ExposedCenterTarget),
+            Is.False,
+            "The second step must not retarget an enemy exposed after the " +
+            "center target dies.");
+    }
+
+    [Test]
+    public void EnemyStatus_NonFirePeriodicDamage_ResolvesValueModesAndStacks()
+    {
+        StatusEffectSO status = CreateEnemyPeriodicDamageStatus(
+            "test_periodic_damage",
+            StatusEffectStackRemovalOrder.Oldest,
+            2f,
+            true,
+            0.1f,
+            false);
+        EnemyRuntime enemy = CreateEnemyRuntime();
+        CharacterRuntime source = CreateCharacter(SuirenAssetPath);
+        int totalDamage = 0;
+        List<IBattleCharacter> damageSources = new();
+
+        Assert.That(status.StatusId, Is.Not.EqualTo(StatusEffectIds.Fire));
+        Assert.That(
+            ApplyEnemyStatus(enemy, status, 1f, 3, source, 1f),
+            Is.True);
+
+        bool changed = TickEnemyStatuses(
+            enemy,
+            1f,
+            (damage, appliedSource) =>
+            {
+                totalDamage += damage;
+                damageSources.Add(appliedSource);
+                return true;
+            });
+
+        Assert.That(changed, Is.True);
+        Assert.That(
+            totalDamage,
+            Is.EqualTo(8),
+            "Fixed 2 x 3 stacks plus 10% of 20 max health must deal 8.");
+        Assert.That(damageSources, Is.All.SameAs(source));
+        Assert.That(HasEnemyStatus(enemy, status), Is.False);
+    }
+
+    [Test]
+    public void EnemyStatus_IndependentDuration_UsesActiveBatchAndLastTick()
+    {
+        StatusEffectSO status = CreateEnemyPeriodicDamageStatus(
+            "test_independent_duration",
+            StatusEffectStackRemovalOrder.Oldest);
+        EnemyRuntime enemy = CreateEnemyRuntime();
+        CharacterRuntime firstSource = CreateCharacter(SuirenAssetPath);
+        CharacterRuntime secondSource = CreateCharacter(AislingAssetPath);
+
+        Assert.That(
+            ApplyEnemyStatus(enemy, status, 2f, 2, firstSource, 1f),
+            Is.True);
+        Assert.That(
+            ApplyEnemyStatus(enemy, status, 1f, 1, secondSource, 1f),
+            Is.True);
+        Assert.That(GetEnemyStatusStacks(enemy, status), Is.EqualTo(3));
+        Assert.That(
+            GetEnemyStatusRemainingDuration(enemy, status),
+            Is.EqualTo(3f).Within(0.001f));
+
+        int firstSourceDamage = 0;
+        int secondSourceDamage = 0;
+        bool changed = TickEnemyStatuses(
+            enemy,
+            3f,
+            (damage, appliedSource) =>
+            {
+                if (ReferenceEquals(appliedSource, firstSource))
+                    firstSourceDamage += damage;
+                if (ReferenceEquals(appliedSource, secondSource))
+                    secondSourceDamage += damage;
+                return true;
+            });
+
+        Assert.That(changed, Is.True);
+        Assert.That(firstSourceDamage, Is.EqualTo(4));
+        Assert.That(
+            secondSourceDamage,
+            Is.EqualTo(1),
+            "The final boundary tick must execute before the last batch " +
+            "expires.");
+        Assert.That(HasEnemyStatus(enemy, status), Is.False);
+        Assert.That(GetEnemyStatusStacks(enemy, status), Is.Zero);
+        Assert.That(GetEnemyStatusRemainingDuration(enemy, status), Is.Zero);
+    }
+
+    [Test]
+    public void EnemyStatus_OldestRemoval_RemovesOldestIndependentBatch()
+    {
+        StatusEffectSO status = CreateEnemyPeriodicDamageStatus(
+            "test_oldest_removal",
+            StatusEffectStackRemovalOrder.Oldest);
+        EnemyRuntime enemy = CreateEnemyRuntime();
+        CharacterRuntime firstSource = CreateCharacter(SuirenAssetPath);
+        CharacterRuntime secondSource = CreateCharacter(AislingAssetPath);
+
+        Assert.That(
+            ApplyEnemyStatus(enemy, status, 2f, 2, firstSource, 1f),
+            Is.True);
+        Assert.That(
+            ApplyEnemyStatus(enemy, status, 1f, 1, secondSource, 1f),
+            Is.True);
+
+        int removed = RemoveEnemyStatus(
+            enemy,
+            CharacterStatusRemovalTarget.Single,
+            status,
+            2);
+
+        Assert.That(removed, Is.EqualTo(2));
+        Assert.That(GetEnemyStatusStacks(enemy, status), Is.EqualTo(1));
+        Assert.That(
+            GetEnemyStatusRemainingDuration(enemy, status),
+            Is.EqualTo(1f).Within(0.001f));
+
+        int firstSourceDamage = 0;
+        int secondSourceDamage = 0;
+        TickEnemyStatuses(
+            enemy,
+            1f,
+            (damage, appliedSource) =>
+            {
+                if (ReferenceEquals(appliedSource, firstSource))
+                    firstSourceDamage += damage;
+                if (ReferenceEquals(appliedSource, secondSource))
+                    secondSourceDamage += damage;
+                return true;
+            });
+
+        Assert.That(firstSourceDamage, Is.Zero);
+        Assert.That(secondSourceDamage, Is.EqualTo(1));
+        Assert.That(HasEnemyStatus(enemy, status), Is.False);
+    }
+
+    [Test]
+    public void FireCompatibilityWrapper_PreservesStacksDurationAndDamage()
+    {
+        StatusEffectSO fire = LoadAsset<StatusEffectSO>(FireAssetPath);
+        EnemyRuntime enemy = CreateEnemyRuntime();
+        CharacterRuntime source = CreateCharacter(SuirenAssetPath);
+        ApplyFire(enemy, 2f, 1f, 2, source);
+
+        Assert.That(enemy.HasFire, Is.True);
+        Assert.That(enemy.FireStackCount, Is.EqualTo(2));
+        Assert.That(enemy.FireRemainingDuration, Is.EqualTo(2f));
+
+        int totalDamage = 0;
+        List<IBattleCharacter> damageSources = new();
+        bool changed = TickEnemyStatuses(
+            enemy,
+            2f,
+            (damage, appliedSource) =>
+            {
+                totalDamage += damage;
+                damageSources.Add(appliedSource);
+                return true;
+            });
+
+        Assert.That(changed, Is.True);
+        Assert.That(totalDamage, Is.EqualTo(4));
+        Assert.That(damageSources, Is.All.SameAs(source));
+        Assert.That(enemy.HasFire, Is.False);
+        Assert.That(enemy.FireStackCount, Is.Zero);
+        Assert.That(enemy.FireRemainingDuration, Is.Zero);
+    }
+
+    [Test]
+    public void EnemyStatus_LifecycleDamage_HasOrderedExclusiveRemovalPaths()
+    {
+        StatusEffectSO status = CreateRuntimeStatus(
+            "test_lifecycle_damage",
+            true,
+            false,
+            StatusEffectStackMode.AddAndRefreshDuration,
+            4);
+        ConfigureRuntimeStatusOperation(
+            status,
+            0,
+            StatusEffectOperationTrigger.OnApply,
+            StatusEffectOperationType.InstantDamage,
+            StatusEffectValueMode.Fixed,
+            1f,
+            false);
+        ConfigureRuntimeStatusOperation(
+            status,
+            1,
+            StatusEffectOperationTrigger.OnStackChanged,
+            StatusEffectOperationType.InstantDamage,
+            StatusEffectValueMode.Fixed,
+            2f,
+            false);
+        ConfigureRuntimeStatusOperation(
+            status,
+            2,
+            StatusEffectOperationTrigger.OnRemove,
+            StatusEffectOperationType.InstantDamage,
+            StatusEffectValueMode.Fixed,
+            3f,
+            false);
+        ConfigureRuntimeStatusOperation(
+            status,
+            3,
+            StatusEffectOperationTrigger.OnExpire,
+            StatusEffectOperationType.InstantDamage,
+            StatusEffectValueMode.Fixed,
+            4f,
+            false);
+
+        CharacterRuntime source = CreateCharacter(SuirenAssetPath);
+        EnemyRuntime manuallyRemoved = CreateEnemyRuntime();
+        List<int> manualEvents = new();
+        Func<int, IBattleCharacter, bool> recordManual =
+            (damage, appliedSource) =>
+            {
+                Assert.That(appliedSource, Is.SameAs(source));
+                manualEvents.Add(damage);
+                return true;
+            };
+
+        Assert.That(
+            ApplyEnemyStatus(
+                manuallyRemoved,
+                status,
+                1f,
+                1,
+                source,
+                1f,
+                recordManual),
+            Is.True);
+        Assert.That(
+            RemoveEnemyStatus(
+                manuallyRemoved,
+                CharacterStatusRemovalTarget.Single,
+                status,
+                1,
+                recordManual),
+            Is.EqualTo(1));
+        TickEnemyStatuses(manuallyRemoved, 2f, recordManual);
+
+        Assert.That(
+            manualEvents,
+            Is.EqualTo(new[] { 1, 2, 2, 3 }),
+            "Manual removal must execute OnStackChanged then OnRemove, " +
+            "without a later OnExpire.");
+
+        EnemyRuntime naturallyExpired = CreateEnemyRuntime();
+        List<int> expirationEvents = new();
+        Func<int, IBattleCharacter, bool> recordExpiration =
+            (damage, appliedSource) =>
+            {
+                Assert.That(appliedSource, Is.SameAs(source));
+                expirationEvents.Add(damage);
+                return true;
+            };
+
+        Assert.That(
+            ApplyEnemyStatus(
+                naturallyExpired,
+                status,
+                1f,
+                1,
+                source,
+                1f,
+                recordExpiration),
+            Is.True);
+        Assert.That(
+            TickEnemyStatuses(
+                naturallyExpired,
+                1f,
+                recordExpiration),
+            Is.True);
+        Assert.That(
+            RemoveEnemyStatus(
+                naturallyExpired,
+                CharacterStatusRemovalTarget.Single,
+                status,
+                1,
+                recordExpiration),
+            Is.Zero);
+
+        Assert.That(
+            expirationEvents,
+            Is.EqualTo(new[] { 1, 2, 2, 4 }),
+            "Natural expiration must execute OnStackChanged then OnExpire, " +
+            "without a later OnRemove.");
+    }
+
+    [Test]
+    public void EnemyStatus_LifecycleDamage_StopsWhenCallbackRejectsTarget()
+    {
+        StatusEffectSO status = CreateRuntimeStatus(
+            "test_lifecycle_callback_stop",
+            true,
+            false,
+            StatusEffectStackMode.AddAndRefreshDuration,
+            2);
+        for (int index = 0; index < 2; index++)
+        {
+            ConfigureRuntimeStatusOperation(
+                status,
+                index,
+                StatusEffectOperationTrigger.OnApply,
+                StatusEffectOperationType.InstantDamage,
+                StatusEffectValueMode.Fixed,
+                1f,
+                false);
+        }
+
+        CharacterRuntime source = CreateCharacter(SuirenAssetPath);
+        EnemyRuntime originalTarget = CreateEnemyRuntime();
+        EnemyRuntime replacementTarget = CreateEnemyRuntime();
+        EnemyRuntime currentTarget = originalTarget;
+        List<EnemyRuntime> callbackTargets = new();
+
+        bool applied = ApplyEnemyStatus(
+            originalTarget,
+            status,
+            3f,
+            1,
+            source,
+            1f,
+            (damage, appliedSource) =>
+            {
+                Assert.That(damage, Is.EqualTo(1));
+                Assert.That(appliedSource, Is.SameAs(source));
+                callbackTargets.Add(currentTarget);
+                currentTarget = replacementTarget;
+                return false;
+            });
+
+        Assert.That(applied, Is.True);
+        Assert.That(
+            callbackTargets,
+            Is.EqualTo(new[] { originalTarget }),
+            "After the callback reports a defeated/replaced target, " +
+            "remaining lifecycle damage must not spill to the new target.");
+        Assert.That(HasEnemyStatus(originalTarget, status), Is.True);
+        Assert.That(HasEnemyStatus(replacementTarget, status), Is.False);
+    }
+
+    [Test]
+    public void AlliedStatus_ModifiersRestoreWithoutDriftAfterRemoveAndExpire()
+    {
+        StatusEffectSO status = CreateRuntimeStatus(
+            "test_ally_modifiers",
+            false,
+            true,
+            StatusEffectStackMode.AddAndRefreshDuration,
+            4);
+        ConfigureRuntimeStatusOperation(
+            status,
+            0,
+            StatusEffectOperationTrigger.OnApply,
+            StatusEffectOperationType.AttackPowerModifier,
+            StatusEffectValueMode.Fixed,
+            2f,
+            true);
+        ConfigureRuntimeStatusOperation(
+            status,
+            1,
+            StatusEffectOperationTrigger.OnApply,
+            StatusEffectOperationType.AttackPowerModifier,
+            StatusEffectValueMode.Ratio,
+            0.5f,
+            false);
+        ConfigureRuntimeStatusOperation(
+            status,
+            2,
+            StatusEffectOperationTrigger.OnApply,
+            StatusEffectOperationType.AttackSpeedModifier,
+            StatusEffectValueMode.Fixed,
+            0.1f,
+            true);
+        ConfigureRuntimeStatusOperation(
+            status,
+            3,
+            StatusEffectOperationTrigger.OnApply,
+            StatusEffectOperationType.AttackSpeedModifier,
+            StatusEffectValueMode.Ratio,
+            0.5f,
+            false);
+
+        CharacterRuntime character = CreateCharacter(AislingAssetPath);
+        FakeBattleBoard board = new();
+        float basePower = character.CurrentAttackPower;
+        float baseSpeed = character.CurrentAttackSpeed;
+        float stackedPower = basePower + 4f + basePower * 0.5f;
+        float stackedSpeed = baseSpeed + 0.2f + baseSpeed * 0.5f;
+        float partialPower = basePower + 2f + basePower * 0.5f;
+        float partialSpeed = baseSpeed + 0.1f + baseSpeed * 0.5f;
+
+        Assert.That(character.ApplyStatusEffect(status, 1f, 2), Is.True);
+        Assert.That(
+            character.CurrentAttackPower,
+            Is.EqualTo(stackedPower).Within(0.0001f));
+        Assert.That(
+            character.CurrentAttackSpeed,
+            Is.EqualTo(stackedSpeed).Within(0.0001f));
+
+        Assert.That(
+            character.RemoveStatusEffects(
+                CharacterStatusRemovalTarget.Single,
+                status,
+                1),
+            Is.EqualTo(1));
+        Assert.That(
+            character.CurrentAttackPower,
+            Is.EqualTo(partialPower).Within(0.0001f));
+        Assert.That(
+            character.CurrentAttackSpeed,
+            Is.EqualTo(partialSpeed).Within(0.0001f));
+
+        Assert.That(
+            character.RemoveStatusEffects(
+                CharacterStatusRemovalTarget.Single,
+                status,
+                1),
+            Is.EqualTo(1));
+        Assert.That(
+            character.CurrentAttackPower,
+            Is.EqualTo(basePower).Within(0.0001f));
+        Assert.That(
+            character.CurrentAttackSpeed,
+            Is.EqualTo(baseSpeed).Within(0.0001f));
+
+        for (int cycle = 0; cycle < 3; cycle++)
+        {
+            Assert.That(
+                character.ApplyStatusEffect(status, 1f, 2),
+                Is.True);
+            Assert.That(
+                character.CurrentAttackPower,
+                Is.EqualTo(stackedPower).Within(0.0001f));
+            Assert.That(
+                character.CurrentAttackSpeed,
+                Is.EqualTo(stackedSpeed).Within(0.0001f));
+
+            character.TickBattle(1f, board);
+
+            Assert.That(character.HasStatusEffect(status), Is.False);
+            Assert.That(
+                character.CurrentAttackPower,
+                Is.EqualTo(basePower).Within(0.0001f));
+            Assert.That(
+                character.CurrentAttackSpeed,
+                Is.EqualTo(baseSpeed).Within(0.0001f));
+        }
+    }
+
+    [Test]
+    public void AttackPowerModifier_AffectsScaledSkillDamage()
+    {
+        StatusEffectSO fire = LoadAsset<StatusEffectSO>(FireAssetPath);
+        CharacterSO definition = CreateExplicitDamageAndStatusCharacter(fire);
+        SerializedObject serializedDefinition = new(definition);
+        serializedDefinition.FindProperty("attackPower").intValue = 4;
+        SerializedProperty damageEffect = serializedDefinition
+            .FindProperty("skillDefinitions")
+            .GetArrayElementAtIndex(0)
+            .FindPropertyRelative("effects")
+            .GetArrayElementAtIndex(0);
+        damageEffect.FindPropertyRelative("damageAmountMode").enumValueIndex =
+            (int)CharacterDamageAmountMode.Ratio;
+        damageEffect.FindPropertyRelative("damageAmount").floatValue = 1f;
+        serializedDefinition.ApplyModifiedPropertiesWithoutUndo();
+
+        StatusEffectSO modifier = CreateRuntimeStatus(
+            "test_skill_power_modifier",
+            false,
+            true,
+            StatusEffectStackMode.AddAndRefreshDuration,
+            2);
+        ConfigureRuntimeStatusOperation(
+            modifier,
+            0,
+            StatusEffectOperationTrigger.OnApply,
+            StatusEffectOperationType.AttackPowerModifier,
+            StatusEffectValueMode.Fixed,
+            2f,
+            false);
+        ConfigureRuntimeStatusOperation(
+            modifier,
+            1,
+            StatusEffectOperationTrigger.OnApply,
+            StatusEffectOperationType.AttackPowerModifier,
+            StatusEffectValueMode.Ratio,
+            0.5f,
+            false);
+
+        CharacterRuntime character = CreateCharacter(definition);
+        EnemyRuntime target = CreateEnemyRuntime();
+        FakeActiveSkillResource resource = new(10);
+        FakeBattleBoard board = new()
+        {
+            LivingEnemyCountValue = 1,
+            SelectedEnemyTargets = new[] { target },
+        };
+        character.BindBattle(resource, board);
+
+        Assert.That(character.ApplyStatusEffect(modifier, 5f, 1), Is.True);
+        Assert.That(character.CurrentAttackPower, Is.EqualTo(8f));
+        Assert.That(character.TryActivateActiveSkill(), Is.True);
+
+        Assert.That(character.TotalDamageDealt, Is.EqualTo(8));
+        Assert.That(resource.Current, Is.EqualTo(8));
+    }
+
+    [Test]
+    public void Stun_GenericStatusBlocksActionUntilExpiration()
+    {
+        StatusEffectSO stun = LoadAsset<StatusEffectSO>(StunAssetPath);
+        CharacterRuntime character = CreateCharacter(SuirenAssetPath);
+        EnemyRuntime target = CreateEnemyRuntime();
+        FakeBattleBoard board = new()
+        {
+            LivingEnemyCountValue = 1,
+            SelectedEnemyTargets = new[] { target },
+        };
+        character.BindBattle(null, board);
+
+        Assert.That(character.ApplyStatusEffect(stun, 3f, 1), Is.True);
+        Assert.That(character.HasStatusEffect(stun), Is.True);
+        Assert.That(character.GetStatusStackCount(stun), Is.EqualTo(1));
+        Assert.That(character.DisabledStatusEffect, Is.SameAs(stun));
+        Assert.That(character.DisabledTimeRemaining, Is.EqualTo(3f));
+
+        character.TickBattle(3f, board);
+
+        Assert.That(board.DamageTargetSnapshots, Is.Empty);
+        Assert.That(character.HasStatusEffect(stun), Is.False);
+        Assert.That(character.GetStatusStackCount(stun), Is.Zero);
+        Assert.That(character.DisabledStatusEffect, Is.Null);
+        Assert.That(character.DisabledTimeRemaining, Is.Zero);
+
+        character.TickBattle(3f, board);
+
+        Assert.That(
+            board.DamageTargetSnapshots,
+            Is.Not.Empty,
+            "The character must resume acting after the generic Stun " +
+            "status expires.");
+    }
+
+    [Test]
+    public void AlliedStatus_ReadModelReportsOrderedLifecycleChanges()
+    {
+        StatusEffectSO laterStatus = CreateRuntimeStatus(
+            "test_status_z",
+            false,
+            true,
+            StatusEffectStackMode.AddAndRefreshDuration,
+            0);
+        StatusEffectSO earlierStatus = CreateRuntimeStatus(
+            "test_status_a",
+            false,
+            true,
+            StatusEffectStackMode.AddAndRefreshDuration,
+            0);
+        CharacterRuntime character = CreateCharacter(SuirenAssetPath);
+        FakeBattleBoard board = new();
+        character.BindBattle(null, board);
+        List<BattleStatusChangedEvent> events = new();
+        character.StatusChanged += events.Add;
+
+        Assert.That(
+            character.ApplyStatusEffect(laterStatus, 3f, 2),
+            Is.True);
+        Assert.That(
+            character.ApplyStatusEffect(laterStatus, 4f, 1),
+            Is.True);
+        Assert.That(
+            character.ApplyStatusEffect(earlierStatus, 1f, 1),
+            Is.True);
+
+        IReadOnlyList<BattleStatusSnapshot> snapshots =
+            character.GetActiveStatusEffects();
+        Assert.That(snapshots.Count, Is.EqualTo(2));
+        Assert.That(
+            snapshots[0].Definition,
+            Is.SameAs(earlierStatus),
+            "Snapshots must use stable StatusId ordering for presentation.");
+        Assert.That(snapshots[1].Definition, Is.SameAs(laterStatus));
+        Assert.That(snapshots[1].StackCount, Is.EqualTo(3));
+        Assert.That(snapshots[1].RemainingDuration, Is.EqualTo(4f));
+
+        Assert.That(
+            character.RemoveStatusEffects(
+                CharacterStatusRemovalTarget.Single,
+                laterStatus,
+                1),
+            Is.EqualTo(1));
+        Assert.That(
+            character.RemoveStatusEffects(
+                CharacterStatusRemovalTarget.Single,
+                laterStatus,
+                0),
+            Is.EqualTo(2));
+        character.TickBattle(1f, board);
+
+        Assert.That(
+            events.ConvertAll(eventData => eventData.ChangeType),
+            Is.EqualTo(new[]
+            {
+                BattleStatusChangeType.Applied,
+                BattleStatusChangeType.Reapplied,
+                BattleStatusChangeType.Applied,
+                BattleStatusChangeType.StackChanged,
+                BattleStatusChangeType.Removed,
+                BattleStatusChangeType.Expired,
+            }));
+        Assert.That(
+            events.TrueForAll(eventData =>
+                ReferenceEquals(eventData.Target.Ally, character) &&
+                eventData.Target.Enemy == null),
+            Is.True);
+        Assert.That(events[0].PreviousStacks, Is.Zero);
+        Assert.That(events[0].CurrentStacks, Is.EqualTo(2));
+        Assert.That(events[1].PreviousStacks, Is.EqualTo(2));
+        Assert.That(events[1].CurrentStacks, Is.EqualTo(3));
+        Assert.That(events[3].PreviousStacks, Is.EqualTo(3));
+        Assert.That(events[3].CurrentStacks, Is.EqualTo(2));
+        Assert.That(events[4].PreviousStacks, Is.EqualTo(2));
+        Assert.That(events[4].CurrentStacks, Is.Zero);
+        Assert.That(events[5].StatusEffect, Is.SameAs(earlierStatus));
+        Assert.That(events[5].CurrentStacks, Is.Zero);
+        Assert.That(character.GetActiveStatusEffects(), Is.Empty);
+    }
+
+    [Test]
+    public void AlliedStatus_ActualBoardPreservesApplyingSource()
+    {
+        StatusEffectSO status = CreateRuntimeStatus(
+            "test_allied_status_source",
+            false,
+            true,
+            StatusEffectStackMode.AddAndRefreshDuration,
+            0);
+        CharacterRuntime source = CreateCharacter(SuirenAssetPath);
+        CharacterRuntime target = CreateCharacter(AislingAssetPath);
+        GameObject boardObject = new("Test_AlliedStatusSourceBoard");
+        _createdObjects.Add(boardObject);
+        DungeonBoardView board =
+            boardObject.AddComponent<DungeonBoardView>();
+        target.BindBattle(null, board);
+
+        List<BattleStatusChangedEvent> lifecycleEvents = new();
+        List<BattleStatusAppliedEvent> appliedEvents = new();
+        target.StatusChanged += lifecycleEvents.Add;
+        board.StatusApplied += appliedEvents.Add;
+
+        Assert.That(
+            board.TryApplyAlliedCharacterStatus(
+                source,
+                new IBattleCharacter[] { target },
+                status,
+                2f,
+                1f),
+            Is.True);
+
+        IReadOnlyList<BattleStatusSnapshot> snapshots =
+            target.GetActiveStatusEffects();
+        Assert.That(snapshots.Count, Is.EqualTo(1));
+        Assert.That(snapshots[0].ActiveSource, Is.SameAs(source));
+        Assert.That(lifecycleEvents, Has.Count.EqualTo(1));
+        Assert.That(
+            lifecycleEvents[0].Current.ActiveSource,
+            Is.SameAs(source));
+        Assert.That(appliedEvents, Has.Count.EqualTo(1));
+        Assert.That(appliedEvents[0].Source, Is.SameAs(source));
+        Assert.That(appliedEvents[0].Target.Ally, Is.SameAs(target));
+    }
+
+    [Test]
+    public void EnemyStatus_LifecycleDispatchCompletesWithoutSubscriber()
+    {
+        StatusEffectSO status = CreateRuntimeStatus(
+            "test_enemy_no_lifecycle_subscriber",
+            true,
+            false,
+            StatusEffectStackMode.AddAndRefreshDuration,
+            0);
+        EnemyRuntime enemy = CreateEnemyRuntime();
+        CharacterRuntime source = CreateCharacter(SuirenAssetPath);
+
+        Assert.That(
+            ApplyEnemyStatus(enemy, status, 2f, 1, source, 1f),
+            Is.True);
+        Assert.That(GetEnemyStatusStacks(enemy, status), Is.EqualTo(1));
+        Assert.That(
+            RemoveEnemyStatus(
+                enemy,
+                CharacterStatusRemovalTarget.Single,
+                status,
+                0),
+            Is.EqualTo(1));
+        Assert.That(enemy.GetActiveStatusEffects(), Is.Empty);
+    }
+
+    [Test]
+    public void EnemyStatus_ReadModelReportsPartialAndFinalExpiration()
+    {
+        StatusEffectSO status = CreateRuntimeStatus(
+            "test_enemy_lifecycle",
+            true,
+            false,
+            StatusEffectStackMode.IndependentDuration,
+            0);
+        EnemyRuntime enemy = CreateEnemyRuntime();
+        CharacterRuntime source = CreateCharacter(SuirenAssetPath);
+        List<BattleStatusChangedEvent> events = new();
+        enemy.StatusChanged += events.Add;
+
+        Assert.That(
+            ApplyEnemyStatus(enemy, status, 2f, 2, source, 1f),
+            Is.True);
+        Assert.That(
+            ApplyEnemyStatus(enemy, status, 1f, 1, source, 1f),
+            Is.True);
+
+        IReadOnlyList<BattleStatusSnapshot> snapshots =
+            enemy.GetActiveStatusEffects();
+        Assert.That(snapshots.Count, Is.EqualTo(1));
+        Assert.That(snapshots[0].Definition, Is.SameAs(status));
+        Assert.That(snapshots[0].StackCount, Is.EqualTo(3));
+        Assert.That(snapshots[0].RemainingDuration, Is.EqualTo(3f));
+
+        Assert.That(TickEnemyStatuses(enemy, 2f, null), Is.True);
+        Assert.That(GetEnemyStatusStacks(enemy, status), Is.EqualTo(1));
+        Assert.That(TickEnemyStatuses(enemy, 1f, null), Is.True);
+
+        Assert.That(
+            events.ConvertAll(eventData => eventData.ChangeType),
+            Is.EqualTo(new[]
+            {
+                BattleStatusChangeType.Applied,
+                BattleStatusChangeType.Reapplied,
+                BattleStatusChangeType.StackChanged,
+                BattleStatusChangeType.Expired,
+            }));
+        Assert.That(
+            events.TrueForAll(eventData =>
+                eventData.Target.Enemy == enemy &&
+                eventData.Target.Ally == null),
+            Is.True);
+        Assert.That(events[2].PreviousStacks, Is.EqualTo(3));
+        Assert.That(events[2].CurrentStacks, Is.EqualTo(1));
+        Assert.That(events[3].PreviousStacks, Is.EqualTo(1));
+        Assert.That(events[3].CurrentStacks, Is.Zero);
+        Assert.That(enemy.GetActiveStatusEffects(), Is.Empty);
+    }
+
+    [Test]
+    public void PermanentStatus_SnapshotPreservesInfiniteDuration()
+    {
+        StatusEffectSO status = CreateRuntimeStatus(
+            "test_permanent_snapshot",
+            false,
+            true,
+            StatusEffectStackMode.AddKeepDuration,
+            0);
+        SerializedObject serialized = new(status);
+        serialized.FindProperty("durationMode").enumValueIndex =
+            (int)StatusEffectDurationMode.Permanent;
+        serialized.ApplyModifiedPropertiesWithoutUndo();
+        status.ValidateDefinition();
+        CharacterRuntime character = CreateCharacter(SuirenAssetPath);
+        List<BattleStatusChangedEvent> events = new();
+        character.StatusChanged += events.Add;
+
+        Assert.That(character.ApplyStatusEffect(status, 0f, 1), Is.True);
+
+        IReadOnlyList<BattleStatusSnapshot> snapshots =
+            character.GetActiveStatusEffects();
+        Assert.That(snapshots.Count, Is.EqualTo(1));
+        Assert.That(snapshots[0].IsValid, Is.True);
+        Assert.That(snapshots[0].IsPermanent, Is.True);
+        Assert.That(
+            snapshots[0].RemainingDuration,
+            Is.EqualTo(float.PositiveInfinity));
+
+        character.ResetRuntime();
+
+        Assert.That(character.GetActiveStatusEffects(), Is.Empty);
+        Assert.That(
+            events.ConvertAll(eventData => eventData.ChangeType),
+            Is.EqualTo(new[]
+            {
+                BattleStatusChangeType.Applied,
+                BattleStatusChangeType.Removed,
+            }));
+        Assert.That(events[1].Current.IsValid, Is.False);
+        Assert.That(events[1].Current.IsPermanent, Is.False);
+        Assert.That(events[1].Current.RemainingDuration, Is.Zero);
+    }
+
+    [Test]
+    public void FireCompatibilityWrapper_PublishesGenericStatusLifecycle()
+    {
+        StatusEffectSO fire = LoadAsset<StatusEffectSO>(FireAssetPath);
+        EnemyRuntime enemy = CreateEnemyRuntime();
+        CharacterRuntime source = CreateCharacter(SuirenAssetPath);
+        List<BattleStatusChangedEvent> events = new();
+        enemy.StatusChanged += events.Add;
+
+        ApplyFire(enemy, 2f, 1f, 2, source);
+
+        IReadOnlyList<BattleStatusSnapshot> snapshots =
+            enemy.GetActiveStatusEffects();
+        Assert.That(snapshots.Count, Is.EqualTo(1));
+        Assert.That(snapshots[0].Definition, Is.SameAs(fire));
+        Assert.That(snapshots[0].StackCount, Is.EqualTo(2));
+        Assert.That(enemy.HasFire, Is.True);
+
+        Assert.That(
+            RemoveEnemyStatus(
+                enemy,
+                CharacterStatusRemovalTarget.Single,
+                fire,
+                0),
+            Is.EqualTo(2));
+
+        Assert.That(
+            events.ConvertAll(eventData => eventData.ChangeType),
+            Is.EqualTo(new[]
+            {
+                BattleStatusChangeType.Applied,
+                BattleStatusChangeType.Removed,
+            }));
+        Assert.That(events[0].StatusEffect, Is.SameAs(fire));
+        Assert.That(events[1].StatusEffect, Is.SameAs(fire));
+        Assert.That(enemy.HasFire, Is.False);
+        Assert.That(enemy.GetActiveStatusEffects(), Is.Empty);
+    }
+
+    [Test]
+    public void EnemyStatus_ReentrantLifecycleEventWaitsForOperations()
+    {
+        StatusEffectSO status = CreateRuntimeStatus(
+            "test_reentrant_lifecycle",
+            true,
+            false,
+            StatusEffectStackMode.Replace,
+            2);
+        ConfigureRuntimeStatusOperation(
+            status,
+            0,
+            StatusEffectOperationTrigger.OnApply,
+            StatusEffectOperationType.InstantDamage,
+            StatusEffectValueMode.Fixed,
+            1f,
+            false);
+        ConfigureRuntimeStatusOperation(
+            status,
+            1,
+            StatusEffectOperationTrigger.OnRemove,
+            StatusEffectOperationType.InstantDamage,
+            StatusEffectValueMode.Fixed,
+            2f,
+            false);
+        EnemyRuntime enemy = CreateEnemyRuntime();
+        CharacterRuntime source = CreateCharacter(SuirenAssetPath);
+        List<string> sequence = new();
+        Func<int, IBattleCharacter, bool> applyDamage = (damage, _) =>
+        {
+            sequence.Add($"damage:{damage}");
+            return true;
+        };
+        enemy.StatusChanged += eventData =>
+        {
+            sequence.Add(eventData.ChangeType.ToString());
+            if (eventData.ChangeType == BattleStatusChangeType.Applied)
+            {
+                RemoveEnemyStatus(
+                    enemy,
+                    CharacterStatusRemovalTarget.Single,
+                    status,
+                    0,
+                    applyDamage);
+            }
+        };
+
+        Assert.That(
+            ApplyEnemyStatus(
+                enemy,
+                status,
+                3f,
+                1,
+                source,
+                1f,
+                applyDamage),
+            Is.True);
+
+        Assert.That(
+            sequence,
+            Is.EqualTo(new[]
+            {
+                "damage:1",
+                "Applied",
+                "damage:2",
+                "Removed",
+            }));
+        Assert.That(enemy.GetActiveStatusEffects(), Is.Empty);
+    }
+
+    private StatusEffectSO CreateRuntimeStatus(
+        string statusId,
+        bool canTargetEnemy,
+        bool canTargetAlly,
+        StatusEffectStackMode stackMode,
+        int operationCount)
+    {
+        StatusEffectSO status =
+            ScriptableObject.CreateInstance<StatusEffectSO>();
+        status.hideFlags = HideFlags.HideAndDontSave;
+        status.name = statusId;
+        _createdObjects.Add(status);
+
+        SerializedObject serialized = new(status);
+        serialized.FindProperty("statusId").stringValue = statusId;
+        serialized.FindProperty("canTargetEnemy").boolValue =
+            canTargetEnemy;
+        serialized.FindProperty("canTargetAlly").boolValue =
+            canTargetAlly;
+        serialized.FindProperty("durationMode").enumValueIndex =
+            (int)StatusEffectDurationMode.Timed;
+        serialized.FindProperty("defaultDuration").floatValue = 1f;
+        serialized.FindProperty("refreshDurationOnReapply").boolValue = true;
+        serialized.FindProperty("tickInterval").floatValue = 1f;
+        serialized.FindProperty("stackMode").enumValueIndex =
+            (int)stackMode;
+        serialized.FindProperty("maximumStacks").intValue = 0;
+        serialized.FindProperty("defaultAppliedStacks").intValue = 1;
+        serialized.FindProperty("stackRemovalOrder").enumValueIndex =
+            (int)StatusEffectStackRemovalOrder.Oldest;
+        serialized.FindProperty("removable").boolValue = true;
+        serialized.FindProperty("includedInRandomRemoval").boolValue = true;
+        serialized.FindProperty("includedInAllRemoval").boolValue = true;
+        serialized.FindProperty("operations").arraySize =
+            Mathf.Max(0, operationCount);
+        serialized.ApplyModifiedPropertiesWithoutUndo();
+        return status;
+    }
+
+    private static void ConfigureRuntimeStatusOperation(
+        StatusEffectSO status,
+        int operationIndex,
+        StatusEffectOperationTrigger trigger,
+        StatusEffectOperationType operationType,
+        StatusEffectValueMode valueMode,
+        float value,
+        bool scaleWithStacks)
+    {
+        SerializedObject serialized = new(status);
+        SerializedProperty operation = serialized
+            .FindProperty("operations")
+            .GetArrayElementAtIndex(operationIndex);
+        operation.FindPropertyRelative("trigger").enumValueIndex =
+            (int)trigger;
+        operation.FindPropertyRelative("operationType").enumValueIndex =
+            (int)operationType;
+        operation.FindPropertyRelative("valueMode").enumValueIndex =
+            (int)valueMode;
+        operation.FindPropertyRelative("value").floatValue = value;
+        operation.FindPropertyRelative("scaleWithStacks").boolValue =
+            scaleWithStacks;
+        serialized.ApplyModifiedPropertiesWithoutUndo();
+        status.ValidateDefinition();
+    }
+
+    private StatusEffectSO CreateEnemyPeriodicDamageStatus(
+        string statusId,
+        StatusEffectStackRemovalOrder removalOrder,
+        float fixedDamage = 1f,
+        bool fixedDamageScalesWithStacks = true,
+        float ratioDamage = 0f,
+        bool ratioDamageScalesWithStacks = false)
+    {
+        StatusEffectSO status =
+            ScriptableObject.CreateInstance<StatusEffectSO>();
+        status.hideFlags = HideFlags.HideAndDontSave;
+        status.name = statusId;
+        _createdObjects.Add(status);
+
+        SerializedObject serialized = new(status);
+        serialized.FindProperty("statusId").stringValue = statusId;
+        serialized.FindProperty("canTargetEnemy").boolValue = true;
+        serialized.FindProperty("canTargetAlly").boolValue = false;
+        serialized.FindProperty("durationMode").enumValueIndex =
+            (int)StatusEffectDurationMode.Timed;
+        serialized.FindProperty("defaultDuration").floatValue = 1f;
+        serialized.FindProperty("refreshDurationOnReapply").boolValue = false;
+        serialized.FindProperty("tickInterval").floatValue = 1f;
+        serialized.FindProperty("stackMode").enumValueIndex =
+            (int)StatusEffectStackMode.IndependentDuration;
+        serialized.FindProperty("maximumStacks").intValue = 0;
+        serialized.FindProperty("defaultAppliedStacks").intValue = 1;
+        serialized.FindProperty("stackRemovalOrder").enumValueIndex =
+            (int)removalOrder;
+        serialized.FindProperty("removable").boolValue = true;
+        serialized.FindProperty("includedInRandomRemoval").boolValue = true;
+        serialized.FindProperty("includedInAllRemoval").boolValue = true;
+
+        SerializedProperty operations = serialized.FindProperty("operations");
+        operations.arraySize = ratioDamage > 0f ? 2 : 1;
+        SetPeriodicDamageOperation(
+            operations.GetArrayElementAtIndex(0),
+            StatusEffectValueMode.Fixed,
+            fixedDamage,
+            fixedDamageScalesWithStacks);
+        if (ratioDamage > 0f)
+        {
+            SetPeriodicDamageOperation(
+                operations.GetArrayElementAtIndex(1),
+                StatusEffectValueMode.Ratio,
+                ratioDamage,
+                ratioDamageScalesWithStacks);
+        }
+
+        serialized.ApplyModifiedPropertiesWithoutUndo();
+        status.ValidateDefinition();
+        return status;
+    }
+
+    private static void SetPeriodicDamageOperation(
+        SerializedProperty operation,
+        StatusEffectValueMode valueMode,
+        float value,
+        bool scaleWithStacks)
+    {
+        operation.FindPropertyRelative("trigger").enumValueIndex =
+            (int)StatusEffectOperationTrigger.OnTick;
+        operation.FindPropertyRelative("operationType").enumValueIndex =
+            (int)StatusEffectOperationType.PeriodicDamage;
+        operation.FindPropertyRelative("valueMode").enumValueIndex =
+            (int)valueMode;
+        operation.FindPropertyRelative("value").floatValue = value;
+        operation.FindPropertyRelative("scaleWithStacks").boolValue =
+            scaleWithStacks;
+    }
+
+    private static bool ApplyEnemyStatus(
+        EnemyRuntime enemy,
+        StatusEffectSO status,
+        float duration,
+        int stacks,
+        IBattleCharacter source,
+        float tickInterval)
+    {
+        return (bool)InvokeEnemyRuntime(
+            enemy,
+            "ApplyStatusEffect",
+            new[]
+            {
+                typeof(StatusEffectSO),
+                typeof(float),
+                typeof(int),
+                typeof(IBattleCharacter),
+                typeof(float),
+            },
+            status,
+            duration,
+            stacks,
+            source,
+            tickInterval);
+    }
+
+    private static void SetEnemyHealth(
+        EnemyRuntime enemy,
+        int health)
+    {
+        InvokeEnemyRuntime(
+            enemy,
+            "SetHealth",
+            new[] { typeof(int) },
+            health);
+    }
+
+    private static int TakeEnemyDamage(
+        EnemyRuntime enemy,
+        int damage,
+        CharacterAttackDamageType damageType)
+    {
+        return (int)InvokeEnemyRuntime(
+            enemy,
+            "TakeDamage",
+            new[]
+            {
+                typeof(int),
+                typeof(CharacterAttackDamageType),
+            },
+            damage,
+            damageType);
+    }
+
+    private static bool ApplyEnemyStatus(
+        EnemyRuntime enemy,
+        StatusEffectSO status,
+        float duration,
+        int stacks,
+        IBattleCharacter source,
+        float tickInterval,
+        Func<int, IBattleCharacter, bool> applyDamage)
+    {
+        return (bool)InvokeEnemyRuntime(
+            enemy,
+            "ApplyStatusEffect",
+            new[]
+            {
+                typeof(StatusEffectSO),
+                typeof(float),
+                typeof(int),
+                typeof(IBattleCharacter),
+                typeof(float),
+                typeof(Func<int, IBattleCharacter, bool>),
+            },
+            status,
+            duration,
+            stacks,
+            source,
+            tickInterval,
+            applyDamage);
+    }
+
+    private static bool TickEnemyStatuses(
+        EnemyRuntime enemy,
+        float deltaTime,
+        Func<int, IBattleCharacter, bool> applyDamage)
+    {
+        return (bool)InvokeEnemyRuntime(
+            enemy,
+            "TickStatusEffects",
+            new[]
+            {
+                typeof(float),
+                typeof(Func<int, IBattleCharacter, bool>),
+            },
+            deltaTime,
+            applyDamage);
+    }
+
+    private static bool HasEnemyStatus(
+        EnemyRuntime enemy,
+        StatusEffectSO status)
+    {
+        return (bool)InvokeEnemyRuntime(
+            enemy,
+            "HasStatusEffect",
+            new[] { typeof(StatusEffectSO) },
+            status);
+    }
+
+    private static int GetEnemyStatusStacks(
+        EnemyRuntime enemy,
+        StatusEffectSO status)
+    {
+        return (int)InvokeEnemyRuntime(
+            enemy,
+            "GetStatusStackCount",
+            new[] { typeof(StatusEffectSO) },
+            status);
+    }
+
+    private static float GetEnemyStatusRemainingDuration(
+        EnemyRuntime enemy,
+        StatusEffectSO status)
+    {
+        return (float)InvokeEnemyRuntime(
+            enemy,
+            "GetStatusRemainingDuration",
+            new[] { typeof(StatusEffectSO) },
+            status);
+    }
+
+    private static int RemoveEnemyStatus(
+        EnemyRuntime enemy,
+        CharacterStatusRemovalTarget removalTarget,
+        StatusEffectSO status,
+        int removalCount)
+    {
+        return (int)InvokeEnemyRuntime(
+            enemy,
+            "RemoveStatusEffects",
+            new[]
+            {
+                typeof(CharacterStatusRemovalTarget),
+                typeof(StatusEffectSO),
+                typeof(int),
+            },
+            removalTarget,
+            status,
+            removalCount);
+    }
+
+    private static int RemoveEnemyStatus(
+        EnemyRuntime enemy,
+        CharacterStatusRemovalTarget removalTarget,
+        StatusEffectSO status,
+        int removalCount,
+        Func<int, IBattleCharacter, bool> applyDamage)
+    {
+        return (int)InvokeEnemyRuntime(
+            enemy,
+            "RemoveStatusEffects",
+            new[]
+            {
+                typeof(CharacterStatusRemovalTarget),
+                typeof(StatusEffectSO),
+                typeof(int),
+                typeof(Func<int, IBattleCharacter, bool>),
+            },
+            removalTarget,
+            status,
+            removalCount,
+            applyDamage);
+    }
+
+    private static void ApplyFire(
+        EnemyRuntime enemy,
+        float duration,
+        float tickInterval,
+        int stacks,
+        IBattleCharacter source)
+    {
+        InvokeEnemyRuntime(
+            enemy,
+            "ApplyFire",
+            new[]
+            {
+                typeof(float),
+                typeof(float),
+                typeof(int),
+                typeof(IBattleCharacter),
+            },
+            duration,
+            tickInterval,
+            stacks,
+            source);
+    }
+
+    private static object InvokeEnemyRuntime(
+        EnemyRuntime enemy,
+        string methodName,
+        Type[] parameterTypes,
+        params object[] arguments)
+    {
+        MethodInfo method = typeof(EnemyRuntime).GetMethod(
+            methodName,
+            BindingFlags.Instance |
+            BindingFlags.Public |
+            BindingFlags.NonPublic,
+            null,
+            parameterTypes,
+            null);
+        Assert.That(
+            method,
+            Is.Not.Null,
+            $"Missing EnemyRuntime test contract: {methodName}.");
+        return method.Invoke(enemy, arguments);
+    }
+
+    private CharacterRuntime CreateCharacter(string characterAssetPath)
+    {
+        CharacterSO definition = LoadAsset<CharacterSO>(characterAssetPath);
+        return CreateCharacter(definition);
+    }
+
+    private CharacterRuntime CreateCharacter(CharacterSO definition)
+    {
+        GameObject root = new(
+            $"Test_{definition.name}",
+            typeof(RectTransform),
+            typeof(CanvasRenderer),
+            typeof(Image),
+            typeof(AudioSource));
+        _createdObjects.Add(root);
+
+        CharacterRuntime character = root.AddComponent<CharacterRuntime>();
+        TextMeshProUGUI nameText = CreateText(root.transform, "txtName");
+        TextMeshProUGUI attackText = CreateText(
+            root.transform,
+            "txtAttack");
+        TextMeshProUGUI cooldownText = CreateText(
+            root.transform,
+            "txtCooldown");
+        GameObject cooldownTrack = new(
+            "grpCooldown",
+            typeof(RectTransform));
+        cooldownTrack.transform.SetParent(root.transform, false);
+        GameObject cooldownFillObject = new(
+            "imgCooldownFill",
+            typeof(RectTransform),
+            typeof(CanvasRenderer),
+            typeof(Image));
+        cooldownFillObject.transform.SetParent(
+            cooldownTrack.transform,
+            false);
+
+        SerializedObject serializedCharacter = new(character);
+        serializedCharacter.FindProperty("nameText").objectReferenceValue =
+            nameText;
+        serializedCharacter.FindProperty("attackText").objectReferenceValue =
+            attackText;
+        serializedCharacter.FindProperty("cooldownText").objectReferenceValue =
+            cooldownText;
+        serializedCharacter.FindProperty("cooldownFill").objectReferenceValue =
+            cooldownFillObject.GetComponent<Image>();
+        serializedCharacter.FindProperty(
+            "attackSfxSpeaker").objectReferenceValue =
+            root.GetComponent<AudioSource>();
+        serializedCharacter.ApplyModifiedPropertiesWithoutUndo();
+
+        Assert.That(
+            character.ConfigureDefinition(definition),
+            Is.True,
+            $"Failed to initialize {definition.name}.");
+        _characters.Add(character);
+        return character;
+    }
+
+    private CharacterSO CreateExplicitDamageAndStatusCharacter(
+        StatusEffectSO statusEffect)
+    {
+        CharacterSO definition =
+            ScriptableObject.CreateInstance<CharacterSO>();
+        definition.hideFlags = HideFlags.HideAndDontSave;
+        definition.name = "ExplicitDamageAndStatusCharacter";
+        _createdObjects.Add(definition);
+
+        SerializedObject serialized = new(definition);
+        serialized.FindProperty("characterId").stringValue =
+            Guid.NewGuid().ToString("N");
+        serialized.FindProperty("nameLocalizationKey").stringValue =
+            "character.suiren.name";
+        serialized.FindProperty("descriptionLocalizationKey").stringValue =
+            "character.suiren.description";
+        SerializedProperty skills =
+            serialized.FindProperty("skillDefinitions");
+        skills.arraySize = 1;
+        SerializedProperty skill = skills.GetArrayElementAtIndex(0);
+        SetSections(
+            skill.FindPropertyRelative("sections"),
+            (int)CharacterSkillSectionType.Cost,
+            (int)CharacterSkillSectionType.Subject,
+            (int)CharacterSkillSectionType.Ability);
+        skill.FindPropertyRelative("cost").intValue = 2;
+        skill.FindPropertyRelative("targetFaction").enumValueIndex =
+            (int)CharacterTargetFaction.Enemy;
+        skill.FindPropertyRelative("subject").enumValueIndex =
+            (int)CharacterAttackSubject.Random;
+        skill.FindPropertyRelative("subjectCount").intValue = 1;
+
+        // Explicit execution uses the list. Legacy values stay usable for
+        // compatibility with the action preparation gate.
+        skill.FindPropertyRelative("damageType").enumValueIndex =
+            (int)CharacterAttackDamageType.Fixed;
+        skill.FindPropertyRelative("damageAmountMode").enumValueIndex =
+            (int)CharacterDamageAmountMode.Fixed;
+        skill.FindPropertyRelative("damageAmount").floatValue = 1f;
+
+        SerializedProperty effects =
+            skill.FindPropertyRelative("effects");
+        effects.arraySize = 2;
+        SerializedProperty damage = effects.GetArrayElementAtIndex(0);
+        damage.FindPropertyRelative("type").enumValueIndex =
+            (int)CharacterEffectType.Damage;
+        damage.FindPropertyRelative("damageType").enumValueIndex =
+            (int)CharacterAttackDamageType.Fixed;
+        damage.FindPropertyRelative("damageAmountMode").enumValueIndex =
+            (int)CharacterDamageAmountMode.Fixed;
+        damage.FindPropertyRelative("damageAmount").floatValue = 4f;
+
+        SerializedProperty status = effects.GetArrayElementAtIndex(1);
+        status.FindPropertyRelative("type").enumValueIndex =
+            (int)CharacterEffectType.ApplyStatus;
+        status.FindPropertyRelative("statusEffect").objectReferenceValue =
+            statusEffect;
+        status.FindPropertyRelative("statusDuration").floatValue = 3f;
+        status.FindPropertyRelative("statusStacks").floatValue = 1f;
+        serialized.ApplyModifiedPropertiesWithoutUndo();
+        return definition;
+    }
+
+    private CharacterSO CreateResourceGainCharacter(
+        float fixedAmount,
+        float sourceResourceScale,
+        int targetCount)
+    {
+        CharacterSO definition =
+            ScriptableObject.CreateInstance<CharacterSO>();
+        definition.hideFlags = HideFlags.HideAndDontSave;
+        definition.name = "ResourceGainCharacter";
+        _createdObjects.Add(definition);
+
+        SerializedObject serialized = new(definition);
+        serialized.FindProperty("characterId").stringValue =
+            Guid.NewGuid().ToString("N");
+        serialized.FindProperty("nameLocalizationKey").stringValue =
+            "character.suiren.name";
+        serialized.FindProperty("descriptionLocalizationKey").stringValue =
+            "character.suiren.description";
+        SerializedProperty skills =
+            serialized.FindProperty("skillDefinitions");
+        skills.arraySize = 1;
+        SerializedProperty skill = skills.GetArrayElementAtIndex(0);
+        SetSections(
+            skill.FindPropertyRelative("sections"),
+            (int)CharacterSkillSectionType.Cost,
+            (int)CharacterSkillSectionType.Subject,
+            (int)CharacterSkillSectionType.Ability);
+        skill.FindPropertyRelative("cost").intValue = 2;
+        skill.FindPropertyRelative("targetFaction").enumValueIndex =
+            (int)CharacterTargetFaction.Enemy;
+        skill.FindPropertyRelative("subject").enumValueIndex =
+            (int)CharacterAttackSubject.Random;
+        skill.FindPropertyRelative("subjectCount").intValue =
+            Mathf.Max(1, targetCount);
+
+        // Legacy fields remain valid for compatibility with shared editor
+        // and preview paths; explicit execution reads the effect below.
+        skill.FindPropertyRelative("damageType").enumValueIndex =
+            (int)CharacterAttackDamageType.Fixed;
+        skill.FindPropertyRelative("damageAmountMode").enumValueIndex =
+            (int)CharacterDamageAmountMode.Fixed;
+        skill.FindPropertyRelative("damageAmount").floatValue = 1f;
+
+        SerializedProperty effects =
+            skill.FindPropertyRelative("effects");
+        effects.arraySize = 1;
+        SerializedProperty gain = effects.GetArrayElementAtIndex(0);
+        gain.FindPropertyRelative("type").enumValueIndex =
+            (int)CharacterEffectType.GainResource;
+        gain.FindPropertyRelative("damageAmountMode").enumValueIndex =
+            (int)CharacterDamageAmountMode.Fixed;
+        gain.FindPropertyRelative("damageAmount").floatValue =
+            fixedAmount;
+        gain.FindPropertyRelative("sourceResourceScale").floatValue =
+            sourceResourceScale;
+        serialized.ApplyModifiedPropertiesWithoutUndo();
+        return definition;
+    }
+
+    private CharacterSO CreateResourceSpendCharacter(
+        params float[] amounts)
+    {
+        CharacterSO definition = CreateResourceGainCharacter(
+            fixedAmount: 1f,
+            sourceResourceScale: 0f,
+            targetCount: 1);
+        definition.name = "ResourceSpendCharacter";
+
+        SerializedObject serialized = new(definition);
+        SerializedProperty skill = serialized
+            .FindProperty("skillDefinitions")
+            .GetArrayElementAtIndex(0);
+        skill.FindPropertyRelative("subject").enumValueIndex =
+            (int)CharacterAttackSubject.None;
+        SerializedProperty effects =
+            skill.FindPropertyRelative("effects");
+        int effectCount = amounts?.Length ?? 0;
+        effects.arraySize = effectCount;
+        for (int index = 0; index < effectCount; index++)
+        {
+            ConfigureFixedResourceSpendEffect(
+                effects.GetArrayElementAtIndex(index),
+                amounts[index]);
+        }
+
+        serialized.ApplyModifiedPropertiesWithoutUndo();
+        return definition;
+    }
+
+    private static void ConfigureFixedResourceSpendEffect(
+        SerializedProperty effect,
+        float amount)
+    {
+        effect.FindPropertyRelative("type").enumValueIndex =
+            (int)CharacterEffectType.SpendResource;
+        effect.FindPropertyRelative("targetMode").enumValueIndex =
+            (int)CharacterEffectTargetMode.InheritAction;
+        effect.FindPropertyRelative(
+            "preconditionFailurePolicy").enumValueIndex =
+            (int)CharacterEffectPreconditionFailurePolicy.AbortAction;
+        effect.FindPropertyRelative("failurePolicy").enumValueIndex =
+            (int)CharacterEffectFailurePolicy.Continue;
+        effect.FindPropertyRelative("damageAmountMode").enumValueIndex =
+            (int)CharacterDamageAmountMode.Fixed;
+        effect.FindPropertyRelative("damageAmount").floatValue = amount;
+        effect.FindPropertyRelative("sourceResourceScale").floatValue = 0f;
+        effect.FindPropertyRelative(
+            "targetCurrentHealthScale").floatValue = 0f;
+        effect.FindPropertyRelative(
+            "targetMaxHealthScale").floatValue = 0f;
+        effect.FindPropertyRelative(
+            "sourceStatusStacksScale").floatValue = 0f;
+        effect.FindPropertyRelative(
+            "targetStatusStacksScale").floatValue = 0f;
+    }
+
+    private CharacterSO CreateHealCharacter(
+        CharacterTargetFaction faction,
+        CharacterAttackSubject subject,
+        float amount)
+    {
+        CharacterSO definition = CreateResourceGainCharacter(
+            fixedAmount: 1f,
+            sourceResourceScale: 0f,
+            targetCount: 1);
+        definition.name = "HealCharacter";
+
+        SerializedObject serialized = new(definition);
+        serialized.FindProperty("maximumHealth").intValue = 10;
+        SerializedProperty skill = serialized
+            .FindProperty("skillDefinitions")
+            .GetArrayElementAtIndex(0);
+        skill.FindPropertyRelative("targetFaction").enumValueIndex =
+            (int)faction;
+        skill.FindPropertyRelative("subject").enumValueIndex =
+            (int)subject;
+        SerializedProperty effects =
+            skill.FindPropertyRelative("effects");
+        effects.arraySize = 1;
+        ConfigureHealEffect(
+            effects.GetArrayElementAtIndex(0),
+            CharacterEffectTargetMode.InheritAction,
+            amount);
+        serialized.ApplyModifiedPropertiesWithoutUndo();
+        return definition;
+    }
+
+    private CharacterSO CreateHealthSpendCharacter(
+        params float[] amounts)
+    {
+        CharacterSO definition =
+            CreateResourceSpendCharacter(amounts);
+        definition.name = "HealthSpendCharacter";
+
+        SerializedObject serialized = new(definition);
+        serialized.FindProperty("maximumHealth").intValue = 10;
+        SerializedProperty effects = serialized
+            .FindProperty("skillDefinitions")
+            .GetArrayElementAtIndex(0)
+            .FindPropertyRelative("effects");
+        for (int index = 0; index < effects.arraySize; index++)
+        {
+            ConfigureFixedHealthSpendEffect(
+                effects.GetArrayElementAtIndex(index),
+                amounts[index]);
+        }
+
+        serialized.ApplyModifiedPropertiesWithoutUndo();
+        return definition;
+    }
+
+    private static void ConfigureHealEffect(
+        SerializedProperty effect,
+        CharacterEffectTargetMode targetMode,
+        float amount)
+    {
+        effect.FindPropertyRelative("type").enumValueIndex =
+            (int)CharacterEffectType.Heal;
+        effect.FindPropertyRelative("targetMode").enumValueIndex =
+            (int)targetMode;
+        effect.FindPropertyRelative(
+            "preconditionFailurePolicy").enumValueIndex =
+            (int)CharacterEffectPreconditionFailurePolicy.AbortAction;
+        effect.FindPropertyRelative("failurePolicy").enumValueIndex =
+            (int)CharacterEffectFailurePolicy.Continue;
+        effect.FindPropertyRelative("damageAmountMode").enumValueIndex =
+            (int)CharacterDamageAmountMode.Fixed;
+        effect.FindPropertyRelative("damageAmount").floatValue = amount;
+        effect.FindPropertyRelative("sourceResourceScale").floatValue = 0f;
+        effect.FindPropertyRelative(
+            "targetCurrentHealthScale").floatValue = 0f;
+        effect.FindPropertyRelative(
+            "targetMaxHealthScale").floatValue = 0f;
+        effect.FindPropertyRelative(
+            "sourceStatusStacksScale").floatValue = 0f;
+        effect.FindPropertyRelative(
+            "targetStatusStacksScale").floatValue = 0f;
+    }
+
+    private static void ConfigureFixedHealthSpendEffect(
+        SerializedProperty effect,
+        float amount)
+    {
+        ConfigureFixedResourceSpendEffect(effect, amount);
+        effect.FindPropertyRelative("type").enumValueIndex =
+            (int)CharacterEffectType.SpendHealth;
+    }
+
+    private CharacterSO CreateShieldCharacter(
+        CharacterTargetFaction faction,
+        CharacterAttackSubject subject,
+        params float[] amounts)
+    {
+        CharacterSO definition = CreateResourceGainCharacter(
+            fixedAmount: 1f,
+            sourceResourceScale: 0f,
+            targetCount: 1);
+        definition.name = "ShieldCharacter";
+
+        SerializedObject serialized = new(definition);
+        serialized.FindProperty("maximumHealth").intValue = 10;
+        SerializedProperty skill = serialized
+            .FindProperty("skillDefinitions")
+            .GetArrayElementAtIndex(0);
+        skill.FindPropertyRelative("targetFaction").enumValueIndex =
+            (int)faction;
+        skill.FindPropertyRelative("subject").enumValueIndex =
+            (int)subject;
+        SerializedProperty effects =
+            skill.FindPropertyRelative("effects");
+        int effectCount = amounts?.Length ?? 0;
+        effects.arraySize = effectCount;
+        for (int index = 0; index < effectCount; index++)
+        {
+            ConfigureShieldEffect(
+                effects.GetArrayElementAtIndex(index),
+                CharacterEffectTargetMode.InheritAction,
+                amounts[index]);
+        }
+
+        serialized.ApplyModifiedPropertiesWithoutUndo();
+        return definition;
+    }
+
+    private static void ConfigureShieldEffect(
+        SerializedProperty effect,
+        CharacterEffectTargetMode targetMode,
+        float amount)
+    {
+        ConfigureHealEffect(effect, targetMode, amount);
+        effect.FindPropertyRelative("type").enumValueIndex =
+            (int)CharacterEffectType.Shield;
+    }
+
+    private CharacterSO CreateCumulativeUpgradeCharacter()
+    {
+        CharacterSO definition = CreateResourceGainCharacter(
+            fixedAmount: 1f,
+            sourceResourceScale: 0f,
+            targetCount: 1);
+        definition.name = "CumulativeUpgradeCharacter";
+
+        SerializedObject serialized = new(definition);
+        serialized.FindProperty("maximumHealth").intValue = 10;
+        serialized.FindProperty("attackPower").intValue = 10;
+        serialized.FindProperty("attackCooldown").floatValue = 1f;
+        serialized.ApplyModifiedPropertiesWithoutUndo();
+        return definition;
+    }
+
+    private static void SetCharacterInitiallyOwned(
+        CharacterSO definition,
+        bool initiallyOwned)
+    {
+        SerializedObject serialized = new(definition);
+        serialized.FindProperty("initiallyOwned").boolValue =
+            initiallyOwned;
+        serialized.ApplyModifiedPropertiesWithoutUndo();
+    }
+
+    private static void ConfigureCumulativeUpgradeDefinition(
+        CharacterSO definition,
+        int definitionIndex,
+        string upgradeId,
+        int maxLevel,
+        params (
+            CharacterCumulativeUpgradeModifierType Type,
+            float Value)[] modifiers)
+    {
+        SerializedObject serialized = new(definition);
+        SerializedProperty definitions = serialized.FindProperty(
+            "cumulativeUpgradeDefinitions");
+        definitions.arraySize = Mathf.Max(
+            definitions.arraySize,
+            definitionIndex + 1);
+        SerializedProperty upgrade =
+            definitions.GetArrayElementAtIndex(definitionIndex);
+        upgrade.FindPropertyRelative("upgradeId").stringValue =
+            upgradeId ?? string.Empty;
+        upgrade.FindPropertyRelative("maxLevel").intValue = maxLevel;
+        SerializedProperty modifierList =
+            upgrade.FindPropertyRelative("modifiers");
+        int modifierCount = modifiers?.Length ?? 0;
+        modifierList.arraySize = modifierCount;
+        for (int index = 0; index < modifierCount; index++)
+        {
+            SerializedProperty modifier =
+                modifierList.GetArrayElementAtIndex(index);
+            modifier.FindPropertyRelative("type").enumValueIndex =
+                (int)modifiers[index].Type;
+            modifier.FindPropertyRelative("valuePerLevel").floatValue =
+                modifiers[index].Value;
+        }
+
+        serialized.ApplyModifiedPropertiesWithoutUndo();
+    }
+
+    private CharacterSO CreateSourceRetargetCharacter(
+        StatusEffectSO sourceStatus)
+    {
+        CharacterSO definition =
+            ScriptableObject.CreateInstance<CharacterSO>();
+        definition.hideFlags = HideFlags.HideAndDontSave;
+        definition.name = "SourceRetargetCharacter";
+        _createdObjects.Add(definition);
+
+        SerializedObject serialized = new(definition);
+        serialized.FindProperty("characterId").stringValue =
+            Guid.NewGuid().ToString("N");
+        serialized.FindProperty("nameLocalizationKey").stringValue =
+            "character.suiren.name";
+        serialized.FindProperty("descriptionLocalizationKey").stringValue =
+            "character.suiren.description";
+        SerializedProperty skills =
+            serialized.FindProperty("skillDefinitions");
+        skills.arraySize = 1;
+        SerializedProperty skill = skills.GetArrayElementAtIndex(0);
+        SetSections(
+            skill.FindPropertyRelative("sections"),
+            (int)CharacterSkillSectionType.Cost,
+            (int)CharacterSkillSectionType.Subject,
+            (int)CharacterSkillSectionType.Ability);
+        skill.FindPropertyRelative("cost").intValue = 2;
+        skill.FindPropertyRelative("targetFaction").enumValueIndex =
+            (int)CharacterTargetFaction.Enemy;
+        skill.FindPropertyRelative("subject").enumValueIndex =
+            (int)CharacterAttackSubject.Random;
+        skill.FindPropertyRelative("subjectCount").intValue = 1;
+
+        // Legacy values remain valid for the shared preparation path.
+        skill.FindPropertyRelative("damageType").enumValueIndex =
+            (int)CharacterAttackDamageType.Fixed;
+        skill.FindPropertyRelative("damageAmountMode").enumValueIndex =
+            (int)CharacterDamageAmountMode.Fixed;
+        skill.FindPropertyRelative("damageAmount").floatValue = 1f;
+
+        SerializedProperty effects =
+            skill.FindPropertyRelative("effects");
+        effects.arraySize = 2;
+
+        SerializedProperty applyToSource =
+            effects.GetArrayElementAtIndex(0);
+        applyToSource.FindPropertyRelative("targetMode").enumValueIndex =
+            (int)CharacterEffectTargetMode.Source;
+        applyToSource.FindPropertyRelative("type").enumValueIndex =
+            (int)CharacterEffectType.ApplyStatus;
+        applyToSource.FindPropertyRelative(
+            "statusEffect").objectReferenceValue = sourceStatus;
+        applyToSource.FindPropertyRelative(
+            "statusDuration").floatValue = 1f;
+        applyToSource.FindPropertyRelative(
+            "statusStacks").floatValue = 1f;
+
+        SerializedProperty inheritedDamage =
+            effects.GetArrayElementAtIndex(1);
+        inheritedDamage.FindPropertyRelative(
+            "targetMode").enumValueIndex =
+            (int)CharacterEffectTargetMode.InheritAction;
+        inheritedDamage.FindPropertyRelative("type").enumValueIndex =
+            (int)CharacterEffectType.Damage;
+        inheritedDamage.FindPropertyRelative(
+            "damageType").enumValueIndex =
+            (int)CharacterAttackDamageType.Fixed;
+        inheritedDamage.FindPropertyRelative(
+            "damageAmountMode").enumValueIndex =
+            (int)CharacterDamageAmountMode.Fixed;
+        inheritedDamage.FindPropertyRelative(
+            "damageAmount").floatValue = 0f;
+        inheritedDamage.FindPropertyRelative(
+            "sourceResourceScale").floatValue = 1f;
+        serialized.ApplyModifiedPropertiesWithoutUndo();
+        return definition;
+    }
+
+    private CharacterSO CreateTargetlessSourceCharacter(
+        StatusEffectSO sourceStatus)
+    {
+        CharacterSO definition =
+            CreateSourceRetargetCharacter(sourceStatus);
+        definition.name = "TargetlessSourceCharacter";
+
+        SerializedObject serialized = new(definition);
+        SerializedProperty skill = serialized
+            .FindProperty("skillDefinitions")
+            .GetArrayElementAtIndex(0);
+        skill.FindPropertyRelative("subject").enumValueIndex =
+            (int)CharacterAttackSubject.None;
+        skill.FindPropertyRelative("effects").arraySize = 1;
+        serialized.ApplyModifiedPropertiesWithoutUndo();
+        return definition;
+    }
+
+    private CharacterSO CreateAllySelfCharacter(
+        StatusEffectSO sourceStatus)
+    {
+        CharacterSO definition =
+            CreateTargetlessSourceCharacter(sourceStatus);
+        definition.name = "AllySelfCharacter";
+
+        SerializedObject serialized = new(definition);
+        SerializedProperty skill = serialized
+            .FindProperty("skillDefinitions")
+            .GetArrayElementAtIndex(0);
+        skill.FindPropertyRelative("targetFaction").enumValueIndex =
+            (int)CharacterTargetFaction.Ally;
+        skill.FindPropertyRelative("subject").enumValueIndex =
+            (int)CharacterAttackSubject.Self;
+        skill.FindPropertyRelative("effects")
+            .GetArrayElementAtIndex(0)
+            .FindPropertyRelative("targetMode").enumValueIndex =
+            (int)CharacterEffectTargetMode.InheritAction;
+        serialized.ApplyModifiedPropertiesWithoutUndo();
+        return definition;
+    }
+
+    private CharacterSO CreateFreshSelectionCharacter()
+    {
+        CharacterSO definition = CreateResourceGainCharacter(
+            fixedAmount: 1f,
+            sourceResourceScale: 0f,
+            targetCount: 1);
+        definition.name = "FreshSelectionCharacter";
+
+        SerializedObject serialized = new(definition);
+        SerializedProperty effects = serialized
+            .FindProperty("skillDefinitions")
+            .GetArrayElementAtIndex(0)
+            .FindPropertyRelative("effects");
+        effects.arraySize = 2;
+
+        ConfigureFixedDamageEffect(
+            effects.GetArrayElementAtIndex(0),
+            CharacterEffectTargetMode.InheritAction,
+            2f);
+        SerializedProperty freshDamage =
+            effects.GetArrayElementAtIndex(1);
+        ConfigureFixedDamageEffect(
+            freshDamage,
+            CharacterEffectTargetMode.FreshSelection,
+            3f);
+        SerializedProperty selector = freshDamage.FindPropertyRelative(
+            "targetSelector");
+        selector.FindPropertyRelative("targetFaction").enumValueIndex =
+            (int)CharacterTargetFaction.Enemy;
+        selector.FindPropertyRelative("subject").enumValueIndex =
+            (int)CharacterAttackSubject.Random;
+        selector.FindPropertyRelative("subjectMetric").enumValueIndex =
+            (int)CharacterAttackSubjectMetric.Health;
+        selector.FindPropertyRelative("subjectCount").intValue = 1;
+        selector.FindPropertyRelative("conditionMatchMode").enumValueIndex =
+            (int)CharacterConditionMatchMode.All;
+        selector.FindPropertyRelative("numericConditions").ClearArray();
+        selector.FindPropertyRelative("areaOffsets").ClearArray();
+        serialized.ApplyModifiedPropertiesWithoutUndo();
+        return definition;
+    }
+
+    private static void ConfigureFixedDamageEffect(
+        SerializedProperty effect,
+        CharacterEffectTargetMode targetMode,
+        float amount)
+    {
+        effect.FindPropertyRelative("type").enumValueIndex =
+            (int)CharacterEffectType.Damage;
+        effect.FindPropertyRelative("targetMode").enumValueIndex =
+            (int)targetMode;
+        effect.FindPropertyRelative("damageType").enumValueIndex =
+            (int)CharacterAttackDamageType.Fixed;
+        effect.FindPropertyRelative("damageAmountMode").enumValueIndex =
+            (int)CharacterDamageAmountMode.Fixed;
+        effect.FindPropertyRelative("damageAmount").floatValue = amount;
+        effect.FindPropertyRelative("sourceResourceScale").floatValue = 0f;
+        effect.FindPropertyRelative("targetCurrentHealthScale").floatValue =
+            0f;
+        effect.FindPropertyRelative("targetMaxHealthScale").floatValue = 0f;
+        effect.FindPropertyRelative("sourceStatusStacksScale").floatValue =
+            0f;
+        effect.FindPropertyRelative("targetStatusStacksScale").floatValue =
+            0f;
+    }
+
+    private static void SetFirstSkillSubject(
+        CharacterSO definition,
+        CharacterAttackSubject subject)
+    {
+        SerializedObject serialized = new(definition);
+        serialized.FindProperty("skillDefinitions")
+            .GetArrayElementAtIndex(0)
+            .FindPropertyRelative("subject").enumValueIndex =
+            (int)subject;
+        serialized.ApplyModifiedPropertiesWithoutUndo();
+    }
+
+    private CharacterSO CreateTargetScalingCharacter(
+        StatusEffectSO targetStatus,
+        StatusEffectSO sourceStatus)
+    {
+        CharacterSO definition =
+            ScriptableObject.CreateInstance<CharacterSO>();
+        definition.hideFlags = HideFlags.HideAndDontSave;
+        definition.name = "TargetScalingCharacter";
+        _createdObjects.Add(definition);
+
+        SerializedObject serialized = new(definition);
+        serialized.FindProperty("characterId").stringValue =
+            Guid.NewGuid().ToString("N");
+        serialized.FindProperty("nameLocalizationKey").stringValue =
+            "character.suiren.name";
+        serialized.FindProperty("descriptionLocalizationKey").stringValue =
+            "character.suiren.description";
+        SerializedProperty skills =
+            serialized.FindProperty("skillDefinitions");
+        skills.arraySize = 1;
+        SerializedProperty skill = skills.GetArrayElementAtIndex(0);
+        SetSections(
+            skill.FindPropertyRelative("sections"),
+            (int)CharacterSkillSectionType.Cost,
+            (int)CharacterSkillSectionType.Subject,
+            (int)CharacterSkillSectionType.Ability);
+        skill.FindPropertyRelative("cost").intValue = 1;
+        skill.FindPropertyRelative("targetFaction").enumValueIndex =
+            (int)CharacterTargetFaction.Enemy;
+        skill.FindPropertyRelative("subject").enumValueIndex =
+            (int)CharacterAttackSubject.Random;
+        skill.FindPropertyRelative("subjectCount").intValue = 2;
+        skill.FindPropertyRelative("damageType").enumValueIndex =
+            (int)CharacterAttackDamageType.Fixed;
+        skill.FindPropertyRelative("damageAmountMode").enumValueIndex =
+            (int)CharacterDamageAmountMode.Fixed;
+        skill.FindPropertyRelative("damageAmount").floatValue = 1f;
+
+        SerializedProperty effects =
+            skill.FindPropertyRelative("effects");
+        effects.arraySize = 2;
+        SerializedProperty applyStatus =
+            effects.GetArrayElementAtIndex(0);
+        applyStatus.FindPropertyRelative("type").enumValueIndex =
+            (int)CharacterEffectType.ApplyStatus;
+        applyStatus.FindPropertyRelative(
+            "statusEffect").objectReferenceValue = targetStatus;
+        applyStatus.FindPropertyRelative("statusDuration").floatValue = 3f;
+        applyStatus.FindPropertyRelative("statusStacks").floatValue = 2f;
+
+        SerializedProperty damage = effects.GetArrayElementAtIndex(1);
+        damage.FindPropertyRelative("type").enumValueIndex =
+            (int)CharacterEffectType.Damage;
+        damage.FindPropertyRelative("damageType").enumValueIndex =
+            (int)CharacterAttackDamageType.Fixed;
+        damage.FindPropertyRelative("damageAmountMode").enumValueIndex =
+            (int)CharacterDamageAmountMode.Fixed;
+        damage.FindPropertyRelative("damageAmount").floatValue = 0f;
+        damage.FindPropertyRelative(
+            "targetCurrentHealthScale").floatValue = -0.5f;
+        damage.FindPropertyRelative(
+            "targetMaxHealthScale").floatValue = 0.5f;
+        damage.FindPropertyRelative(
+            "sourceStatusScalingEffect").objectReferenceValue =
+            sourceStatus;
+        damage.FindPropertyRelative(
+            "sourceStatusStacksScale").floatValue = 1f;
+        damage.FindPropertyRelative(
+            "targetStatusScalingEffect").objectReferenceValue =
+            targetStatus;
+        damage.FindPropertyRelative(
+            "targetStatusStacksScale").floatValue = 1f;
+        serialized.ApplyModifiedPropertiesWithoutUndo();
+        return definition;
+    }
+
+    private CharacterSO CreateTargetOnlyScalingCharacter()
+    {
+        CharacterSO definition =
+            ScriptableObject.CreateInstance<CharacterSO>();
+        definition.hideFlags = HideFlags.HideAndDontSave;
+        definition.name = "TargetOnlyScalingCharacter";
+        _createdObjects.Add(definition);
+
+        SerializedObject serialized = new(definition);
+        serialized.FindProperty("characterId").stringValue =
+            Guid.NewGuid().ToString("N");
+        serialized.FindProperty("nameLocalizationKey").stringValue =
+            "character.suiren.name";
+        serialized.FindProperty("descriptionLocalizationKey").stringValue =
+            "character.suiren.description";
+        SerializedProperty skills =
+            serialized.FindProperty("skillDefinitions");
+        skills.arraySize = 1;
+        SerializedProperty skill = skills.GetArrayElementAtIndex(0);
+        SetSections(
+            skill.FindPropertyRelative("sections"),
+            (int)CharacterSkillSectionType.Cost,
+            (int)CharacterSkillSectionType.Subject,
+            (int)CharacterSkillSectionType.Ability);
+        skill.FindPropertyRelative("cost").intValue = 1;
+        skill.FindPropertyRelative("targetFaction").enumValueIndex =
+            (int)CharacterTargetFaction.Enemy;
+        skill.FindPropertyRelative("subject").enumValueIndex =
+            (int)CharacterAttackSubject.Random;
+        skill.FindPropertyRelative("subjectCount").intValue = 1;
+        skill.FindPropertyRelative("damageType").enumValueIndex =
+            (int)CharacterAttackDamageType.Fixed;
+        skill.FindPropertyRelative("damageAmountMode").enumValueIndex =
+            (int)CharacterDamageAmountMode.Fixed;
+        skill.FindPropertyRelative("damageAmount").floatValue = 1f;
+
+        SerializedProperty effects =
+            skill.FindPropertyRelative("effects");
+        effects.arraySize = 1;
+        SerializedProperty damage = effects.GetArrayElementAtIndex(0);
+        damage.FindPropertyRelative("type").enumValueIndex =
+            (int)CharacterEffectType.Damage;
+        damage.FindPropertyRelative("damageType").enumValueIndex =
+            (int)CharacterAttackDamageType.Fixed;
+        damage.FindPropertyRelative("damageAmountMode").enumValueIndex =
+            (int)CharacterDamageAmountMode.Fixed;
+        damage.FindPropertyRelative("damageAmount").floatValue = 0f;
+        damage.FindPropertyRelative(
+            "targetCurrentHealthScale").floatValue = 0.25f;
+        serialized.ApplyModifiedPropertiesWithoutUndo();
+        return definition;
+    }
+
+    private static void SetSections(
+        SerializedProperty sections,
+        params int[] values)
+    {
+        sections.arraySize = values.Length;
+        for (int index = 0; index < values.Length; index++)
+        {
+            sections.GetArrayElementAtIndex(index).enumValueIndex =
+                values[index];
+        }
+    }
+
+    private static void AssertEffectsInheritActionTarget(
+        IReadOnlyList<CharacterEffectDefinition> effects,
+        string actionPath,
+        ref int explicitEffectCount)
+    {
+        if (effects == null)
+            return;
+
+        for (int index = 0; index < effects.Count; index++)
+        {
+            CharacterEffectDefinition effect = effects[index];
+            Assert.That(
+                effect,
+                Is.Not.Null,
+                $"{actionPath}.effects[{index}] is null.");
+            Assert.That(
+                effect.TargetMode,
+                Is.EqualTo(CharacterEffectTargetMode.InheritAction),
+                $"{actionPath}.effects[{index}] changed the legacy " +
+                "serialized target default.");
+            explicitEffectCount++;
+        }
+    }
+
+    private static bool HasDiagnostic(
+        CharacterDefinitionValidationResult result,
+        string code)
+    {
+        foreach (CharacterDefinitionDiagnostic diagnostic in
+                 result.Diagnostics)
+        {
+            if (string.Equals(
+                    diagnostic.Code,
+                    code,
+                    StringComparison.Ordinal))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static TextMeshProUGUI CreateText(
+        Transform parent,
+        string objectName)
+    {
+        GameObject textObject = new(
+            objectName,
+            typeof(RectTransform),
+            typeof(CanvasRenderer),
+            typeof(TextMeshProUGUI));
+        textObject.transform.SetParent(parent, false);
+        return textObject.GetComponent<TextMeshProUGUI>();
+    }
+
+    private EnemyRuntime CreateEnemyRuntime(
+        int maximumHealth = 20,
+        float initialArmorMultiplier = 0f)
+    {
+        EnemySO definition = ScriptableObject.CreateInstance<EnemySO>();
+        definition.hideFlags = HideFlags.HideAndDontSave;
+        _createdObjects.Add(definition);
+        if (initialArmorMultiplier > 0f)
+        {
+            SerializedObject serialized = new(definition);
+            serialized.FindProperty("initialArmorMultiplier").floatValue =
+                initialArmorMultiplier;
+            serialized.ApplyModifiedPropertiesWithoutUndo();
+        }
+        return new EnemyRuntime(definition, maximumHealth);
+    }
+
+    private static T LoadAsset<T>(string assetPath)
+        where T : UnityEngine.Object
+    {
+        T asset = AssetDatabase.LoadAssetAtPath<T>(assetPath);
+        Assert.That(asset, Is.Not.Null, $"Missing test asset: {assetPath}");
+        return asset;
+    }
+
+    private sealed class FakeActiveSkillResource : IActiveSkillResource
+    {
+        public int Current { get; private set; }
+        public int Maximum { get; }
+        public int TrySpendCallCount { get; private set; }
+        public int TryGainCallCount { get; private set; }
+        public event Action<int> Changed;
+
+        public FakeActiveSkillResource(
+            int current,
+            int maximum = 10)
+        {
+            Maximum = Mathf.Max(1, maximum);
+            Current = Mathf.Clamp(current, 0, Maximum);
+        }
+
+        public bool CanSpend(int amount)
+        {
+            return amount > 0 && Current >= amount;
+        }
+
+        public bool TrySpend(int amount)
+        {
+            TrySpendCallCount++;
+            if (!CanSpend(amount))
+                return false;
+
+            Current -= amount;
+            Changed?.Invoke(Current);
+            return true;
+        }
+
+        public bool TryGain(int amount)
+        {
+            TryGainCallCount++;
+            if (amount <= 0 || Current >= Maximum)
+                return false;
+
+            int previous = Current;
+            Current = Mathf.Min(Maximum, Current + amount);
+            if (Current == previous)
+                return false;
+
+            Changed?.Invoke(Current);
+            return true;
+        }
+    }
+
+    private sealed class FakeBattleBoard : IBattleBoard
+    {
+        private EnemyRuntime _centerTarget;
+        private EnemyRuntime _crossTarget;
+
+        public int InitialEnemyCapacity => 9;
+        public int LivingEnemyCount => LivingEnemyCountValue;
+        public bool HasEmptyEnemyTile => false;
+        public int LivingEnemyCountValue { get; set; }
+        public bool SimulateAislingAreaSequence { get; set; }
+        public bool ApplyEffectsToEnemyRuntime { get; set; }
+        public bool ForceStatusApplyFailure { get; set; }
+        public Action<EnemyRuntime, int> TargetDamageApplied { get; set; }
+        public bool CenterTargetAlive { get; private set; } = true;
+        public EnemyRuntime DiagonalTarget { get; private set; }
+        public EnemyRuntime ExposedCenterTarget { get; private set; }
+        public int AreaExpansionCallCount { get; private set; }
+        public int AreaExpansionCountAtFirstDamage { get; private set; }
+        public int AlliedStatusRemovalCallCount { get; private set; }
+        public int CharacterTargetSelectionCallCount { get; private set; }
+        public int AlliedCharacterTargetSelectionCallCount
+            { get; private set; }
+        public Queue<IReadOnlyList<EnemyRuntime>> PlannedEnemySelections
+            { get; } = new();
+        public List<int> SelectionNumericConditionCounts
+            { get; } = new();
+        public IReadOnlyList<EnemyRuntime> SelectedEnemyTargets
+            { get; set; } = Array.Empty<EnemyRuntime>();
+        public IReadOnlyList<IBattleCharacter>
+            LastAlliedStatusRemovalTargets { get; private set; } =
+                Array.Empty<IBattleCharacter>();
+        public List<IReadOnlyList<EnemyRuntime>> DamageTargetSnapshots
+            { get; } = new();
+        public List<int> DamageAmounts { get; } = new();
+        public List<bool> DamageShowAttackRangeSnapshots { get; } = new();
+        public List<IReadOnlyList<EnemyRuntime>> StatusTargetSnapshots
+            { get; } = new();
+        public List<StatusEffectSO> AppliedStatuses { get; } = new();
+        public int StatusApplyCallCount { get; private set; }
+
+        public event Action<EnemyRuntime> EnemyDefeated
+        {
+            add { }
+            remove { }
+        }
+        public event Action<BattleStatusAppliedEvent> StatusApplied;
+
+        public void ConfigureAislingTargets(
+            EnemyRuntime centerTarget,
+            EnemyRuntime crossTarget,
+            EnemyRuntime diagonalTarget,
+            EnemyRuntime exposedCenterTarget)
+        {
+            _centerTarget = centerTarget;
+            _crossTarget = crossTarget;
+            DiagonalTarget = diagonalTarget;
+            ExposedCenterTarget = exposedCenterTarget;
+            CenterTargetAlive = true;
+        }
+
+        public void RaiseStatusApplied(BattleStatusAppliedEvent eventData)
+        {
+            NotifyStatusApplied(eventData);
+        }
+
+        public void NotifyStatusApplied(BattleStatusAppliedEvent eventData)
+        {
+            StatusApplied?.Invoke(eventData);
+        }
+
+        public bool TryAddEnemy(EnemyRuntime enemy)
+        {
+            return false;
+        }
+
+        public bool TryAddEnemiesToDistinctTiles(
+            IReadOnlyList<EnemyRuntime> enemies)
+        {
+            return false;
+        }
+
+        public void ClearAllEnemies()
+        {
+        }
+
+        public void TickStatusEffects(float deltaTime)
+        {
+        }
+
+        public void TickEnemyAbilities(
+            float deltaTime,
+            IReadOnlyList<IBattleCharacter> characters)
+        {
+        }
+
+        public void SetBattleCharacters(
+            IReadOnlyList<IBattleCharacter> characters)
+        {
+        }
+
+        public IReadOnlyList<EnemyRuntime> SelectCharacterTargets(
+            IBattleCharacter source,
+            CharacterAttackSubject subject,
+            CharacterAttackSubjectMetric metric,
+            int targetCount,
+            CharacterConditionMatchMode conditionMatchMode,
+            IReadOnlyList<CharacterNumericCondition> numericConditions)
+        {
+            CharacterTargetSelectionCallCount++;
+            SelectionNumericConditionCounts.Add(
+                numericConditions?.Count ?? 0);
+            if (PlannedEnemySelections.Count > 0)
+                return PlannedEnemySelections.Dequeue();
+            return SimulateAislingAreaSequence && _centerTarget != null
+                ? new[] { _centerTarget }
+                : SelectedEnemyTargets;
+        }
+
+        public IReadOnlyList<IBattleCharacter> SelectAlliedCharacters(
+            IBattleCharacter source,
+            CharacterAttackSubject subject,
+            CharacterAttackSubjectMetric metric,
+            int targetCount,
+            CharacterConditionMatchMode conditionMatchMode,
+            IReadOnlyList<CharacterNumericCondition> numericConditions)
+        {
+            AlliedCharacterTargetSelectionCallCount++;
+            return subject == CharacterAttackSubject.Self && source != null
+                ? new[] { source }
+                : Array.Empty<IBattleCharacter>();
+        }
+
+        public IReadOnlyList<EnemyRuntime> ExpandCharacterAreaTargets(
+            IReadOnlyList<EnemyRuntime> centerTargets,
+            IReadOnlyList<CharacterTargetAreaOffset> areaOffsets)
+        {
+            if (!SimulateAislingAreaSequence ||
+                centerTargets == null ||
+                centerTargets.Count == 0 ||
+                centerTargets[0] != _centerTarget ||
+                !CenterTargetAlive)
+            {
+                return Array.Empty<EnemyRuntime>();
+            }
+
+            AreaExpansionCallCount++;
+            bool diagonal = false;
+            if (areaOffsets != null)
+            {
+                foreach (CharacterTargetAreaOffset offset in areaOffsets)
+                {
+                    if (offset != null &&
+                        offset.RowOffset != 0 &&
+                        offset.ColumnOffset != 0)
+                    {
+                        diagonal = true;
+                        break;
+                    }
+                }
+            }
+
+            return diagonal
+                ? new[] { _centerTarget, DiagonalTarget }
+                : new[] { _centerTarget, _crossTarget };
+        }
+
+        public int TryDamageCharacterTargets(
+            IBattleCharacter source,
+            IReadOnlyList<EnemyRuntime> targets,
+            int damage,
+            CharacterAttackDamageType damageType,
+            bool showAttackRange)
+        {
+            if (targets == null || targets.Count == 0 || damage <= 0)
+                return 0;
+
+            DamageShowAttackRangeSnapshots.Add(showAttackRange);
+            List<EnemyRuntime> appliedTargets = new();
+            int totalDamage = 0;
+            foreach (EnemyRuntime target in targets)
+            {
+                if (target == _centerTarget && !CenterTargetAlive)
+                    continue;
+
+                appliedTargets.Add(target);
+                DamageAmounts.Add(damage);
+                totalDamage += ApplyEffectsToEnemyRuntime
+                    ? TakeEnemyDamage(target, damage, damageType)
+                    : damage;
+                TargetDamageApplied?.Invoke(target, damage);
+            }
+
+            DamageTargetSnapshots.Add(appliedTargets);
+            if (DamageTargetSnapshots.Count == 1)
+            {
+                AreaExpansionCountAtFirstDamage = AreaExpansionCallCount;
+                CenterTargetAlive = false;
+            }
+            return totalDamage;
+        }
+
+        public int TryHealCharacterTargets(
+            IBattleCharacter source,
+            IReadOnlyList<EnemyRuntime> targets,
+            int amount,
+            bool showAttackRange)
+        {
+            if (targets == null || amount <= 0)
+                return 0;
+
+            int totalHealed = 0;
+            HashSet<EnemyRuntime> uniqueTargets = new();
+            foreach (EnemyRuntime target in targets)
+            {
+                if (target != null && uniqueTargets.Add(target))
+                    totalHealed += target.Heal(amount);
+            }
+
+            return totalHealed;
+        }
+
+        public int TryHealAlliedCharacters(
+            IBattleCharacter source,
+            IReadOnlyList<IBattleCharacter> targets,
+            int amount)
+        {
+            if (targets == null || amount <= 0)
+                return 0;
+
+            int totalHealed = 0;
+            HashSet<IBattleCharacter> uniqueTargets = new();
+            foreach (IBattleCharacter target in targets)
+            {
+                if (target != null && uniqueTargets.Add(target))
+                    totalHealed += target.Heal(amount);
+            }
+
+            return totalHealed;
+        }
+
+        public int TryGrantShieldToCharacterTargets(
+            IBattleCharacter source,
+            IReadOnlyList<EnemyRuntime> targets,
+            int amount,
+            bool showAttackRange)
+        {
+            if (targets == null || amount <= 0)
+                return 0;
+
+            int totalGranted = 0;
+            HashSet<EnemyRuntime> uniqueTargets = new();
+            foreach (EnemyRuntime target in targets)
+            {
+                if (target != null && uniqueTargets.Add(target))
+                    totalGranted += target.GainShield(amount);
+            }
+
+            return totalGranted;
+        }
+
+        public int TryGrantShieldToAlliedCharacters(
+            IBattleCharacter source,
+            IReadOnlyList<IBattleCharacter> targets,
+            int amount)
+        {
+            if (targets == null || amount <= 0)
+                return 0;
+
+            int totalGranted = 0;
+            HashSet<IBattleCharacter> uniqueTargets = new();
+            foreach (IBattleCharacter target in targets)
+            {
+                if (target != null && uniqueTargets.Add(target))
+                    totalGranted += target.GainShield(amount);
+            }
+
+            return totalGranted;
+        }
+
+        public bool TryApplyCharacterStatus(
+            IBattleCharacter source,
+            IReadOnlyList<EnemyRuntime> targets,
+            StatusEffectSO statusEffect,
+            float duration,
+            float stacks,
+            float tickInterval,
+            bool showAttackRange)
+        {
+            StatusApplyCallCount++;
+            StatusTargetSnapshots.Add(
+                targets != null
+                    ? new List<EnemyRuntime>(targets)
+                    : Array.Empty<EnemyRuntime>());
+            AppliedStatuses.Add(statusEffect);
+            bool hasValidTargets = targets != null &&
+                                   targets.Count > 0 &&
+                                   statusEffect != null;
+            if (ForceStatusApplyFailure)
+                return false;
+            if (!hasValidTargets || !ApplyEffectsToEnemyRuntime)
+                return hasValidTargets;
+
+            bool applied = false;
+            HashSet<EnemyRuntime> uniqueTargets = new();
+            foreach (EnemyRuntime target in targets)
+            {
+                if (target == null || !uniqueTargets.Add(target))
+                    continue;
+
+                applied |= ApplyEnemyStatus(
+                    target,
+                    statusEffect,
+                    duration,
+                    Mathf.Max(1, Mathf.RoundToInt(stacks)),
+                    source,
+                    tickInterval);
+            }
+
+            return applied;
+        }
+
+        public bool TryApplyAlliedCharacterStatus(
+            IBattleCharacter source,
+            IReadOnlyList<IBattleCharacter> targets,
+            StatusEffectSO statusEffect,
+            float duration,
+            float stacks)
+        {
+            if (targets == null)
+                return false;
+
+            bool applied = false;
+            foreach (IBattleCharacter target in targets)
+            {
+                if (target != null)
+                {
+                    applied |= target.ApplyStatusEffect(
+                        statusEffect,
+                        duration,
+                        Mathf.Max(1, Mathf.RoundToInt(stacks)),
+                        source);
+                }
+            }
+
+            return applied;
+        }
+
+        public bool TryRemoveCharacterStatus(
+            IBattleCharacter source,
+            IReadOnlyList<EnemyRuntime> targets,
+            CharacterStatusRemovalTarget removalTarget,
+            StatusEffectSO statusEffect,
+            int removalCount,
+            bool showAttackRange)
+        {
+            return false;
+        }
+
+        public bool TryRemoveAlliedCharacterStatus(
+            IBattleCharacter source,
+            IReadOnlyList<IBattleCharacter> targets,
+            CharacterStatusRemovalTarget removalTarget,
+            StatusEffectSO statusEffect,
+            int removalCount)
+        {
+            AlliedStatusRemovalCallCount++;
+            LastAlliedStatusRemovalTargets =
+                targets != null
+                    ? new List<IBattleCharacter>(targets)
+                    : Array.Empty<IBattleCharacter>();
+            if (targets == null)
+                return false;
+
+            bool removed = false;
+            foreach (IBattleCharacter target in targets)
+            {
+                if (target != null)
+                {
+                    removed |= target.RemoveStatusEffects(
+                        removalTarget,
+                        statusEffect,
+                        removalCount) > 0;
+                }
+            }
+
+            return removed;
+        }
+    }
+}

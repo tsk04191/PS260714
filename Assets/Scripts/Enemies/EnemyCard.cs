@@ -59,9 +59,11 @@ public sealed class EnemyCard : MonoBehaviour, IPointerClickHandler
             string typeCode = Runtime.Definition.CardCode;
             string displayName = EnemyLocalization.GetName(
                 Runtime.Definition.Type);
-            string health = Runtime.Armor > 0
-                ? $"{Runtime.Health} A{Runtime.Armor}"
-                : Runtime.Health.ToString();
+            string health = Runtime.Health.ToString();
+            if (Runtime.Armor > 0)
+                health += $" A{Runtime.Armor}";
+            if (Runtime.CurrentShield > 0)
+                health += $" S{Runtime.CurrentShield}";
             healthText.text = string.IsNullOrEmpty(typeCode)
                 ? $"{displayName}\n{health}"
                 : $"{displayName}\n{typeCode} {health}";

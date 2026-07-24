@@ -32,6 +32,8 @@ namespace PS260714.Localization.Editor
         private int tab;
         private int selectedStringRow = 1;
         private int previewLocaleColumn = 4;
+        private string stringCategoryFilter = string.Empty;
+        private string stringSearchText = string.Empty;
         private bool dirty;
         private LocalizationFontCatalog fontCatalog;
         private LocalizationMarkupCatalog markupCatalog;
@@ -162,9 +164,26 @@ namespace PS260714.Localization.Editor
                         row.Add(string.Empty);
                     }
 
+                    if (isStrings &&
+                        !string.IsNullOrEmpty(stringCategoryFilter) &&
+                        row.Count > 0)
+                    {
+                        row[0] = stringCategoryFilter + ".";
+                    }
                     document.Rows.Add(row);
+                    if (isStrings)
+                    {
+                        selectedStringRow = document.RowCount - 1;
+                        stringSearchText = string.Empty;
+                    }
                     dirty = true;
                 }
+            }
+
+            if (isStrings)
+            {
+                DrawStringFilters(document);
+                EnsureSelectedStringRowVisible(document);
             }
 
             tableScroll = EditorGUILayout.BeginScrollView(
@@ -173,6 +192,9 @@ namespace PS260714.Localization.Editor
             DrawHeader(document);
             for (int row = 1; row < document.RowCount; row++)
             {
+                if (isStrings && !MatchesStringFilters(document, row))
+                    continue;
+
                 GUIStyle selectionStyle =
                     GUI.skin.FindStyle("SelectionRect") ?? GUIStyle.none;
                 GUIStyle background = isStrings && row == selectedStringRow
@@ -214,6 +236,13 @@ namespace PS260714.Localization.Editor
                         GUILayout.Width(24f)))
                     {
                         document.Rows.RemoveAt(row);
+                        if (isStrings)
+                        {
+                            if (selectedStringRow == row)
+                                selectedStringRow = -1;
+                            else if (selectedStringRow > row)
+                                selectedStringRow--;
+                        }
                         dirty = true;
                         row--;
                     }
@@ -221,6 +250,193 @@ namespace PS260714.Localization.Editor
             }
 
             EditorGUILayout.EndScrollView();
+        }
+
+        private void DrawStringFilters(LocalizationCsvDocument document)
+        {
+            List<string> categories = CollectStringCategories(document);
+            string[] categoryLabels = new string[categories.Count + 1];
+            categoryLabels[0] = "All categories";
+            int currentCategoryIndex = 0;
+            for (int index = 0; index < categories.Count; index++)
+            {
+                categoryLabels[index + 1] = categories[index];
+                if (string.Equals(
+                        categories[index],
+                        stringCategoryFilter,
+                        StringComparison.OrdinalIgnoreCase))
+                {
+                    currentCategoryIndex = index + 1;
+                }
+            }
+
+            if (!string.IsNullOrEmpty(stringCategoryFilter) &&
+                currentCategoryIndex == 0)
+            {
+                stringCategoryFilter = string.Empty;
+            }
+
+            string previousCategory = stringCategoryFilter;
+            string previousSearch = stringSearchText;
+            using (new EditorGUILayout.HorizontalScope(EditorStyles.toolbar))
+            {
+                GUILayout.Label(
+                    "Category",
+                    EditorStyles.miniLabel,
+                    GUILayout.Width(54f));
+                int selectedCategoryIndex = EditorGUILayout.Popup(
+                    currentCategoryIndex,
+                    categoryLabels,
+                    EditorStyles.toolbarPopup,
+                    GUILayout.Width(150f));
+                stringCategoryFilter = selectedCategoryIndex <= 0
+                    ? string.Empty
+                    : categories[selectedCategoryIndex - 1];
+
+                GUILayout.Space(8f);
+                GUILayout.Label(
+                    "Search",
+                    EditorStyles.miniLabel,
+                    GUILayout.Width(42f));
+                stringSearchText = GUILayout.TextField(
+                    stringSearchText ?? string.Empty,
+                    EditorStyles.toolbarSearchField,
+                    GUILayout.MinWidth(180f),
+                    GUILayout.ExpandWidth(true));
+                if (GUILayout.Button(
+                        "Clear",
+                        EditorStyles.toolbarButton,
+                        GUILayout.Width(48f)))
+                {
+                    stringCategoryFilter = string.Empty;
+                    stringSearchText = string.Empty;
+                }
+
+                int visibleCount = CountVisibleStringRows(document);
+                GUILayout.Label(
+                    $"{visibleCount}/{Mathf.Max(0, document.RowCount - 1)}",
+                    EditorStyles.miniLabel,
+                    GUILayout.Width(64f));
+            }
+
+            if (!string.Equals(
+                    previousCategory,
+                    stringCategoryFilter,
+                    StringComparison.OrdinalIgnoreCase) ||
+                !string.Equals(
+                    previousSearch,
+                    stringSearchText,
+                    StringComparison.Ordinal))
+            {
+                tableScroll = Vector2.zero;
+            }
+        }
+
+        private static List<string> CollectStringCategories(
+            LocalizationCsvDocument document)
+        {
+            SortedSet<string> categories = new(
+                StringComparer.OrdinalIgnoreCase);
+            int keyColumn = ResolveKeyColumn(document);
+            for (int row = 1; row < document.RowCount; row++)
+            {
+                string category = GetTopLevelCategory(
+                    document.Get(row, keyColumn));
+                if (!string.IsNullOrEmpty(category))
+                    categories.Add(category);
+            }
+
+            return new List<string>(categories);
+        }
+
+        private int CountVisibleStringRows(
+            LocalizationCsvDocument document)
+        {
+            int count = 0;
+            for (int row = 1; row < document.RowCount; row++)
+            {
+                if (MatchesStringFilters(document, row))
+                    count++;
+            }
+            return count;
+        }
+
+        private void EnsureSelectedStringRowVisible(
+            LocalizationCsvDocument document)
+        {
+            if (selectedStringRow > 0 &&
+                selectedStringRow < document.RowCount &&
+                MatchesStringFilters(document, selectedStringRow))
+            {
+                return;
+            }
+
+            selectedStringRow = -1;
+            for (int row = 1; row < document.RowCount; row++)
+            {
+                if (!MatchesStringFilters(document, row))
+                    continue;
+
+                selectedStringRow = row;
+                return;
+            }
+        }
+
+        private bool MatchesStringFilters(
+            LocalizationCsvDocument document,
+            int row)
+        {
+            if (row <= 0 || row >= document.RowCount)
+                return false;
+
+            int keyColumn = ResolveKeyColumn(document);
+            if (!string.IsNullOrEmpty(stringCategoryFilter) &&
+                !string.Equals(
+                    GetTopLevelCategory(document.Get(row, keyColumn)),
+                    stringCategoryFilter,
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+
+            string search = (stringSearchText ?? string.Empty).Trim();
+            if (string.IsNullOrEmpty(search))
+                return true;
+
+            for (int column = 0; column < document.ColumnCount; column++)
+            {
+                string value = document.Get(row, column);
+                if (!string.IsNullOrEmpty(value) &&
+                    value.IndexOf(
+                        search,
+                        StringComparison.OrdinalIgnoreCase) >= 0)
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private static int ResolveKeyColumn(
+            LocalizationCsvDocument document)
+        {
+            Dictionary<string, int> headers = document.BuildHeaderMap();
+            return headers.TryGetValue("key", out int keyColumn)
+                ? keyColumn
+                : 0;
+        }
+
+        private static string GetTopLevelCategory(string key)
+        {
+            string normalized = (key ?? string.Empty).Trim();
+            if (string.IsNullOrEmpty(normalized))
+                return string.Empty;
+
+            int separatorIndex = normalized.IndexOf('.');
+            return separatorIndex > 0
+                ? normalized.Substring(0, separatorIndex)
+                : normalized;
         }
 
         private static void DrawHeader(LocalizationCsvDocument document)

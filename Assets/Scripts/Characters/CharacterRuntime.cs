@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using PS260714.Localization;
 using TMPro;
 using UnityEngine;
@@ -11,7 +12,220 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
     IPointerEnterHandler,
     IPointerExitHandler
 {
-    public const float TargetAttackRecoveryDuration = 0.5f;
+    private const float AttackSdDisplayDuration = 0.45f;
+    private const float PassiveSdDisplayDuration = 0.7f;
+    private const float SkillSdDisplayDuration = 0.9f;
+    private const int MaximumStatusChangesPerDispatch = 128;
+
+    private struct RectLayout
+    {
+        public Vector2 AnchorMin;
+        public Vector2 AnchorMax;
+        public Vector2 Pivot;
+        public Vector2 AnchoredPosition;
+        public Vector2 SizeDelta;
+
+        public static RectLayout Capture(RectTransform rect)
+        {
+            return new RectLayout
+            {
+                AnchorMin = rect.anchorMin,
+                AnchorMax = rect.anchorMax,
+                Pivot = rect.pivot,
+                AnchoredPosition = rect.anchoredPosition,
+                SizeDelta = rect.sizeDelta,
+            };
+        }
+
+        public void Apply(RectTransform rect)
+        {
+            rect.anchorMin = AnchorMin;
+            rect.anchorMax = AnchorMax;
+            rect.pivot = Pivot;
+            rect.anchoredPosition = AnchoredPosition;
+            rect.sizeDelta = SizeDelta;
+        }
+    }
+
+    private readonly struct AbilityTargetSelection
+    {
+        public CharacterTargetFaction Faction { get; }
+        public IReadOnlyList<EnemyRuntime> EnemyTargets { get; }
+        public IReadOnlyList<IBattleCharacter> AllyTargets { get; }
+        public bool RangeAlreadyShown { get; }
+        public int Count => Faction == CharacterTargetFaction.Ally
+            ? AllyTargets?.Count ?? 0
+            : EnemyTargets?.Count ?? 0;
+
+        private AbilityTargetSelection(
+            CharacterTargetFaction faction,
+            IReadOnlyList<EnemyRuntime> enemyTargets,
+            IReadOnlyList<IBattleCharacter> allyTargets,
+            bool rangeAlreadyShown)
+        {
+            Faction = faction;
+            EnemyTargets = enemyTargets ?? System.Array.Empty<EnemyRuntime>();
+            AllyTargets = allyTargets ??
+                System.Array.Empty<IBattleCharacter>();
+            RangeAlreadyShown = rangeAlreadyShown;
+        }
+
+        public static AbilityTargetSelection Enemies(
+            IReadOnlyList<EnemyRuntime> targets,
+            bool rangeAlreadyShown = false)
+        {
+            return new AbilityTargetSelection(
+                CharacterTargetFaction.Enemy,
+                targets,
+                null,
+                rangeAlreadyShown);
+        }
+
+        public static AbilityTargetSelection Allies(
+            IReadOnlyList<IBattleCharacter> targets)
+        {
+            return new AbilityTargetSelection(
+                CharacterTargetFaction.Ally,
+                null,
+                targets,
+                false);
+        }
+    }
+
+    private readonly struct PreparedSkillAction
+    {
+        public CharacterSkillDefinition Definition { get; }
+        public AbilityTargetSelection Targets { get; }
+        public AbilityTargetSelection SelectedTargets { get; }
+        public IReadOnlyList<PreparedEffectExecution> Effects { get; }
+        public int Damage { get; }
+
+        public PreparedSkillAction(
+            CharacterSkillDefinition definition,
+            AbilityTargetSelection targets,
+            AbilityTargetSelection selectedTargets,
+            IReadOnlyList<PreparedEffectExecution> effects,
+            int damage)
+        {
+            Definition = definition;
+            Targets = targets;
+            SelectedTargets = selectedTargets;
+            Effects = effects ??
+                System.Array.Empty<PreparedEffectExecution>();
+            Damage = damage;
+        }
+    }
+
+    private readonly struct PreparedEffectExecution
+    {
+        public bool IsPrepared { get; }
+        public AbilityTargetSelection Targets { get; }
+        public int ResourceSpendAmount { get; }
+        public int HealthSpendAmount { get; }
+
+        public PreparedEffectExecution(
+            AbilityTargetSelection targets,
+            int resourceSpendAmount = 0,
+            int healthSpendAmount = 0)
+        {
+            IsPrepared = true;
+            Targets = targets;
+            ResourceSpendAmount = Mathf.Max(
+                0,
+                resourceSpendAmount);
+            HealthSpendAmount = Mathf.Max(
+                0,
+                healthSpendAmount);
+        }
+    }
+
+    private sealed class EffectCostReservation
+    {
+        private readonly IActiveSkillResource _resource;
+        private readonly IBattleCharacter _source;
+        private readonly int _baseCost;
+        private int _reservedAmount;
+        private int _reservedHealth;
+
+        private EffectCostReservation(
+            IActiveSkillResource resource,
+            IBattleCharacter source,
+            int baseCost)
+        {
+            _resource = resource;
+            _source = source;
+            _baseCost = Mathf.Max(0, baseCost);
+            _reservedAmount = _baseCost;
+        }
+
+        public static bool TryCreate(
+            IActiveSkillResource resource,
+            IBattleCharacter source,
+            int baseCost,
+            out EffectCostReservation reservation)
+        {
+            reservation = null;
+            baseCost = Mathf.Max(0, baseCost);
+            if (source == null ||
+                (baseCost > 0 && resource == null) ||
+                (baseCost > 0 && !resource.CanSpend(baseCost)))
+            {
+                return false;
+            }
+
+            reservation = new EffectCostReservation(
+                resource,
+                source,
+                baseCost);
+            return true;
+        }
+
+        public bool TryReserveEffectSpend(int amount)
+        {
+            amount = Mathf.Max(0, amount);
+            if (_resource == null || amount == 0 ||
+                _resource.Current - _reservedAmount < amount)
+            {
+                return false;
+            }
+
+            _reservedAmount += amount;
+            return true;
+        }
+
+        public bool TryReserveHealthSpend(int amount)
+        {
+            amount = Mathf.Max(0, amount);
+            if (amount == 0 ||
+                _source.CurrentHealth - _reservedHealth - amount < 1)
+            {
+                return false;
+            }
+
+            _reservedHealth += amount;
+            return true;
+        }
+
+        public bool TryCommitBaseCost()
+        {
+            return _baseCost == 0 ||
+                   _resource.TrySpend(_baseCost);
+        }
+    }
+
+    private readonly struct TargetDamageSnapshot
+    {
+        public EnemyRuntime Target { get; }
+        public int Damage { get; }
+
+        public TargetDamageSnapshot(
+            EnemyRuntime target,
+            int damage)
+        {
+            Target = target;
+            Damage = Mathf.Max(0, damage);
+        }
+    }
 
     [SerializeField] private CharacterSO original;
     [SerializeField] private TextMeshProUGUI nameText;
@@ -19,18 +233,26 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
     [SerializeField] private TextMeshProUGUI cooldownText;
     [SerializeField] private Image cooldownFill;
     [SerializeField] private AudioSource attackSfxSpeaker;
+    [SerializeField] private Image sdImage;
 
     private bool _initialized;
+    private int _currentHealth;
+    private int _currentShield;
     private float _remainingCooldown;
-    private float _disabledTimeRemaining;
+    private readonly Dictionary<string, StatusEffectRuntimeState>
+        _statusEffects =
+        new(System.StringComparer.Ordinal);
+    private readonly Queue<BattleStatusChangedEvent> _statusChangeQueue =
+        new();
+    private bool _dispatchingStatusChanges;
     private float _attackRecoveryRemaining;
-    private float _dualSkillTimeRemaining;
     private float _attackSpeedBoostRemaining;
     private float _attackSpeedMultiplier = 1f;
     private float _powerBoostRemaining;
     private float _powerMultiplier = 1f;
-    private int _areaSkillAttackCount;
-    private int _fireSkillAttackCount;
+    private float _attackSdTimeRemaining;
+    private float _passiveSdTimeRemaining;
+    private float _skillSdTimeRemaining;
     private IActiveSkillResource _activeSkillResource;
     private IBattleBoard _board;
     private Image _panelImage;
@@ -38,22 +260,195 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
     private System.Func<CharacterRuntime, bool> _itemTargetHandler;
     private GameObject _skillTooltip;
     private TextMeshProUGUI _skillTooltipText;
+    private bool _infoLayoutCached;
+    private bool _sdLayoutEnabled;
+    private RectTransform _cooldownTrack;
+    private RectLayout _nameLayout;
+    private RectLayout _attackLayout;
+    private RectLayout _cooldownLayout;
+    private RectLayout _cooldownTrackLayout;
+    private readonly Dictionary<CharacterPassiveDefinition, float>
+        _passiveCooldowns = new();
+    private bool _lastAttackAttempted;
+    private bool _lastAttackSucceeded;
+    private AbilityTargetSelection _lastAttackTargets;
 
     public CharacterSO Definition => original;
     public CharacterData Data { get; private set; }
     public int PartySlotIndex { get; private set; } = -1;
     public int PartySlotNumber => PartySlotIndex + 1;
     public Color EffectColor { get; private set; } = Color.white;
-    public Sprite TargetEffectSprite => Data?.TargetEffectSprite;
-    public RuntimeAnimatorController TargetEffectController =>
-        Data?.TargetEffectController;
     public int TotalDamageDealt { get; private set; }
-    public float DisabledTimeRemaining =>
-        TimePrecision.FloorToTenth(_disabledTimeRemaining);
+    public int CurrentHealth => Mathf.Clamp(
+        _currentHealth,
+        0,
+        MaximumHealth);
+    public int MaximumHealth => Mathf.Max(1, Data?.MaximumHealth ?? 1);
+    public int CurrentShield => Mathf.Max(0, _currentShield);
+    public float DisabledTimeRemaining
+    {
+        get
+        {
+            float duration = GetDisabledDuration();
+            return float.IsPositiveInfinity(duration)
+                ? duration
+                : TimePrecision.FloorToTenth(duration);
+        }
+    }
+    public StatusEffectSO DisabledStatusEffect => GetDisabledStatusEffect();
+    public float CurrentAttackPower => GetEffectiveAttackPower();
+    public float CurrentAttackSpeed => GetEffectiveAttackSpeed();
+    public event System.Action<BattleStatusChangedEvent> StatusChanged;
+
+    public IReadOnlyList<BattleStatusSnapshot> GetActiveStatusEffects()
+    {
+        if (_statusEffects.Count == 0)
+            return System.Array.Empty<BattleStatusSnapshot>();
+
+        List<BattleStatusSnapshot> snapshots =
+            new(_statusEffects.Count);
+        foreach (StatusEffectRuntimeState state in _statusEffects.Values)
+        {
+            if (state == null || !state.HasStacks ||
+                state.Definition == null)
+            {
+                continue;
+            }
+
+            snapshots.Add(CreateStatusSnapshot(state));
+        }
+
+        snapshots.Sort((left, right) => string.Compare(
+            left.Definition?.StatusId,
+            right.Definition?.StatusId,
+            System.StringComparison.Ordinal));
+        return snapshots.Count > 0
+            ? snapshots.ToArray()
+            : System.Array.Empty<BattleStatusSnapshot>();
+    }
+
+    public bool HasStatusEffect(StatusEffectSO definition)
+    {
+        if (definition == null)
+            return false;
+
+        return !string.IsNullOrWhiteSpace(definition.StatusId) &&
+               _statusEffects.TryGetValue(
+                   definition.StatusId,
+                   out StatusEffectRuntimeState state) &&
+               state != null && state.HasStacks;
+    }
+
+    public int GetStatusStackCount(StatusEffectSO definition)
+    {
+        if (definition == null)
+            return 0;
+
+        return _statusEffects.TryGetValue(
+            definition.StatusId,
+            out StatusEffectRuntimeState state)
+                ? Mathf.Max(0, state.StackCount)
+                : 0;
+    }
+
+    public bool TryConsumeStatusStacks(
+        StatusEffectSO definition,
+        int stackCount)
+    {
+        stackCount = Mathf.Max(1, stackCount);
+        if (GetStatusStackCount(definition) < stackCount)
+            return false;
+
+        return RemoveStatusEffects(
+            CharacterStatusRemovalTarget.Single,
+            definition,
+            stackCount) == stackCount;
+    }
+
+    public int Heal(int amount)
+    {
+        amount = Mathf.Max(0, amount);
+        if (amount <= 0 || _currentHealth <= 0 ||
+            _currentHealth >= MaximumHealth)
+        {
+            return 0;
+        }
+
+        int previous = _currentHealth;
+        _currentHealth = Mathf.Min(
+            MaximumHealth,
+            _currentHealth + amount);
+        RefreshUi();
+        return _currentHealth - previous;
+    }
+
+    public int GainShield(int amount)
+    {
+        amount = Mathf.Max(0, amount);
+        if (amount <= 0 || _currentHealth <= 0 ||
+            _currentShield == int.MaxValue)
+        {
+            return 0;
+        }
+
+        int previous = _currentShield;
+        long total = (long)_currentShield + amount;
+        _currentShield = total >= int.MaxValue
+            ? int.MaxValue
+            : (int)total;
+        RefreshUi();
+        return _currentShield - previous;
+    }
+
+    public int TakeDamage(int amount)
+    {
+        amount = Mathf.Max(0, amount);
+        if (amount <= 0 || _currentHealth <= 0)
+            return 0;
+
+        int appliedDamage = 0;
+        if (_currentShield > 0)
+        {
+            int shieldDamage = Mathf.Min(_currentShield, amount);
+            _currentShield -= shieldDamage;
+            amount -= shieldDamage;
+            appliedDamage += shieldDamage;
+        }
+
+        if (amount > 0)
+        {
+            int healthDamage = Mathf.Min(_currentHealth, amount);
+            _currentHealth -= healthDamage;
+            appliedDamage += healthDamage;
+        }
+
+        if (appliedDamage > 0)
+            RefreshUi();
+        return appliedDamage;
+    }
+
+    public bool CanSpendHealth(int amount)
+    {
+        return amount > 0 && _currentHealth - amount >= 1;
+    }
+
+    public bool TrySpendHealth(int amount)
+    {
+        if (!CanSpendHealth(amount))
+            return false;
+
+        _currentHealth -= amount;
+        RefreshUi();
+        return true;
+    }
 
     private void Awake()
     {
-        Initialize();
+        // Party slots may intentionally start without a definition. They are
+        // initialized later when DungeonPage assigns a CharacterSO through
+        // ConfigureDefinition().
+        if (original != null)
+            Initialize();
     }
 
     private void OnEnable()
@@ -68,6 +463,7 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
         LocalizationService.LocaleChanged -= HandleLocaleChanged;
         _itemTargetHandler = null;
         BindBattle(null, null);
+        SetCharacterData(null);
     }
 
     public bool Initialize()
@@ -86,7 +482,8 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
         LocalizationFontResolver.ApplyGameDefault(attackText);
         LocalizationFontResolver.ApplyGameDefault(cooldownText);
 
-        Data = original.CreateData();
+        SetCharacterData(CreateCharacterData(original));
+        _currentHealth = Data.MaximumHealth;
         InitializeAttackSfxSpeaker();
         _remainingCooldown = GetEffectiveAttackCooldown();
         _panelImage = GetComponent<Image>();
@@ -97,6 +494,7 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
         }
 
         _initialized = true;
+        EnsureSdInfoView();
         EnsureSkillTooltip();
         RefreshUi();
         return true;
@@ -112,7 +510,8 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
         IActiveSkillResource activeSkillResource,
         IBattleBoard board)
     {
-        _board?.ClearPreparedAttack(this);
+        if (_board != null)
+            _board.StatusApplied -= HandleStatusApplied;
         if (_activeSkillResource != null)
             _activeSkillResource.Changed -= HandleActiveSkillResourceChanged;
 
@@ -121,6 +520,8 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
 
         if (_activeSkillResource != null)
             _activeSkillResource.Changed += HandleActiveSkillResourceChanged;
+        if (_board != null)
+            _board.StatusApplied += HandleStatusApplied;
 
         RefreshUi();
     }
@@ -146,18 +547,53 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
         if (!_initialized)
             return Initialize();
 
-        Data = original.CreateData();
+        SetCharacterData(CreateCharacterData(original));
         ResetRuntime();
         return true;
     }
 
-    public bool ApplyUpgrade(ETurretUpgradeType upgradeType)
+    private void SetCharacterData(CharacterData data)
+    {
+        if (Data != null)
+            Data.StatsChanged -= HandleCharacterStatsChanged;
+
+        Data = data;
+        if (Data != null)
+            Data.StatsChanged += HandleCharacterStatsChanged;
+    }
+
+    private void HandleCharacterStatsChanged()
+    {
+        _currentHealth = Mathf.Clamp(
+            _currentHealth,
+            0,
+            MaximumHealth);
+        RefreshUi();
+    }
+
+    private static CharacterData CreateCharacterData(CharacterSO definition)
+    {
+        if (definition == null)
+            return null;
+
+        CharacterCollectionData collection =
+            DataManager.Current?.CharacterDatas;
+        return collection != null
+            ? collection.CreateRuntimeData(definition)
+            : definition.CreateData(new CharacterProgressData(
+                definition.CharacterId,
+                definition.InitiallyOwned));
+    }
+
+    public bool ApplyDungeonUpgrade(
+        int definitionIndex,
+        CharacterDungeonUpgradeType upgradeType)
     {
         if ((!_initialized && !Initialize()) || Data == null)
             return false;
 
         float previousCooldown = Data.AttackCooldown;
-        if (!Data.ApplyUpgrade(upgradeType))
+        if (!Data.ApplyDungeonUpgrade(definitionIndex, upgradeType))
             return false;
 
         if (Data.AttackCooldown < previousCooldown)
@@ -166,6 +602,7 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
                 _remainingCooldown,
                 GetEffectiveAttackCooldown());
         }
+
         RefreshUi();
         return true;
     }
@@ -179,13 +616,32 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
         _attackSpeedMultiplier = 1f;
         _powerBoostRemaining = 0f;
         _powerMultiplier = 1f;
+        _currentHealth = MaximumHealth;
+        _currentShield = 0;
+        IReadOnlyList<BattleStatusSnapshot> removedStatuses =
+            GetActiveStatusEffects();
+        _statusEffects.Clear();
+        foreach (BattleStatusSnapshot removedStatus in removedStatuses)
+        {
+            NotifyStatusChanged(
+                BattleStatusChangeType.Removed,
+                removedStatus,
+                new BattleStatusSnapshot(
+                    removedStatus.Definition,
+                    0,
+                    0f));
+        }
         _remainingCooldown = GetEffectiveAttackCooldown();
-        _disabledTimeRemaining = 0f;
         _attackRecoveryRemaining = 0f;
-        _dualSkillTimeRemaining = 0f;
-        _areaSkillAttackCount = 0;
-        _fireSkillAttackCount = 0;
+        _attackSdTimeRemaining = 0f;
+        _passiveSdTimeRemaining = 0f;
+        _skillSdTimeRemaining = 0f;
+        _lastAttackAttempted = false;
+        _lastAttackSucceeded = false;
+        _lastAttackTargets = default;
+        ResetPassiveCooldowns();
         TotalDamageDealt = 0;
+        EnsureSdInfoView();
         RefreshUi();
     }
 
@@ -195,11 +651,10 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
             return;
 
         _board = board;
+        TickSdActionTimers(deltaTime);
         TickTemporaryBoosts(deltaTime);
-        _dualSkillTimeRemaining = Mathf.Max(
-            0f,
-            _dualSkillTimeRemaining - deltaTime);
 
+        bool passiveCooldownPaused = IsActionDisabled();
         float activeDeltaTime = deltaTime;
         if (_attackRecoveryRemaining > 0f)
         {
@@ -215,16 +670,12 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
                 _remainingCooldown = GetEffectiveAttackCooldown();
         }
 
-        if (_disabledTimeRemaining > 0f)
-        {
-            float disabledDeltaTime = Mathf.Min(
-                activeDeltaTime,
-                _disabledTimeRemaining);
-            _disabledTimeRemaining = Mathf.Max(
-                0f,
-                _disabledTimeRemaining - disabledDeltaTime);
-            activeDeltaTime -= disabledDeltaTime;
-        }
+        float disabledDuration = GetDisabledDuration();
+        TickGenericStatusEffects(deltaTime, activeDeltaTime);
+        activeDeltaTime -= Mathf.Min(activeDeltaTime, disabledDuration);
+
+        if (!passiveCooldownPaused)
+            TickCooldownPassives(deltaTime, board);
 
         if (activeDeltaTime <= 0f)
         {
@@ -232,31 +683,11 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
             return;
         }
 
-        bool targetChanged = false;
-        if (Data.AttackType == CharacterAttackType.LowestHealth)
-        {
-            board.TryPrepareLowestHealthAttack(this, out targetChanged);
-        }
-        else if (Data.AttackType == CharacterAttackType.RandomMultiple)
-        {
-            board.TryPrepareRandomAttack(
-                this,
-                GetRandomTargetCount(),
-                out targetChanged);
-        }
-
-        if (targetChanged)
-        {
-            _remainingCooldown = Mathf.Max(
-                _remainingCooldown,
-                1f / _attackSpeedMultiplier);
-        }
-
         _remainingCooldown = Mathf.Max(0f, _remainingCooldown - activeDeltaTime);
         if (_remainingCooldown <= 0f && TryAttack(board))
         {
-            if (UsesAttackRecovery())
-                BeginTargetAttackRecovery();
+            if (Data.AttackRecoveryDuration > 0f)
+                BeginAttackRecovery(Data.AttackRecoveryDuration);
             else
                 _remainingCooldown = GetEffectiveAttackCooldown();
         }
@@ -271,11 +702,498 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
 
     public void DisableFor(float duration)
     {
-        duration = TimePrecision.FloorToTenth(duration);
-        _disabledTimeRemaining = Mathf.Max(
-            _disabledTimeRemaining,
-            duration);
+        StatusEffectSO stun =
+            StatusEffectDefinitionCatalog.FindById(StatusEffectIds.Stun);
+        if (!ApplyStatusEffect(stun, duration, 1))
+        {
+            Debug.LogWarning(
+                "Unable to apply the configured Stun status effect.",
+                this);
+        }
+    }
+
+    public bool ApplyStatusEffect(
+        StatusEffectSO definition,
+        float duration,
+        int stacks)
+    {
+        return ApplyStatusEffect(
+            definition,
+            duration,
+            stacks,
+            null);
+    }
+
+    public bool ApplyStatusEffect(
+        StatusEffectSO definition,
+        float duration,
+        int stacks,
+        IBattleCharacter source)
+    {
+        if (definition == null || !definition.CanTargetAlly || stacks <= 0 ||
+            string.IsNullOrWhiteSpace(definition.StatusId))
+        {
+            return false;
+        }
+
+        float remainingDuration = ResolveStatusDuration(definition, duration);
+        if (remainingDuration <= 0f)
+            return false;
+
+        float previousAttackSpeed = GetEffectiveAttackSpeed();
+        int previousStacks = GetStatusStackCount(definition);
+        BattleStatusSnapshot previousSnapshot = default;
+        bool wasActive = false;
+        if (!_statusEffects.TryGetValue(
+                definition.StatusId,
+                out StatusEffectRuntimeState state))
+        {
+            state = new StatusEffectRuntimeState(definition);
+            _statusEffects.Add(definition.StatusId, state);
+        }
+        else if (state != null && state.HasStacks)
+        {
+            wasActive = true;
+            previousSnapshot = CreateStatusSnapshot(state);
+        }
+
+        StatusEffectRuntimeMutation mutation = state.Apply(
+            stacks,
+            remainingDuration,
+            definition.TickInterval,
+            source);
+        if (!mutation.Succeeded)
+        {
+            if (!state.HasStacks)
+                _statusEffects.Remove(definition.StatusId);
+            return false;
+        }
+
+        int currentStacks = GetStatusStackCount(definition);
+        BattleStatusSnapshot currentSnapshot =
+            CreateStatusSnapshot(state);
+        NotifyStatusChanged(
+            wasActive
+                ? BattleStatusChangeType.Reapplied
+                : BattleStatusChangeType.Applied,
+            previousSnapshot,
+            currentSnapshot);
+        AdjustCooldownForAttackSpeedChange(
+            previousAttackSpeed,
+            GetEffectiveAttackSpeed());
         RefreshUi();
+        if (MatchesActiveStatusSnapshot(currentSnapshot))
+        {
+            NotifyStatusApplied(
+                definition,
+                previousStacks,
+                currentStacks,
+                source);
+        }
+        return true;
+    }
+
+    public int RemoveStatusEffects(
+        CharacterStatusRemovalTarget removalTarget,
+        StatusEffectSO statusEffect,
+        int removalCount)
+    {
+        if (removalCount < 0)
+            return 0;
+
+        float previousAttackSpeed = GetEffectiveAttackSpeed();
+        int removed = removalTarget switch
+        {
+            CharacterStatusRemovalTarget.Single =>
+                RemoveSingleStatusEffect(statusEffect, removalCount),
+            CharacterStatusRemovalTarget.Random =>
+                RemoveRandomStatusEffect(removalCount),
+            CharacterStatusRemovalTarget.All =>
+                RemoveAllStatusEffects(removalCount),
+            _ => 0
+        };
+        if (removed > 0)
+        {
+            AdjustCooldownForAttackSpeedChange(
+                previousAttackSpeed,
+                GetEffectiveAttackSpeed());
+            RefreshUi();
+        }
+        return removed;
+    }
+
+    private int RemoveSingleStatusEffect(
+        StatusEffectSO definition,
+        int removalCount)
+    {
+        if (definition == null || !definition.Removable)
+            return 0;
+
+        return RemoveStatusStacks(definition.StatusId, removalCount);
+    }
+
+    private int RemoveRandomStatusEffect(int removalCount)
+    {
+        List<StatusEffectSO> candidates = new();
+        foreach (StatusEffectRuntimeState state in _statusEffects.Values)
+        {
+            if (state.Definition != null &&
+                state.Definition.IncludedInRandomRemoval)
+            {
+                candidates.Add(state.Definition);
+            }
+        }
+
+        return candidates.Count == 0
+            ? 0
+            : RemoveSingleStatusEffect(
+                candidates[UnityEngine.Random.Range(0, candidates.Count)],
+                removalCount);
+    }
+
+    private int RemoveAllStatusEffects(int removalCount)
+    {
+        int removed = 0;
+        List<string> statusIds = new(_statusEffects.Keys);
+        foreach (string statusId in statusIds)
+        {
+            if (_statusEffects.TryGetValue(
+                    statusId,
+                    out StatusEffectRuntimeState state) &&
+                state.Definition != null &&
+                state.Definition.IncludedInAllRemoval)
+            {
+                removed += RemoveStatusStacks(
+                    statusId,
+                    removalCount);
+            }
+        }
+
+        return removed;
+    }
+
+    private int RemoveStatusStacks(
+        string statusId,
+        int removalCount)
+    {
+        if (string.IsNullOrWhiteSpace(statusId) ||
+            !_statusEffects.TryGetValue(
+                statusId,
+                out StatusEffectRuntimeState state) ||
+            state.Definition == null || !state.Definition.Removable)
+        {
+            return 0;
+        }
+
+        BattleStatusSnapshot previousSnapshot =
+            CreateStatusSnapshot(state);
+        StatusEffectRuntimeMutation mutation =
+            state.RemoveStacks(removalCount);
+        if (!mutation.Succeeded)
+            return 0;
+
+        BattleStatusSnapshot currentSnapshot =
+            CreateStatusSnapshot(state);
+        if (!state.HasStacks)
+            _statusEffects.Remove(statusId);
+        NotifyStatusChanged(
+            state.HasStacks
+                ? BattleStatusChangeType.StackChanged
+                : BattleStatusChangeType.Removed,
+            previousSnapshot,
+            currentSnapshot);
+        return mutation.RemovedStacks;
+    }
+
+    private void TickGenericStatusEffects(
+        float deltaTime,
+        float disableDeltaTime)
+    {
+        if (deltaTime <= 0f || _statusEffects.Count == 0)
+            return;
+
+        float previousAttackSpeed = GetEffectiveAttackSpeed();
+        bool changed = false;
+        List<string> statusIds = new(_statusEffects.Keys);
+        foreach (string statusId in statusIds)
+        {
+            if (!_statusEffects.TryGetValue(
+                    statusId,
+                    out StatusEffectRuntimeState state) ||
+                state == null)
+            {
+                continue;
+            }
+
+            float stateDeltaTime = HasContinuousStatusOperation(
+                state.Definition,
+                StatusEffectOperationType.DisableAction)
+                    ? disableDeltaTime
+                    : deltaTime;
+            changed |= AdvanceStatusState(state, stateDeltaTime);
+            if (!state.HasStacks)
+                _statusEffects.Remove(statusId);
+        }
+
+        if (changed)
+        {
+            AdjustCooldownForAttackSpeedChange(
+                previousAttackSpeed,
+                GetEffectiveAttackSpeed());
+            RefreshUi();
+        }
+    }
+
+    private bool AdvanceStatusState(
+        StatusEffectRuntimeState state,
+        float deltaTime)
+    {
+        if (state == null || deltaTime <= 0f)
+            return false;
+
+        bool changed = false;
+        float remainingDelta = deltaTime;
+        while (remainingDelta > 0f && state.HasStacks)
+        {
+            if (RemoveExpiredStatusBatch(state))
+            {
+                changed = true;
+                continue;
+            }
+
+            float activeDelta = state.AdvanceActiveDuration(remainingDelta);
+            if (activeDelta <= 0f)
+                break;
+
+            remainingDelta -= activeDelta;
+            state.ConsumePendingTickCount();
+            if (RemoveExpiredStatusBatch(state))
+                changed = true;
+        }
+
+        return changed;
+    }
+
+    private bool RemoveExpiredStatusBatch(StatusEffectRuntimeState state)
+    {
+        if (state == null)
+            return false;
+
+        BattleStatusSnapshot previousSnapshot =
+            CreateStatusSnapshot(state);
+        StatusEffectRuntimeMutation mutation =
+            state.RemoveExpiredActiveBatch();
+        if (!mutation.Succeeded)
+            return false;
+
+        BattleStatusSnapshot currentSnapshot =
+            CreateStatusSnapshot(state);
+        NotifyStatusChanged(
+            state.HasStacks
+                ? BattleStatusChangeType.StackChanged
+                : BattleStatusChangeType.Expired,
+            previousSnapshot,
+            currentSnapshot);
+        return true;
+    }
+
+    private static BattleStatusSnapshot CreateStatusSnapshot(
+        StatusEffectRuntimeState state)
+    {
+        return state?.Definition != null
+            ? new BattleStatusSnapshot(
+                state.Definition,
+                state.StackCount,
+                state.RemainingDuration,
+                state.ActiveBatch?.Source)
+            : default;
+    }
+
+    private bool MatchesActiveStatusSnapshot(
+        BattleStatusSnapshot expected)
+    {
+        if (!expected.IsValid ||
+            !_statusEffects.TryGetValue(
+                expected.Definition.StatusId,
+                out StatusEffectRuntimeState state) ||
+            state == null || !state.HasStacks)
+        {
+            return false;
+        }
+
+        BattleStatusSnapshot current = CreateStatusSnapshot(state);
+        return ReferenceEquals(current.Definition, expected.Definition) &&
+               current.StackCount == expected.StackCount &&
+               (current.RemainingDuration.Equals(
+                    expected.RemainingDuration) ||
+                Mathf.Approximately(
+                    current.RemainingDuration,
+                    expected.RemainingDuration));
+    }
+
+    private bool IsActionDisabled()
+    {
+        return GetDisabledStatusEffect() != null;
+    }
+
+    private float GetDisabledDuration()
+    {
+        float longestDuration = 0f;
+        foreach (StatusEffectRuntimeState state in _statusEffects.Values)
+        {
+            if (state == null || !state.HasStacks ||
+                !HasContinuousStatusOperation(
+                    state.Definition,
+                    StatusEffectOperationType.DisableAction))
+            {
+                continue;
+            }
+
+            longestDuration = Mathf.Max(
+                longestDuration,
+                state.RemainingDuration);
+        }
+
+        return longestDuration;
+    }
+
+    private StatusEffectSO GetDisabledStatusEffect()
+    {
+        StatusEffectSO result = null;
+        float longestDuration = 0f;
+        foreach (StatusEffectRuntimeState state in _statusEffects.Values)
+        {
+            if (state == null || !state.HasStacks ||
+                !HasContinuousStatusOperation(
+                    state.Definition,
+                    StatusEffectOperationType.DisableAction))
+            {
+                continue;
+            }
+
+            if (result == null ||
+                state.RemainingDuration > longestDuration)
+            {
+                result = state.Definition;
+                longestDuration = state.RemainingDuration;
+            }
+        }
+
+        return result;
+    }
+
+    private static bool HasContinuousStatusOperation(
+        StatusEffectSO definition,
+        StatusEffectOperationType operationType)
+    {
+        if (definition?.Operations == null)
+            return false;
+
+        foreach (StatusEffectOperationDefinition operation in
+                 definition.Operations)
+        {
+            if (operation != null &&
+                operation.Trigger == StatusEffectOperationTrigger.OnApply &&
+                operation.OperationType == operationType)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static float ResolveStatusDuration(
+        StatusEffectSO definition,
+        float duration)
+    {
+        if (definition.DurationMode == StatusEffectDurationMode.Permanent)
+            return float.PositiveInfinity;
+
+        return TimePrecision.Normalize(
+            duration > 0f ? duration : definition.DefaultDuration,
+            0.1f);
+    }
+
+    private void NotifyStatusApplied(
+        StatusEffectSO definition,
+        int previousStacks,
+        int currentStacks,
+        IBattleCharacter source)
+    {
+        _board?.NotifyStatusApplied(new BattleStatusAppliedEvent(
+            BattleStatusTarget.FromAlly(this),
+            definition,
+            previousStacks,
+            currentStacks,
+            source));
+    }
+
+    private void NotifyStatusChanged(
+        BattleStatusChangeType changeType,
+        BattleStatusSnapshot previous,
+        BattleStatusSnapshot current)
+    {
+        BattleStatusChangedEvent eventData = new(
+            BattleStatusTarget.FromAlly(this),
+            changeType,
+            previous,
+            current);
+        if (eventData.IsValid)
+            _statusChangeQueue.Enqueue(eventData);
+        DispatchStatusChanges();
+    }
+
+    private void DispatchStatusChanges()
+    {
+        if (_dispatchingStatusChanges)
+            return;
+
+        _dispatchingStatusChanges = true;
+        try
+        {
+            int dispatchedCount = 0;
+            while (_statusChangeQueue.Count > 0)
+            {
+                if (dispatchedCount >= MaximumStatusChangesPerDispatch)
+                {
+                    int discardedCount = _statusChangeQueue.Count;
+                    _statusChangeQueue.Clear();
+                    Debug.LogError(
+                        $"Status change dispatch exceeded " +
+                        $"{MaximumStatusChangesPerDispatch} events. " +
+                        $"Discarded {discardedCount} queued events to stop " +
+                        $"a re-entrant lifecycle loop.",
+                        this);
+                    break;
+                }
+
+                BattleStatusChangedEvent eventData =
+                    _statusChangeQueue.Dequeue();
+                dispatchedCount++;
+                StatusChanged?.Invoke(eventData);
+            }
+        }
+        finally
+        {
+            _dispatchingStatusChanges = false;
+        }
+    }
+
+    public void NotifyPassiveActivated()
+    {
+        NotifyPassiveActivated(PassiveSdDisplayDuration);
+    }
+
+    public void NotifyPassiveActivated(float duration)
+    {
+        if ((!_initialized && !Initialize()) || duration <= 0f)
+            return;
+
+        _passiveSdTimeRemaining = Mathf.Max(
+            _passiveSdTimeRemaining,
+            duration);
+        RefreshSdImage();
     }
 
     public void BindItemTargetHandler(
@@ -353,145 +1271,1908 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
     {
         if ((!_initialized && !Initialize()) ||
             _activeSkillResource == null || _board == null ||
-            _board.LivingEnemyCount <= 0 || IsActiveSkillPending() ||
-            !_activeSkillResource.TrySpend(Data.ActiveSkillCost))
+            Data == null || !Data.HasCustomSkillDefinitions)
         {
             return false;
         }
 
-        switch (Data.AttackType)
+        return TryActivateCustomSkill();
+    }
+
+    private bool TryActivateCustomSkill()
+    {
+        return Data.SkillExecutionPolicy ==
+               CharacterSkillExecutionPolicy.SequenceAll
+            ? TryActivateSkillSequence()
+            : TryActivateFirstSuccessfulSkill();
+    }
+
+    private bool TryActivateFirstSuccessfulSkill()
+    {
+        CharacterSkillDefinition selected = null;
+        AbilityTargetSelection selectedTargets = default;
+        IReadOnlyList<PreparedEffectExecution> selectedEffects =
+            System.Array.Empty<PreparedEffectExecution>();
+        EffectCostReservation selectedCostReservation = null;
+        int selectedDamage = 0;
+        foreach (CharacterSkillDefinition definition in Data.SkillDefinitions)
         {
-            case CharacterAttackType.RandomMultiple:
-                _dualSkillTimeRemaining = Data.ActiveSkillDuration;
-                _board.ClearPreparedAttack(this);
-                break;
-
-            case CharacterAttackType.CrossHighestHealth:
-                _areaSkillAttackCount = Data.ActiveSkillAttackCount;
-                break;
-
-            case CharacterAttackType.FireRandom:
-                _fireSkillAttackCount = Data.ActiveSkillAttackCount;
-                break;
-
-            default:
-                _board.ClearPreparedAttack(this);
-                int damageDealt = _board.TryAttackLowestHealthEnemy(
+            if (!EffectCostReservation.TryCreate(
+                    _activeSkillResource,
                     this,
-                    Data.SkillAttackDamage);
-                RecordDamageDealt(damageDealt);
-                if (damageDealt > 0)
-                {
-                    PlayAttackSfx();
-                    BeginTargetAttackRecovery();
-                }
-                break;
+                    Data.GetSkillCost(definition),
+                    out EffectCostReservation costReservation))
+            {
+                continue;
+            }
+
+            if (!TryPrepareSkillAction(
+                    definition,
+                    _lastAttackAttempted,
+                    _lastAttackSucceeded,
+                    _lastAttackTargets,
+                    out AbilityTargetSelection targets,
+                    out _,
+                    out IReadOnlyList<PreparedEffectExecution> effects,
+                    costReservation,
+                    out int damage))
+            {
+                continue;
+            }
+
+            selected = definition;
+            selectedTargets = targets;
+            selectedEffects = effects;
+            selectedCostReservation = costReservation;
+            selectedDamage = damage;
+            break;
         }
 
-        RefreshUi();
+        if (selected == null ||
+            !selectedCostReservation.TryCommitBaseCost())
+        {
+            return false;
+        }
+
+        BattleEffectResult effectResult = selected.HasExplicitEffects
+            ? ExecuteExplicitEffectsOnTargets(
+                _board,
+                selectedTargets,
+                selected.Effects,
+                CharacterActionKind.Skill,
+                selectedEffects)
+            : ExecuteLegacyAbilityOnTargets(
+                _board,
+                selectedTargets,
+                selected.DamageType,
+                selectedDamage,
+                selected.AppliedStatusEffect,
+                selected.StatusDuration,
+                selected.StatusStacks,
+                selected.StatusRemovalEffect,
+                selected.StatusRemovalTarget,
+                selected.StatusRemovalCount);
+        RecordDamageDealt(effectResult.DamageDealt);
+        if (effectResult.Succeeded)
+            PlayActionSfx(selected.AudioClip);
+
+        FinishCustomSkillActivation(effectResult.Succeeded);
         return true;
+    }
+
+    private bool TryActivateSkillSequence()
+    {
+        int skillCost = Data.ActiveSkillCost;
+        if (!EffectCostReservation.TryCreate(
+                _activeSkillResource,
+                this,
+                skillCost,
+                out _))
+        {
+            return false;
+        }
+
+        bool previousAttempted = _lastAttackAttempted;
+        bool previousSucceeded = _lastAttackSucceeded;
+        bool anyAttempted = false;
+        bool anySucceeded = false;
+        bool costPaid = false;
+        int totalDamage = 0;
+        AbilityTargetSelection previousTargets = _lastAttackTargets;
+        List<PreparedSkillAction> simultaneousGroup = new();
+
+        int definitionIndex = 0;
+        while (definitionIndex < Data.SkillDefinitions.Count)
+        {
+            CharacterSkillDefinition definition =
+                Data.SkillDefinitions[definitionIndex];
+            EffectCostReservation groupCostReservation;
+            if (costPaid)
+            {
+                groupCostReservation =
+                    CreateEffectCostReservation();
+            }
+            else if (!EffectCostReservation.TryCreate(
+                         _activeSkillResource,
+                         this,
+                         skillCost,
+                         out groupCostReservation))
+            {
+                return false;
+            }
+            if (!TryPrepareSkillAction(
+                    definition,
+                    previousAttempted,
+                    previousSucceeded,
+                    previousTargets,
+                    out AbilityTargetSelection targets,
+                    out AbilityTargetSelection selectedTargets,
+                    out IReadOnlyList<PreparedEffectExecution> effects,
+                    groupCostReservation,
+                    out int damage))
+            {
+                previousAttempted = false;
+                previousSucceeded = false;
+                previousTargets = default;
+                definitionIndex++;
+                continue;
+            }
+
+            simultaneousGroup.Clear();
+            simultaneousGroup.Add(new PreparedSkillAction(
+                definition,
+                targets,
+                selectedTargets,
+                effects,
+                damage));
+
+            // Simultaneous steps must resolve from one board snapshot.
+            // Otherwise an earlier hit can remove its center enemy and make a
+            // later area step lose that tile or hit a newly exposed enemy.
+            int nextDefinitionIndex = definitionIndex + 1;
+            bool skippedInvalidSimultaneousStep = false;
+            AbilityTargetSelection plannedPreviousTargets = selectedTargets;
+            while (nextDefinitionIndex < Data.SkillDefinitions.Count)
+            {
+                CharacterSkillDefinition nextDefinition =
+                    Data.SkillDefinitions[nextDefinitionIndex];
+                if (!IsSimultaneousSkillStep(nextDefinition))
+                    break;
+
+                if (!TryPrepareSkillAction(
+                        nextDefinition,
+                        true,
+                        false,
+                        plannedPreviousTargets,
+                        out AbilityTargetSelection nextTargets,
+                        out AbilityTargetSelection nextSelectedTargets,
+                        out IReadOnlyList<PreparedEffectExecution>
+                            nextEffects,
+                        groupCostReservation,
+                        out int nextDamage))
+                {
+                    skippedInvalidSimultaneousStep = true;
+                    nextDefinitionIndex++;
+                    break;
+                }
+
+                simultaneousGroup.Add(new PreparedSkillAction(
+                    nextDefinition,
+                    nextTargets,
+                    nextSelectedTargets,
+                    nextEffects,
+                    nextDamage));
+                plannedPreviousTargets = nextSelectedTargets;
+                nextDefinitionIndex++;
+            }
+
+            if (!costPaid)
+            {
+                if (!groupCostReservation.TryCommitBaseCost())
+                    return false;
+                costPaid = true;
+            }
+
+            foreach (PreparedSkillAction action in simultaneousGroup)
+            {
+                CharacterSkillDefinition actionDefinition =
+                    action.Definition;
+                BattleEffectResult effectResult =
+                    actionDefinition.HasExplicitEffects
+                        ? ExecuteExplicitEffectsOnTargets(
+                            _board,
+                            action.Targets,
+                            actionDefinition.Effects,
+                            CharacterActionKind.Skill,
+                            action.Effects)
+                        : ExecuteLegacyAbilityOnTargets(
+                            _board,
+                            action.Targets,
+                            actionDefinition.DamageType,
+                            action.Damage,
+                            actionDefinition.AppliedStatusEffect,
+                            actionDefinition.StatusDuration,
+                            actionDefinition.StatusStacks,
+                            actionDefinition.StatusRemovalEffect,
+                            actionDefinition.StatusRemovalTarget,
+                            actionDefinition.StatusRemovalCount);
+                totalDamage += effectResult.DamageDealt;
+                previousAttempted = effectResult.Attempted;
+                previousSucceeded = effectResult.Succeeded;
+                previousTargets = action.SelectedTargets;
+                anyAttempted |= effectResult.Attempted;
+                anySucceeded |= effectResult.Succeeded;
+                if (effectResult.Succeeded)
+                    PlayActionSfx(actionDefinition.AudioClip);
+            }
+
+            if (skippedInvalidSimultaneousStep)
+            {
+                previousAttempted = false;
+                previousSucceeded = false;
+                previousTargets = default;
+            }
+
+            definitionIndex = nextDefinitionIndex;
+        }
+
+        if (!anyAttempted)
+            return false;
+
+        RecordDamageDealt(totalDamage);
+        FinishCustomSkillActivation(anySucceeded);
+        return true;
+    }
+
+    private static bool IsSimultaneousSkillStep(
+        CharacterSkillDefinition definition)
+    {
+        return definition != null &&
+               definition.HasSection(CharacterSkillSectionType.Linkage) &&
+               definition.Linkage ==
+               CharacterActionLinkage.SimultaneousWithPreviousAttack;
+    }
+
+    private bool TryPrepareSkillAction(
+        CharacterSkillDefinition definition,
+        bool previousAttempted,
+        bool previousSucceeded,
+        AbilityTargetSelection inheritedTargets,
+        out AbilityTargetSelection targets,
+        out AbilityTargetSelection selectedTargets,
+        out IReadOnlyList<PreparedEffectExecution> effects,
+        EffectCostReservation costReservation,
+        out int damage)
+    {
+        targets = default;
+        selectedTargets = default;
+        effects = System.Array.Empty<PreparedEffectExecution>();
+        damage = 0;
+        if (definition == null ||
+            !definition.HasSection(CharacterSkillSectionType.Ability))
+        {
+            return false;
+        }
+
+        CharacterActionConditionData actionCondition =
+            Data.GetActionConditionData(definition);
+        if (!PassesLinkage(
+                actionCondition.Linkage,
+                previousAttempted,
+                previousSucceeded))
+        {
+            return false;
+        }
+
+        CharacterAttackSubject subject = definition.HasSection(
+            CharacterSkillSectionType.Subject)
+            ? definition.Subject
+            : CharacterAttackSubject.Random;
+        damage = Data.CalculateSkillDamage(
+            definition,
+            GetEffectivePowerMultiplier());
+        selectedTargets = SelectCustomAbilityTargets(
+            _board,
+            definition.TargetFaction,
+            subject,
+            definition.SubjectMetric,
+            definition.SubjectCount,
+            actionCondition.HasNumericConditions,
+            actionCondition.MatchMode,
+            actionCondition.NumericConditions,
+            inheritedTargets);
+        targets = ExpandCustomAbilityArea(
+            _board,
+            selectedTargets,
+            definition.AreaOffsets);
+        if (definition.HasExplicitEffects)
+        {
+            effects = PrepareExplicitEffects(
+                _board,
+                targets,
+                definition.Effects,
+                CharacterActionKind.Skill,
+                costReservation);
+            return CanExecutePreparedExplicitEffects(
+                definition.Effects,
+                effects,
+                CharacterActionKind.Skill);
+        }
+
+        return targets.Count > 0 &&
+               HasUsableAbilityValue(definition.DamageType, damage);
+    }
+
+    private EffectCostReservation CreateEffectCostReservation()
+    {
+        EffectCostReservation.TryCreate(
+            _activeSkillResource,
+            this,
+            0,
+            out EffectCostReservation reservation);
+        return reservation;
+    }
+
+    private void FinishCustomSkillActivation(bool succeeded)
+    {
+        if (succeeded && Data.ActiveSkillRecoveryDuration > 0f)
+            BeginAttackRecovery(Data.ActiveSkillRecoveryDuration);
+        _skillSdTimeRemaining = Mathf.Max(
+            _skillSdTimeRemaining,
+            SkillSdDisplayDuration);
+        RefreshUi();
     }
 
     private bool TryAttack(IBattleBoard board)
     {
-        int damageDealt;
-        switch (Data.AttackType)
+        return Data.HasCustomAttackDefinitions && TryCustomAttack(board);
+    }
+
+    private bool TryCustomAttack(IBattleBoard board)
+    {
+        bool previousAttempted = false;
+        bool previousSucceeded = false;
+        bool anyAttempted = false;
+        bool anySucceeded = false;
+        int totalDamage = 0;
+        AbilityTargetSelection previousTargets = default;
+        AbilityTargetSelection lastAttemptedTargets = default;
+        foreach (CharacterAttackDefinition definition in
+                 Data.AttackDefinitions)
         {
-            case CharacterAttackType.RandomMultiple:
-                damageDealt = board.TryResolveRandomAttack(
-                    this,
-                    _dualSkillTimeRemaining > 0f
-                        ? Data.SkillAttackDamage
-                        : GetNormalAttackDamage());
-                break;
+            if (definition == null ||
+                !definition.HasSection(CharacterAttackSectionType.Subject) ||
+                !definition.HasSection(CharacterAttackSectionType.Ability))
+            {
+                previousAttempted = false;
+                previousSucceeded = false;
+                previousTargets = default;
+                continue;
+            }
 
-            case CharacterAttackType.CrossHighestHealth:
-                if (_areaSkillAttackCount > 0)
-                {
-                    int adjacentDamage = Mathf.Max(
-                        1,
-                        Mathf.FloorToInt(Data.SkillAttackDamage * 0.5f));
-                    damageDealt = board.TryAttackCrossWithAdjacentSplash(
-                        this,
-                        Data.SkillAttackDamage,
-                        adjacentDamage);
-                    if (damageDealt > 0)
-                        _areaSkillAttackCount--;
-                }
-                else
-                {
-                    damageDealt = board.TryAttackCrossAroundHighestHealthEnemy(
-                        this,
-                        GetNormalAttackDamage());
-                }
-                break;
+            CharacterActionConditionData actionCondition =
+                Data.GetActionConditionData(definition);
+            if (!PassesLinkage(
+                    actionCondition.Linkage,
+                    previousAttempted,
+                    previousSucceeded))
+            {
+                previousAttempted = false;
+                previousSucceeded = false;
+                previousTargets = default;
+                continue;
+            }
 
-            case CharacterAttackType.FireRandom:
-                bool fireApplied = _fireSkillAttackCount > 0
-                    ? board.TryApplyFireAroundRandomEnemies(
-                        this,
-                        Data.FireSkillTargetCount,
-                        GetEffectiveFireDuration(),
-                        Data.FireTickInterval,
-                        Data.FireTickDamage)
-                    : board.TryApplyFireToRandomEnemy(
-                        this,
-                        GetEffectiveFireDuration(),
-                        Data.FireTickInterval,
-                        Data.FireTickDamage);
-                if (fireApplied && _fireSkillAttackCount > 0)
-                    _fireSkillAttackCount--;
-                if (fireApplied)
-                    PlayAttackSfx();
-                return fireApplied;
+            int abilityDamage = Data.CalculateAttackDamage(
+                definition,
+                GetEffectivePowerMultiplier());
+            AbilityTargetSelection targets;
+            BattleEffectResult effectResult;
+            if (definition.HasExplicitEffects)
+            {
+                targets = SelectCustomAbilityTargets(
+                    board,
+                    definition.TargetFaction,
+                    definition.Subject,
+                    definition.SubjectMetric,
+                    definition.SubjectCount,
+                    actionCondition.HasNumericConditions,
+                    actionCondition.MatchMode,
+                    actionCondition.NumericConditions,
+                    previousTargets);
+                targets = ExpandCustomAbilityArea(
+                    board,
+                    targets,
+                    definition.AreaOffsets);
+                IReadOnlyList<PreparedEffectExecution> effects =
+                    PrepareExplicitEffects(
+                        board,
+                        targets,
+                        definition.Effects,
+                        CharacterActionKind.Attack,
+                        CreateEffectCostReservation());
+                effectResult = HasUsableExplicitEffects(
+                    definition.Effects,
+                    CharacterActionKind.Attack)
+                    ? ExecuteExplicitEffectsOnTargets(
+                        board,
+                        targets,
+                        definition.Effects,
+                        CharacterActionKind.Attack,
+                        effects)
+                    : default;
+            }
+            else
+            {
+                bool succeeded = ExecuteCustomAbility(
+                    board,
+                    definition.TargetFaction,
+                    definition.Subject,
+                    definition.SubjectMetric,
+                    definition.SubjectCount,
+                    actionCondition.HasNumericConditions,
+                    actionCondition.MatchMode,
+                    actionCondition.NumericConditions,
+                    definition.DamageType,
+                    abilityDamage,
+                    definition.AppliedStatusEffect,
+                    definition.StatusDuration,
+                    definition.StatusStacks,
+                    definition.StatusRemovalEffect,
+                    definition.StatusRemovalTarget,
+                    definition.StatusRemovalCount,
+                    definition.AreaOffsets,
+                    previousTargets,
+                    out targets,
+                    out int damageDealt);
+                bool attempted = targets.Count > 0 &&
+                    HasUsableAbilityValue(
+                        definition.DamageType,
+                        abilityDamage);
+                effectResult = new BattleEffectResult(
+                    attempted,
+                    succeeded,
+                    damageDealt);
+            }
 
-            default:
-                damageDealt = board.TryResolveLowestHealthAttack(
-                    this,
-                    GetNormalAttackDamage());
-                break;
+            totalDamage += effectResult.DamageDealt;
+            previousAttempted = effectResult.Attempted;
+            previousSucceeded = effectResult.Succeeded;
+            previousTargets = effectResult.Attempted ? targets : default;
+            if (effectResult.Attempted)
+                lastAttemptedTargets = targets;
+            anyAttempted |= effectResult.Attempted;
+            anySucceeded |= effectResult.Succeeded;
+            if (effectResult.Succeeded)
+                PlayActionSfx(definition.AudioClip);
         }
 
-        if (damageDealt <= 0)
-            return false;
+        _lastAttackAttempted = anyAttempted;
+        _lastAttackSucceeded = anySucceeded;
+        _lastAttackTargets = anyAttempted
+            ? lastAttemptedTargets
+            : default;
+        RecordDamageDealt(totalDamage);
+        if (anyAttempted)
+        {
+            ShowAttackSd();
+            ExecuteCustomPassives(
+                board,
+                anyAttempted,
+                anySucceeded);
+        }
 
-        RecordDamageDealt(damageDealt);
-        PlayAttackSfx();
+        return anyAttempted || Data.AttackDefinitions.Count > 0;
+    }
+
+    private void ExecuteCustomPassives(
+        IBattleBoard board,
+        bool attackAttempted,
+        bool attackSucceeded)
+    {
+        if (!Data.HasCustomPassiveDefinitions)
+            return;
+
+        bool anyPassiveSucceeded = false;
+        int totalDamage = 0;
+        foreach (CharacterPassiveDefinition definition in
+                 Data.PassiveDefinitions)
+        {
+            if (definition == null ||
+                definition.Trigger != CharacterPassiveTrigger.OnAttack ||
+                !definition.HasSection(
+                    CharacterPassiveSectionType.Ability))
+            {
+                continue;
+            }
+
+            CharacterActionConditionData actionCondition =
+                Data.GetActionConditionData(definition);
+            if (!PassesLinkage(
+                    actionCondition.Linkage,
+                    attackAttempted,
+                    attackSucceeded))
+            {
+                continue;
+            }
+
+            bool succeeded = TryExecutePassiveAbility(
+                board,
+                definition,
+                actionCondition,
+                _lastAttackTargets,
+                out int damageDealt);
+            totalDamage += damageDealt;
+            anyPassiveSucceeded |= succeeded;
+        }
+
+        RecordDamageDealt(totalDamage);
+        if (anyPassiveSucceeded)
+            NotifyPassiveActivated();
+    }
+
+    private void TickCooldownPassives(float deltaTime, IBattleBoard board)
+    {
+        if (deltaTime <= 0f || board == null || Data == null ||
+            !Data.HasCustomPassiveDefinitions)
+        {
+            return;
+        }
+
+        bool anyPassiveSucceeded = false;
+        int totalDamage = 0;
+        foreach (CharacterPassiveDefinition definition in
+                 Data.PassiveDefinitions)
+        {
+            if (definition == null ||
+                definition.Trigger != CharacterPassiveTrigger.OnCooldown ||
+                !definition.HasSection(CharacterPassiveSectionType.Ability))
+            {
+                continue;
+            }
+
+            if (!_passiveCooldowns.TryGetValue(
+                    definition,
+                    out float remainingCooldown))
+            {
+                remainingCooldown = definition.Cooldown;
+            }
+
+            remainingCooldown -= deltaTime;
+            if (remainingCooldown > 0f)
+            {
+                _passiveCooldowns[definition] = remainingCooldown;
+                continue;
+            }
+
+            // Reset before execution so an unsuccessful attempt cannot retry
+            // every frame and status-triggered callbacks remain re-entrancy safe.
+            _passiveCooldowns[definition] = definition.Cooldown;
+            CharacterActionConditionData actionCondition =
+                Data.GetActionConditionData(definition);
+            bool succeeded = TryExecutePassiveAbility(
+                board,
+                definition,
+                actionCondition,
+                default,
+                out int damageDealt);
+            totalDamage += damageDealt;
+            anyPassiveSucceeded |= succeeded;
+        }
+
+        RecordDamageDealt(totalDamage);
+        if (anyPassiveSucceeded)
+            NotifyPassiveActivated();
+    }
+
+    private void ResetPassiveCooldowns()
+    {
+        _passiveCooldowns.Clear();
+        if (Data == null || !Data.HasCustomPassiveDefinitions)
+            return;
+
+        foreach (CharacterPassiveDefinition definition in
+                 Data.PassiveDefinitions)
+        {
+            if (definition != null &&
+                definition.Trigger == CharacterPassiveTrigger.OnCooldown)
+            {
+                _passiveCooldowns[definition] = definition.Cooldown;
+            }
+        }
+    }
+
+    private void HandleStatusApplied(BattleStatusAppliedEvent eventData)
+    {
+        if (!eventData.IsValid || !_initialized || Data == null ||
+            _board == null ||
+            !Data.HasCustomPassiveDefinitions)
+        {
+            return;
+        }
+
+        bool anyPassiveSucceeded = false;
+        int totalDamage = 0;
+        foreach (CharacterPassiveDefinition definition in
+                 Data.PassiveDefinitions)
+        {
+            if (definition == null ||
+                definition.Trigger !=
+                CharacterPassiveTrigger.OnStatusAcquired ||
+                !MatchesStatusTarget(
+                    definition.StatusTarget,
+                    eventData.Target.Faction) ||
+                !MatchesTriggerStatus(
+                    definition.TriggerStatusEffect,
+                    eventData.StatusEffect) ||
+                !definition.HasSection(CharacterPassiveSectionType.Ability))
+            {
+                continue;
+            }
+
+            CharacterActionConditionData actionCondition =
+                Data.GetActionConditionData(definition);
+            bool succeeded = TryExecutePassiveAbility(
+                _board,
+                definition,
+                actionCondition,
+                CreateStatusEventTargets(eventData.Target),
+                out int damageDealt);
+            totalDamage += damageDealt;
+            anyPassiveSucceeded |= succeeded;
+        }
+
+        RecordDamageDealt(totalDamage);
+        if (anyPassiveSucceeded)
+            NotifyPassiveActivated();
+    }
+
+    private static bool MatchesStatusTarget(
+        CharacterPassiveStatusTarget configuredTarget,
+        CharacterTargetFaction acquiredFaction)
+    {
+        return configuredTarget == CharacterPassiveStatusTarget.All ||
+               (configuredTarget == CharacterPassiveStatusTarget.Ally &&
+                acquiredFaction == CharacterTargetFaction.Ally) ||
+               (configuredTarget == CharacterPassiveStatusTarget.Enemy &&
+                acquiredFaction == CharacterTargetFaction.Enemy);
+    }
+
+    private static bool MatchesTriggerStatus(
+        StatusEffectSO configuredStatus,
+        StatusEffectSO acquiredStatus)
+    {
+        if (acquiredStatus == null)
+            return false;
+        if (configuredStatus == null)
+            return true;
+
+        return string.Equals(
+            configuredStatus.StatusId,
+            acquiredStatus.StatusId,
+            System.StringComparison.Ordinal);
+    }
+
+    private static AbilityTargetSelection CreateStatusEventTargets(
+        BattleStatusTarget target)
+    {
+        if (!target.IsValid)
+            return default;
+
+        return target.Faction == CharacterTargetFaction.Ally
+            ? AbilityTargetSelection.Allies(new[] { target.Ally })
+            : AbilityTargetSelection.Enemies(new[] { target.Enemy });
+    }
+
+    private bool TryExecutePassiveAbility(
+        IBattleBoard board,
+        CharacterPassiveDefinition definition,
+        CharacterActionConditionData actionCondition,
+        AbilityTargetSelection inheritedTargets,
+        out int damageDealt)
+    {
+        damageDealt = 0;
+        CharacterStatusStackCostDefinition cost =
+            definition?.HasSelfStatusCost == true
+                ? definition.SelfStatusCost
+                : null;
+        if (cost != null && GetStatusStackCount(cost.StatusEffect) <
+            cost.RequiredStacks)
+        {
+            return false;
+        }
+
+        bool succeeded = ExecutePassiveAbility(
+            board,
+            definition,
+            actionCondition,
+            inheritedTargets,
+            out damageDealt);
+        if (!succeeded || cost == null)
+            return succeeded;
+
+        if (TryConsumeStatusStacks(
+                cost.StatusEffect,
+                cost.ConsumedStacks))
+        {
+            return true;
+        }
+
+        Debug.LogError(
+            $"Failed to consume passive status cost for " +
+            $"'{Definition?.name ?? name}'.",
+            this);
         return true;
     }
 
-    private bool IsActiveSkillPending()
+    private bool ExecutePassiveAbility(
+        IBattleBoard board,
+        CharacterPassiveDefinition definition,
+        CharacterActionConditionData actionCondition,
+        AbilityTargetSelection inheritedTargets,
+        out int damageDealt)
     {
-        return Data.AttackType switch
+        damageDealt = 0;
+        if (board == null || definition == null ||
+            !definition.HasSection(CharacterPassiveSectionType.Ability))
         {
-            CharacterAttackType.RandomMultiple =>
-                _dualSkillTimeRemaining > 0f,
-            CharacterAttackType.CrossHighestHealth =>
-                _areaSkillAttackCount > 0,
-            CharacterAttackType.FireRandom =>
-                _fireSkillAttackCount > 0,
+            return false;
+        }
+
+        CharacterAttackSubject subject = definition.HasSection(
+            CharacterPassiveSectionType.Subject)
+            ? definition.Subject
+            : CharacterAttackSubject.Random;
+        BattleEffectResult effectResult;
+        if (definition.HasExplicitEffects)
+        {
+            AbilityTargetSelection targets = SelectCustomAbilityTargets(
+                board,
+                definition.TargetFaction,
+                subject,
+                definition.SubjectMetric,
+                definition.SubjectCount,
+                actionCondition.HasNumericConditions,
+                actionCondition.MatchMode,
+                actionCondition.NumericConditions,
+                inheritedTargets);
+            targets = ExpandCustomAbilityArea(
+                board,
+                targets,
+                definition.AreaOffsets);
+            IReadOnlyList<PreparedEffectExecution> effects =
+                PrepareExplicitEffects(
+                    board,
+                    targets,
+                    definition.Effects,
+                    CharacterActionKind.Passive,
+                    CreateEffectCostReservation());
+            effectResult = HasUsableExplicitEffects(
+                definition.Effects,
+                CharacterActionKind.Passive)
+                ? ExecuteExplicitEffectsOnTargets(
+                    board,
+                    targets,
+                    definition.Effects,
+                    CharacterActionKind.Passive,
+                    effects)
+                : default;
+        }
+        else
+        {
+            int legacyDamage =
+                Data.CalculatePassiveDamage(
+                    definition,
+                    GetEffectivePowerMultiplier());
+            bool succeeded = ExecuteCustomAbility(
+                board,
+                definition.TargetFaction,
+                subject,
+                definition.SubjectMetric,
+                definition.SubjectCount,
+                actionCondition.HasNumericConditions,
+                actionCondition.MatchMode,
+                actionCondition.NumericConditions,
+                definition.DamageType,
+                legacyDamage,
+                definition.AppliedStatusEffect,
+                definition.StatusDuration,
+                definition.StatusStacks,
+                definition.StatusRemovalEffect,
+                definition.StatusRemovalTarget,
+                definition.StatusRemovalCount,
+                definition.AreaOffsets,
+                inheritedTargets,
+                out AbilityTargetSelection targets,
+                out int legacyDamageDealt);
+            bool attempted = targets.Count > 0 && HasUsableAbilityValue(
+                definition.DamageType,
+                legacyDamage);
+            effectResult = new BattleEffectResult(
+                attempted,
+                succeeded,
+                legacyDamageDealt);
+        }
+
+        damageDealt = effectResult.DamageDealt;
+        if (effectResult.Succeeded)
+            PlayActionSfx(definition.AudioClip);
+        return effectResult.Succeeded;
+    }
+
+    private bool ExecuteCustomAbility(
+        IBattleBoard board,
+        CharacterTargetFaction targetFaction,
+        CharacterAttackSubject subject,
+        CharacterAttackSubjectMetric metric,
+        int targetCount,
+        bool hasNumericConditions,
+        CharacterConditionMatchMode conditionMatchMode,
+        IReadOnlyList<CharacterNumericCondition> numericConditions,
+        CharacterAttackDamageType damageType,
+        int damage,
+        StatusEffectSO appliedStatusEffect,
+        float statusDuration,
+        float statusStacks,
+        StatusEffectSO statusRemovalEffect,
+        CharacterStatusRemovalTarget statusRemovalTarget,
+        int statusRemovalCount,
+        IReadOnlyList<CharacterTargetAreaOffset> areaOffsets,
+        AbilityTargetSelection inheritedTargets,
+        out AbilityTargetSelection targets,
+        out int damageDealt)
+    {
+        targets = SelectCustomAbilityTargets(
+            board,
+            targetFaction,
+            subject,
+            metric,
+            targetCount,
+            hasNumericConditions,
+            conditionMatchMode,
+            numericConditions,
+            inheritedTargets);
+        targets = ExpandCustomAbilityArea(board, targets, areaOffsets);
+
+        return ExecuteCustomAbilityOnTargets(
+            board,
+            targets,
+            damageType,
+            damage,
+            appliedStatusEffect,
+            statusDuration,
+            statusStacks,
+            statusRemovalEffect,
+            statusRemovalTarget,
+            statusRemovalCount,
+            out damageDealt);
+    }
+
+    private static AbilityTargetSelection ExpandCustomAbilityArea(
+        IBattleBoard board,
+        AbilityTargetSelection targets,
+        IReadOnlyList<CharacterTargetAreaOffset> areaOffsets)
+    {
+        if (board == null ||
+            targets.Faction != CharacterTargetFaction.Enemy ||
+            targets.Count == 0 || areaOffsets == null ||
+            areaOffsets.Count == 0)
+        {
+            return targets;
+        }
+
+        return AbilityTargetSelection.Enemies(
+            board.ExpandCharacterAreaTargets(
+                targets.EnemyTargets,
+                areaOffsets),
+            true);
+    }
+
+    private AbilityTargetSelection SelectCustomAbilityTargets(
+        IBattleBoard board,
+        CharacterTargetFaction targetFaction,
+        CharacterAttackSubject subject,
+        CharacterAttackSubjectMetric metric,
+        int targetCount,
+        bool hasNumericConditions,
+        CharacterConditionMatchMode conditionMatchMode,
+        IReadOnlyList<CharacterNumericCondition> numericConditions,
+        AbilityTargetSelection inheritedTargets)
+    {
+        if (subject == CharacterAttackSubject.None)
+            return ReuseAbilityTargets(inheritedTargets);
+
+        IReadOnlyList<CharacterNumericCondition> conditions =
+            hasNumericConditions
+                ? numericConditions
+                : System.Array.Empty<CharacterNumericCondition>();
+        if (targetFaction == CharacterTargetFaction.Ally)
+        {
+            return AbilityTargetSelection.Allies(
+                board.SelectAlliedCharacters(
+                    this,
+                    subject,
+                    metric,
+                    targetCount,
+                    conditionMatchMode,
+                    conditions));
+        }
+
+        return AbilityTargetSelection.Enemies(
+            board.SelectCharacterTargets(
+                this,
+                subject,
+                metric,
+                targetCount,
+                conditionMatchMode,
+                conditions));
+    }
+
+    private IReadOnlyList<PreparedEffectExecution>
+        PrepareExplicitEffects(
+            IBattleBoard board,
+            AbilityTargetSelection actionTargets,
+            IReadOnlyList<CharacterEffectDefinition> effects,
+            CharacterActionKind actionKind,
+            EffectCostReservation costReservation)
+    {
+        if (effects == null || effects.Count == 0)
+            return System.Array.Empty<PreparedEffectExecution>();
+
+        PreparedEffectExecution[] preparedEffects =
+            new PreparedEffectExecution[effects.Count];
+        if (board == null)
+            return preparedEffects;
+
+        for (int index = 0; index < effects.Count; index++)
+        {
+            CharacterEffectDefinition effect = effects[index];
+            if (!IsUsableExplicitEffect(effect))
+            {
+                continue;
+            }
+
+            AbilityTargetSelection effectTargets = default;
+            if (effect.Type != CharacterEffectType.GainResource &&
+                effect.Type != CharacterEffectType.SpendResource &&
+                effect.Type != CharacterEffectType.SpendHealth &&
+                effect.TargetMode ==
+                CharacterEffectTargetMode.FreshSelection)
+            {
+                CharacterEffectTargetSelector selector =
+                    effect.TargetSelector;
+                if (selector != null &&
+                    selector.Subject != CharacterAttackSubject.None)
+                {
+                    AbilityTargetSelection selected =
+                        SelectCustomAbilityTargets(
+                            board,
+                            selector.TargetFaction,
+                            selector.Subject,
+                            selector.SubjectMetric,
+                            selector.SubjectCount,
+                            selector.HasNumericConditions,
+                            selector.ConditionMatchMode,
+                            selector.NumericConditions,
+                            default);
+                    effectTargets = ExpandCustomAbilityArea(
+                        board,
+                        selected,
+                        selector.AreaOffsets);
+                }
+            }
+
+            if (!MeetsEffectTargetPreconditions(
+                    actionTargets,
+                    effect,
+                    effectTargets))
+            {
+                continue;
+            }
+
+            int resourceSpendAmount = 0;
+            int healthSpendAmount = 0;
+            if (effect.Type == CharacterEffectType.SpendResource ||
+                effect.Type == CharacterEffectType.SpendHealth)
+            {
+                EffectContext reservationContext = new(
+                    this,
+                    board,
+                    _activeSkillResource,
+                    actionKind,
+                    actionTargets.Faction,
+                    actionTargets.EnemyTargets,
+                    actionTargets.AllyTargets,
+                    GetScalingAttackPower());
+                int spendAmount = Data.CalculateEffectAmount(
+                    effect,
+                    reservationContext);
+                bool reserved = effect.Type ==
+                                CharacterEffectType.SpendResource
+                    ? costReservation?.TryReserveEffectSpend(
+                        spendAmount) == true
+                    : costReservation?.TryReserveHealthSpend(
+                        spendAmount) == true;
+                if (spendAmount <= 0 || !reserved)
+                {
+                    continue;
+                }
+
+                if (effect.Type == CharacterEffectType.SpendResource)
+                    resourceSpendAmount = spendAmount;
+                else
+                    healthSpendAmount = spendAmount;
+            }
+
+            preparedEffects[index] = new PreparedEffectExecution(
+                effectTargets,
+                resourceSpendAmount,
+                healthSpendAmount);
+        }
+
+        return preparedEffects;
+    }
+
+    private static AbilityTargetSelection ReuseAbilityTargets(
+        AbilityTargetSelection targets)
+    {
+        if (targets.Count == 0)
+            return default;
+
+        return targets.Faction == CharacterTargetFaction.Ally
+            ? AbilityTargetSelection.Allies(targets.AllyTargets)
+            : AbilityTargetSelection.Enemies(targets.EnemyTargets);
+    }
+
+    private bool ExecuteCustomAbilityOnTargets(
+        IBattleBoard board,
+        AbilityTargetSelection targets,
+        CharacterAttackDamageType damageType,
+        int damage,
+        StatusEffectSO appliedStatusEffect,
+        float statusDuration,
+        float statusStacks,
+        StatusEffectSO statusRemovalEffect,
+        CharacterStatusRemovalTarget statusRemovalTarget,
+        int statusRemovalCount,
+        out int damageDealt)
+    {
+        damageDealt = 0;
+        if (targets.Count == 0)
+            return false;
+
+        if (damageType == CharacterAttackDamageType.StatusRemoval)
+        {
+            return targets.Faction == CharacterTargetFaction.Ally
+                ? board.TryRemoveAlliedCharacterStatus(
+                    this,
+                    targets.AllyTargets,
+                    statusRemovalTarget,
+                    statusRemovalEffect,
+                    statusRemovalCount)
+                : board.TryRemoveCharacterStatus(
+                    this,
+                    targets.EnemyTargets,
+                    statusRemovalTarget,
+                    statusRemovalEffect,
+                    statusRemovalCount,
+                    !targets.RangeAlreadyShown);
+        }
+
+        if (damageType == CharacterAttackDamageType.StatusEffect)
+        {
+            return targets.Faction == CharacterTargetFaction.Ally
+                ? board.TryApplyAlliedCharacterStatus(
+                    this,
+                    targets.AllyTargets,
+                    appliedStatusEffect,
+                    statusDuration,
+                    statusStacks)
+                : board.TryApplyCharacterStatus(
+                    this,
+                    targets.EnemyTargets,
+                    appliedStatusEffect,
+                    statusDuration,
+                    statusStacks,
+                    appliedStatusEffect?.TickInterval ?? 0f,
+                    !targets.RangeAlreadyShown);
+        }
+
+        // CharacterRuntime currently has no health or generic ally-effect
+        // receiver. Keep the selected allies intact in the target pipeline so
+        // upcoming buff/heal ability types can consume them without changing
+        // target selection again.
+        if (targets.Faction == CharacterTargetFaction.Ally)
+            return false;
+
+        IReadOnlyList<EnemyRuntime> enemyTargets = targets.EnemyTargets;
+
+        if (damage <= 0)
+            return false;
+
+        damageDealt = board.TryDamageCharacterTargets(
+            this,
+            enemyTargets,
+            damage,
+            damageType,
+            !targets.RangeAlreadyShown);
+        return damageDealt > 0;
+    }
+
+    private BattleEffectResult ExecuteLegacyAbilityOnTargets(
+        IBattleBoard board,
+        AbilityTargetSelection targets,
+        CharacterAttackDamageType damageType,
+        int damage,
+        StatusEffectSO appliedStatusEffect,
+        float statusDuration,
+        float statusStacks,
+        StatusEffectSO statusRemovalEffect,
+        CharacterStatusRemovalTarget statusRemovalTarget,
+        int statusRemovalCount)
+    {
+        bool succeeded = ExecuteCustomAbilityOnTargets(
+            board,
+            targets,
+            damageType,
+            damage,
+            appliedStatusEffect,
+            statusDuration,
+            statusStacks,
+            statusRemovalEffect,
+            statusRemovalTarget,
+            statusRemovalCount,
+            out int damageDealt);
+        return new BattleEffectResult(
+            targets.Count > 0 &&
+            HasUsableAbilityValue(damageType, damage),
+            succeeded,
+            damageDealt);
+    }
+
+    private BattleEffectResult ExecuteExplicitEffectsOnTargets(
+        IBattleBoard board,
+        AbilityTargetSelection targets,
+        IReadOnlyList<CharacterEffectDefinition> effects,
+        CharacterActionKind actionKind,
+        IReadOnlyList<PreparedEffectExecution> preparedEffects)
+    {
+        if (board == null || effects == null || effects.Count == 0 ||
+            !CanExecutePreparedExplicitEffects(
+                effects,
+                preparedEffects,
+                actionKind))
+        {
+            return default;
+        }
+
+        BattleEffectResult combined = default;
+        bool showAttackRange = !targets.RangeAlreadyShown;
+        EffectContext context = new(
+            this,
+            board,
+            _activeSkillResource,
+            actionKind,
+            targets.Faction,
+            targets.EnemyTargets,
+            targets.AllyTargets,
+            GetScalingAttackPower());
+        for (int index = 0; index < effects.Count; index++)
+        {
+            CharacterEffectDefinition effect = effects[index];
+            if (!IsUsableExplicitEffect(effect) ||
+                !MeetsExplicitEffectPreconditions(
+                    preparedEffects,
+                    index))
+            {
+                continue;
+            }
+
+            PreparedEffectExecution preparedEffect =
+                GetPreparedEffect(preparedEffects, index);
+            AbilityTargetSelection preparedTargets =
+                preparedEffect.Targets;
+            if (!TryResolveEffectContext(
+                    context,
+                    effect,
+                    preparedTargets,
+                    out EffectContext effectContext))
+            {
+                continue;
+            }
+
+            bool effectShowAttackRange =
+                effect.TargetMode ==
+                CharacterEffectTargetMode.FreshSelection
+                    ? !preparedTargets.RangeAlreadyShown
+                    : showAttackRange;
+            BattleEffectResult current = ExecuteExplicitEffectOnTargets(
+                effectContext,
+                effect,
+                effectShowAttackRange,
+                preparedEffect.ResourceSpendAmount,
+                preparedEffect.HealthSpendAmount);
+            combined = combined.Combine(current);
+            if (current.Attempted &&
+                effect.TargetMode ==
+                CharacterEffectTargetMode.InheritAction &&
+                effectContext.TargetFaction ==
+                CharacterTargetFaction.Enemy)
+            {
+                showAttackRange = false;
+            }
+
+            if (!current.Succeeded &&
+                effect.FailurePolicy ==
+                CharacterEffectFailurePolicy.StopRemainingEffects)
+            {
+                break;
+            }
+        }
+
+        return combined;
+    }
+
+    private static bool TryResolveEffectContext(
+        EffectContext actionContext,
+        CharacterEffectDefinition effect,
+        AbilityTargetSelection preparedTargets,
+        out EffectContext effectContext)
+    {
+        effectContext = default;
+        if (effect == null)
+            return false;
+        if (effect.Type == CharacterEffectType.GainResource ||
+            effect.Type == CharacterEffectType.SpendResource ||
+            effect.Type == CharacterEffectType.SpendHealth)
+        {
+            effectContext = actionContext;
+            return true;
+        }
+
+        switch (effect.TargetMode)
+        {
+            case CharacterEffectTargetMode.InheritAction:
+                effectContext = actionContext;
+                return true;
+            case CharacterEffectTargetMode.Source:
+                effectContext = actionContext.RetargetToSource();
+                return effectContext.HasTargets;
+            case CharacterEffectTargetMode.FreshSelection:
+                if (preparedTargets.Count == 0)
+                    return false;
+                effectContext = actionContext.RetargetTo(
+                    preparedTargets.Faction,
+                    preparedTargets.EnemyTargets,
+                    preparedTargets.AllyTargets);
+                return effectContext.HasTargets;
+            default:
+                return false;
+        }
+    }
+
+    private BattleEffectResult ExecuteExplicitEffectOnTargets(
+        EffectContext context,
+        CharacterEffectDefinition effect,
+        bool showAttackRange,
+        int preparedResourceSpendAmount,
+        int preparedHealthSpendAmount)
+    {
+        if (context.Board == null || effect == null ||
+            (!context.HasTargets &&
+             effect.Type != CharacterEffectType.GainResource &&
+             effect.Type != CharacterEffectType.SpendResource &&
+             effect.Type != CharacterEffectType.SpendHealth))
+        {
+            return default;
+        }
+
+        EffectContext effectContext = context.SnapshotSourceStatus(
+            effect.SourceStatusScalingEffect);
+        switch (effect.Type)
+        {
+            case CharacterEffectType.Damage:
+            {
+                if (!IsDirectDamageType(effect.DamageType))
+                    return default;
+
+                if (effectContext.TargetFaction ==
+                    CharacterTargetFaction.Ally)
+                {
+                    return new BattleEffectResult(true, false);
+                }
+
+                if (effect.DamageScaling.HasTargetDependentTerm)
+                {
+                    return ExecuteTargetScaledDamage(
+                        effectContext,
+                        effect,
+                        showAttackRange);
+                }
+
+                int damage = Data.CalculateEffectDamage(
+                    effect,
+                    effectContext);
+                if (damage <= 0)
+                    return default;
+
+                int damageDealt =
+                    effectContext.Board.TryDamageCharacterTargets(
+                    effectContext.Source,
+                    effectContext.EnemyTargets,
+                    damage,
+                    effect.DamageType,
+                    showAttackRange);
+                return new BattleEffectResult(
+                    true,
+                    damageDealt > 0,
+                    damageDealt);
+            }
+            case CharacterEffectType.ApplyStatus:
+            {
+                if (effect.StatusEffect == null)
+                    return default;
+
+                bool changed = effectContext.TargetFaction ==
+                               CharacterTargetFaction.Ally
+                    ? effectContext.Board.TryApplyAlliedCharacterStatus(
+                        effectContext.Source,
+                        effectContext.AllyTargets,
+                        effect.StatusEffect,
+                        effect.StatusDuration,
+                        effect.StatusStacks)
+                    : effectContext.Board.TryApplyCharacterStatus(
+                        effectContext.Source,
+                        effectContext.EnemyTargets,
+                        effect.StatusEffect,
+                        effect.StatusDuration,
+                        effect.StatusStacks,
+                        effect.StatusEffect.TickInterval,
+                        showAttackRange);
+                return new BattleEffectResult(true, changed);
+            }
+            case CharacterEffectType.RemoveStatus:
+            {
+                if (effect.StatusRemovalTarget ==
+                        CharacterStatusRemovalTarget.Single &&
+                    effect.StatusEffect == null)
+                {
+                    return default;
+                }
+
+                bool changed = effectContext.TargetFaction ==
+                               CharacterTargetFaction.Ally
+                    ? effectContext.Board.TryRemoveAlliedCharacterStatus(
+                        effectContext.Source,
+                        effectContext.AllyTargets,
+                        effect.StatusRemovalTarget,
+                        effect.StatusEffect,
+                        effect.StatusRemovalCount)
+                    : effectContext.Board.TryRemoveCharacterStatus(
+                        effectContext.Source,
+                        effectContext.EnemyTargets,
+                        effect.StatusRemovalTarget,
+                        effect.StatusEffect,
+                        effect.StatusRemovalCount,
+                        showAttackRange);
+                return new BattleEffectResult(true, changed);
+            }
+            case CharacterEffectType.GainResource:
+            {
+                int amount = Data.CalculateEffectAmount(
+                    effect,
+                    effectContext);
+                if (amount <= 0)
+                    return new BattleEffectResult(true, false);
+
+                bool changed =
+                    effectContext.Resource?.TryGain(amount) == true;
+                return new BattleEffectResult(true, changed);
+            }
+            case CharacterEffectType.SpendResource:
+            {
+                if (preparedResourceSpendAmount <= 0)
+                    return new BattleEffectResult(true, false);
+
+                bool changed =
+                    effectContext.Resource?.TrySpend(
+                        preparedResourceSpendAmount) == true;
+                return new BattleEffectResult(true, changed);
+            }
+            case CharacterEffectType.Heal:
+                return ExecuteHeal(
+                    effectContext,
+                    effect,
+                    showAttackRange);
+            case CharacterEffectType.Shield:
+                return ExecuteShield(
+                    effectContext,
+                    effect,
+                    showAttackRange);
+            case CharacterEffectType.SpendHealth:
+            {
+                if (preparedHealthSpendAmount <= 0)
+                    return new BattleEffectResult(true, false);
+
+                bool changed =
+                    effectContext.Source?.TrySpendHealth(
+                        preparedHealthSpendAmount) == true;
+                return new BattleEffectResult(true, changed);
+            }
+            default:
+                return default;
+        }
+    }
+
+    private BattleEffectResult ExecuteHeal(
+        EffectContext context,
+        CharacterEffectDefinition effect,
+        bool showAttackRange)
+    {
+        if (!effect.AmountScaling.HasTargetDependentTerm)
+        {
+            int amount = Data.CalculateEffectAmount(effect, context);
+            if (amount <= 0)
+                return default;
+
+            int healed = context.TargetFaction ==
+                         CharacterTargetFaction.Ally
+                ? context.Board.TryHealAlliedCharacters(
+                    context.Source,
+                    context.AllyTargets,
+                    amount)
+                : context.Board.TryHealCharacterTargets(
+                    context.Source,
+                    context.EnemyTargets,
+                    amount,
+                    showAttackRange);
+            return new BattleEffectResult(true, healed > 0);
+        }
+
+        bool attempted = false;
+        int totalHealed = 0;
+        if (context.TargetFaction == CharacterTargetFaction.Ally)
+        {
+            HashSet<IBattleCharacter> uniqueTargets = new();
+            foreach (IBattleCharacter target in context.AllyTargets)
+            {
+                if (target == null || !uniqueTargets.Add(target))
+                    continue;
+
+                EffectContext targetContext = context.BindAllyTarget(
+                    target,
+                    effect.TargetStatusScalingEffect);
+                int amount = Data.CalculateEffectAmount(
+                    effect,
+                    targetContext);
+                if (amount <= 0)
+                    continue;
+
+                attempted = true;
+                totalHealed += context.Board.TryHealAlliedCharacters(
+                    context.Source,
+                    new[] { target },
+                    amount);
+            }
+        }
+        else
+        {
+            HashSet<EnemyRuntime> uniqueTargets = new();
+            foreach (EnemyRuntime target in context.EnemyTargets)
+            {
+                if (target == null || !uniqueTargets.Add(target))
+                    continue;
+
+                EffectContext targetContext = context.BindEnemyTarget(
+                    target,
+                    effect.TargetStatusScalingEffect);
+                int amount = Data.CalculateEffectAmount(
+                    effect,
+                    targetContext);
+                if (amount <= 0)
+                    continue;
+
+                attempted = true;
+                totalHealed += context.Board.TryHealCharacterTargets(
+                    context.Source,
+                    new[] { target },
+                    amount,
+                    showAttackRange);
+            }
+        }
+
+        return new BattleEffectResult(
+            attempted,
+            totalHealed > 0);
+    }
+
+    private BattleEffectResult ExecuteShield(
+        EffectContext context,
+        CharacterEffectDefinition effect,
+        bool showAttackRange)
+    {
+        if (!effect.AmountScaling.HasTargetDependentTerm)
+        {
+            int amount = Data.CalculateEffectAmount(effect, context);
+            if (amount <= 0)
+                return default;
+
+            int granted = context.TargetFaction ==
+                          CharacterTargetFaction.Ally
+                ? context.Board.TryGrantShieldToAlliedCharacters(
+                    context.Source,
+                    context.AllyTargets,
+                    amount)
+                : context.Board.TryGrantShieldToCharacterTargets(
+                    context.Source,
+                    context.EnemyTargets,
+                    amount,
+                    showAttackRange);
+            return new BattleEffectResult(true, granted > 0);
+        }
+
+        bool attempted = false;
+        int totalGranted = 0;
+        if (context.TargetFaction == CharacterTargetFaction.Ally)
+        {
+            HashSet<IBattleCharacter> uniqueTargets = new();
+            foreach (IBattleCharacter target in context.AllyTargets)
+            {
+                if (target == null || !uniqueTargets.Add(target))
+                    continue;
+
+                EffectContext targetContext = context.BindAllyTarget(
+                    target,
+                    effect.TargetStatusScalingEffect);
+                int amount = Data.CalculateEffectAmount(
+                    effect,
+                    targetContext);
+                if (amount <= 0)
+                    continue;
+
+                attempted = true;
+                totalGranted +=
+                    context.Board.TryGrantShieldToAlliedCharacters(
+                        context.Source,
+                        new[] { target },
+                        amount);
+            }
+        }
+        else
+        {
+            HashSet<EnemyRuntime> uniqueTargets = new();
+            foreach (EnemyRuntime target in context.EnemyTargets)
+            {
+                if (target == null || !uniqueTargets.Add(target))
+                    continue;
+
+                EffectContext targetContext = context.BindEnemyTarget(
+                    target,
+                    effect.TargetStatusScalingEffect);
+                int amount = Data.CalculateEffectAmount(
+                    effect,
+                    targetContext);
+                if (amount <= 0)
+                    continue;
+
+                attempted = true;
+                totalGranted +=
+                    context.Board.TryGrantShieldToCharacterTargets(
+                        context.Source,
+                        new[] { target },
+                        amount,
+                        showAttackRange);
+            }
+        }
+
+        return new BattleEffectResult(
+            attempted,
+            totalGranted > 0);
+    }
+
+    private BattleEffectResult ExecuteTargetScaledDamage(
+        EffectContext context,
+        CharacterEffectDefinition effect,
+        bool showAttackRange)
+    {
+        List<TargetDamageSnapshot> snapshots = new(
+            context.EnemyTargets.Count);
+        HashSet<EnemyRuntime> uniqueTargets = new();
+        foreach (EnemyRuntime target in context.EnemyTargets)
+        {
+            if (target == null || !uniqueTargets.Add(target))
+                continue;
+
+            EffectContext targetContext = context.BindEnemyTarget(
+                target,
+                effect.TargetStatusScalingEffect);
+            snapshots.Add(new TargetDamageSnapshot(
+                target,
+                Data.CalculateEffectDamage(effect, targetContext)));
+        }
+
+        if (snapshots.Count == 0)
+            return default;
+
+        int totalDamageDealt = 0;
+        int groupedDamage = 0;
+        List<EnemyRuntime> groupedTargets = new();
+        foreach (TargetDamageSnapshot snapshot in snapshots)
+        {
+            if (snapshot.Damage <= 0)
+                continue;
+
+            if (groupedTargets.Count > 0 &&
+                snapshot.Damage != groupedDamage)
+            {
+                totalDamageDealt +=
+                    context.Board.TryDamageCharacterTargets(
+                        context.Source,
+                        groupedTargets,
+                        groupedDamage,
+                        effect.DamageType,
+                        showAttackRange);
+                groupedTargets.Clear();
+            }
+
+            groupedDamage = snapshot.Damage;
+            groupedTargets.Add(snapshot.Target);
+        }
+
+        if (groupedTargets.Count > 0)
+        {
+            totalDamageDealt +=
+                context.Board.TryDamageCharacterTargets(
+                    context.Source,
+                    groupedTargets,
+                    groupedDamage,
+                    effect.DamageType,
+                    showAttackRange);
+        }
+
+        return new BattleEffectResult(
+            true,
+            totalDamageDealt > 0,
+            totalDamageDealt);
+    }
+
+    private bool HasUsableExplicitEffects(
+        IReadOnlyList<CharacterEffectDefinition> effects,
+        CharacterActionKind actionKind)
+    {
+        if (effects == null)
+            return false;
+
+        _ = actionKind;
+        foreach (CharacterEffectDefinition effect in effects)
+        {
+            if (IsUsableExplicitEffect(effect))
+                return true;
+        }
+
+        return false;
+    }
+
+    private bool CanExecutePreparedExplicitEffects(
+        IReadOnlyList<CharacterEffectDefinition> effects,
+        IReadOnlyList<PreparedEffectExecution> preparedEffects,
+        CharacterActionKind actionKind)
+    {
+        if (effects == null)
+            return false;
+
+        _ = actionKind;
+        bool hasPreparedEffect = false;
+        for (int index = 0; index < effects.Count; index++)
+        {
+            CharacterEffectDefinition effect = effects[index];
+            if (!IsUsableExplicitEffect(effect))
+                continue;
+
+            if (MeetsExplicitEffectPreconditions(
+                    preparedEffects,
+                    index))
+            {
+                hasPreparedEffect = true;
+                continue;
+            }
+
+            if (effect.PreconditionFailurePolicy !=
+                CharacterEffectPreconditionFailurePolicy.SkipEffect)
+            {
+                return false;
+            }
+        }
+
+        return hasPreparedEffect;
+    }
+
+    private static bool MeetsExplicitEffectPreconditions(
+        IReadOnlyList<PreparedEffectExecution> preparedEffects,
+        int effectIndex)
+    {
+        return GetPreparedEffect(
+            preparedEffects,
+            effectIndex).IsPrepared;
+    }
+
+    private static PreparedEffectExecution GetPreparedEffect(
+        IReadOnlyList<PreparedEffectExecution> preparedEffects,
+        int effectIndex)
+    {
+        if (preparedEffects == null ||
+            effectIndex < 0 ||
+            effectIndex >= preparedEffects.Count)
+        {
+            return default;
+        }
+
+        return preparedEffects[effectIndex];
+    }
+
+    private static bool MeetsEffectTargetPreconditions(
+        AbilityTargetSelection actionTargets,
+        CharacterEffectDefinition effect,
+        AbilityTargetSelection preparedTargets)
+    {
+        if (effect == null)
+            return false;
+        if (effect.Type == CharacterEffectType.GainResource ||
+            effect.Type == CharacterEffectType.SpendResource ||
+            effect.Type == CharacterEffectType.SpendHealth ||
+            effect.TargetMode == CharacterEffectTargetMode.Source)
+        {
+            return true;
+        }
+
+        return effect.TargetMode switch
+        {
+            CharacterEffectTargetMode.InheritAction =>
+                actionTargets.Count > 0,
+            CharacterEffectTargetMode.FreshSelection =>
+                preparedTargets.Count > 0,
             _ => false,
         };
     }
 
-    private int GetRandomTargetCount()
+    private static bool IsUsableExplicitEffect(
+        CharacterEffectDefinition effect)
     {
-        int bonusTargetCount = _dualSkillTimeRemaining > 0f ? 2 : 0;
-        return Data.TargetCount + bonusTargetCount;
+        if (effect == null ||
+            !System.Enum.IsDefined(
+                typeof(CharacterEffectTargetMode),
+                effect.TargetMode) ||
+            !System.Enum.IsDefined(
+                typeof(CharacterEffectPreconditionFailurePolicy),
+                effect.PreconditionFailurePolicy) ||
+            !System.Enum.IsDefined(
+                typeof(CharacterEffectFailurePolicy),
+                effect.FailurePolicy))
+        {
+            return false;
+        }
+
+        switch (effect.Type)
+        {
+            case CharacterEffectType.Damage:
+                return effect.TargetMode !=
+                           CharacterEffectTargetMode.Source &&
+                       IsDirectDamageType(effect.DamageType) &&
+                       effect.DamageScaling.IsFinite &&
+                       effect.DamageScaling.HasNonZeroTerm;
+            case CharacterEffectType.ApplyStatus:
+                return effect.StatusEffect != null &&
+                       (effect.TargetMode !=
+                            CharacterEffectTargetMode.Source ||
+                        effect.StatusEffect.CanTargetAlly);
+            case CharacterEffectType.RemoveStatus:
+                return effect.StatusRemovalTarget !=
+                           CharacterStatusRemovalTarget.Single ||
+                       (effect.StatusEffect != null &&
+                        (effect.TargetMode !=
+                             CharacterEffectTargetMode.Source ||
+                         effect.StatusEffect.CanTargetAlly));
+            case CharacterEffectType.GainResource:
+                return effect.AmountScaling.IsFinite &&
+                       effect.AmountScaling.HasNonZeroTerm;
+            case CharacterEffectType.SpendResource:
+                return effect.AmountMode ==
+                           CharacterDamageAmountMode.Fixed &&
+                       !float.IsNaN(effect.Amount) &&
+                       !float.IsInfinity(effect.Amount) &&
+                       effect.Amount >= 1f &&
+                       effect.SourceResourceScale == 0f &&
+                       effect.TargetCurrentHealthScale == 0f &&
+                       effect.TargetMaxHealthScale == 0f &&
+                       effect.SourceStatusStacksScale == 0f &&
+                       effect.TargetStatusStacksScale == 0f;
+            case CharacterEffectType.Heal:
+                return effect.AmountScaling.IsFinite &&
+                       effect.AmountScaling.HasNonZeroTerm;
+            case CharacterEffectType.Shield:
+                return effect.AmountScaling.IsFinite &&
+                       effect.AmountScaling.HasNonZeroTerm;
+            case CharacterEffectType.SpendHealth:
+                return effect.AmountMode ==
+                           CharacterDamageAmountMode.Fixed &&
+                       !float.IsNaN(effect.Amount) &&
+                       !float.IsInfinity(effect.Amount) &&
+                       effect.Amount >= 1f &&
+                       effect.SourceResourceScale == 0f &&
+                       effect.TargetCurrentHealthScale == 0f &&
+                       effect.TargetMaxHealthScale == 0f &&
+                       effect.SourceStatusStacksScale == 0f &&
+                       effect.TargetStatusStacksScale == 0f;
+            default:
+                return false;
+        }
     }
 
-    private bool UsesAttackRecovery()
+    private static bool IsDirectDamageType(
+        CharacterAttackDamageType damageType)
     {
-        return Data.AttackType == CharacterAttackType.LowestHealth ||
-               Data.AttackType == CharacterAttackType.RandomMultiple ||
-               Data.AttackType == CharacterAttackType.CrossHighestHealth;
+        return damageType == CharacterAttackDamageType.Physical ||
+               damageType == CharacterAttackDamageType.Magical ||
+               damageType == CharacterAttackDamageType.Fixed;
     }
 
-    private void BeginTargetAttackRecovery()
+    private static bool HasUsableAbilityValue(
+        CharacterAttackDamageType damageType,
+        int damage)
     {
+        return damageType == CharacterAttackDamageType.StatusEffect ||
+               damageType == CharacterAttackDamageType.StatusRemoval ||
+               damage > 0;
+    }
+
+    private static bool PassesLinkage(
+        CharacterActionLinkage linkage,
+        bool previousAttempted,
+        bool previousSucceeded)
+    {
+        if (linkage == CharacterActionLinkage.None)
+            return true;
+
+        return linkage switch
+        {
+            CharacterActionLinkage.PreviousAttackSucceeded =>
+                previousSucceeded,
+            CharacterActionLinkage.SimultaneousWithPreviousAttack =>
+                previousAttempted,
+            _ => true,
+        };
+    }
+
+    private void ShowAttackSd()
+    {
+        _attackSdTimeRemaining = Mathf.Max(
+            _attackSdTimeRemaining,
+            AttackSdDisplayDuration);
+        RefreshSdImage();
+    }
+
+    private void TickSdActionTimers(float deltaTime)
+    {
+        _attackSdTimeRemaining = Mathf.Max(
+            0f,
+            _attackSdTimeRemaining - deltaTime);
+        _passiveSdTimeRemaining = Mathf.Max(
+            0f,
+            _passiveSdTimeRemaining - deltaTime);
+        _skillSdTimeRemaining = Mathf.Max(
+            0f,
+            _skillSdTimeRemaining - deltaTime);
+    }
+
+    private void BeginAttackRecovery(float duration)
+    {
+        duration = TimePrecision.Normalize(duration);
+        if (duration <= 0f)
+            return;
+
         _remainingCooldown = 0f;
-        _attackRecoveryRemaining =
-            TargetAttackRecoveryDuration / _attackSpeedMultiplier;
+        _attackRecoveryRemaining = duration /
+            Mathf.Max(TimePrecision.Step, GetEffectiveAttackSpeedRatio());
     }
 
     private void TickTemporaryBoosts(float deltaTime)
@@ -522,43 +3203,134 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
 
     private float GetEffectiveAttackCooldown()
     {
+        float attackSpeed = GetEffectiveAttackSpeed();
+        return attackSpeed > 0f ? 1f / attackSpeed : 0f;
+    }
+
+    private float GetEffectiveAttackPower()
+    {
+        if (Data == null)
+            return 0f;
+
+        float modifiedPower = GetStatusModifiedStat(
+            Data.AttackPower,
+            StatusEffectOperationType.AttackPowerModifier);
+        return Mathf.Max(0f, modifiedPower * _powerMultiplier);
+    }
+
+    private float GetEffectivePowerMultiplier()
+    {
+        if (Data == null || Data.AttackPower <= 0f)
+            return Mathf.Max(0f, _powerMultiplier);
+
+        return GetEffectiveAttackPower() / Data.AttackPower;
+    }
+
+    private float GetScalingAttackPower()
+    {
         return Data != null
-            ? Data.AttackCooldown / Mathf.Max(1f, _attackSpeedMultiplier)
+            ? Data.AttackPower * GetEffectivePowerMultiplier()
             : 0f;
     }
 
-    private int GetNormalAttackDamage()
+    private float GetEffectiveAttackSpeed()
     {
-        return Data != null
-            ? Mathf.Max(
-                1,
-                Mathf.RoundToInt(Data.AttackDamage * _powerMultiplier))
-            : 0;
+        float baseAttackSpeed = GetBaseAttackSpeed();
+        if (baseAttackSpeed <= 0f)
+            return 0f;
+
+        float modifiedSpeed = GetStatusModifiedStat(
+            baseAttackSpeed,
+            StatusEffectOperationType.AttackSpeedModifier);
+        return Mathf.Max(
+            TimePrecision.Step,
+            modifiedSpeed * _attackSpeedMultiplier);
     }
 
-    private float GetEffectiveFireDuration()
+    private float GetBaseAttackSpeed()
     {
-        return Data != null
-            ? TimePrecision.Normalize(
-                Data.FireDuration * _powerMultiplier,
-                0.1f)
+        return Data != null && Data.AttackCooldown > 0f
+            ? 1f / Data.AttackCooldown
             : 0f;
     }
 
-    private void PlayAttackSfx()
+    private float GetEffectiveAttackSpeedRatio()
     {
-        if (Data?.AttackSfx == null)
+        float baseAttackSpeed = GetBaseAttackSpeed();
+        return baseAttackSpeed > 0f
+            ? GetEffectiveAttackSpeed() / baseAttackSpeed
+            : 1f;
+    }
+
+    private float GetStatusModifiedStat(
+        float baseValue,
+        StatusEffectOperationType operationType)
+    {
+        float fixedAmount = 0f;
+        float ratioAmount = 0f;
+        foreach (StatusEffectRuntimeState state in _statusEffects.Values)
+        {
+            if (state == null || !state.HasStacks ||
+                state.Definition?.Operations == null)
+            {
+                continue;
+            }
+
+            int stacks = Mathf.Max(1, state.StackCount);
+            foreach (StatusEffectOperationDefinition operation in
+                     state.Definition.Operations)
+            {
+                if (operation == null ||
+                    operation.Trigger !=
+                        StatusEffectOperationTrigger.OnApply ||
+                    operation.OperationType != operationType ||
+                    float.IsNaN(operation.Value) ||
+                    float.IsInfinity(operation.Value))
+                {
+                    continue;
+                }
+
+                float value = operation.Value *
+                    (operation.ScaleWithStacks ? stacks : 1);
+                if (operation.ValueMode == StatusEffectValueMode.Fixed)
+                    fixedAmount += value;
+                else if (operation.ValueMode == StatusEffectValueMode.Ratio)
+                    ratioAmount += value;
+            }
+        }
+
+        return baseValue + fixedAmount + baseValue * ratioAmount;
+    }
+
+    private void AdjustCooldownForAttackSpeedChange(
+        float previousAttackSpeed,
+        float currentAttackSpeed)
+    {
+        if (previousAttackSpeed <= 0f || currentAttackSpeed <= 0f ||
+            Mathf.Approximately(previousAttackSpeed, currentAttackSpeed))
+        {
+            return;
+        }
+
+        float timeScale = previousAttackSpeed / currentAttackSpeed;
+        _remainingCooldown *= timeScale;
+        _attackRecoveryRemaining *= timeScale;
+    }
+
+    private void PlayActionSfx(AudioClip clip)
+    {
+        if (clip == null)
             return;
 
         InitializeAttackSfxSpeaker();
         GameManager manager = GameManager.Instance;
         if (manager?.Audio != null)
         {
-            manager.Audio.PlaySfx(attackSfxSpeaker, Data.AttackSfx);
+            manager.Audio.PlaySfx(attackSfxSpeaker, clip);
             return;
         }
 
-        attackSfxSpeaker?.PlayOneShot(Data.AttackSfx);
+        attackSfxSpeaker?.PlayOneShot(clip);
     }
 
     private void InitializeAttackSfxSpeaker()
@@ -691,16 +3463,173 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
                                _activeSkillResource.Current >=
                                Data.ActiveSkillCost;
         string status = CharacterLocalization.GetTurretStatus(
-            IsActiveSkillPending(),
+            false,
             hasEnoughEnergy);
         _skillTooltipText.text =
             CharacterLocalization.GetTurretSkillHeader(
                 Data.ActiveSkillCost,
                 status) + "\n" +
-            CharacterLocalization.GetActiveSkillDescription(
-                Data,
-                GetEffectiveFireDuration()) + "\n" +
+            CharacterLocalization.GetActiveSkillDescription(Data) + "\n" +
             CharacterLocalization.GetTurretClickActivate();
+    }
+
+    private void EnsureSdInfoView()
+    {
+        CacheInfoLayout();
+
+        bool hasSdSprite = Data != null &&
+            (Data.WaitingSdSprite != null ||
+             Data.AttackSdSprite != null ||
+             Data.DamagedSdSprite != null ||
+             Data.SkillSdSprite != null ||
+             Data.PassiveSdSprite != null);
+
+        if (!hasSdSprite)
+        {
+            if (sdImage != null)
+                sdImage.gameObject.SetActive(false);
+            ApplySdInfoLayout(false);
+            return;
+        }
+
+        if (sdImage == null)
+        {
+            Transform existing = transform.Find("imgCharacterSd");
+            if (existing != null)
+                sdImage = existing.GetComponent<Image>();
+        }
+
+        if (sdImage == null)
+        {
+            GameObject imageObject = new(
+                "imgCharacterSd",
+                typeof(RectTransform),
+                typeof(CanvasRenderer),
+                typeof(Image));
+            imageObject.transform.SetParent(transform, false);
+            sdImage = imageObject.GetComponent<Image>();
+        }
+
+        RectTransform imageRect = sdImage.rectTransform;
+        imageRect.anchorMin = new Vector2(0f, 0.5f);
+        imageRect.anchorMax = new Vector2(0f, 0.5f);
+        imageRect.pivot = new Vector2(0f, 0.5f);
+        imageRect.anchoredPosition = new Vector2(4f, 0f);
+        imageRect.sizeDelta = new Vector2(104f, 104f);
+        imageRect.localScale = Vector3.one;
+        sdImage.preserveAspect = true;
+        sdImage.raycastTarget = false;
+        sdImage.type = Image.Type.Simple;
+        sdImage.gameObject.SetActive(true);
+        imageRect.SetAsFirstSibling();
+
+        ApplySdInfoLayout(true);
+        RefreshSdImage();
+    }
+
+    private void CacheInfoLayout()
+    {
+        if (_infoLayoutCached)
+            return;
+
+        _cooldownTrack = cooldownFill != null
+            ? cooldownFill.rectTransform.parent as RectTransform
+            : null;
+        if (nameText == null || attackText == null ||
+            cooldownText == null || _cooldownTrack == null)
+        {
+            return;
+        }
+
+        _nameLayout = RectLayout.Capture(nameText.rectTransform);
+        _attackLayout = RectLayout.Capture(attackText.rectTransform);
+        _cooldownLayout = RectLayout.Capture(cooldownText.rectTransform);
+        _cooldownTrackLayout = RectLayout.Capture(_cooldownTrack);
+        _infoLayoutCached = true;
+    }
+
+    private void ApplySdInfoLayout(bool enabled)
+    {
+        if (!_infoLayoutCached || _sdLayoutEnabled == enabled)
+            return;
+
+        if (!enabled)
+        {
+            _nameLayout.Apply(nameText.rectTransform);
+            _attackLayout.Apply(attackText.rectTransform);
+            _cooldownLayout.Apply(cooldownText.rectTransform);
+            _cooldownTrackLayout.Apply(_cooldownTrack);
+            _sdLayoutEnabled = false;
+            return;
+        }
+
+        SetAnchoredRect(
+            nameText.rectTransform,
+            new Vector2(0f, 1f),
+            new Vector2(0f, 1f),
+            new Vector2(0f, 1f),
+            new Vector2(116f, -4f),
+            new Vector2(172f, 38f));
+        SetAnchoredRect(
+            attackText.rectTransform,
+            Vector2.zero,
+            Vector2.zero,
+            Vector2.zero,
+            new Vector2(116f, 27f),
+            new Vector2(80f, 36f));
+        SetAnchoredRect(
+            cooldownText.rectTransform,
+            new Vector2(1f, 0f),
+            new Vector2(1f, 0f),
+            new Vector2(1f, 0f),
+            new Vector2(-8f, 27f),
+            new Vector2(84f, 36f));
+
+        _cooldownTrack.anchorMin = Vector2.zero;
+        _cooldownTrack.anchorMax = new Vector2(1f, 0f);
+        _cooldownTrack.pivot = new Vector2(0.5f, 0.5f);
+        _cooldownTrack.offsetMin = new Vector2(116f, 7f);
+        _cooldownTrack.offsetMax = new Vector2(-8f, 17f);
+        _sdLayoutEnabled = true;
+    }
+
+    private static void SetAnchoredRect(
+        RectTransform rect,
+        Vector2 anchorMin,
+        Vector2 anchorMax,
+        Vector2 pivot,
+        Vector2 anchoredPosition,
+        Vector2 sizeDelta)
+    {
+        rect.anchorMin = anchorMin;
+        rect.anchorMax = anchorMax;
+        rect.pivot = pivot;
+        rect.anchoredPosition = anchoredPosition;
+        rect.sizeDelta = sizeDelta;
+    }
+
+    private void RefreshSdImage()
+    {
+        if (sdImage == null || Data == null ||
+            !sdImage.gameObject.activeSelf)
+        {
+            return;
+        }
+
+        Sprite sprite = null;
+        if (_skillSdTimeRemaining > 0f)
+            sprite = Data.SkillSdSprite;
+        if (sprite == null && _passiveSdTimeRemaining > 0f)
+            sprite = Data.PassiveSdSprite;
+        if (sprite == null && _attackSdTimeRemaining > 0f)
+            sprite = Data.AttackSdSprite;
+        if (sprite == null && IsActionDisabled())
+            sprite = Data.DamagedSdSprite;
+        if (sprite == null)
+            sprite = Data.WaitingSdSprite;
+
+        sdImage.sprite = sprite;
+        sdImage.enabled = sprite != null;
     }
 
     private void RefreshUi()
@@ -708,18 +3637,20 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
         if (!_initialized)
             return;
 
+        RefreshSdImage();
+
         string slotLabel = PartySlotIndex >= 0
             ? $"[S{PartySlotNumber}] "
             : string.Empty;
         nameText.text = slotLabel + CharacterLocalization.GetTurretName(Data);
         nameText.color = EffectColor;
         attackText.text = CharacterLocalization.GetTurretAttack(Data);
-        if (_disabledTimeRemaining > 0f)
+        float disabledTimeRemaining = GetDisabledDuration();
+        if (disabledTimeRemaining > 0f)
         {
-            float displayedTime =
-                TimePrecision.FloorToTenth(_disabledTimeRemaining);
             cooldownText.text =
-                CharacterLocalization.GetCooldownStop(displayedTime);
+                CharacterLocalization.GetCooldownStop(
+                    DisabledTimeRemaining);
         }
         else if (_attackRecoveryRemaining > 0f)
         {
@@ -732,32 +3663,9 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
         {
             float displayedCooldown =
                 TimePrecision.FloorToTenth(_remainingCooldown);
-            if (_dualSkillTimeRemaining > 0f)
-            {
-                float displayedSkillTime =
-                    TimePrecision.FloorToTenth(_dualSkillTimeRemaining);
-                cooldownText.text =
-                    CharacterLocalization.GetCooldownActiveTime(
-                        displayedSkillTime);
-            }
-            else if (_areaSkillAttackCount > 0)
-            {
-                cooldownText.text =
-                    CharacterLocalization.GetCooldownActiveCount(
-                        _areaSkillAttackCount);
-            }
-            else if (_fireSkillAttackCount > 0)
-            {
-                cooldownText.text =
-                    CharacterLocalization.GetCooldownActiveCount(
-                        _fireSkillAttackCount);
-            }
-            else
-            {
-                cooldownText.text = _remainingCooldown > 0f
-                    ? CharacterLocalization.GetCooldownWait(displayedCooldown)
-                    : CharacterLocalization.GetReadyStatus();
-            }
+            cooldownText.text = _remainingCooldown > 0f
+                ? CharacterLocalization.GetCooldownWait(displayedCooldown)
+                : CharacterLocalization.GetReadyStatus();
         }
         float effectiveAttackCooldown = GetEffectiveAttackCooldown();
         cooldownFill.fillAmount = _attackRecoveryRemaining > 0f
@@ -773,11 +3681,9 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
             bool canAfford = _activeSkillResource != null &&
                              _activeSkillResource.Current >=
                              Data.ActiveSkillCost;
-            _panelImage.color = IsActiveSkillPending()
-                ? Color.Lerp(_defaultPanelColor, Color.green, 0.25f)
-                : canAfford
-                    ? _defaultPanelColor
-                    : Color.Lerp(_defaultPanelColor, Color.black, 0.35f);
+            _panelImage.color = canAfford
+                ? _defaultPanelColor
+                : Color.Lerp(_defaultPanelColor, Color.black, 0.35f);
         }
 
         if (_skillTooltip != null && _skillTooltip.activeSelf)

@@ -3,6 +3,7 @@ using PS260714.Localization;
 using UnityEngine;
 using UnityEngine.UI;
 
+[DefaultExecutionOrder(-1000)]
 public class DataManager : MonoBehaviour
 {
     public static DataManager Current { get; private set; }
@@ -13,6 +14,7 @@ public class DataManager : MonoBehaviour
 
     [HideInInspector] public DisplayData DisplayDatas;
     [HideInInspector] public AudioData AudioDatas;
+    [HideInInspector] public CharacterCollectionData CharacterDatas;
 
     [Header("Audio Clip")]
     public AudioClipList MusicList = new AudioClipList();
@@ -34,6 +36,8 @@ public class DataManager : MonoBehaviour
             Current = this;
 
         IsSetupDone = false;
+        CharacterDatas ??= new CharacterCollectionData();
+        CharacterDatas.Load();
         LocalizationFontResolver.RefreshAllClientText();
     }
 
@@ -41,10 +45,11 @@ public class DataManager : MonoBehaviour
     {
         SetEventManager(GameManager.Instance.Events);
 
-        DisplayDatas = new DisplayData();
-        AudioDatas = new AudioData();
+        DisplayDatas ??= new DisplayData();
+        AudioDatas ??= new AudioData();
+        CharacterDatas ??= new CharacterCollectionData();
 
-        LoadALL();
+        LoadAll(loadCharacters: false);
         SaveALL();
 
         IsSetupDone = true;
@@ -104,8 +109,12 @@ public class DataManager : MonoBehaviour
 
     public void SaveALL()
     {
+        DisplayDatas ??= new DisplayData();
+        AudioDatas ??= new AudioData();
+        CharacterDatas ??= new CharacterCollectionData();
         DisplayDatas.Save(false);
         AudioDatas.Save(false);
+        CharacterDatas.Save(false);
         PlayerPrefs.Save();
 
         _events?.NotifyDataSaved();
@@ -113,8 +122,18 @@ public class DataManager : MonoBehaviour
 
     public void LoadALL()
     {
+        LoadAll(loadCharacters: true);
+    }
+
+    private void LoadAll(bool loadCharacters)
+    {
+        DisplayDatas ??= new DisplayData();
+        AudioDatas ??= new AudioData();
+        CharacterDatas ??= new CharacterCollectionData();
         DisplayDatas.Load();
         AudioDatas.Load();
+        if (loadCharacters)
+            CharacterDatas.Load();
         
         NotifyCurrentSettings();
         _events?.NotifyDataLoaded();

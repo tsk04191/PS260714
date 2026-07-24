@@ -210,6 +210,11 @@ public sealed class EnemyCodexPage : RuntimeMenuPageBase
             buttonLayout.flexibleWidth = 0f;
             _tabButtons.Add(button);
         }
+
+        SyncIndexedChildren(
+            contentObject.transform,
+            "btnEnemyTab_",
+            _entries.Count);
     }
 
     private void BuildDetailPanel()
@@ -377,6 +382,7 @@ public sealed class EnemyCodexPage : RuntimeMenuPageBase
             return;
 
         RefreshEntries();
+        BuildEnemyTabStrip();
         for (int index = 0;
              index < _tabButtons.Count && index < _entries.Count;
              index++)

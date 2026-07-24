@@ -54,6 +54,8 @@ public static class MenuPageSceneBuilder
             return;
         }
 
+        CharacterDefinitionCatalog.Invalidate();
+
         GameObject layClient = FindSceneObject(scene, "layClient");
         if (layClient == null)
             return;
@@ -124,6 +126,7 @@ public static class MenuPageSceneBuilder
         bool stageSelectUiExists = HasStageSelectUi(stageSelectObject);
         if (!forceRebuild && titlePage != null && mainPage != null &&
             dungeonPage != null &&
+            HasValidDungeonCharacterDefinitions(dungeonPage) &&
             stageSelectPage != null &&
             HasObjectReference(mainPage, "stageSelectPage") &&
             HasObjectReference(stageSelectPage, "mainPage") &&
@@ -142,6 +145,7 @@ public static class MenuPageSceneBuilder
             characterCodexPage != null &&
             HasObjectReference(characterCodexPage, "codexPage") &&
             HasObjectReference(characterCodexPage, "dungeonPage") &&
+            HasAllCharacterDefinitions(characterCodexPage) &&
             skillCodexPage != null &&
             HasObjectReference(skillCodexPage, "codexPage") &&
             itemCodexPage != null &&
@@ -153,7 +157,7 @@ public static class MenuPageSceneBuilder
             HasGeneratedUi(shopObject) && HasGeneratedUi(questObject) &&
             HasGeneratedUi(storageObject) &&
             HasGeneratedUi(enemyCodexObject) &&
-            HasGeneratedUi(characterCodexObject) &&
+            HasCurrentCharacterCodexUi(characterCodexObject) &&
             HasGeneratedUi(skillCodexObject) &&
             HasGeneratedUi(itemCodexObject))
         {
@@ -260,6 +264,7 @@ public static class MenuPageSceneBuilder
             "dungeonPage",
             dungeonObject);
         SetCharacterDefinitions(characterCodexPage);
+        SetDungeonCharacterDefinitions(dungeonPage);
         ConfigureBattleCardCodex(
             skillCodexPage,
             codexObject,
@@ -308,7 +313,7 @@ public static class MenuPageSceneBuilder
             storagePage.RebuildEditorPreview();
         if (forceRebuild || !HasGeneratedUi(enemyCodexObject))
             enemyCodexPage.RebuildEditorPreview();
-        if (forceRebuild || !HasGeneratedUi(characterCodexObject))
+        if (forceRebuild || !HasCurrentCharacterCodexUi(characterCodexObject))
             characterCodexPage.RebuildEditorPreview();
         if (forceRebuild || !HasGeneratedUi(skillCodexObject))
             skillCodexPage.RebuildEditorPreview();
@@ -399,6 +404,147 @@ public static class MenuPageSceneBuilder
 
         serializedObject.ApplyModifiedProperties();
         EditorUtility.SetDirty(page);
+    }
+
+    private static bool HasAllCharacterDefinitions(CharacterCodexPage page)
+    {
+        if (page == null)
+            return false;
+
+        string[] guids = AssetDatabase.FindAssets(
+            "t:CharacterSO",
+            new[] { "Assets" });
+        SerializedObject serializedObject = new(page);
+        SerializedProperty property =
+            serializedObject.FindProperty("characterDefinitions");
+        if (property == null || property.arraySize != guids.Length)
+            return false;
+
+        HashSet<CharacterSO> assigned = new();
+        for (int index = 0; index < property.arraySize; index++)
+        {
+            CharacterSO definition = property
+                .GetArrayElementAtIndex(index)
+                .objectReferenceValue as CharacterSO;
+            if (definition == null || !assigned.Add(definition))
+                return false;
+        }
+
+        foreach (string guid in guids)
+        {
+            CharacterSO definition = AssetDatabase.LoadAssetAtPath<CharacterSO>(
+                AssetDatabase.GUIDToAssetPath(guid));
+            if (definition == null || !assigned.Contains(definition))
+                return false;
+        }
+
+        return true;
+    }
+
+    private static void SetDungeonCharacterDefinitions(DungeonPage page)
+    {
+        if (page == null)
+            return;
+
+        IReadOnlyList<CharacterSO> definitions =
+            CharacterDefinitionCatalog.GetAll();
+        SerializedObject pageObject = new(page);
+        SerializedProperty slots = pageObject.FindProperty("playerCharacters");
+        if (slots == null)
+            return;
+
+        for (int index = 0; index < slots.arraySize; index++)
+        {
+            CharacterRuntime character = slots.GetArrayElementAtIndex(index)
+                .objectReferenceValue as CharacterRuntime;
+            if (character == null)
+                continue;
+
+            CharacterSO expected = index < definitions.Count
+                ? definitions[index]
+                : null;
+            SerializedObject characterObject = new(character);
+            SerializedProperty original =
+                characterObject.FindProperty("original");
+            if (original == null || original.objectReferenceValue == expected)
+                continue;
+
+            Undo.RecordObject(character, "Sync Dungeon Characters");
+            original.objectReferenceValue = expected;
+            characterObject.ApplyModifiedProperties();
+            EditorUtility.SetDirty(character);
+        }
+    }
+
+    private static bool HasValidDungeonCharacterDefinitions(DungeonPage page)
+    {
+        if (page == null)
+            return false;
+
+        IReadOnlyList<CharacterSO> definitions =
+            CharacterDefinitionCatalog.GetAll();
+        if (definitions.Count == 0)
+            return false;
+
+        SerializedObject pageObject = new(page);
+        SerializedProperty slots = pageObject.FindProperty("playerCharacters");
+        if (slots == null)
+            return false;
+
+        for (int index = 0; index < slots.arraySize; index++)
+        {
+            CharacterRuntime character = slots.GetArrayElementAtIndex(index)
+                .objectReferenceValue as CharacterRuntime;
+            if (character == null)
+                continue;
+
+            CharacterSO expected = index < definitions.Count
+                ? definitions[index]
+                : null;
+            SerializedObject characterObject = new(character);
+            SerializedProperty original =
+                characterObject.FindProperty("original");
+            if (original == null || original.objectReferenceValue != expected)
+                return false;
+        }
+
+        return true;
+    }
+
+    private static bool HasCurrentCharacterCodexUi(GameObject pageObject)
+    {
+        if (!HasGeneratedUi(pageObject))
+            return false;
+
+        Transform runtimeRoot = pageObject.transform.Find(
+            RuntimeMenuPageBase.RuntimeRootObjectName);
+        Transform panel = runtimeRoot != null
+            ? runtimeRoot.Find("grpMenuPanel")
+            : null;
+        Transform buttonRoot = panel != null
+            ? panel.Find("grpMenuButtons")
+            : null;
+        Transform detail = buttonRoot != null
+            ? buttonRoot.Find("grpCharacterDetail")
+            : null;
+        Transform visuals = detail != null
+            ? detail.Find("grpCharacterVisuals")
+            : null;
+        Transform scroll = detail != null
+            ? detail.Find("scrCharacterDetails")
+            : null;
+        Transform viewport = scroll != null
+            ? scroll.Find("vptCharacterDetails")
+            : null;
+        Transform content = viewport != null
+            ? viewport.Find("grpCharacterDetailContent")
+            : null;
+        return visuals != null &&
+               visuals.Find("imgCharacterStanding") != null &&
+               visuals.Find("imgCharacterIcon") != null &&
+               content != null &&
+               content.Find("txtPassive") != null &&
+               content.Find("txtDungeonUpgrade") != null;
     }
 
     private static GameObject CreatePageObject(

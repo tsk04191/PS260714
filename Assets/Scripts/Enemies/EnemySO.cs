@@ -24,6 +24,7 @@ public sealed class EnemySO : ScriptableObject
     [SerializeField, Min(0f)] private float abilityCooldown;
     [SerializeField, Min(0)] private int abilityPower = 1;
     [SerializeField, Min(0f)] private float disableDuration;
+    [SerializeField] private StatusEffectSO disableStatusEffect;
 
     public string EnemyId => enemyId;
     public string DisplayName => displayName;
@@ -43,6 +44,9 @@ public sealed class EnemySO : ScriptableObject
     public float AbilityCooldown => TimePrecision.FloorToTenth(abilityCooldown);
     public int AbilityPower => abilityPower;
     public float DisableDuration => TimePrecision.FloorToTenth(disableDuration);
+    public StatusEffectSO DisableStatusEffect => disableStatusEffect != null
+        ? disableStatusEffect
+        : StatusEffectDefinitionCatalog.FindById(StatusEffectIds.Stun);
 
     public EnemyRuntime CreateRuntime(int maximumHealthOverride = 0)
     {

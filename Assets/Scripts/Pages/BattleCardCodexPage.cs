@@ -161,6 +161,11 @@ public sealed class BattleCardCodexPage : RuntimeMenuPageBase
             buttonLayout.flexibleWidth = 0f;
             _tabButtons.Add(button);
         }
+
+        SyncIndexedChildren(
+            contentObject.transform,
+            "btnBattleCardTab_",
+            _entries.Count);
     }
 
     private void BuildDetailPanel()
@@ -350,6 +355,7 @@ public sealed class BattleCardCodexPage : RuntimeMenuPageBase
             return;
 
         RefreshEntries();
+        BuildTabStrip();
         for (int index = 0;
              index < _tabButtons.Count && index < _entries.Count;
              index++)

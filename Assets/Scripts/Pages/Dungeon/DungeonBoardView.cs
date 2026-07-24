@@ -8,46 +8,7 @@ using Random = UnityEngine.Random;
 [RequireComponent(typeof(RectTransform))]
 public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard
 {
-    private const byte AreaEffectAlpha = 155;
-    private const float AreaEffectSizeScale = 0.75f;
-    private const float AreaEffectAnimationSpeed = 0.5f;
-    private const string AreaExplosionFireStateName = "AreaExplosionFire";
-    private const string AreaExplosionHiddenStateName = "AreaExplosionHidden";
-
-    private sealed class AreaEffectHandle
-    {
-        public RectTransform RectTransform { get; }
-        public Image Image { get; }
-        public CanvasGroup CanvasGroup { get; }
-        public Animator Animator { get; }
-
-        public AreaEffectHandle(
-            RectTransform rectTransform,
-            Image image,
-            CanvasGroup canvasGroup,
-            Animator animator)
-        {
-            RectTransform = rectTransform;
-            Image = image;
-            CanvasGroup = canvasGroup;
-            Animator = animator;
-        }
-    }
-
-    private readonly struct PreparedTarget
-    {
-        public DungeonTileView Tile { get; }
-        public EnemyRuntime Enemy { get; }
-
-        public PreparedTarget(
-            DungeonTileView tile,
-            EnemyRuntime enemy)
-        {
-            Tile = tile;
-            Enemy = enemy;
-        }
-    }
-
+    private const int MaximumStatusEventsPerDispatch = 128;
     public const int MinimumGridSize = 3;
     public const int MaximumGridSize = 9;
 
@@ -56,16 +17,14 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard
     [SerializeField] private DungeonTileView tilePrefab;
 
     private readonly List<DungeonTileView> _tiles = new();
-    private readonly Dictionary<IBattleCharacter, PreparedTarget>
-        _preparedLowestHealthTargets = new();
-    private readonly Dictionary<IBattleCharacter, List<PreparedTarget>>
-        _preparedRandomTargets = new();
-    private readonly Dictionary<int, AreaEffectHandle> _areaEffects = new();
+    private readonly List<IBattleCharacter> _battleCharacters = new();
     private Func<EnemyRuntime, bool> _itemTargetHandler;
     private EnemyRuntime _forcedPriorityTarget;
     private float _forcedPriorityRemaining;
     private int _maximumStackSize = 8;
     private bool _initialized;
+    private readonly Queue<BattleStatusAppliedEvent> _statusEventQueue = new();
+    private bool _dispatchingStatusEvents;
 
     public int GridSize { get; private set; } = MinimumGridSize;
     public RectTransform HighlightRect => boardRect != null
@@ -101,11 +60,63 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard
     }
     public event Action<EnemyRuntime> EnemyDefeated;
     public event Action<EnemyRuntime> EnemyClicked;
+    public event Action<BattleStatusAppliedEvent> StatusApplied;
+
+    public void NotifyStatusApplied(BattleStatusAppliedEvent eventData)
+    {
+        if (!eventData.IsValid)
+            return;
+
+        _statusEventQueue.Enqueue(eventData);
+        if (_dispatchingStatusEvents)
+            return;
+
+        _dispatchingStatusEvents = true;
+        try
+        {
+            int processedCount = 0;
+            while (_statusEventQueue.Count > 0 &&
+                   processedCount < MaximumStatusEventsPerDispatch)
+            {
+                BattleStatusAppliedEvent queuedEvent =
+                    _statusEventQueue.Dequeue();
+                StatusApplied?.Invoke(queuedEvent);
+                processedCount++;
+            }
+
+            if (_statusEventQueue.Count > 0)
+            {
+                Debug.LogError(
+                    "Status event dispatch limit exceeded. " +
+                    "Remaining chained status events were discarded.",
+                    this);
+                _statusEventQueue.Clear();
+            }
+        }
+        finally
+        {
+            _dispatchingStatusEvents = false;
+        }
+    }
 
     public void BindItemTargetHandler(
         Func<EnemyRuntime, bool> itemTargetHandler)
     {
         _itemTargetHandler = itemTargetHandler;
+    }
+
+    public void SetBattleCharacters(
+        IReadOnlyList<IBattleCharacter> characters)
+    {
+        _battleCharacters.Clear();
+        if (characters == null)
+            return;
+
+        foreach (IBattleCharacter character in characters)
+        {
+            if (character != null && !_battleCharacters.Contains(character))
+                _battleCharacters.Add(character);
+        }
     }
 
     public void Initialize(int gridSize, int stackSize)
@@ -338,12 +349,13 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard
         if (!TryFindEnemyTile(enemy, out DungeonTileView tile))
             return false;
 
-        bool applied = tile.TryApplyFireToTop(
+        bool applied = TryApplyFireStatus(
+            tile,
             null,
             duration,
             tickInterval,
             tickDamage);
-        if (applied)
+        if (applied && ReferenceEquals(tile.TopEnemy, enemy))
             tile.ShowAttackRange();
         return applied;
     }
@@ -354,483 +366,711 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard
         if (duration <= 0f || !TryFindEnemyTile(enemy, out _))
             return false;
 
-        ClearAllPreparedAttacks();
         _forcedPriorityTarget = enemy;
         _forcedPriorityRemaining = duration;
         return true;
     }
 
-    public bool TryPrepareLowestHealthAttack(
+    public IReadOnlyList<EnemyRuntime> SelectCharacterTargets(
         IBattleCharacter source,
-        out bool targetChanged)
-    {
-        targetChanged = false;
-        if (source == null)
-            return false;
-
-        if (_preparedLowestHealthTargets.TryGetValue(
-                source,
-                out PreparedTarget currentTarget) &&
-            currentTarget.Tile != null &&
-            ReferenceEquals(currentTarget.Tile.TopEnemy, currentTarget.Enemy))
-        {
-            return true;
-        }
-
-        if (currentTarget.Tile != null)
-            currentTarget.Tile.HideBasicTargetEffect(source);
-        _preparedLowestHealthTargets.Remove(source);
-
-        DungeonTileView target = FindLowestHealthTarget();
-        if (target == null)
-            return false;
-
-        _preparedLowestHealthTargets[source] = new PreparedTarget(
-            target,
-            target.TopEnemy);
-        target.PlayBasicTargetAim(source);
-        targetChanged = true;
-        return true;
-    }
-
-    public int TryResolveLowestHealthAttack(
-        IBattleCharacter source,
-        int damage)
-    {
-        if (source == null || damage <= 0 ||
-            !_preparedLowestHealthTargets.TryGetValue(
-                source,
-                out PreparedTarget preparedTarget))
-        {
-            return 0;
-        }
-
-        _preparedLowestHealthTargets.Remove(source);
-        DungeonTileView target = preparedTarget.Tile;
-        if (target == null ||
-            !ReferenceEquals(target.TopEnemy, preparedTarget.Enemy))
-        {
-            target?.HideBasicTargetEffect(source);
-            return 0;
-        }
-
-        target.PlayBasicTargetFire(source);
-        target.ShowAttackRange();
-        return TryDamageTile(target, damage);
-    }
-
-    public int TryAttackLowestHealthEnemy(
-        IBattleCharacter source,
-        int damage)
-    {
-        if (source == null || damage <= 0)
-            return 0;
-
-        DungeonTileView target = FindLowestHealthTarget();
-        if (target == null)
-            return 0;
-
-        target.PlayBasicTargetFire(source);
-        target.ShowAttackRange();
-        return TryDamageTile(target, damage);
-    }
-
-    public void ClearPreparedAttack(IBattleCharacter source)
-    {
-        if (source == null)
-            return;
-
-        if (_preparedLowestHealthTargets.TryGetValue(
-                source,
-                out PreparedTarget preparedTarget))
-        {
-            _preparedLowestHealthTargets.Remove(source);
-            preparedTarget.Tile?.HideBasicTargetEffect(source);
-        }
-
-        if (_preparedRandomTargets.TryGetValue(
-                source,
-                out List<PreparedTarget> randomTargets))
-        {
-            _preparedRandomTargets.Remove(source);
-            HidePreparedTargetEffects(source, randomTargets);
-        }
-    }
-
-    private DungeonTileView FindLowestHealthTarget()
-    {
-        if (TryGetForcedPriorityTile(out DungeonTileView forcedTarget))
-            return forcedTarget;
-
-        DungeonTileView target = null;
-        int lowestHealth = int.MaxValue;
-
-        foreach (DungeonTileView tile in CollectPriorityTargetTiles())
-        {
-            if (tile.TopEnemyHealth >= lowestHealth)
-                continue;
-
-            target = tile;
-            lowestHealth = tile.TopEnemyHealth;
-        }
-
-        return target;
-    }
-
-    public bool TryPrepareRandomAttack(
-        IBattleCharacter source,
+        CharacterAttackSubject subject,
+        CharacterAttackSubjectMetric metric,
         int targetCount,
-        out bool targetChanged)
+        CharacterConditionMatchMode conditionMatchMode,
+        IReadOnlyList<CharacterNumericCondition> numericConditions)
     {
-        targetChanged = false;
-        if (source == null || targetCount <= 0)
-            return false;
+        if (source == null)
+            return Array.Empty<EnemyRuntime>();
 
-        List<DungeonTileView> targets = CollectPriorityTargetTiles();
-        bool hasForcedTarget = TryGetForcedPriorityTile(
-            out DungeonTileView forcedTarget);
-        if (hasForcedTarget)
-            targets.Remove(forcedTarget);
-        int preparedCount = Mathf.Min(
-            targetCount,
-            targets.Count + (hasForcedTarget ? 1 : 0));
-        if (_preparedRandomTargets.TryGetValue(
-                source,
-                out List<PreparedTarget> currentTargets) &&
-            currentTargets.Count == preparedCount &&
-            ArePreparedTargetsValid(currentTargets))
+        // Ally-only modes are normalized defensively in case serialized data
+        // changes faction without going through the character editor.
+        if (subject == CharacterAttackSubject.Self ||
+            subject == CharacterAttackSubject.RandomExceptSelf ||
+            subject == CharacterAttackSubject.None)
+            subject = CharacterAttackSubject.Random;
+        else if (subject == CharacterAttackSubject.AllExceptSelf)
+            subject = CharacterAttackSubject.All;
+
+        targetCount = Mathf.Max(1, targetCount);
+        List<DungeonTileView> candidates = CollectPriorityTargetTiles();
+        candidates.RemoveAll(tile => !MatchesCharacterConditions(
+            tile,
+            conditionMatchMode,
+            numericConditions));
+        if (candidates.Count == 0)
+            return Array.Empty<EnemyRuntime>();
+
+        List<DungeonTileView> selected = new(targetCount);
+        if (TryGetForcedPriorityTile(out DungeonTileView forcedTarget) &&
+            candidates.Remove(forcedTarget))
         {
-            return preparedCount > 0;
+            selected.Add(forcedTarget);
         }
 
-        if (currentTargets != null)
-            HidePreparedTargetEffects(source, currentTargets);
-        _preparedRandomTargets.Remove(source);
-
-        if (preparedCount <= 0)
-            return false;
-
-        List<PreparedTarget> preparedTargets = new(preparedCount);
-        int firstRandomIndex = 0;
-        if (hasForcedTarget)
+        if (subject == CharacterAttackSubject.All)
         {
-            preparedTargets.Add(new PreparedTarget(
-                forcedTarget,
-                forcedTarget.TopEnemy));
-            forcedTarget.PlayBasicTargetAim(source);
-            firstRandomIndex = 1;
+            selected.AddRange(candidates);
+        }
+        else if (subject == CharacterAttackSubject.Random)
+        {
+            for (int index = 0;
+                 index < candidates.Count && selected.Count < targetCount;
+                 index++)
+            {
+                int randomIndex = Random.Range(index, candidates.Count);
+                (candidates[index], candidates[randomIndex]) =
+                    (candidates[randomIndex], candidates[index]);
+                selected.Add(candidates[index]);
+            }
+        }
+        else
+        {
+            bool descending = subject == CharacterAttackSubject.HighestValue;
+            candidates.Sort((left, right) =>
+            {
+                int leftValue = metric == CharacterAttackSubjectMetric.Health
+                    ? left.TopEnemyHealth
+                    : metric == CharacterAttackSubjectMetric.Shield
+                        ? left.TopEnemy.CurrentShield
+                        : left.StackCount;
+                int rightValue = metric == CharacterAttackSubjectMetric.Health
+                    ? right.TopEnemyHealth
+                    : metric == CharacterAttackSubjectMetric.Shield
+                        ? right.TopEnemy.CurrentShield
+                        : right.StackCount;
+                int comparison = leftValue.CompareTo(rightValue);
+                return descending ? -comparison : comparison;
+            });
+
+            for (int index = 0;
+                 index < candidates.Count && selected.Count < targetCount;
+                 index++)
+            {
+                selected.Add(candidates[index]);
+            }
         }
 
-        for (int index = firstRandomIndex; index < preparedCount; index++)
+        List<EnemyRuntime> result = new(selected.Count);
+        foreach (DungeonTileView tile in selected)
         {
-            int poolIndex = index - firstRandomIndex;
-            int randomIndex = Random.Range(poolIndex, targets.Count);
-            (targets[poolIndex], targets[randomIndex]) =
-                (targets[randomIndex], targets[poolIndex]);
-            DungeonTileView target = targets[poolIndex];
-            preparedTargets.Add(new PreparedTarget(target, target.TopEnemy));
-            target.PlayBasicTargetAim(source);
+            if (tile?.TopEnemy != null)
+                result.Add(tile.TopEnemy);
         }
 
-        _preparedRandomTargets[source] = preparedTargets;
-        targetChanged = true;
-        return true;
+        return result;
     }
 
-    public int TryResolveRandomAttack(
+    public IReadOnlyList<IBattleCharacter> SelectAlliedCharacters(
         IBattleCharacter source,
-        int damage)
+        CharacterAttackSubject subject,
+        CharacterAttackSubjectMetric metric,
+        int targetCount,
+        CharacterConditionMatchMode conditionMatchMode,
+        IReadOnlyList<CharacterNumericCondition> numericConditions)
     {
-        if (source == null || damage <= 0 ||
-            !_preparedRandomTargets.TryGetValue(
-                source,
-                out List<PreparedTarget> preparedTargets))
+        if (source == null)
+            return Array.Empty<IBattleCharacter>();
+
+        if (subject == CharacterAttackSubject.None)
+            subject = CharacterAttackSubject.Random;
+
+        List<IBattleCharacter> candidates = new();
+        foreach (IBattleCharacter character in _battleCharacters)
         {
-            return 0;
+            if (character != null && MatchesCharacterConditions(
+                    character,
+                    conditionMatchMode,
+                    numericConditions))
+            {
+                candidates.Add(character);
+            }
         }
 
-        _preparedRandomTargets.Remove(source);
-        int totalDamage = 0;
-        foreach (PreparedTarget preparedTarget in preparedTargets)
+        if (candidates.Count == 0)
+            return Array.Empty<IBattleCharacter>();
+
+        if (subject == CharacterAttackSubject.Self)
         {
-            DungeonTileView target = preparedTarget.Tile;
-            if (target == null ||
-                !ReferenceEquals(target.TopEnemy, preparedTarget.Enemy))
+            foreach (IBattleCharacter candidate in candidates)
             {
-                target?.HideBasicTargetEffect(source);
-                continue;
+                if (ReferenceEquals(candidate, source))
+                    return new[] { candidate };
             }
 
-            target.PlayBasicTargetFire(source);
-            target.ShowAttackRange();
-            totalDamage += TryDamageTile(target, damage);
+            return Array.Empty<IBattleCharacter>();
         }
 
-        return totalDamage;
+        if (subject == CharacterAttackSubject.AllExceptSelf)
+        {
+            candidates.RemoveAll(candidate => ReferenceEquals(
+                candidate,
+                source));
+            return candidates;
+        }
+
+        if (subject == CharacterAttackSubject.RandomExceptSelf)
+        {
+            candidates.RemoveAll(candidate => ReferenceEquals(
+                candidate,
+                source));
+            if (candidates.Count == 0)
+                return Array.Empty<IBattleCharacter>();
+            subject = CharacterAttackSubject.Random;
+        }
+
+        if (subject == CharacterAttackSubject.All)
+            return candidates;
+
+        targetCount = Mathf.Clamp(targetCount, 1, candidates.Count);
+        if (subject == CharacterAttackSubject.Random)
+        {
+            for (int index = 0; index < targetCount; index++)
+            {
+                int randomIndex = Random.Range(index, candidates.Count);
+                (candidates[index], candidates[randomIndex]) =
+                    (candidates[randomIndex], candidates[index]);
+            }
+        }
+        else
+        {
+            bool descending = subject == CharacterAttackSubject.HighestValue;
+            candidates.Sort((left, right) =>
+            {
+                float leftValue = GetCharacterMetric(left, metric);
+                float rightValue = GetCharacterMetric(right, metric);
+                int comparison = leftValue.CompareTo(rightValue);
+                return descending ? -comparison : comparison;
+            });
+        }
+
+        if (candidates.Count > targetCount)
+            candidates.RemoveRange(targetCount, candidates.Count - targetCount);
+        return candidates;
     }
 
-    private static bool ArePreparedTargetsValid(
-        IReadOnlyList<PreparedTarget> targets)
+    public IReadOnlyList<EnemyRuntime> ExpandCharacterAreaTargets(
+        IReadOnlyList<EnemyRuntime> centerTargets,
+        IReadOnlyList<CharacterTargetAreaOffset> areaOffsets)
     {
-        foreach (PreparedTarget target in targets)
+        if (centerTargets == null || centerTargets.Count == 0)
+            return Array.Empty<EnemyRuntime>();
+
+        List<EnemyRuntime> result = new();
+        HashSet<EnemyRuntime> uniqueEnemies = new();
+        HashSet<DungeonTileView> uniqueTiles = new();
+
+        void AddAreaTile(DungeonTileView tile)
         {
-            if (target.Tile == null ||
-                !ReferenceEquals(target.Tile.TopEnemy, target.Enemy))
+            if (tile == null || !uniqueTiles.Add(tile))
+                return;
+
+            tile.ShowAttackRange();
+            if (tile.TopEnemy != null && uniqueEnemies.Add(tile.TopEnemy))
+                result.Add(tile.TopEnemy);
+        }
+
+        foreach (EnemyRuntime centerTarget in centerTargets)
+        {
+            if (!TryFindEnemyTile(centerTarget, out DungeonTileView centerTile))
+                continue;
+
+            AddAreaTile(centerTile);
+            if (areaOffsets == null)
+                continue;
+
+            foreach (CharacterTargetAreaOffset offset in areaOffsets)
             {
+                if (offset == null || offset.IsCenter ||
+                    !TryGetTile(
+                        centerTile.Row + offset.RowOffset,
+                        centerTile.Column + offset.ColumnOffset,
+                        out DungeonTileView areaTile))
+                {
+                    continue;
+                }
+
+                AddAreaTile(areaTile);
+            }
+        }
+
+        return result;
+    }
+
+    private static bool MatchesCharacterConditions(
+        DungeonTileView tile,
+        CharacterConditionMatchMode matchMode,
+        IReadOnlyList<CharacterNumericCondition> conditions)
+    {
+        if (conditions == null || conditions.Count == 0)
+            return true;
+        if (tile?.TopEnemy == null)
+            return false;
+
+        bool matchAny = matchMode == CharacterConditionMatchMode.Any;
+        bool evaluatedAny = false;
+        foreach (CharacterNumericCondition condition in conditions)
+        {
+            if (condition == null)
+                continue;
+
+            evaluatedAny = true;
+            bool matched;
+            if (condition.Type == CharacterConditionType.HasStatus)
+            {
+                matched = EnemyHasCharacterStatus(
+                    tile.TopEnemy,
+                    condition.StatusEffect);
+            }
+            else
+            {
+                float value = condition.Metric switch
+                {
+                    CharacterNumericConditionMetric.Health =>
+                        tile.TopEnemy.Health,
+                    CharacterNumericConditionMetric.HealthPercentage =>
+                        tile.TopEnemy.MaxHealth > 0
+                            ? tile.TopEnemy.Health * 100f /
+                              tile.TopEnemy.MaxHealth
+                            : 0f,
+                    CharacterNumericConditionMetric.StackCount =>
+                        tile.StackCount,
+                    CharacterNumericConditionMetric.Shield =>
+                        tile.TopEnemy.CurrentShield,
+                    _ => 0f
+                };
+                matched = CompareCharacterCondition(
+                    value,
+                    condition.Comparison,
+                    condition.Threshold);
+            }
+            if (matchAny && matched)
+                return true;
+            if (!matchAny && !matched)
                 return false;
-            }
         }
 
-        return true;
+        return !evaluatedAny || !matchAny;
     }
 
-    private static void HidePreparedTargetEffects(
-        IBattleCharacter source,
-        IReadOnlyList<PreparedTarget> targets)
+    private static bool MatchesCharacterConditions(
+        IBattleCharacter character,
+        CharacterConditionMatchMode matchMode,
+        IReadOnlyList<CharacterNumericCondition> conditions)
     {
-        foreach (PreparedTarget target in targets)
-            target.Tile?.HideBasicTargetEffect(source);
-    }
+        if (conditions == null || conditions.Count == 0)
+            return true;
+        if (character == null)
+            return false;
 
-    public int TryAttackCrossAroundHighestHealthEnemy(
-        IBattleCharacter source,
-        int damage)
-    {
-        if (source == null || damage <= 0)
-            return 0;
-
-        DungeonTileView center = TryGetForcedPriorityTile(
-            out DungeonTileView forcedTarget)
-            ? forcedTarget
-            : null;
-        int highestHealth = 0;
-        List<DungeonTileView> automaticTargets = center == null
-            ? CollectPriorityTargetTiles()
-            : new List<DungeonTileView>();
-        foreach (DungeonTileView tile in automaticTargets)
+        bool matchAny = matchMode == CharacterConditionMatchMode.Any;
+        bool evaluatedAny = false;
+        foreach (CharacterNumericCondition condition in conditions)
         {
-            if (tile.TopEnemyHealth <= highestHealth)
+            if (condition == null)
+                continue;
+
+            evaluatedAny = true;
+            bool matched;
+            if (condition.Type == CharacterConditionType.HasStatus)
+            {
+                matched = character.HasStatusEffect(
+                    condition.StatusEffect);
+            }
+            else
+            {
+                float value = condition.Metric switch
+                {
+                    CharacterNumericConditionMetric.Health =>
+                        character.CurrentHealth,
+                    CharacterNumericConditionMetric.HealthPercentage =>
+                        character.MaximumHealth > 0
+                            ? character.CurrentHealth * 100f /
+                              character.MaximumHealth
+                            : 0f,
+                    CharacterNumericConditionMetric.AttackPower =>
+                        character.CurrentAttackPower,
+                    CharacterNumericConditionMetric.AttackSpeed =>
+                        character.CurrentAttackSpeed,
+                    CharacterNumericConditionMetric.Shield =>
+                        character.CurrentShield,
+                    _ => 0f
+                };
+                matched = CompareCharacterCondition(
+                    value,
+                    condition.Comparison,
+                    condition.Threshold);
+            }
+            if (matchAny && matched)
+                return true;
+            if (!matchAny && !matched)
+                return false;
+        }
+
+        return !evaluatedAny || !matchAny;
+    }
+
+    private static bool EnemyHasCharacterStatus(
+        EnemyRuntime enemy,
+        StatusEffectSO statusEffect)
+    {
+        return enemy != null && enemy.HasStatusEffect(statusEffect);
+    }
+
+    private static float GetCharacterMetric(
+        IBattleCharacter character,
+        CharacterAttackSubjectMetric metric)
+    {
+        if (character == null)
+            return 0f;
+
+        return metric switch
+        {
+            CharacterAttackSubjectMetric.Health =>
+                character.CurrentHealth,
+            CharacterAttackSubjectMetric.Shield =>
+                character.CurrentShield,
+            CharacterAttackSubjectMetric.AttackSpeed =>
+                character.CurrentAttackSpeed,
+            _ => character.CurrentAttackPower,
+        };
+    }
+
+    private static bool CompareCharacterCondition(
+        float value,
+        CharacterNumericComparison comparison,
+        float threshold)
+    {
+        return comparison switch
+        {
+            CharacterNumericComparison.GreaterThanOrEqual =>
+                value >= threshold,
+            CharacterNumericComparison.LessThanOrEqual => value <= threshold,
+            CharacterNumericComparison.GreaterThan => value > threshold,
+            CharacterNumericComparison.LessThan => value < threshold,
+            CharacterNumericComparison.Equal =>
+                Mathf.Approximately(value, threshold),
+            CharacterNumericComparison.NotEqual =>
+                !Mathf.Approximately(value, threshold),
+            _ => true
+        };
+    }
+
+    public int TryDamageCharacterTargets(
+        IBattleCharacter source,
+        IReadOnlyList<EnemyRuntime> targets,
+        int damage,
+        CharacterAttackDamageType damageType,
+        bool showAttackRange)
+    {
+        if (source == null || targets == null || damage <= 0 ||
+            damageType == CharacterAttackDamageType.StatusEffect ||
+            damageType == CharacterAttackDamageType.StatusRemoval)
+        {
+            return 0;
+        }
+
+        int totalDamage = 0;
+        HashSet<EnemyRuntime> uniqueTargets = new();
+        foreach (EnemyRuntime enemy in targets)
+        {
+            if (enemy == null || !uniqueTargets.Add(enemy) ||
+                !TryFindEnemyTile(enemy, out DungeonTileView tile))
             {
                 continue;
             }
 
-            center = tile;
-            highestHealth = tile.TopEnemyHealth;
+            if (showAttackRange)
+                tile.ShowAttackRange();
+            totalDamage += TryDamageTile(tile, damage, damageType);
         }
 
-        if (center == null)
-            return 0;
-
-        PlayAreaExplosion(source, center, 3);
-        ShowAttackRangeTile(center.Row, center.Column);
-        ShowAttackRangeTile(center.Row - 1, center.Column);
-        ShowAttackRangeTile(center.Row + 1, center.Column);
-        ShowAttackRangeTile(center.Row, center.Column - 1);
-        ShowAttackRangeTile(center.Row, center.Column + 1);
-        int totalDamage = TryDamageTile(center, damage);
-        totalDamage += TryDamageTile(center.Row - 1, center.Column, damage);
-        totalDamage += TryDamageTile(center.Row + 1, center.Column, damage);
-        totalDamage += TryDamageTile(center.Row, center.Column - 1, damage);
-        totalDamage += TryDamageTile(center.Row, center.Column + 1, damage);
         return totalDamage;
     }
 
-    public int TryAttackCrossWithAdjacentSplash(
+    public int TryHealCharacterTargets(
         IBattleCharacter source,
-        int damage,
-        int adjacentDamage)
+        IReadOnlyList<EnemyRuntime> targets,
+        int amount,
+        bool showAttackRange)
     {
-        if (source == null || damage <= 0 || adjacentDamage <= 0)
+        if (source == null || targets == null || amount <= 0)
             return 0;
 
-        DungeonTileView center = TryGetForcedPriorityTile(
-            out DungeonTileView forcedTarget)
-            ? forcedTarget
-            : null;
-        int highestHealth = 0;
-        List<DungeonTileView> automaticTargets = center == null
-            ? CollectPriorityTargetTiles()
-            : new List<DungeonTileView>();
-        foreach (DungeonTileView tile in automaticTargets)
+        int totalHealed = 0;
+        HashSet<EnemyRuntime> uniqueTargets = new();
+        foreach (EnemyRuntime enemy in targets)
         {
-            if (tile.TopEnemyHealth <= highestHealth)
+            if (enemy == null || !uniqueTargets.Add(enemy) ||
+                !TryFindEnemyTile(enemy, out DungeonTileView tile) ||
+                !ReferenceEquals(tile.TopEnemy, enemy))
+            {
+                continue;
+            }
+
+            if (showAttackRange)
+                tile.ShowAttackRange();
+            totalHealed += tile.TryHealTop(amount);
+        }
+
+        return totalHealed;
+    }
+
+    public int TryHealAlliedCharacters(
+        IBattleCharacter source,
+        IReadOnlyList<IBattleCharacter> targets,
+        int amount)
+    {
+        if (source == null || targets == null || amount <= 0)
+            return 0;
+
+        int totalHealed = 0;
+        HashSet<IBattleCharacter> uniqueTargets = new();
+        foreach (IBattleCharacter target in targets)
+        {
+            if (target != null && uniqueTargets.Add(target))
+                totalHealed += target.Heal(amount);
+        }
+
+        return totalHealed;
+    }
+
+    public int TryGrantShieldToCharacterTargets(
+        IBattleCharacter source,
+        IReadOnlyList<EnemyRuntime> targets,
+        int amount,
+        bool showAttackRange)
+    {
+        if (source == null || targets == null || amount <= 0)
+            return 0;
+
+        int totalGranted = 0;
+        HashSet<EnemyRuntime> uniqueTargets = new();
+        foreach (EnemyRuntime enemy in targets)
+        {
+            if (enemy == null || !uniqueTargets.Add(enemy) ||
+                !TryFindEnemyTile(enemy, out DungeonTileView tile) ||
+                !ReferenceEquals(tile.TopEnemy, enemy))
+            {
+                continue;
+            }
+
+            if (showAttackRange)
+                tile.ShowAttackRange();
+            totalGranted += tile.TryGrantShieldTop(amount);
+        }
+
+        return totalGranted;
+    }
+
+    public int TryGrantShieldToAlliedCharacters(
+        IBattleCharacter source,
+        IReadOnlyList<IBattleCharacter> targets,
+        int amount)
+    {
+        if (source == null || targets == null || amount <= 0)
+            return 0;
+
+        int totalGranted = 0;
+        HashSet<IBattleCharacter> uniqueTargets = new();
+        foreach (IBattleCharacter target in targets)
+        {
+            if (target != null && uniqueTargets.Add(target))
+                totalGranted += target.GainShield(amount);
+        }
+
+        return totalGranted;
+    }
+
+    public bool TryApplyCharacterStatus(
+        IBattleCharacter source,
+        IReadOnlyList<EnemyRuntime> targets,
+        StatusEffectSO statusEffect,
+        float duration,
+        float stacks,
+        float tickInterval,
+        bool showAttackRange)
+    {
+        if (source == null || targets == null || statusEffect == null ||
+            !statusEffect.CanTargetEnemy || stacks <= 0f)
+        {
+            return false;
+        }
+
+        float effectiveDuration = statusEffect.DurationMode ==
+            StatusEffectDurationMode.Permanent
+                ? 0f
+                : (duration > 0f ? duration : statusEffect.DefaultDuration);
+        if (statusEffect.DurationMode == StatusEffectDurationMode.Timed &&
+            effectiveDuration <= 0f)
+        {
+            return false;
+        }
+
+        int stackCount = Mathf.Max(
+            1,
+            Mathf.RoundToInt(stacks));
+
+        bool applied = false;
+        HashSet<EnemyRuntime> uniqueTargets = new();
+        foreach (EnemyRuntime enemy in targets)
+        {
+            if (enemy == null || !uniqueTargets.Add(enemy) ||
+                !TryFindEnemyTile(enemy, out DungeonTileView tile))
+            {
+                continue;
+            }
+
+            int previousStacks = enemy.GetStatusStackCount(statusEffect);
+            bool targetApplied = tile.TryApplyStatusToTop(
+                statusEffect,
+                effectiveDuration,
+                stackCount,
+                source,
+                tickInterval,
+                TryDamageTile);
+            if (targetApplied)
+            {
+                NotifyStatusApplied(new BattleStatusAppliedEvent(
+                    BattleStatusTarget.FromEnemy(enemy),
+                    statusEffect,
+                    previousStacks,
+                    enemy.GetStatusStackCount(statusEffect),
+                    source));
+            }
+            if (targetApplied && showAttackRange &&
+                ReferenceEquals(tile.TopEnemy, enemy))
+                tile.ShowAttackRange();
+            applied |= targetApplied;
+        }
+
+        return applied;
+    }
+
+    public bool TryApplyAlliedCharacterStatus(
+        IBattleCharacter source,
+        IReadOnlyList<IBattleCharacter> targets,
+        StatusEffectSO statusEffect,
+        float duration,
+        float stacks)
+    {
+        if (source == null || targets == null || statusEffect == null ||
+            !statusEffect.CanTargetAlly || stacks <= 0f)
+        {
+            return false;
+        }
+
+        int stackCount = Mathf.Max(1, Mathf.RoundToInt(stacks));
+        bool applied = false;
+        HashSet<IBattleCharacter> uniqueTargets = new();
+        foreach (IBattleCharacter target in targets)
+        {
+            if (target == null || !uniqueTargets.Add(target))
                 continue;
 
-            center = tile;
-            highestHealth = tile.TopEnemyHealth;
+            applied |= target.ApplyStatusEffect(
+                statusEffect,
+                duration,
+                stackCount,
+                source);
         }
 
-        if (center == null)
-            return 0;
-
-        PlayAreaExplosion(source, center, 5);
-        ShowAttackRangeTile(center.Row, center.Column);
-        ShowAttackRangeTile(center.Row - 1, center.Column);
-        ShowAttackRangeTile(center.Row + 1, center.Column);
-        ShowAttackRangeTile(center.Row, center.Column - 1);
-        ShowAttackRangeTile(center.Row, center.Column + 1);
-        ShowAttackRangeTile(center.Row - 2, center.Column);
-        ShowAttackRangeTile(center.Row + 2, center.Column);
-        ShowAttackRangeTile(center.Row, center.Column - 2);
-        ShowAttackRangeTile(center.Row, center.Column + 2);
-        ShowAttackRangeTile(center.Row - 1, center.Column - 1);
-        ShowAttackRangeTile(center.Row - 1, center.Column + 1);
-        ShowAttackRangeTile(center.Row + 1, center.Column - 1);
-        ShowAttackRangeTile(center.Row + 1, center.Column + 1);
-        int totalDamage = TryDamageTile(center, damage);
-        totalDamage += TryDamageTile(center.Row - 1, center.Column, damage);
-        totalDamage += TryDamageTile(center.Row + 1, center.Column, damage);
-        totalDamage += TryDamageTile(center.Row, center.Column - 1, damage);
-        totalDamage += TryDamageTile(center.Row, center.Column + 1, damage);
-        totalDamage += TryDamageTile(
-            center.Row - 2,
-            center.Column,
-            adjacentDamage);
-        totalDamage += TryDamageTile(
-            center.Row + 2,
-            center.Column,
-            adjacentDamage);
-        totalDamage += TryDamageTile(
-            center.Row,
-            center.Column - 2,
-            adjacentDamage);
-        totalDamage += TryDamageTile(
-            center.Row,
-            center.Column + 2,
-            adjacentDamage);
-        totalDamage += TryDamageTile(
-            center.Row - 1,
-            center.Column - 1,
-            adjacentDamage);
-        totalDamage += TryDamageTile(
-            center.Row - 1,
-            center.Column + 1,
-            adjacentDamage);
-        totalDamage += TryDamageTile(
-            center.Row + 1,
-            center.Column - 1,
-            adjacentDamage);
-        totalDamage += TryDamageTile(
-            center.Row + 1,
-            center.Column + 1,
-            adjacentDamage);
-        return totalDamage;
+        return applied;
     }
 
-    public bool TryApplyFireToRandomEnemy(
+    public bool TryRemoveCharacterStatus(
+        IBattleCharacter source,
+        IReadOnlyList<EnemyRuntime> targets,
+        CharacterStatusRemovalTarget removalTarget,
+        StatusEffectSO statusEffect,
+        int removalCount,
+        bool showAttackRange)
+    {
+        if (source == null || targets == null || removalCount < 0)
+            return false;
+
+        bool removedAny = false;
+        HashSet<EnemyRuntime> uniqueTargets = new();
+        foreach (EnemyRuntime enemy in targets)
+        {
+            if (enemy == null || !uniqueTargets.Add(enemy) ||
+                !TryFindEnemyTile(enemy, out DungeonTileView tile))
+            {
+                continue;
+            }
+
+            int removed = tile.TryRemoveStatusFromTop(
+                removalTarget,
+                statusEffect,
+                removalCount,
+                TryDamageTile);
+            if (removed <= 0)
+                continue;
+
+            if (showAttackRange &&
+                ReferenceEquals(tile.TopEnemy, enemy))
+                tile.ShowAttackRange();
+            removedAny = true;
+        }
+
+        return removedAny;
+    }
+
+    public bool TryRemoveAlliedCharacterStatus(
+        IBattleCharacter source,
+        IReadOnlyList<IBattleCharacter> targets,
+        CharacterStatusRemovalTarget removalTarget,
+        StatusEffectSO statusEffect,
+        int removalCount)
+    {
+        if (source == null || targets == null || removalCount < 0)
+            return false;
+
+        bool removedAny = false;
+        HashSet<IBattleCharacter> uniqueTargets = new();
+        foreach (IBattleCharacter target in targets)
+        {
+            if (target == null || !uniqueTargets.Add(target))
+                continue;
+
+            removedAny |= target.RemoveStatusEffects(
+                removalTarget,
+                statusEffect,
+                removalCount) > 0;
+        }
+
+        return removedAny;
+    }
+
+    private bool TryApplyFireStatus(
+        DungeonTileView tile,
         IBattleCharacter source,
         float duration,
         float tickInterval,
         int tickDamage)
     {
-        if (TryGetForcedPriorityTile(out DungeonTileView forcedTarget))
-        {
-            bool forcedApplied = forcedTarget.TryApplyFireToTop(
-                source,
-                duration,
-                tickInterval,
-                tickDamage);
-            if (forcedApplied)
-                forcedTarget.ShowAttackRange();
-            return forcedApplied;
-        }
-
-        List<DungeonTileView> occupiedTiles = CollectPriorityTargetTiles();
-        if (occupiedTiles.Count == 0)
+        if (tile == null)
             return false;
 
-        List<DungeonTileView> targetsWithoutFire = new();
-        foreach (DungeonTileView tile in occupiedTiles)
-        {
-            if (!tile.TopEnemyHasFire)
-                targetsWithoutFire.Add(tile);
-        }
-
-        List<DungeonTileView> targetPool = targetsWithoutFire.Count > 0
-            ? targetsWithoutFire
-            : occupiedTiles;
-        DungeonTileView target = targetPool[Random.Range(0, targetPool.Count)];
-        bool applied = target.TryApplyFireToTop(
+        EnemyRuntime enemy = tile.TopEnemy;
+        StatusEffectSO fire =
+            StatusEffectDefinitionCatalog.FindById(StatusEffectIds.Fire);
+        int previousStacks = enemy?.GetStatusStackCount(fire) ?? 0;
+        bool applied = tile.TryApplyFireToTop(
             source,
             duration,
             tickInterval,
-            tickDamage);
-        if (applied)
-            target.ShowAttackRange();
+            tickDamage,
+            TryDamageTile);
+        if (applied && enemy != null)
+        {
+            NotifyStatusApplied(new BattleStatusAppliedEvent(
+                BattleStatusTarget.FromEnemy(enemy),
+                fire,
+                previousStacks,
+                enemy.GetStatusStackCount(fire),
+                source));
+        }
         return applied;
-    }
-
-    public bool TryApplyFireAroundRandomEnemies(
-        IBattleCharacter source,
-        int centerTargetCount,
-        float duration,
-        float tickInterval,
-        int tickDamage)
-    {
-        List<DungeonTileView> occupiedTiles = CollectPriorityTargetTiles();
-        if (occupiedTiles.Count == 0)
-            return false;
-
-        bool hasForcedTarget = TryGetForcedPriorityTile(
-            out DungeonTileView forcedTarget);
-        if (hasForcedTarget)
-        {
-            occupiedTiles.Remove(forcedTarget);
-            occupiedTiles.Insert(0, forcedTarget);
-        }
-        int targetCount = Mathf.Clamp(
-            centerTargetCount,
-            1,
-            occupiedTiles.Count);
-        int firstRandomIndex = hasForcedTarget ? 1 : 0;
-
-        for (int index = firstRandomIndex; index < targetCount; index++)
-        {
-            int swapIndex = Random.Range(index, occupiedTiles.Count);
-            (occupiedTiles[index], occupiedTiles[swapIndex]) =
-                (occupiedTiles[swapIndex], occupiedTiles[index]);
-        }
-
-        Dictionary<DungeonTileView, int> rangeHitCounts = new();
-        for (int index = 0; index < targetCount; index++)
-        {
-            DungeonTileView center = occupiedTiles[index];
-            for (int row = center.Row - 1; row <= center.Row + 1; row++)
-            {
-                for (int column = center.Column - 1;
-                     column <= center.Column + 1;
-                     column++)
-                {
-                    if (!TryGetTile(row, column, out DungeonTileView tile))
-                        continue;
-
-                    rangeHitCounts.TryGetValue(tile, out int hitCount);
-                    rangeHitCounts[tile] = hitCount + 1;
-                }
-            }
-        }
-
-        bool applied = false;
-        foreach ((DungeonTileView tile, int hitCount) in rangeHitCounts)
-        {
-            tile.ShowAttackRange(hitCount);
-            if (tile.TopEnemy == null)
-                continue;
-
-            applied |= tile.TryApplyFireToTop(
-                source,
-                duration * hitCount,
-                tickInterval,
-                tickDamage);
-        }
-
-        return applied;
-    }
-
-    private void ShowAttackRangeTile(int row, int column)
-    {
-        if (TryGetTile(row, column, out DungeonTileView tile))
-            tile.ShowAttackRange();
     }
 
     public void TickStatusEffects(float deltaTime)
@@ -864,8 +1104,9 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard
                 EEnemyType.Medic => TryHealAdjacentEnemies(
                     tile,
                     enemy.Definition.AbilityPower),
-                EEnemyType.Mechanic => TryDisableHighestDamageCharacter(
+                EEnemyType.Mechanic => TryApplyStatusToHighestDamageCharacter(
                     characters,
+                    enemy.Definition.DisableStatusEffect,
                     enemy.Definition.DisableDuration),
                 _ => false,
             };
@@ -885,116 +1126,9 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard
 
     public void ClearAllEnemies()
     {
-        ClearAllPreparedAttacks();
         _forcedPriorityTarget = null;
         _forcedPriorityRemaining = 0f;
-        HideAllAreaEffects();
         ClearAllStacks();
-    }
-
-    private void PlayAreaExplosion(
-        IBattleCharacter source,
-        DungeonTileView centerTile,
-        int tileSpan)
-    {
-        if (source == null || centerTile == null ||
-            source.PartySlotIndex < 0 ||
-            source.TargetEffectSprite == null ||
-            source.TargetEffectController == null || boardRect == null)
-        {
-            return;
-        }
-
-        AreaEffectHandle effect = GetOrCreateAreaEffect(source);
-        if (effect == null)
-            return;
-
-        Bounds targetBounds = RectTransformUtility.CalculateRelativeRectTransformBounds(
-            boardRect,
-            centerTile.transform as RectTransform);
-        float effectSize = (gridLayout.cellSize.x * tileSpan +
-                            gridLayout.spacing.x * (tileSpan - 1)) *
-                           AreaEffectSizeScale;
-
-        effect.RectTransform.anchoredPosition = targetBounds.center;
-        effect.RectTransform.sizeDelta = new Vector2(effectSize, effectSize);
-        effect.RectTransform.SetAsLastSibling();
-        effect.Image.sprite = source.TargetEffectSprite;
-        Color32 color = source.EffectColor;
-        color.a = AreaEffectAlpha;
-        effect.Image.color = color;
-        effect.Image.enabled = true;
-        effect.Animator.runtimeAnimatorController =
-            source.TargetEffectController;
-        effect.Animator.speed = AreaEffectAnimationSpeed;
-        effect.Animator.Play(AreaExplosionFireStateName, 0, 0f);
-    }
-
-    private AreaEffectHandle GetOrCreateAreaEffect(IBattleCharacter source)
-    {
-        if (_areaEffects.TryGetValue(
-                source.PartySlotIndex,
-                out AreaEffectHandle effect) && effect?.RectTransform != null)
-        {
-            return effect;
-        }
-
-        GameObject effectObject = new(
-            $"imgAreaExplosionEffect_S{source.PartySlotIndex + 1}",
-            typeof(RectTransform),
-            typeof(CanvasRenderer),
-            typeof(Image),
-            typeof(CanvasGroup),
-            typeof(Animator));
-        effectObject.layer = gameObject.layer;
-
-        RectTransform rectTransform =
-            effectObject.GetComponent<RectTransform>();
-        rectTransform.SetParent(boardRect, false);
-        rectTransform.anchorMin = new Vector2(0.5f, 0.5f);
-        rectTransform.anchorMax = new Vector2(0.5f, 0.5f);
-        rectTransform.pivot = new Vector2(0.5f, 0.5f);
-        rectTransform.localScale = Vector3.one;
-
-        Image image = effectObject.GetComponent<Image>();
-        image.raycastTarget = false;
-        image.preserveAspect = true;
-
-        CanvasGroup canvasGroup = effectObject.GetComponent<CanvasGroup>();
-        canvasGroup.alpha = 0f;
-        canvasGroup.interactable = false;
-        canvasGroup.blocksRaycasts = false;
-
-        Animator animator = effectObject.GetComponent<Animator>();
-        animator.runtimeAnimatorController = source.TargetEffectController;
-        animator.updateMode = AnimatorUpdateMode.Normal;
-        animator.cullingMode = AnimatorCullingMode.AlwaysAnimate;
-        animator.speed = AreaEffectAnimationSpeed;
-
-        effect = new AreaEffectHandle(
-            rectTransform,
-            image,
-            canvasGroup,
-            animator);
-        _areaEffects[source.PartySlotIndex] = effect;
-        return effect;
-    }
-
-    private void HideAllAreaEffects()
-    {
-        foreach (AreaEffectHandle effect in _areaEffects.Values)
-        {
-            if (effect?.Animator != null &&
-                effect.Animator.runtimeAnimatorController != null &&
-                effect.Animator.isActiveAndEnabled)
-            {
-                effect.Animator.Play(AreaExplosionHiddenStateName, 0, 0f);
-            }
-            else if (effect?.CanvasGroup != null)
-            {
-                effect.CanvasGroup.alpha = 0f;
-            }
-        }
     }
 
     private void OnRectTransformDimensionsChange()
@@ -1054,6 +1188,17 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard
 
     private int TryDamageTile(DungeonTileView targetTile, int damage)
     {
+        return TryDamageTile(
+            targetTile,
+            damage,
+            CharacterAttackDamageType.Physical);
+    }
+
+    private int TryDamageTile(
+        DungeonTileView targetTile,
+        int damage,
+        CharacterAttackDamageType damageType)
+    {
         if (targetTile == null || targetTile.TopEnemy == null || damage <= 0)
             return 0;
 
@@ -1062,7 +1207,7 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard
             ? shieldTile
             : targetTile;
         EnemyRuntime damagedEnemy = damageReceiver.TopEnemy;
-        int appliedDamage = damageReceiver.TryDamageTop(damage);
+        int appliedDamage = damageReceiver.TryDamageTop(damage, damageType);
         if (appliedDamage > 0 && damagedEnemy.Health <= 0)
             EnemyDefeated?.Invoke(damagedEnemy);
 
@@ -1118,11 +1263,12 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard
             : 0;
     }
 
-    private static bool TryDisableHighestDamageCharacter(
+    private static bool TryApplyStatusToHighestDamageCharacter(
         IReadOnlyList<IBattleCharacter> characters,
+        StatusEffectSO statusEffect,
         float duration)
     {
-        if (characters == null || duration <= 0f)
+        if (characters == null || statusEffect == null || duration <= 0f)
             return false;
 
         IBattleCharacter target = null;
@@ -1139,8 +1285,7 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard
         if (target == null)
             return false;
 
-        target.DisableFor(duration);
-        return true;
+        return target.ApplyStatusEffect(statusEffect, duration, 1);
     }
 
     private List<DungeonTileView> CollectOccupiedTiles()
@@ -1221,24 +1366,6 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard
 
         _forcedPriorityTarget = null;
         _forcedPriorityRemaining = 0f;
-        ClearAllPreparedAttacks();
-    }
-
-    private void ClearAllPreparedAttacks()
-    {
-        foreach (KeyValuePair<IBattleCharacter, PreparedTarget> prepared in
-                 _preparedLowestHealthTargets)
-        {
-            prepared.Value.Tile?.HideBasicTargetEffect(prepared.Key);
-        }
-        _preparedLowestHealthTargets.Clear();
-
-        foreach (KeyValuePair<IBattleCharacter, List<PreparedTarget>> prepared in
-                 _preparedRandomTargets)
-        {
-            HidePreparedTargetEffects(prepared.Key, prepared.Value);
-        }
-        _preparedRandomTargets.Clear();
     }
 
     private List<EnemyRuntime>[,] CaptureExistingStacks()

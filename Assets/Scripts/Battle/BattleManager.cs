@@ -67,6 +67,7 @@ public sealed class BattleManager : MonoBehaviour, IActiveSkillResource
     public float ActiveSkillRechargeRemaining =>
         TimePrecision.FloorToTenth(_activeSkillRechargeRemaining);
     int IActiveSkillResource.Current => _activeSkillResource;
+    int IActiveSkillResource.Maximum => _maximumActiveSkillResource;
     public int PendingEnemyCount => _spawnQueue.Count;
     public int SpawnedEnemyCount => _spawnedEnemyCount;
     public int MaximumEnemyCount => _maximumEnemyCount;
@@ -159,6 +160,7 @@ public sealed class BattleManager : MonoBehaviour, IActiveSkillResource
             character.BindBattle(this, _board);
             _characters.Add(character);
         }
+        _board.SetBattleCharacters(_characters);
 
         foreach (EnemyRuntime enemy in enemies)
         {
@@ -203,6 +205,21 @@ public sealed class BattleManager : MonoBehaviour, IActiveSkillResource
                 _activeSkillRechargeDuration);
         }
         return true;
+    }
+
+    public bool TryGain(int amount)
+    {
+        if (amount <= 0 || State != EBattleState.Running ||
+            _activeSkillResource >= _maximumActiveSkillResource)
+        {
+            return false;
+        }
+
+        int previous = _activeSkillResource;
+        SetActiveSkillResource(_activeSkillResource + amount);
+        if (_activeSkillResource >= _maximumActiveSkillResource)
+            SetActiveSkillRechargeRemaining(0f);
+        return _activeSkillResource > previous;
     }
 
     public void ConfigureActiveSkillResource(
@@ -461,6 +478,8 @@ public sealed class BattleManager : MonoBehaviour, IActiveSkillResource
         RestoreDefaultTimeScale();
         foreach (IBattleCharacter character in _characters)
             character?.BindBattle(null, null);
+
+        _board?.SetBattleCharacters(null);
 
         _spawnQueue.Clear();
         _characters.Clear();
