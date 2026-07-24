@@ -5356,16 +5356,56 @@ public sealed class CharacterP0RegressionTests
         EnemySO definition = ScriptableObject.CreateInstance<EnemySO>();
         definition.hideFlags = HideFlags.HideAndDontSave;
         _createdObjects.Add(definition);
-        if (initialArmorMultiplier > 0f || abilityCooldown > 0f)
+        SerializedObject serialized = new(definition);
+        if (abilityCooldown > 0f)
         {
-            SerializedObject serialized = new(definition);
-            serialized.FindProperty("initialArmorMultiplier").floatValue =
-                initialArmorMultiplier;
-            serialized.FindProperty("abilityCooldown").floatValue =
+            SerializedProperty abilities =
+                serialized.FindProperty("abilities");
+            abilities.arraySize = 1;
+            SerializedProperty ability =
+                abilities.GetArrayElementAtIndex(0);
+            ability.FindPropertyRelative("abilityId").stringValue =
+                "test_enemy_cooldown";
+            ability.FindPropertyRelative("fallbackName").stringValue =
+                "Test Enemy Cooldown";
+            ability.FindPropertyRelative("trigger").enumValueIndex =
+                (int)EnemyAbilityTrigger.OnCooldown;
+            ability.FindPropertyRelative("cooldown").floatValue =
                 abilityCooldown;
-            serialized.ApplyModifiedPropertiesWithoutUndo();
+            ability.FindPropertyRelative(
+                "pauseCooldownWhileDisabled").boolValue = true;
+            SerializedProperty target =
+                ability.FindPropertyRelative("target");
+            target.FindPropertyRelative("faction").enumValueIndex =
+                (int)EnemyAbilityTargetFaction.Self;
+            target.FindPropertyRelative("subject").enumValueIndex =
+                (int)EnemyAbilityTargetSubject.Self;
+            SerializedProperty operations =
+                ability.FindPropertyRelative("operations");
+            operations.arraySize = 1;
+            SerializedProperty operation =
+                operations.GetArrayElementAtIndex(0);
+            operation.FindPropertyRelative("type").enumValueIndex =
+                (int)EnemyAbilityOperationType.ExecuteEffects;
+            operation.FindPropertyRelative("enabled").boolValue = true;
         }
-        return new EnemyRuntime(definition, maximumHealth);
+        serialized.ApplyModifiedPropertiesWithoutUndo();
+
+        EnemyRuntime runtime =
+            new EnemyRuntime(definition, maximumHealth);
+        if (initialArmorMultiplier > 0f)
+        {
+            int armor = Mathf.Max(
+                0,
+                Mathf.RoundToInt(
+                    runtime.MaxHealth * initialArmorMultiplier));
+            InvokeEnemyRuntime(
+                runtime,
+                "GainArmor",
+                new[] { typeof(int) },
+                armor);
+        }
+        return runtime;
     }
 
     private static T LoadAsset<T>(string assetPath)

@@ -14,9 +14,9 @@ public sealed class EnemyRuntime
         new(StringComparer.Ordinal);
     private readonly Queue<BattleStatusChangedEvent> _statusChangeQueue =
         new();
+    private readonly List<EnemyAbilityRuntimeState> _abilityStates = new();
     private int _statusMutationDepth;
     private bool _dispatchingStatusChanges;
-    private float _abilityCooldownRemaining;
 
     public EnemySO Definition { get; }
     public EEnemyGrade Grade => Definition.Grade;
@@ -25,7 +25,6 @@ public sealed class EnemyRuntime
     public int Health { get; private set; }
     public int CurrentShield { get; private set; }
     public int Armor { get; private set; }
-    public int RemainingGuardedHits { get; private set; }
     public bool HasFire => TryGetStatusState(
         StatusEffectIds.Fire,
         out _);
@@ -44,10 +43,50 @@ public sealed class EnemyRuntime
         out StatusEffectRuntimeState fireState)
             ? fireState.Definition?.Icon
             : null;
-    public bool IsTargetPriorityExcluded => Definition.TargetPriorityExcluded;
+    public bool IsTargetPriorityExcluded
+    {
+        get
+        {
+            foreach (EnemyAbilityRuntimeState state in _abilityStates)
+            {
+                if (state.Definition.Trigger !=
+                    EnemyAbilityTrigger.OnTargetPriorityEvaluation)
+                {
+                    continue;
+                }
+
+                foreach (EnemyAbilityOperationDefinition operation in
+                         state.Definition.Operations)
+                {
+                    if (operation != null && operation.Enabled &&
+                        operation.Type ==
+                            EnemyAbilityOperationType.ModifyTargetPriority)
+                    {
+                        return true;
+                    }
+                }
+            }
+
+            return false;
+        }
+    }
     public float SpawnIntervalMultiplier => Definition.SpawnIntervalMultiplier;
-    public float AbilityCooldownRemaining =>
-        TimePrecision.FloorToTenth(_abilityCooldownRemaining);
+    public float AbilityCooldownRemaining
+    {
+        get
+        {
+            foreach (EnemyAbilityRuntimeState state in _abilityStates)
+            {
+                if (state.Definition.Trigger ==
+                    EnemyAbilityTrigger.OnCooldown)
+                {
+                    return state.CooldownRemaining;
+                }
+            }
+
+            return 0f;
+        }
+    }
     public bool AreAllActionsDisabled =>
         HasStatusControl(StatusEffectControlType.DisableAllActions);
     public event Action<BattleStatusChangedEvent> StatusChanged;
@@ -89,11 +128,8 @@ public sealed class EnemyRuntime
             : Definition.BaseHealth;
         MaxHealth = Mathf.Max(1, MaxHealth);
         Health = MaxHealth;
-        Armor = Mathf.Max(
-            0,
-            Mathf.RoundToInt(MaxHealth * Definition.InitialArmorMultiplier));
-        RemainingGuardedHits = Mathf.Max(0, Definition.GuardedHitCount);
-        ResetAbilityCooldown();
+        Armor = 0;
+        InitializeAbilityStates();
     }
 
     internal void SetHealth(int health)
@@ -122,13 +158,6 @@ public sealed class EnemyRuntime
         if (damageType == CharacterAttackDamageType.StatusEffect ||
             damageType == CharacterAttackDamageType.StatusRemoval)
             return 0;
-
-        if (damageType != CharacterAttackDamageType.Fixed &&
-            RemainingGuardedHits > 0)
-        {
-            RemainingGuardedHits--;
-            damage = 1;
-        }
 
         int appliedDamage = 0;
         if (CurrentShield > 0)
@@ -229,6 +258,34 @@ public sealed class EnemyRuntime
             ? int.MaxValue
             : (int)total;
         return CurrentShield - previousShield;
+    }
+
+    internal int GainArmor(int amount)
+    {
+        amount = Mathf.Max(0, amount);
+        if (amount <= 0 || Health <= 0 || Armor == int.MaxValue)
+            return 0;
+
+        int previousArmor = Armor;
+        long total = (long)Armor + amount;
+        Armor = total >= int.MaxValue
+            ? int.MaxValue
+            : (int)total;
+        return Armor - previousArmor;
+    }
+
+    internal bool CanSpendHealth(int amount)
+    {
+        return amount > 0 && Health - amount >= 1;
+    }
+
+    internal bool TrySpendHealth(int amount)
+    {
+        if (!CanSpendHealth(amount))
+            return false;
+
+        Health -= amount;
+        return true;
     }
 
     internal void ApplyFire(
@@ -929,14 +986,59 @@ public sealed class EnemyRuntime
 
     internal bool TickAbilityCooldown(float deltaTime)
     {
-        if (Definition.AbilityCooldown <= 0f || deltaTime <= 0f ||
-            AreAllActionsDisabled)
-            return false;
+        foreach (EnemyAbilityRuntimeState state in _abilityStates)
+        {
+            if (state.Definition.Trigger ==
+                EnemyAbilityTrigger.OnCooldown)
+            {
+                return state.TickCooldown(
+                    deltaTime,
+                    AreAllActionsDisabled);
+            }
+        }
 
-        _abilityCooldownRemaining = Mathf.Max(
-            0f,
-            _abilityCooldownRemaining - deltaTime);
-        return _abilityCooldownRemaining <= 0f;
+        return false;
+    }
+
+    internal IReadOnlyList<EnemyAbilityRuntimeState> AbilityStates =>
+        _abilityStates;
+
+    internal int GetAbilityRemainingCharges(string abilityId)
+    {
+        foreach (EnemyAbilityRuntimeState state in _abilityStates)
+        {
+            if (string.Equals(
+                    state.Definition.AbilityId,
+                    abilityId,
+                    StringComparison.Ordinal))
+            {
+                return state.RemainingCharges;
+            }
+        }
+
+        return 0;
+    }
+
+    private void InitializeAbilityStates()
+    {
+        _abilityStates.Clear();
+        foreach (EnemyAbilityDefinition ability in Definition.Abilities)
+        {
+            if (ability != null)
+                _abilityStates.Add(new EnemyAbilityRuntimeState(ability));
+        }
+
+        _abilityStates.Sort((left, right) =>
+        {
+            int priority = right.Definition.Priority.CompareTo(
+                left.Definition.Priority);
+            return priority != 0
+                ? priority
+                : string.Compare(
+                    left.Definition.AbilityId,
+                    right.Definition.AbilityId,
+                    StringComparison.Ordinal);
+        });
     }
 
     private bool HasStatusControl(StatusEffectControlType controlType)
@@ -973,8 +1075,4 @@ public sealed class EnemyRuntime
         return false;
     }
 
-    internal void ResetAbilityCooldown()
-    {
-        _abilityCooldownRemaining = Mathf.Max(0f, Definition.AbilityCooldown);
-    }
 }

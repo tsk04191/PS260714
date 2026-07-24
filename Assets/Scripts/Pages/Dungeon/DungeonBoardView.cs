@@ -190,7 +190,7 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard
     {
         return enemy != null &&
                TryGetTile(row, column, out DungeonTileView tile) &&
-               tile.TryAdd(enemy);
+               TryAddEnemyToTile(tile, enemy);
     }
 
     public bool TryAddEnemyCardToRandomTile(EnemyRuntime enemy)
@@ -210,7 +210,7 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard
             return false;
 
         int index = Random.Range(0, availableTiles.Count);
-        return availableTiles[index].TryAdd(enemy);
+        return TryAddEnemyToTile(availableTiles[index], enemy);
     }
 
     public bool TryAddEnemyCardToNextAvailableTile(EnemyRuntime enemy)
@@ -240,7 +240,7 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard
             return false;
 
         int randomIndex = Random.Range(0, candidateTiles.Count);
-        return candidateTiles[randomIndex].TryAdd(enemy);
+        return TryAddEnemyToTile(candidateTiles[randomIndex], enemy);
     }
 
     public bool TryAddEnemy(EnemyRuntime enemy)
@@ -295,10 +295,26 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard
 
         for (int index = 0; index < enemies.Count; index++)
         {
-            if (!selectedTiles[index].TryAdd(enemies[index]))
+            if (!TryAddEnemyToTile(
+                    selectedTiles[index],
+                    enemies[index]))
+            {
                 return false;
+            }
         }
 
+        return true;
+    }
+
+    private bool TryAddEnemyToTile(
+        DungeonTileView tile,
+        EnemyRuntime enemy)
+    {
+        if (tile == null || enemy == null || !tile.TryAdd(enemy))
+            return false;
+
+        ExecuteSpawnAbilities(tile, enemy);
+        tile.RefreshTopEnemyCard();
         return true;
     }
 
@@ -762,7 +778,7 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard
         CharacterAttackDamageType damageType,
         bool showAttackRange)
     {
-        if (source == null || targets == null || damage <= 0 ||
+        if (targets == null || damage <= 0 ||
             damageType == CharacterAttackDamageType.StatusEffect ||
             damageType == CharacterAttackDamageType.StatusRemoval)
         {
@@ -793,7 +809,7 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard
         int amount,
         bool showAttackRange)
     {
-        if (source == null || targets == null || amount <= 0)
+        if (targets == null || amount <= 0)
             return 0;
 
         int totalHealed = 0;
@@ -820,7 +836,7 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard
         IReadOnlyList<IBattleCharacter> targets,
         int amount)
     {
-        if (source == null || targets == null || amount <= 0)
+        if (targets == null || amount <= 0)
             return 0;
 
         int totalHealed = 0;
@@ -840,7 +856,7 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard
         int amount,
         bool showAttackRange)
     {
-        if (source == null || targets == null || amount <= 0)
+        if (targets == null || amount <= 0)
             return 0;
 
         int totalGranted = 0;
@@ -867,7 +883,7 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard
         IReadOnlyList<IBattleCharacter> targets,
         int amount)
     {
-        if (source == null || targets == null || amount <= 0)
+        if (targets == null || amount <= 0)
             return 0;
 
         int totalGranted = 0;
@@ -890,7 +906,7 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard
         float tickInterval,
         bool showAttackRange)
     {
-        if (source == null || targets == null || statusEffect == null ||
+        if (targets == null || statusEffect == null ||
             !statusEffect.CanTargetEnemy || stacks <= 0f)
         {
             return false;
@@ -953,7 +969,7 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard
         float duration,
         float stacks)
     {
-        if (source == null || targets == null || statusEffect == null ||
+        if (targets == null || statusEffect == null ||
             !statusEffect.CanTargetAlly || stacks <= 0f)
         {
             return false;
@@ -985,7 +1001,7 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard
         int removalCount,
         bool showAttackRange)
     {
-        if (source == null || targets == null || removalCount < 0)
+        if (targets == null || removalCount < 0)
             return false;
 
         bool removedAny = false;
@@ -1022,7 +1038,7 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard
         StatusEffectSO statusEffect,
         int removalCount)
     {
-        if (source == null || targets == null || removalCount < 0)
+        if (targets == null || removalCount < 0)
             return false;
 
         bool removedAny = false;
@@ -1096,23 +1112,800 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard
         foreach (DungeonTileView tile in _tiles)
         {
             EnemyRuntime enemy = tile != null ? tile.TopEnemy : null;
-            if (enemy == null || !enemy.TickAbilityCooldown(deltaTime))
+            if (enemy == null)
                 continue;
 
-            bool activated = enemy.Type switch
-            {
-                EEnemyType.Medic => TryHealAdjacentEnemies(
-                    tile,
-                    enemy.Definition.AbilityPower),
-                EEnemyType.Mechanic => TryApplyStatusToHighestDamageCharacter(
-                    characters,
-                    enemy.Definition.DisableStatusEffect,
-                    enemy.Definition.DisableDuration),
-                _ => false,
-            };
-            if (activated)
-                enemy.ResetAbilityCooldown();
+            TickModularEnemyAbilities(
+                tile,
+                enemy,
+                deltaTime,
+                characters);
         }
+    }
+
+    private void TickModularEnemyAbilities(
+        DungeonTileView sourceTile,
+        EnemyRuntime source,
+        float deltaTime,
+        IReadOnlyList<IBattleCharacter> characters)
+    {
+        foreach (EnemyAbilityRuntimeState state in source.AbilityStates)
+        {
+            if (!state.TickCooldown(
+                    deltaTime,
+                    source.AreAllActionsDisabled))
+            {
+                continue;
+            }
+
+            BattleEffectResult result = ExecuteCooldownAbility(
+                sourceTile,
+                source,
+                state.Definition,
+                characters);
+            state.RecordActivation(result.Attempted, result.Succeeded);
+        }
+    }
+
+    private BattleEffectResult ExecuteCooldownAbility(
+        DungeonTileView sourceTile,
+        EnemyRuntime source,
+        EnemyAbilityDefinition ability,
+        IReadOnlyList<IBattleCharacter> characters)
+    {
+        if (ability == null ||
+            ability.Trigger != EnemyAbilityTrigger.OnCooldown ||
+            !TryResolveEnemyAbilityTargets(
+                sourceTile,
+                source,
+                ability.Target,
+                characters,
+                out CharacterTargetFaction targetFaction,
+                out IReadOnlyList<EnemyRuntime> enemyTargets,
+                out IReadOnlyList<IBattleCharacter> playerTargets) ||
+            !MatchesEnemyAbilityConditions(
+                ability,
+                source,
+                enemyTargets,
+                playerTargets))
+        {
+            return default;
+        }
+
+        BattleEffectContext context =
+            BattleEffectContext.ForEnemyAbility(
+                source,
+                this,
+                targetFaction,
+                enemyTargets,
+                playerTargets);
+        return ExecuteEffectOperations(ability, context);
+    }
+
+    private void ExecuteSpawnAbilities(
+        DungeonTileView sourceTile,
+        EnemyRuntime source)
+    {
+        if (source == null)
+            return;
+
+        foreach (EnemyAbilityRuntimeState state in source.AbilityStates)
+        {
+            EnemyAbilityDefinition ability = state.Definition;
+            if (!state.CanActivate ||
+                ability.Trigger != EnemyAbilityTrigger.OnSpawn ||
+                !TryResolveEnemyAbilityTargets(
+                    sourceTile,
+                    source,
+                    ability.Target,
+                    _battleCharacters,
+                    out CharacterTargetFaction targetFaction,
+                    out IReadOnlyList<EnemyRuntime> enemyTargets,
+                    out IReadOnlyList<IBattleCharacter> playerTargets) ||
+                !MatchesEnemyAbilityConditions(
+                    ability,
+                    source,
+                    enemyTargets,
+                    playerTargets))
+            {
+                continue;
+            }
+
+            BattleEffectContext context =
+                BattleEffectContext.ForEnemyAbility(
+                    source,
+                    this,
+                    targetFaction,
+                    enemyTargets,
+                    playerTargets);
+            BattleEffectResult combined =
+                ExecuteEffectOperations(ability, context);
+            foreach (EnemyAbilityOperationDefinition operation in
+                     ability.Operations)
+            {
+                if (operation == null || !operation.Enabled ||
+                    operation.Type !=
+                        EnemyAbilityOperationType.GrantArmor)
+                {
+                    continue;
+                }
+
+                int armor = ResolveGrantedArmor(source, operation);
+                int granted = source.GainArmor(armor);
+                combined = combined.Combine(
+                    new BattleEffectResult(true, granted > 0));
+            }
+
+            state.RecordActivation(
+                combined.Attempted,
+                combined.Succeeded);
+        }
+    }
+
+    private int ExecuteBeforeSelfDamageAbilities(
+        DungeonTileView sourceTile,
+        EnemyRuntime source,
+        int damage,
+        CharacterAttackDamageType damageType)
+    {
+        if (source == null || source.AreAllActionsDisabled)
+        {
+            return damage;
+        }
+
+        foreach (EnemyAbilityRuntimeState state in source.AbilityStates)
+        {
+            EnemyAbilityDefinition ability = state.Definition;
+            if (!state.CanActivate ||
+                ability.Trigger !=
+                    EnemyAbilityTrigger.BeforeSelfDamage ||
+                !TryResolveEnemyAbilityTargets(
+                    sourceTile,
+                    source,
+                    ability.Target,
+                    _battleCharacters,
+                    out CharacterTargetFaction targetFaction,
+                    out IReadOnlyList<EnemyRuntime> enemyTargets,
+                    out IReadOnlyList<IBattleCharacter> playerTargets) ||
+                !MatchesEnemyAbilityConditions(
+                    ability,
+                    source,
+                    enemyTargets,
+                    playerTargets,
+                    damageType))
+            {
+                continue;
+            }
+
+            BattleEffectContext context =
+                BattleEffectContext.ForEnemyAbility(
+                    source,
+                    this,
+                    targetFaction,
+                    enemyTargets,
+                    playerTargets);
+            BattleEffectResult combined =
+                ExecuteEffectOperations(ability, context);
+            foreach (EnemyAbilityOperationDefinition operation in
+                     ability.Operations)
+            {
+                if (operation == null || !operation.Enabled ||
+                    operation.Type !=
+                        EnemyAbilityOperationType.ModifyIncomingDamage)
+                {
+                    continue;
+                }
+
+                damage = Mathf.Max(0, operation.Amount);
+                combined = combined.Combine(
+                    new BattleEffectResult(true, true));
+            }
+
+            state.RecordActivation(
+                combined.Attempted,
+                combined.Succeeded);
+        }
+
+        return damage;
+    }
+
+    private DungeonTileView FindModularDamageRedirect(
+        DungeonTileView targetTile,
+        CharacterAttackDamageType damageType)
+    {
+        EnemyRuntime target = targetTile?.TopEnemy;
+        if (target == null)
+            return null;
+
+        foreach (DungeonTileView sourceTile in _tiles)
+        {
+            EnemyRuntime source = sourceTile?.TopEnemy;
+            if (source == null || ReferenceEquals(source, target) ||
+                source.AreAllActionsDisabled)
+            {
+                continue;
+            }
+
+            foreach (EnemyAbilityRuntimeState state in source.AbilityStates)
+            {
+                EnemyAbilityDefinition ability = state.Definition;
+                if (!state.CanActivate ||
+                    ability.Trigger !=
+                        EnemyAbilityTrigger.BeforeAllyDamage)
+                {
+                    continue;
+                }
+
+                IReadOnlyList<EnemyRuntime> enemyTargets =
+                    new[] { target };
+                if (!MatchesEnemyAbilityConditions(
+                        ability,
+                        source,
+                        enemyTargets,
+                        Array.Empty<IBattleCharacter>(),
+                        damageType))
+                {
+                    continue;
+                }
+
+                EnemyAbilityOperationDefinition redirect = null;
+                foreach (EnemyAbilityOperationDefinition operation in
+                         ability.Operations)
+                {
+                    if (operation != null && operation.Enabled &&
+                        operation.Type ==
+                            EnemyAbilityOperationType.RedirectDamage &&
+                        IsWithinAbilityRange(
+                            sourceTile,
+                            targetTile,
+                            operation.Range,
+                            operation.IncludeDiagonals))
+                    {
+                        redirect = operation;
+                        break;
+                    }
+                }
+                if (redirect == null)
+                    continue;
+
+                BattleEffectContext context =
+                    BattleEffectContext.ForEnemyAbility(
+                        source,
+                        this,
+                        CharacterTargetFaction.Enemy,
+                        enemyTargets,
+                        null);
+                BattleEffectResult combined =
+                    ExecuteEffectOperations(ability, context).Combine(
+                        new BattleEffectResult(true, true));
+                state.RecordActivation(
+                    combined.Attempted,
+                    combined.Succeeded);
+                return sourceTile;
+            }
+        }
+
+        return null;
+    }
+
+    private void ExecuteDeathAbilities(
+        DungeonTileView sourceTile,
+        EnemyRuntime source)
+    {
+        if (source == null)
+            return;
+
+        foreach (EnemyAbilityRuntimeState state in source.AbilityStates)
+        {
+            EnemyAbilityDefinition ability = state.Definition;
+            if (!state.CanActivate ||
+                ability.Trigger != EnemyAbilityTrigger.OnDeath ||
+                !TryResolveEnemyAbilityTargets(
+                    sourceTile,
+                    source,
+                    ability.Target,
+                    _battleCharacters,
+                    out CharacterTargetFaction targetFaction,
+                    out IReadOnlyList<EnemyRuntime> enemyTargets,
+                    out IReadOnlyList<IBattleCharacter> playerTargets) ||
+                !MatchesEnemyAbilityConditions(
+                    ability,
+                    source,
+                    enemyTargets,
+                    playerTargets))
+            {
+                continue;
+            }
+
+            BattleEffectContext context =
+                BattleEffectContext.ForEnemyAbility(
+                    source,
+                    this,
+                    targetFaction,
+                    enemyTargets,
+                    playerTargets);
+            BattleEffectResult combined =
+                ExecuteEffectOperations(ability, context);
+            state.RecordActivation(
+                combined.Attempted,
+                combined.Succeeded);
+        }
+    }
+
+    private static BattleEffectResult ExecuteEffectOperations(
+        EnemyAbilityDefinition ability,
+        BattleEffectContext context)
+    {
+        BattleEffectResult combined = default;
+        foreach (EnemyAbilityOperationDefinition operation in
+                 ability.Operations)
+        {
+            if (operation == null || !operation.Enabled ||
+                operation.Type !=
+                    EnemyAbilityOperationType.ExecuteEffects)
+            {
+                continue;
+            }
+
+            combined = combined.Combine(
+                BattleEffectExecutor.ExecuteSequence(
+                    context,
+                    operation.Effects));
+        }
+
+        return combined;
+    }
+
+    private static int ResolveGrantedArmor(
+        EnemyRuntime source,
+        EnemyAbilityOperationDefinition operation)
+    {
+        double amount = operation.Amount +
+                        source.MaxHealth * (double)operation.Multiplier;
+        if (double.IsNaN(amount) || amount <= 0d)
+            return 0;
+        if (double.IsInfinity(amount) || amount >= int.MaxValue)
+            return int.MaxValue;
+        return Mathf.Max(0, Mathf.RoundToInt((float)amount));
+    }
+
+    private static bool IsWithinAbilityRange(
+        DungeonTileView source,
+        DungeonTileView target,
+        int range,
+        bool includeDiagonals)
+    {
+        if (source == null || target == null)
+            return false;
+
+        range = Mathf.Max(1, range);
+        int rowDistance = Mathf.Abs(source.Row - target.Row);
+        int columnDistance = Mathf.Abs(source.Column - target.Column);
+        return includeDiagonals
+            ? Mathf.Max(rowDistance, columnDistance) <= range
+            : rowDistance + columnDistance <= range;
+    }
+
+    private bool TryResolveEnemyAbilityTargets(
+        DungeonTileView sourceTile,
+        EnemyRuntime source,
+        EnemyAbilityTargetDefinition target,
+        IReadOnlyList<IBattleCharacter> characters,
+        out CharacterTargetFaction targetFaction,
+        out IReadOnlyList<EnemyRuntime> enemyTargets,
+        out IReadOnlyList<IBattleCharacter> playerTargets)
+    {
+        targetFaction = CharacterTargetFaction.Enemy;
+        enemyTargets = Array.Empty<EnemyRuntime>();
+        playerTargets = Array.Empty<IBattleCharacter>();
+        if (target == null || !target.HasTarget)
+            return true;
+
+        if (target.Faction == EnemyAbilityTargetFaction.Self ||
+            (target.Faction ==
+                 EnemyAbilityTargetFaction.EnemyAllies &&
+             target.Subject == EnemyAbilityTargetSubject.Self))
+        {
+            enemyTargets = source != null
+                ? new[] { source }
+                : Array.Empty<EnemyRuntime>();
+            return enemyTargets.Count > 0;
+        }
+
+        if (target.Faction ==
+            EnemyAbilityTargetFaction.PlayerCharacters)
+        {
+            if (target.Subject == EnemyAbilityTargetSubject.Self ||
+                target.Subject == EnemyAbilityTargetSubject.Adjacent)
+            {
+                return false;
+            }
+
+            targetFaction = CharacterTargetFaction.Ally;
+            List<IBattleCharacter> candidates = new();
+            if (characters != null)
+            {
+                foreach (IBattleCharacter character in characters)
+                {
+                    if (character != null &&
+                        character.CurrentHealth > 0)
+                    {
+                        candidates.Add(character);
+                    }
+                }
+            }
+
+            SelectEnemyAbilityTargets(
+                candidates,
+                target.Subject,
+                target.Metric,
+                target.TargetCount,
+                GetPlayerAbilityTargetMetric);
+            playerTargets = candidates;
+            return candidates.Count > 0;
+        }
+
+        if (target.Faction !=
+            EnemyAbilityTargetFaction.EnemyAllies)
+        {
+            return false;
+        }
+
+        List<EnemyRuntime> enemyCandidates =
+            target.Subject == EnemyAbilityTargetSubject.Adjacent
+                ? CollectAdjacentEnemyTargets(
+                    sourceTile,
+                    target.Range,
+                    target.IncludeDiagonals)
+                : CollectEnemyAbilityTargets(source);
+        SelectEnemyAbilityTargets(
+            enemyCandidates,
+            target.Subject,
+            target.Metric,
+            target.TargetCount,
+            GetEnemyAbilityTargetMetric);
+        enemyTargets = enemyCandidates;
+        return enemyCandidates.Count > 0;
+    }
+
+    private List<EnemyRuntime> CollectEnemyAbilityTargets(
+        EnemyRuntime source)
+    {
+        List<EnemyRuntime> result = new();
+        foreach (DungeonTileView tile in _tiles)
+        {
+            EnemyRuntime candidate = tile?.TopEnemy;
+            if (candidate != null &&
+                !ReferenceEquals(candidate, source) &&
+                candidate.Health > 0)
+            {
+                result.Add(candidate);
+            }
+        }
+
+        return result;
+    }
+
+    private List<EnemyRuntime> CollectAdjacentEnemyTargets(
+        DungeonTileView sourceTile,
+        int range,
+        bool includeDiagonals)
+    {
+        List<EnemyRuntime> result = new();
+        if (sourceTile == null)
+            return result;
+
+        range = Mathf.Max(1, range);
+        for (int row = sourceTile.Row - range;
+             row <= sourceTile.Row + range;
+             row++)
+        {
+            for (int column = sourceTile.Column - range;
+                 column <= sourceTile.Column + range;
+                 column++)
+            {
+                int rowDistance = Mathf.Abs(row - sourceTile.Row);
+                int columnDistance = Mathf.Abs(
+                    column - sourceTile.Column);
+                if (rowDistance == 0 && columnDistance == 0)
+                    continue;
+                if (includeDiagonals
+                        ? Mathf.Max(rowDistance, columnDistance) > range
+                        : rowDistance + columnDistance > range)
+                {
+                    continue;
+                }
+                if (TryGetTile(row, column, out DungeonTileView tile) &&
+                    tile.TopEnemy != null &&
+                    tile.TopEnemy.Health > 0)
+                {
+                    result.Add(tile.TopEnemy);
+                }
+            }
+        }
+
+        return result;
+    }
+
+    private static void SelectEnemyAbilityTargets<T>(
+        List<T> candidates,
+        EnemyAbilityTargetSubject subject,
+        EnemyAbilityTargetMetric metric,
+        int targetCount,
+        Func<T, EnemyAbilityTargetMetric, float> getMetric)
+    {
+        if (candidates == null || candidates.Count == 0 ||
+            subject == EnemyAbilityTargetSubject.All ||
+            subject == EnemyAbilityTargetSubject.Adjacent)
+        {
+            return;
+        }
+
+        targetCount = Mathf.Clamp(targetCount, 1, candidates.Count);
+        if (subject == EnemyAbilityTargetSubject.Random)
+        {
+            for (int index = 0; index < targetCount; index++)
+            {
+                int randomIndex = Random.Range(index, candidates.Count);
+                (candidates[index], candidates[randomIndex]) =
+                    (candidates[randomIndex], candidates[index]);
+            }
+        }
+        else
+        {
+            bool descending =
+                subject == EnemyAbilityTargetSubject.HighestValue;
+            for (int index = 1; index < candidates.Count; index++)
+            {
+                T candidate = candidates[index];
+                float candidateValue = getMetric(candidate, metric);
+                int insertionIndex = index - 1;
+                while (insertionIndex >= 0)
+                {
+                    float previousValue = getMetric(
+                        candidates[insertionIndex],
+                        metric);
+                    bool shouldMove = descending
+                        ? previousValue < candidateValue
+                        : previousValue > candidateValue;
+                    if (!shouldMove)
+                        break;
+
+                    candidates[insertionIndex + 1] =
+                        candidates[insertionIndex];
+                    insertionIndex--;
+                }
+
+                candidates[insertionIndex + 1] = candidate;
+            }
+        }
+
+        if (candidates.Count > targetCount)
+            candidates.RemoveRange(targetCount, candidates.Count - targetCount);
+    }
+
+    private float GetEnemyAbilityTargetMetric(
+        EnemyRuntime target,
+        EnemyAbilityTargetMetric metric)
+    {
+        if (target == null)
+            return 0f;
+
+        return metric switch
+        {
+            EnemyAbilityTargetMetric.Health => target.Health,
+            EnemyAbilityTargetMetric.HealthPercentage =>
+                target.MaxHealth > 0
+                    ? target.Health * 100f / target.MaxHealth
+                    : 0f,
+            EnemyAbilityTargetMetric.Shield => target.CurrentShield,
+            EnemyAbilityTargetMetric.StackCount =>
+                TryFindEnemyTile(target, out DungeonTileView tile)
+                    ? tile.StackCount
+                    : 0f,
+            _ => 0f
+        };
+    }
+
+    private static float GetPlayerAbilityTargetMetric(
+        IBattleCharacter target,
+        EnemyAbilityTargetMetric metric)
+    {
+        if (target == null)
+            return 0f;
+
+        return metric switch
+        {
+            EnemyAbilityTargetMetric.Health => target.CurrentHealth,
+            EnemyAbilityTargetMetric.HealthPercentage =>
+                target.MaximumHealth > 0
+                    ? target.CurrentHealth * 100f / target.MaximumHealth
+                    : 0f,
+            EnemyAbilityTargetMetric.Shield => target.CurrentShield,
+            EnemyAbilityTargetMetric.TotalDamageDealt =>
+                target.TotalDamageDealt,
+            EnemyAbilityTargetMetric.StackCount =>
+                CountStatusStacks(target.GetActiveStatusEffects()),
+            _ => 0f
+        };
+    }
+
+    private static int CountStatusStacks(
+        IReadOnlyList<BattleStatusSnapshot> statuses)
+    {
+        int total = 0;
+        if (statuses == null)
+            return total;
+
+        foreach (BattleStatusSnapshot status in statuses)
+            total += Mathf.Max(0, status.StackCount);
+        return total;
+    }
+
+    private static bool MatchesEnemyAbilityConditions(
+        EnemyAbilityDefinition ability,
+        EnemyRuntime source,
+        IReadOnlyList<EnemyRuntime> enemyTargets,
+        IReadOnlyList<IBattleCharacter> playerTargets,
+        CharacterAttackDamageType? incomingDamageType = null)
+    {
+        IReadOnlyList<EnemyAbilityConditionDefinition> conditions =
+            ability.Conditions;
+        if (conditions == null || conditions.Count == 0)
+            return true;
+
+        bool matchAny =
+            ability.ConditionMatchMode == CharacterConditionMatchMode.Any;
+        bool evaluatedAny = false;
+        foreach (EnemyAbilityConditionDefinition condition in conditions)
+        {
+            if (condition == null)
+                continue;
+
+            evaluatedAny = true;
+            bool matched = MatchesEnemyAbilityCondition(
+                condition,
+                source,
+                enemyTargets,
+                playerTargets,
+                incomingDamageType);
+            if (matchAny && matched)
+                return true;
+            if (!matchAny && !matched)
+                return false;
+        }
+
+        return !evaluatedAny || !matchAny;
+    }
+
+    private static bool MatchesEnemyAbilityCondition(
+        EnemyAbilityConditionDefinition condition,
+        EnemyRuntime source,
+        IReadOnlyList<EnemyRuntime> enemyTargets,
+        IReadOnlyList<IBattleCharacter> playerTargets,
+        CharacterAttackDamageType? incomingDamageType)
+    {
+        switch (condition.Type)
+        {
+            case EnemyAbilityConditionType.SourceHealth:
+                return CompareCharacterCondition(
+                    source?.Health ?? 0,
+                    condition.Comparison,
+                    condition.Threshold);
+
+            case EnemyAbilityConditionType.SourceHealthPercentage:
+                return CompareCharacterCondition(
+                    source != null && source.MaxHealth > 0
+                        ? source.Health * 100f / source.MaxHealth
+                        : 0f,
+                    condition.Comparison,
+                    condition.Threshold);
+
+            case EnemyAbilityConditionType.SourceHasStatus:
+            {
+                bool hasStatus =
+                    source?.HasStatusEffect(condition.StatusEffect) == true;
+                return hasStatus == condition.Expected;
+            }
+
+            case EnemyAbilityConditionType.TargetHealth:
+                return AnyTargetMatches(
+                    enemyTargets,
+                    playerTargets,
+                    target => target.Health,
+                    target => target.CurrentHealth,
+                    condition);
+
+            case EnemyAbilityConditionType.TargetHealthPercentage:
+                return AnyTargetMatches(
+                    enemyTargets,
+                    playerTargets,
+                    target => target.MaxHealth > 0
+                        ? target.Health * 100f / target.MaxHealth
+                        : 0f,
+                    target => target.MaximumHealth > 0
+                        ? target.CurrentHealth * 100f /
+                          target.MaximumHealth
+                        : 0f,
+                    condition);
+
+            case EnemyAbilityConditionType.TargetTotalDamageDealt:
+                return AnyTargetMatches(
+                    enemyTargets,
+                    playerTargets,
+                    _ => 0f,
+                    target => target.TotalDamageDealt,
+                    condition);
+
+            case EnemyAbilityConditionType.TargetHasStatus:
+            {
+                bool hasStatus = false;
+                foreach (EnemyRuntime target in enemyTargets)
+                {
+                    hasStatus |=
+                        target?.HasStatusEffect(condition.StatusEffect) ==
+                        true;
+                }
+                foreach (IBattleCharacter target in playerTargets)
+                {
+                    hasStatus |=
+                        target?.HasStatusEffect(condition.StatusEffect) ==
+                        true;
+                }
+                return hasStatus == condition.Expected;
+            }
+
+            case EnemyAbilityConditionType.IncomingDamageType:
+            {
+                bool matches =
+                    incomingDamageType.HasValue &&
+                    incomingDamageType.Value ==
+                    condition.IncomingDamageType;
+                return matches == condition.Expected;
+            }
+
+            case EnemyAbilityConditionType.HasAlternateTarget:
+            {
+                bool hasTarget =
+                    (enemyTargets?.Count ?? 0) +
+                    (playerTargets?.Count ?? 0) > 0;
+                return hasTarget == condition.Expected;
+            }
+
+            default:
+                return false;
+        }
+    }
+
+    private static bool AnyTargetMatches(
+        IReadOnlyList<EnemyRuntime> enemyTargets,
+        IReadOnlyList<IBattleCharacter> playerTargets,
+        Func<EnemyRuntime, float> enemyValue,
+        Func<IBattleCharacter, float> playerValue,
+        EnemyAbilityConditionDefinition condition)
+    {
+        foreach (EnemyRuntime target in enemyTargets)
+        {
+            if (target != null && CompareCharacterCondition(
+                    enemyValue(target),
+                    condition.Comparison,
+                    condition.Threshold))
+            {
+                return true;
+            }
+        }
+        foreach (IBattleCharacter target in playerTargets)
+        {
+            if (target != null && CompareCharacterCondition(
+                    playerValue(target),
+                    condition.Comparison,
+                    condition.Threshold))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     public void ClearAllStacks()
@@ -1202,90 +1995,28 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard
         if (targetTile == null || targetTile.TopEnemy == null || damage <= 0)
             return 0;
 
-        DungeonTileView shieldTile = FindProtectingShieldBearer(targetTile);
-        DungeonTileView damageReceiver = shieldTile != null
-            ? shieldTile
+        DungeonTileView redirectTile =
+            FindModularDamageRedirect(targetTile, damageType);
+        DungeonTileView damageReceiver = redirectTile != null
+            ? redirectTile
             : targetTile;
         EnemyRuntime damagedEnemy = damageReceiver.TopEnemy;
+        damage = ExecuteBeforeSelfDamageAbilities(
+            damageReceiver,
+            damagedEnemy,
+            damage,
+            damageType);
+        if (damage <= 0 || damagedEnemy.Health <= 0)
+            return 0;
+
         int appliedDamage = damageReceiver.TryDamageTop(damage, damageType);
         if (appliedDamage > 0 && damagedEnemy.Health <= 0)
+        {
+            ExecuteDeathAbilities(damageReceiver, damagedEnemy);
             EnemyDefeated?.Invoke(damagedEnemy);
+        }
 
         return appliedDamage;
-    }
-
-    private DungeonTileView FindProtectingShieldBearer(
-        DungeonTileView targetTile)
-    {
-        if (targetTile == null || targetTile.TopEnemy == null ||
-            targetTile.TopEnemy.Type == EEnemyType.ShieldBearer)
-        {
-            return null;
-        }
-
-        for (int row = targetTile.Row - 1; row <= targetTile.Row + 1; row++)
-        {
-            for (int column = targetTile.Column - 1;
-                 column <= targetTile.Column + 1;
-                 column++)
-            {
-                if (!TryGetTile(row, column, out DungeonTileView candidate) ||
-                    candidate == targetTile || candidate.TopEnemy == null)
-                {
-                    continue;
-                }
-
-                if (candidate.TopEnemy.Type == EEnemyType.ShieldBearer)
-                    return candidate;
-            }
-        }
-
-        return null;
-    }
-
-    private bool TryHealAdjacentEnemies(DungeonTileView medicTile, int amount)
-    {
-        if (medicTile == null || amount <= 0)
-            return false;
-
-        int healedAmount = 0;
-        healedAmount += TryHealTile(medicTile.Row - 1, medicTile.Column, amount);
-        healedAmount += TryHealTile(medicTile.Row + 1, medicTile.Column, amount);
-        healedAmount += TryHealTile(medicTile.Row, medicTile.Column - 1, amount);
-        healedAmount += TryHealTile(medicTile.Row, medicTile.Column + 1, amount);
-        return healedAmount > 0;
-    }
-
-    private int TryHealTile(int row, int column, int amount)
-    {
-        return TryGetTile(row, column, out DungeonTileView tile)
-            ? tile.TryHealTop(amount)
-            : 0;
-    }
-
-    private static bool TryApplyStatusToHighestDamageCharacter(
-        IReadOnlyList<IBattleCharacter> characters,
-        StatusEffectSO statusEffect,
-        float duration)
-    {
-        if (characters == null || statusEffect == null || duration <= 0f)
-            return false;
-
-        IBattleCharacter target = null;
-        int highestDamage = 0;
-        foreach (IBattleCharacter character in characters)
-        {
-            if (character == null || character.TotalDamageDealt <= highestDamage)
-                continue;
-
-            target = character;
-            highestDamage = character.TotalDamageDealt;
-        }
-
-        if (target == null)
-            return false;
-
-        return target.ApplyStatusEffect(statusEffect, duration, 1);
     }
 
     private List<DungeonTileView> CollectOccupiedTiles()
@@ -1307,7 +2038,9 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard
         foreach (DungeonTileView tile in occupiedTiles)
         {
             if (tile.TopEnemy != null &&
-                !tile.TopEnemy.IsTargetPriorityExcluded)
+                !IsTargetPriorityExcluded(
+                    tile.TopEnemy,
+                    occupiedTiles.Count > 1))
             {
                 priorityTargets.Add(tile);
             }
@@ -1316,6 +2049,42 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard
         return priorityTargets.Count > 0
             ? priorityTargets
             : occupiedTiles;
+    }
+
+    private static bool IsTargetPriorityExcluded(
+        EnemyRuntime source,
+        bool hasAlternateTarget)
+    {
+        if (source == null)
+            return false;
+
+        foreach (EnemyAbilityRuntimeState state in source.AbilityStates)
+        {
+            EnemyAbilityDefinition ability = state.Definition;
+            if (!state.CanActivate ||
+                ability.Trigger !=
+                    EnemyAbilityTrigger.OnTargetPriorityEvaluation ||
+                !EnemyAbilityConditionEvaluator.MatchesSourceOnly(
+                    ability,
+                    source,
+                    hasAlternateTarget))
+            {
+                continue;
+            }
+
+            foreach (EnemyAbilityOperationDefinition operation in
+                     ability.Operations)
+            {
+                if (operation != null && operation.Enabled &&
+                    operation.Type ==
+                        EnemyAbilityOperationType.ModifyTargetPriority)
+                {
+                    return true;
+                }
+            }
+        }
+
+        return false;
     }
 
     private bool TryFindEnemyTile(

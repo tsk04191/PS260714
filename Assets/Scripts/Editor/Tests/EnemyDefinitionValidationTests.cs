@@ -1,0 +1,779 @@
+using System;
+using System.Collections.Generic;
+using System.Reflection;
+using NUnit.Framework;
+using PS260714.Localization;
+using UnityEditor;
+using UnityEngine;
+
+public sealed class EnemyDefinitionValidationTests
+{
+    private readonly List<UnityEngine.Object> _createdObjects = new();
+
+    [TearDown]
+    public void TearDown()
+    {
+        foreach (UnityEngine.Object createdObject in _createdObjects)
+        {
+            if (createdObject != null)
+                UnityEngine.Object.DestroyImmediate(createdObject);
+        }
+        _createdObjects.Clear();
+    }
+
+    [Test]
+    public void AllEnemyAssets_HaveNoDefinitionErrors()
+    {
+        string[] guids = AssetDatabase.FindAssets(
+            "t:EnemySO",
+            new[] { "Assets/Data/Enemies" });
+        List<EnemySO> definitions = new();
+        foreach (string guid in guids)
+        {
+            string path = AssetDatabase.GUIDToAssetPath(guid);
+            EnemySO definition =
+                AssetDatabase.LoadAssetAtPath<EnemySO>(path);
+            if (definition != null)
+                definitions.Add(definition);
+        }
+
+        Assert.That(definitions, Has.Count.EqualTo(8));
+        EnemyDefinitionValidationResult result =
+            EnemyDefinitionValidator.ValidateAll(definitions);
+
+        Assert.That(
+            result.ErrorCount,
+            Is.Zero,
+            BuildFailureMessage(result));
+    }
+
+    [Test]
+    public void NewEnemy_GeneratesPersistentGuidWhenValidated()
+    {
+        EnemySO definition = CreateEnemy();
+        SerializedObject serialized = new(definition);
+        serialized.FindProperty("enemyId").stringValue = string.Empty;
+        serialized.ApplyModifiedPropertiesWithoutUndo();
+
+        InvokeOnValidate(definition);
+
+        Assert.That(
+            Guid.TryParseExact(definition.EnemyId, "N", out _),
+            Is.True);
+        string generatedId = definition.EnemyId;
+
+        InvokeOnValidate(definition);
+
+        Assert.That(definition.EnemyId, Is.EqualTo(generatedId));
+    }
+
+    [Test]
+    public void DuplicateEnemyId_IsRejected()
+    {
+        EnemySO first = CreateEnemy("duplicate_enemy");
+        EnemySO second = CreateEnemy("duplicate_enemy");
+
+        EnemyDefinitionValidationResult result =
+            EnemyDefinitionValidator.ValidateAll(new[] { first, second });
+
+        Assert.That(
+            HasCode(result, "enemy.id_duplicate"),
+            Is.True,
+            BuildFailureMessage(result));
+    }
+
+    [Test]
+    public void ValidCooldownAbility_PassesDefinitionValidation()
+    {
+        EnemySO definition = CreateEnemy("valid_cooldown_enemy");
+        SerializedObject serialized = new(definition);
+        ConfigureAbility(
+            serialized.FindProperty("abilities"),
+            0,
+            "periodic_heal",
+            EnemyAbilityTrigger.OnCooldown,
+            EnemyAbilityOperationType.ExecuteEffects,
+            4f);
+        serialized.ApplyModifiedPropertiesWithoutUndo();
+
+        EnemyDefinitionValidationResult result =
+            EnemyDefinitionValidator.Validate(definition);
+
+        Assert.That(
+            result.ErrorCount,
+            Is.Zero,
+            BuildFailureMessage(result));
+    }
+
+    [Test]
+    public void DuplicateAbilityId_IsRejected()
+    {
+        EnemySO definition = CreateEnemy("duplicate_ability_enemy");
+        SerializedObject serialized = new(definition);
+        SerializedProperty abilities =
+            serialized.FindProperty("abilities");
+        ConfigureAbility(
+            abilities,
+            0,
+            "spawn_armor",
+            EnemyAbilityTrigger.OnSpawn,
+            EnemyAbilityOperationType.GrantArmor);
+        ConfigureAbility(
+            abilities,
+            1,
+            "spawn_armor",
+            EnemyAbilityTrigger.OnSpawn,
+            EnemyAbilityOperationType.GrantArmor);
+        serialized.ApplyModifiedPropertiesWithoutUndo();
+
+        EnemyDefinitionValidationResult result =
+            EnemyDefinitionValidator.Validate(definition);
+
+        Assert.That(
+            HasCode(result, "ability.id_duplicate"),
+            Is.True,
+            BuildFailureMessage(result));
+    }
+
+    [Test]
+    public void CooldownTrigger_RequiresPositiveCooldown()
+    {
+        EnemySO definition = CreateEnemy("invalid_cooldown_enemy");
+        SerializedObject serialized = new(definition);
+        ConfigureAbility(
+            serialized.FindProperty("abilities"),
+            0,
+            "periodic_heal",
+            EnemyAbilityTrigger.OnCooldown,
+            EnemyAbilityOperationType.ExecuteEffects,
+            0f);
+        serialized.ApplyModifiedPropertiesWithoutUndo();
+
+        EnemyDefinitionValidationResult result =
+            EnemyDefinitionValidator.Validate(definition);
+
+        Assert.That(
+            HasCode(result, "ability.cooldown_required"),
+            Is.True,
+            BuildFailureMessage(result));
+    }
+
+    [Test]
+    public void OperationAndTriggerMismatch_IsRejected()
+    {
+        EnemySO definition = CreateEnemy("invalid_operation_enemy");
+        SerializedObject serialized = new(definition);
+        ConfigureAbility(
+            serialized.FindProperty("abilities"),
+            0,
+            "invalid_redirect",
+            EnemyAbilityTrigger.OnCooldown,
+            EnemyAbilityOperationType.RedirectDamage,
+            3f);
+        serialized.ApplyModifiedPropertiesWithoutUndo();
+
+        EnemyDefinitionValidationResult result =
+            EnemyDefinitionValidator.Validate(definition);
+
+        Assert.That(
+            HasCode(result, "ability.operation_trigger_mismatch"),
+            Is.True,
+            BuildFailureMessage(result));
+    }
+
+    [Test]
+    public void IncompleteTargetDefinition_IsRejected()
+    {
+        EnemySO definition = CreateEnemy("invalid_target_enemy");
+        SerializedObject serialized = new(definition);
+        SerializedProperty abilities =
+            serialized.FindProperty("abilities");
+        ConfigureAbility(
+            abilities,
+            0,
+            "spawn_armor",
+            EnemyAbilityTrigger.OnSpawn,
+            EnemyAbilityOperationType.GrantArmor);
+        SerializedProperty target = abilities
+            .GetArrayElementAtIndex(0)
+            .FindPropertyRelative("target");
+        target.FindPropertyRelative("faction").enumValueIndex =
+            (int)EnemyAbilityTargetFaction.EnemyAllies;
+        target.FindPropertyRelative("subject").enumValueIndex =
+            (int)EnemyAbilityTargetSubject.None;
+        serialized.ApplyModifiedPropertiesWithoutUndo();
+
+        EnemyDefinitionValidationResult result =
+            EnemyDefinitionValidator.Validate(definition);
+
+        Assert.That(
+            HasCode(result, "ability.target_incomplete"),
+            Is.True,
+            BuildFailureMessage(result));
+    }
+
+    [Test]
+    public void EnemyEditor_AddAbility_CreatesValidationSafeCooldownDefault()
+    {
+        EnemySO definition = CreateEnemy("editor_default_enemy");
+        SerializedObject serialized = new(definition);
+        SerializedProperty abilities =
+            serialized.FindProperty("abilities");
+
+        InvokeEnemyEditorMethod("AddAbility", abilities);
+        serialized.ApplyModifiedPropertiesWithoutUndo();
+
+        Assert.That(definition.Abilities, Has.Count.EqualTo(1));
+        EnemyAbilityDefinition ability = definition.Abilities[0];
+        Assert.That(ability.AbilityId, Is.EqualTo("ability_1"));
+        Assert.That(ability.Trigger,
+            Is.EqualTo(EnemyAbilityTrigger.OnCooldown));
+        Assert.That(ability.Cooldown, Is.EqualTo(1f));
+        Assert.That(ability.Target.Faction,
+            Is.EqualTo(EnemyAbilityTargetFaction.Self));
+        Assert.That(ability.Target.Subject,
+            Is.EqualTo(EnemyAbilityTargetSubject.Self));
+        Assert.That(ability.Operations, Has.Count.EqualTo(1));
+        Assert.That(
+            ability.Operations[0].Type,
+            Is.EqualTo(EnemyAbilityOperationType.ExecuteEffects));
+        Assert.That(
+            ability.Operations[0].Effects,
+            Has.Count.EqualTo(1));
+        Assert.That(
+            ability.Operations[0].Effects[0].Type,
+            Is.EqualTo(CharacterEffectType.Damage));
+
+        EnemyDefinitionValidationResult result =
+            EnemyDefinitionValidator.Validate(definition);
+        Assert.That(
+            result.ErrorCount,
+            Is.Zero,
+            BuildFailureMessage(result));
+    }
+
+    [Test]
+    public void EnemyEditor_AddCondition_CreatesUsableHealthThreshold()
+    {
+        EnemySO definition = CreateEnemy("editor_condition_enemy");
+        SerializedObject serialized = new(definition);
+        SerializedProperty abilities =
+            serialized.FindProperty("abilities");
+        InvokeEnemyEditorMethod("AddAbility", abilities);
+        SerializedProperty conditions = abilities
+            .GetArrayElementAtIndex(0)
+            .FindPropertyRelative("conditions");
+
+        InvokeEnemyEditorMethod("AddCondition", conditions);
+        serialized.ApplyModifiedPropertiesWithoutUndo();
+
+        EnemyAbilityConditionDefinition condition =
+            definition.Abilities[0].Conditions[0];
+        Assert.That(
+            condition.Type,
+            Is.EqualTo(
+                EnemyAbilityConditionType.SourceHealthPercentage));
+        Assert.That(
+            condition.Comparison,
+            Is.EqualTo(
+                CharacterNumericComparison.LessThanOrEqual));
+        Assert.That(condition.Threshold, Is.EqualTo(50f));
+        Assert.That(condition.Expected, Is.True);
+    }
+
+    [TestCase(
+        EnemyAbilityTrigger.OnSpawn,
+        EnemyAbilityOperationType.GrantArmor)]
+    [TestCase(
+        EnemyAbilityTrigger.BeforeSelfDamage,
+        EnemyAbilityOperationType.ModifyIncomingDamage)]
+    [TestCase(
+        EnemyAbilityTrigger.BeforeAllyDamage,
+        EnemyAbilityOperationType.RedirectDamage)]
+    [TestCase(
+        EnemyAbilityTrigger.OnSpawnQueueEvaluation,
+        EnemyAbilityOperationType.ModifySpawnInterval)]
+    [TestCase(
+        EnemyAbilityTrigger.OnTargetPriorityEvaluation,
+        EnemyAbilityOperationType.ModifyTargetPriority)]
+    public void EnemyEditor_AddOperation_UsesTriggerCompatibleDefault(
+        EnemyAbilityTrigger trigger,
+        EnemyAbilityOperationType expectedType)
+    {
+        EnemySO definition = CreateEnemy(
+            $"editor_operation_{(int)trigger}");
+        SerializedObject serialized = new(definition);
+        SerializedProperty abilities =
+            serialized.FindProperty("abilities");
+        InvokeEnemyEditorMethod("AddAbility", abilities);
+        SerializedProperty operations = abilities
+            .GetArrayElementAtIndex(0)
+            .FindPropertyRelative("operations");
+        operations.ClearArray();
+
+        InvokeEnemyEditorMethod("AddOperation", operations, trigger);
+        serialized.ApplyModifiedPropertiesWithoutUndo();
+
+        Assert.That(
+            definition.Abilities[0].Operations,
+            Has.Count.EqualTo(1));
+        Assert.That(
+            definition.Abilities[0].Operations[0].Type,
+            Is.EqualTo(expectedType));
+    }
+
+    [Test]
+    public void EnemySO_HasNoRetiredSerializedFields()
+    {
+        EnemySO definition = CreateEnemy("modular_storage_enemy");
+        SerializedObject serialized = new(definition);
+        string[] retiredFields =
+        {
+            "schemaVersion",
+            "targetPriorityExcluded",
+            "initialArmorMultiplier",
+            "guardedHitCount",
+            "companionSpawnCount",
+            "abilityCooldown",
+            "abilityPower",
+            "disableDuration",
+            "disableStatusEffect",
+        };
+
+        foreach (string field in retiredFields)
+            Assert.That(serialized.FindProperty(field), Is.Null, field);
+    }
+
+    [Test]
+    public void HeavyAbilityAsset_DefinesThreeNonFixedGuardedHits()
+    {
+        EnemySO definition = CreateAssetClone("Heavy");
+
+        EnemyAbilityDefinition ability =
+            FindAbility(definition, EnemyAbilityIds.GuardedHits);
+        Assert.That(ability.Trigger,
+            Is.EqualTo(EnemyAbilityTrigger.BeforeSelfDamage));
+        Assert.That(ability.InitialCharges, Is.EqualTo(3));
+        Assert.That(ability.ConditionMatchMode,
+            Is.EqualTo(CharacterConditionMatchMode.Any));
+        Assert.That(ability.Conditions, Has.Count.EqualTo(2));
+        Assert.That(
+            ability.Conditions[0].IncomingDamageType,
+            Is.EqualTo(CharacterAttackDamageType.Physical));
+        Assert.That(
+            ability.Conditions[1].IncomingDamageType,
+            Is.EqualTo(CharacterAttackDamageType.Magical));
+        Assert.That(
+            ability.Operations[0].Type,
+            Is.EqualTo(
+                EnemyAbilityOperationType.ModifyIncomingDamage));
+        Assert.That(ability.Operations[0].Amount, Is.EqualTo(1));
+    }
+
+    [Test]
+    public void MechanicAbilityAsset_RequiresPositiveDamageTarget()
+    {
+        EnemySO definition = CreateAssetClone("Mechanic");
+
+        EnemyAbilityDefinition ability = FindAbility(
+            definition,
+            EnemyAbilityIds.DisableHighestDamage);
+        Assert.That(ability.Target.Faction,
+            Is.EqualTo(
+                EnemyAbilityTargetFaction.PlayerCharacters));
+        Assert.That(ability.Target.Subject,
+            Is.EqualTo(EnemyAbilityTargetSubject.HighestValue));
+        Assert.That(ability.Target.Metric,
+            Is.EqualTo(
+                EnemyAbilityTargetMetric.TotalDamageDealt));
+        Assert.That(ability.Conditions, Has.Count.EqualTo(1));
+        Assert.That(
+            ability.Conditions[0].Type,
+            Is.EqualTo(
+                EnemyAbilityConditionType.TargetTotalDamageDealt));
+        Assert.That(
+            ability.Conditions[0].Comparison,
+            Is.EqualTo(CharacterNumericComparison.GreaterThan));
+        Assert.That(ability.Conditions[0].Threshold, Is.Zero);
+        CharacterEffectDefinition effect =
+            ability.Operations[0].Effects[0];
+        Assert.That(
+            effect.Type,
+            Is.EqualTo(CharacterEffectType.ApplyStatus));
+        Assert.That(
+            effect.StatusEffect.StatusId,
+            Is.EqualTo(StatusEffectIds.Stun));
+        Assert.That(effect.StatusDuration, Is.EqualTo(5f));
+    }
+
+    [Test]
+    public void ShieldBearerAbilityAsset_SeparatesArmorAndRedirect()
+    {
+        EnemySO definition = CreateAssetClone("ShieldBearer");
+
+        EnemyAbilityDefinition armor =
+            FindAbility(definition, EnemyAbilityIds.InitialArmor);
+        Assert.That(armor.Trigger,
+            Is.EqualTo(EnemyAbilityTrigger.OnSpawn));
+        Assert.That(
+            armor.Operations[0].Type,
+            Is.EqualTo(EnemyAbilityOperationType.GrantArmor));
+        Assert.That(
+            armor.Operations[0].Multiplier,
+            Is.EqualTo(1f));
+
+        EnemyAbilityDefinition redirect = FindAbility(
+            definition,
+            EnemyAbilityIds.RedirectAdjacentDamage);
+        Assert.That(redirect.Trigger,
+            Is.EqualTo(EnemyAbilityTrigger.BeforeAllyDamage));
+        Assert.That(
+            redirect.Operations[0].Type,
+            Is.EqualTo(EnemyAbilityOperationType.RedirectDamage));
+        Assert.That(redirect.Operations[0].Range, Is.EqualTo(1));
+        Assert.That(
+            redirect.Operations[0].IncludeDiagonals,
+            Is.True);
+    }
+
+    [TestCase(EEnemyType.Basic, 0)]
+    [TestCase(EEnemyType.Assault, 0)]
+    [TestCase(EEnemyType.Heavy, 1)]
+    [TestCase(EEnemyType.Medic, 1)]
+    [TestCase(EEnemyType.Mechanic, 1)]
+    [TestCase(EEnemyType.Pointman, 1)]
+    [TestCase(EEnemyType.ShieldBearer, 2)]
+    [TestCase(EEnemyType.Infiltrator, 1)]
+    public void RuntimeDefault_UsesValidAbilityPreset(
+        EEnemyType enemyType,
+        int expectedAbilityCount)
+    {
+        EnemySO definition = CreateRuntimeDefault(enemyType);
+
+        Assert.That(
+            definition.Abilities,
+            Has.Count.EqualTo(expectedAbilityCount));
+        EnemyDefinitionValidationResult result =
+            EnemyDefinitionValidator.Validate(definition);
+        Assert.That(
+            result.ErrorCount,
+            Is.Zero,
+            BuildFailureMessage(result));
+    }
+
+    [Test]
+    public void EnemyCodexAbilityDescription_UsesModularAbilityValues()
+    {
+        EnemySO heavy = CreateAssetClone("Heavy");
+        SerializedObject heavySerialized = new(heavy);
+        heavySerialized.FindProperty("abilities")
+            .GetArrayElementAtIndex(0)
+            .FindPropertyRelative("initialCharges").intValue = 7;
+        heavySerialized.ApplyModifiedPropertiesWithoutUndo();
+        EnemyAbilityDefinition guardedHits =
+            FindAbility(heavy, EnemyAbilityIds.GuardedHits);
+        Assert.That(
+            EnemyLocalization.GetAbility(heavy),
+            Is.EqualTo(LocalizationService.Get(
+                LocalizationKeys.CodexEnemyAbilityHeavy,
+                LocalizationService.Arg(
+                    "hits",
+                    guardedHits.InitialCharges))));
+
+        EnemySO medic = CreateAssetClone("Medic");
+        SerializedObject medicSerialized = new(medic);
+        SerializedProperty medicAbility = medicSerialized
+            .FindProperty("abilities")
+            .GetArrayElementAtIndex(0);
+        medicAbility.FindPropertyRelative("cooldown").floatValue = 7f;
+        medicAbility.FindPropertyRelative("operations")
+            .GetArrayElementAtIndex(0)
+            .FindPropertyRelative("effects")
+            .GetArrayElementAtIndex(0)
+            .FindPropertyRelative("damageAmount").floatValue = 4f;
+        medicSerialized.ApplyModifiedPropertiesWithoutUndo();
+        EnemyAbilityDefinition adjacentHeal =
+            FindAbility(medic, EnemyAbilityIds.AdjacentHeal);
+        CharacterEffectDefinition heal =
+            adjacentHeal.Operations[0].Effects[0];
+        Assert.That(
+            EnemyLocalization.GetAbility(medic),
+            Is.EqualTo(LocalizationService.Get(
+                LocalizationKeys.CodexEnemyAbilityMedic,
+                LocalizationService.Arg(
+                    "cooldown",
+                    adjacentHeal.Cooldown),
+                LocalizationService.Arg(
+                    "power",
+                    heal.DamageAmount))));
+
+        EnemySO mechanic = CreateAssetClone("Mechanic");
+        SerializedObject mechanicSerialized = new(mechanic);
+        SerializedProperty mechanicAbility = mechanicSerialized
+            .FindProperty("abilities")
+            .GetArrayElementAtIndex(0);
+        mechanicAbility.FindPropertyRelative("cooldown").floatValue = 8f;
+        mechanicAbility.FindPropertyRelative("operations")
+            .GetArrayElementAtIndex(0)
+            .FindPropertyRelative("effects")
+            .GetArrayElementAtIndex(0)
+            .FindPropertyRelative("statusDuration").floatValue = 3f;
+        mechanicSerialized.ApplyModifiedPropertiesWithoutUndo();
+        EnemyAbilityDefinition disable = FindAbility(
+            mechanic,
+            EnemyAbilityIds.DisableHighestDamage);
+        CharacterEffectDefinition stun =
+            disable.Operations[0].Effects[0];
+        Assert.That(
+            EnemyLocalization.GetAbility(mechanic),
+            Is.EqualTo(LocalizationService.Get(
+                LocalizationKeys.CodexEnemyAbilityMechanic,
+                LocalizationService.Arg(
+                    "cooldown",
+                    disable.Cooldown),
+                LocalizationService.Arg(
+                    "duration",
+                    stun.StatusDuration))));
+
+        EnemySO pointman = CreateAssetClone("Pointman");
+        SerializedObject pointmanSerialized = new(pointman);
+        pointmanSerialized.FindProperty("abilities")
+            .GetArrayElementAtIndex(0)
+            .FindPropertyRelative("operations")
+            .GetArrayElementAtIndex(0)
+            .FindPropertyRelative("count").intValue = 4;
+        pointmanSerialized.ApplyModifiedPropertiesWithoutUndo();
+        EnemyAbilityDefinition expand = FindAbility(
+            pointman,
+            EnemyAbilityIds.ExpandSpawnGroup);
+        Assert.That(
+            EnemyLocalization.GetAbility(pointman),
+            Is.EqualTo(LocalizationService.Get(
+                LocalizationKeys.CodexEnemyAbilityPointman,
+                LocalizationService.Arg(
+                    "count",
+                    expand.Operations[0].Count))));
+
+        EnemySO shield = CreateAssetClone("ShieldBearer");
+        SerializedObject shieldSerialized = new(shield);
+        shieldSerialized.FindProperty("abilities")
+            .GetArrayElementAtIndex(0)
+            .FindPropertyRelative("operations")
+            .GetArrayElementAtIndex(0)
+            .FindPropertyRelative("multiplier").floatValue = 0.5f;
+        shieldSerialized.ApplyModifiedPropertiesWithoutUndo();
+        EnemyAbilityDefinition armor =
+            FindAbility(shield, EnemyAbilityIds.InitialArmor);
+        Assert.That(
+            EnemyLocalization.GetAbility(shield),
+            Is.EqualTo(LocalizationService.Get(
+                LocalizationKeys.CodexEnemyAbilityShieldBearer,
+                LocalizationService.Arg(
+                    "armor",
+                    armor.Operations[0].Multiplier * 100f))));
+    }
+
+    [Test]
+    public void EnemyCodexPriority_UsesEnabledModularAbility()
+    {
+        EnemySO infiltrator = CreateAssetClone("Infiltrator");
+        EnemySO basic = CreateAssetClone("Basic");
+
+        Assert.That(
+            EnemyLocalization.HasTargetPriorityExclusion(infiltrator),
+            Is.True);
+        Assert.That(
+            EnemyLocalization.HasTargetPriorityExclusion(basic),
+            Is.False);
+
+        SerializedObject serialized = new(infiltrator);
+        serialized.FindProperty("abilities")
+            .GetArrayElementAtIndex(0)
+            .FindPropertyRelative("operations")
+            .GetArrayElementAtIndex(0)
+            .FindPropertyRelative("enabled").boolValue = false;
+        serialized.ApplyModifiedPropertiesWithoutUndo();
+
+        Assert.That(
+            EnemyLocalization.HasTargetPriorityExclusion(infiltrator),
+            Is.False);
+    }
+
+    [Test]
+    public void EnemyCodexAbilityDescription_UsesAuthoredFallbackForCustomAbility()
+    {
+        EnemySO definition = CreateEnemy("custom_codex_enemy");
+        SerializedObject serialized = new(definition);
+        SerializedProperty abilities =
+            serialized.FindProperty("abilities");
+        InvokeEnemyEditorMethod("AddAbility", abilities);
+        SerializedProperty ability = abilities.GetArrayElementAtIndex(0);
+        ability.FindPropertyRelative("abilityId").stringValue =
+            "custom_storm_call";
+        ability.FindPropertyRelative("fallbackName").stringValue =
+            "Storm Call";
+        ability.FindPropertyRelative("fallbackDescription").stringValue =
+            "Uses authored modular data.";
+        serialized.ApplyModifiedPropertiesWithoutUndo();
+
+        Assert.That(
+            EnemyLocalization.GetAbility(definition),
+            Is.EqualTo(
+                "Storm Call\nUses authored modular data."));
+    }
+
+    private EnemySO CreateEnemy(string enemyId = null)
+    {
+        EnemySO definition = ScriptableObject.CreateInstance<EnemySO>();
+        definition.hideFlags = HideFlags.HideAndDontSave;
+        _createdObjects.Add(definition);
+        SerializedObject serialized = new(definition);
+        serialized.FindProperty("enemyId").stringValue =
+            enemyId ?? Guid.NewGuid().ToString("N");
+        serialized.FindProperty("displayName").stringValue = "TEST ENEMY";
+        serialized.ApplyModifiedPropertiesWithoutUndo();
+        return definition;
+    }
+
+    private EnemySO CreateAssetClone(string assetName)
+    {
+        EnemySO source = AssetDatabase.LoadAssetAtPath<EnemySO>(
+            $"Assets/Data/Enemies/{assetName}.asset");
+        Assert.That(
+            source,
+            Is.Not.Null,
+            $"Missing EnemySO test asset: {assetName}");
+        EnemySO definition =
+            UnityEngine.Object.Instantiate(source);
+        definition.hideFlags = HideFlags.HideAndDontSave;
+        _createdObjects.Add(definition);
+        return definition;
+    }
+
+    private EnemySO CreateRuntimeDefault(EEnemyType enemyType)
+    {
+        MethodInfo method = typeof(EnemySO).GetMethod(
+            "CreateRuntimeDefault",
+            BindingFlags.Static | BindingFlags.NonPublic);
+        Assert.That(method, Is.Not.Null);
+        EnemySO definition = (EnemySO)method.Invoke(
+            null,
+            new object[] { enemyType, 20 });
+        Assert.That(definition, Is.Not.Null);
+        _createdObjects.Add(definition);
+        return definition;
+    }
+
+    private static EnemyAbilityDefinition FindAbility(
+        EnemySO definition,
+        string abilityId)
+    {
+        foreach (EnemyAbilityDefinition ability in
+                 definition.Abilities)
+        {
+            if (ability != null &&
+                string.Equals(
+                    ability.AbilityId,
+                    abilityId,
+                    StringComparison.Ordinal))
+            {
+                return ability;
+            }
+        }
+
+        Assert.Fail(
+            $"Missing migrated ability '{abilityId}'.");
+        return null;
+    }
+
+    private static void InvokeEnemyEditorMethod(
+        string methodName,
+        params object[] arguments)
+    {
+        MethodInfo method = typeof(EnemyEditorWindow).GetMethod(
+            methodName,
+            BindingFlags.Static | BindingFlags.NonPublic);
+        Assert.That(
+            method,
+            Is.Not.Null,
+            $"EnemyEditorWindow.{methodName} was not found.");
+        method.Invoke(null, arguments);
+    }
+
+    private static void ConfigureAbility(
+        SerializedProperty abilities,
+        int index,
+        string abilityId,
+        EnemyAbilityTrigger trigger,
+        EnemyAbilityOperationType operationType,
+        float cooldown = 0f)
+    {
+        abilities.arraySize = Mathf.Max(abilities.arraySize, index + 1);
+        SerializedProperty ability = abilities.GetArrayElementAtIndex(index);
+        ability.FindPropertyRelative("abilityId").stringValue = abilityId;
+        ability.FindPropertyRelative("fallbackName").stringValue =
+            abilityId;
+        ability.FindPropertyRelative("trigger").enumValueIndex =
+            (int)trigger;
+        ability.FindPropertyRelative("cooldown").floatValue = cooldown;
+
+        SerializedProperty operations =
+            ability.FindPropertyRelative("operations");
+        operations.arraySize = 1;
+        SerializedProperty operation =
+            operations.GetArrayElementAtIndex(0);
+        operation.FindPropertyRelative("type").enumValueIndex =
+            (int)operationType;
+
+        if (operationType == EnemyAbilityOperationType.ExecuteEffects)
+        {
+            SerializedProperty effects =
+                operation.FindPropertyRelative("effects");
+            effects.arraySize = 1;
+            SerializedProperty effect = effects.GetArrayElementAtIndex(0);
+            effect.FindPropertyRelative("type").enumValueIndex =
+                (int)CharacterEffectType.Heal;
+            effect.FindPropertyRelative("damageAmountMode").enumValueIndex =
+                (int)CharacterDamageAmountMode.Fixed;
+            effect.FindPropertyRelative("damageAmount").floatValue = 1f;
+        }
+    }
+
+    private static void InvokeOnValidate(EnemySO definition)
+    {
+        MethodInfo method = typeof(EnemySO).GetMethod(
+            "OnValidate",
+            BindingFlags.Instance | BindingFlags.NonPublic);
+        Assert.That(method, Is.Not.Null);
+        method.Invoke(definition, null);
+    }
+
+    private static bool HasCode(
+        EnemyDefinitionValidationResult result,
+        string code)
+    {
+        foreach (EnemyDefinitionDiagnostic diagnostic in
+                 result.Diagnostics)
+        {
+            if (string.Equals(
+                    diagnostic.Code,
+                    code,
+                    StringComparison.Ordinal))
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static string BuildFailureMessage(
+        EnemyDefinitionValidationResult result)
+    {
+        if (result == null || result.Diagnostics.Count == 0)
+            return "No diagnostics.";
+
+        return string.Join(
+            Environment.NewLine,
+            result.Diagnostics);
+    }
+}

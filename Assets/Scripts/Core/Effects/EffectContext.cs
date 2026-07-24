@@ -77,7 +77,8 @@ public readonly struct EffectContext
     private readonly IReadOnlyList<EnemyRuntime> _enemyTargets;
     private readonly IReadOnlyList<IBattleCharacter> _allyTargets;
 
-    public IBattleCharacter Source { get; }
+    public BattleStatusTarget SourceTarget { get; }
+    public IBattleCharacter Source => SourceTarget.Ally;
     public IBattleBoard Board { get; }
     public IActiveSkillResource Resource { get; }
     public CharacterActionKind ActionKind { get; }
@@ -111,7 +112,37 @@ public readonly struct EffectContext
         IReadOnlyList<IBattleCharacter> allyTargets,
         float sourceAttackPower)
         : this(
-            source,
+            source != null
+                ? BattleStatusTarget.FromAlly(source)
+                : default,
+            board,
+            resource,
+            actionKind,
+            targetFaction,
+            enemyTargets,
+            allyTargets,
+            sourceAttackPower,
+            resource?.Current ?? 0,
+            resource?.Maximum ?? 0,
+            default,
+            0,
+            0,
+            0,
+            0)
+    {
+    }
+
+    public EffectContext(
+        BattleStatusTarget sourceTarget,
+        IBattleBoard board,
+        IActiveSkillResource resource,
+        CharacterActionKind actionKind,
+        CharacterTargetFaction targetFaction,
+        IReadOnlyList<EnemyRuntime> enemyTargets,
+        IReadOnlyList<IBattleCharacter> allyTargets,
+        float sourceAttackPower)
+        : this(
+            sourceTarget,
             board,
             resource,
             actionKind,
@@ -130,7 +161,7 @@ public readonly struct EffectContext
     }
 
     private EffectContext(
-        IBattleCharacter source,
+        BattleStatusTarget sourceTarget,
         IBattleBoard board,
         IActiveSkillResource resource,
         CharacterActionKind actionKind,
@@ -146,7 +177,7 @@ public readonly struct EffectContext
         int sourceStatusStacks,
         int targetStatusStacks)
     {
-        Source = source;
+        SourceTarget = sourceTarget;
         Board = board;
         Resource = resource;
         ActionKind = actionKind;
@@ -183,7 +214,7 @@ public readonly struct EffectContext
         int sourceResourceMaximum = 0)
     {
         return new EffectContext(
-            null,
+            default,
             null,
             null,
             actionKind,
@@ -207,12 +238,20 @@ public readonly struct EffectContext
             Target,
             TargetCurrentHealth,
             TargetMaximumHealth,
-            Source?.GetStatusStackCount(statusEffect) ?? 0,
+            SourceTarget.GetStatusStackCount(statusEffect),
             TargetStatusStacks);
     }
 
     public EffectContext RetargetToSource()
     {
+        if (SourceTarget.Enemy != null)
+        {
+            return RetargetTo(
+                CharacterTargetFaction.Enemy,
+                new[] { SourceTarget.Enemy },
+                null);
+        }
+
         IReadOnlyList<IBattleCharacter> sourceTargets = Source == null
             ? Array.Empty<IBattleCharacter>()
             : new[] { Source };
@@ -228,7 +267,7 @@ public readonly struct EffectContext
         IReadOnlyList<IBattleCharacter> allyTargets)
     {
         return new EffectContext(
-            Source,
+            SourceTarget,
             Board,
             Resource,
             ActionKind,
@@ -281,7 +320,7 @@ public readonly struct EffectContext
         int targetStatusStacks)
     {
         return new EffectContext(
-            Source,
+            SourceTarget,
             Board,
             Resource,
             ActionKind,
@@ -309,7 +348,8 @@ public enum BattleEffectOriginKind
     CharacterAttack = 0,
     CharacterPassive = 1,
     CharacterSkill = 2,
-    StatusEffect = 3
+    StatusEffect = 3,
+    EnemyAbility = 4
 }
 
 public readonly struct BattleEffectContext
@@ -373,12 +413,37 @@ public readonly struct BattleEffectContext
     public static BattleEffectContext FromCharacter(
         EffectContext context)
     {
-        BattleStatusTarget sourceTarget = context.Source != null
-            ? BattleStatusTarget.FromAlly(context.Source)
-            : default;
         return new BattleEffectContext(
             context,
             ToOriginKind(context.ActionKind),
+            context.SourceTarget,
+            0,
+            0,
+            1);
+    }
+
+    public static BattleEffectContext ForEnemyAbility(
+        EnemyRuntime source,
+        IBattleBoard board,
+        CharacterTargetFaction targetFaction,
+        IReadOnlyList<EnemyRuntime> enemyTargets,
+        IReadOnlyList<IBattleCharacter> playerCharacterTargets,
+        float sourceAttackPower = 0f)
+    {
+        BattleStatusTarget sourceTarget =
+            BattleStatusTarget.FromEnemy(source);
+        EffectContext context = new(
+            sourceTarget,
+            board,
+            null,
+            CharacterActionKind.Passive,
+            targetFaction,
+            enemyTargets,
+            playerCharacterTargets,
+            sourceAttackPower);
+        return new BattleEffectContext(
+            context,
+            BattleEffectOriginKind.EnemyAbility,
             sourceTarget,
             0,
             0,
@@ -415,7 +480,6 @@ public readonly struct BattleEffectContext
         int occurrenceCount = 1,
         IActiveSkillResource resource = null)
     {
-        IBattleCharacter source = sourceTarget.Ally;
         IReadOnlyList<EnemyRuntime> enemyTargets =
             holder.Enemy != null
                 ? new[] { holder.Enemy }
@@ -425,7 +489,7 @@ public readonly struct BattleEffectContext
                 ? new[] { holder.Ally }
                 : Array.Empty<IBattleCharacter>();
         EffectContext context = new(
-            source,
+            sourceTarget,
             board,
             resource,
             CharacterActionKind.Passive,
@@ -537,6 +601,8 @@ public readonly struct BattleEffectContext
             BattleEffectOriginKind.CharacterSkill =>
                 CharacterActionKind.Skill,
             BattleEffectOriginKind.StatusEffect =>
+                CharacterActionKind.Passive,
+            BattleEffectOriginKind.EnemyAbility =>
                 CharacterActionKind.Passive,
             _ => CharacterActionKind.Attack
         };

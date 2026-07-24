@@ -173,6 +173,12 @@ public sealed class DungeonTileView : MonoBehaviour, IPointerClickHandler
         return grantedAmount;
     }
 
+    internal void RefreshTopEnemyCard()
+    {
+        if (_cards.Count > 0)
+            _cards[^1]?.RefreshHealth();
+    }
+
     internal bool TryApplyFireToTop(
         IBattleCharacter source,
         float duration,

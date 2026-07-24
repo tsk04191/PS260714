@@ -24,14 +24,15 @@ public sealed class EnemyCodexPage : RuntimeMenuPageBase
         public EnemyCodexEntry(EnemySO definition)
         {
             EnemyId = definition.EnemyId;
-            DisplayName = EnemyLocalization.GetName(definition.Type);
+            DisplayName = EnemyLocalization.GetName(definition);
             CardCode = definition.CardCode;
             Grade = definition.Grade;
             Type = definition.Type;
             BaseHealth = definition.BaseHealth;
             SpawnIntervalMultiplier = definition.SpawnIntervalMultiplier;
             ThreatCost = definition.ThreatCost;
-            TargetPriorityExcluded = definition.TargetPriorityExcluded;
+            TargetPriorityExcluded =
+                EnemyLocalization.HasTargetPriorityExclusion(definition);
             AbilityDescription = EnemyLocalization.GetAbility(definition);
         }
     }

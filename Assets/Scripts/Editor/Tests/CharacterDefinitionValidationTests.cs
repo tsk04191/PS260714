@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Text;
 using NUnit.Framework;
 using UnityEditor;
@@ -407,11 +408,8 @@ public sealed class CharacterDefinitionValidationTests
     {
         CharacterSO aisling =
             AssetDatabase.LoadAssetAtPath<CharacterSO>(AislingCharacterPath);
-        StatusEffectSO fire =
-            AssetDatabase.LoadAssetAtPath<StatusEffectSO>(FireStatusPath);
 
         Assert.That(aisling, Is.Not.Null);
-        Assert.That(fire, Is.Not.Null);
         Assert.That(aisling.PassiveDefinitions, Is.Not.Empty);
         Assert.That(
             aisling.PassiveDefinitions[0].NumericConditions,
@@ -422,10 +420,16 @@ public sealed class CharacterDefinitionValidationTests
         Assert.That(
             condition.Type,
             Is.EqualTo(CharacterConditionType.HasStatus));
-        Assert.That(condition.StatusEffect, Is.SameAs(fire));
-        Assert.That(
-            condition.StatusEffect.StatusId,
-            Is.EqualTo(StatusEffectIds.Fire));
+
+        string fireGuid = AssetDatabase.AssetPathToGUID(FireStatusPath);
+        Assert.That(fireGuid, Is.Not.Empty);
+        string serializedAsset = File.ReadAllText(AislingCharacterPath);
+        StringAssert.Contains(
+            $"statusEffect: {{fileID: 11400000, guid: {fireGuid}, type: 2}}",
+            serializedAsset,
+            "The persisted Aisling asset must explicitly reference Fire. " +
+            "Reading the YAML avoids false failures from an unsaved " +
+            "Character Editor object cache.");
     }
 
     [Test]

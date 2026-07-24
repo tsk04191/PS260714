@@ -210,6 +210,9 @@ public sealed class StatusEffectEditorTests
             CharacterEditorWindow.MenuPath,
             Is.EqualTo("PS260714/Character Editor"));
         Assert.That(
+            EnemyEditorWindow.MenuPath,
+            Is.EqualTo("PS260714/Enemy Editor"));
+        Assert.That(
             StatusEffectEditorWindow.MenuPath,
             Is.EqualTo("PS260714/Status Effect Editor"));
         Assert.That(

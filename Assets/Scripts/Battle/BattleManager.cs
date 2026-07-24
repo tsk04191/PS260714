@@ -380,11 +380,16 @@ public sealed class BattleManager : MonoBehaviour, IActiveSkillResource
         if (_spawnQueue.Count == 0 || _board == null)
             return false;
 
-        int spawnCount = _spawnQueue[0].Type == EEnemyType.Pointman
-            ? Mathf.Min(
-                _spawnQueue[0].Definition.CompanionSpawnCount + 1,
-                _spawnQueue.Count)
-            : 1;
+        EnemyRuntime queueSource = _spawnQueue[0];
+        int queueCount = _spawnQueue.Count;
+        EvaluateSpawnQueueAbilities(
+            queueSource,
+            queueCount,
+            out _,
+            out int expandedCount);
+        int spawnCount = (int)Math.Min(
+            queueCount,
+            1L + expandedCount);
         bool spawned;
         if (spawnCount > 1)
         {
@@ -405,6 +410,7 @@ public sealed class BattleManager : MonoBehaviour, IActiveSkillResource
             return false;
         }
 
+        CommitSpawnQueueAbilities(queueSource, queueCount);
         _spawnQueue.RemoveRange(0, spawnCount);
         _spawnedEnemyCount += spawnCount;
         ResetSpawnTimerForNextEnemy();
@@ -594,11 +600,116 @@ public sealed class BattleManager : MonoBehaviour, IActiveSkillResource
         if (_spawnInterval <= 0f)
             return 0f;
 
-        float multiplier = _spawnQueue.Count > 0 && _spawnQueue[0] != null
-            ? _spawnQueue[0].SpawnIntervalMultiplier
-            : 1f;
+        float multiplier = 1f;
+        if (_spawnQueue.Count > 0 && _spawnQueue[0] != null)
+        {
+            EvaluateSpawnQueueAbilities(
+                _spawnQueue[0],
+                _spawnQueue.Count,
+                out multiplier,
+                out _);
+        }
         return TimePrecision.Normalize(
             _spawnInterval * multiplier,
             0.1f);
+    }
+
+    private static void EvaluateSpawnQueueAbilities(
+        EnemyRuntime source,
+        int queueCount,
+        out float intervalMultiplier,
+        out int expandedCount)
+    {
+        intervalMultiplier = source?.SpawnIntervalMultiplier ?? 1f;
+        expandedCount = 0;
+        if (source == null)
+            return;
+
+        bool hasAlternateTarget = queueCount > 1;
+        foreach (EnemyAbilityRuntimeState state in source.AbilityStates)
+        {
+            EnemyAbilityDefinition ability = state.Definition;
+            if (!state.CanActivate ||
+                ability.Trigger !=
+                    EnemyAbilityTrigger.OnSpawnQueueEvaluation ||
+                !EnemyAbilityConditionEvaluator.MatchesSourceOnly(
+                    ability,
+                    source,
+                    hasAlternateTarget))
+            {
+                continue;
+            }
+
+            foreach (EnemyAbilityOperationDefinition operation in
+                     ability.Operations)
+            {
+                if (operation == null || !operation.Enabled)
+                    continue;
+
+                if (operation.Type ==
+                    EnemyAbilityOperationType.ModifySpawnInterval)
+                {
+                    intervalMultiplier *= operation.Multiplier;
+                }
+                else if (operation.Type ==
+                         EnemyAbilityOperationType.ExpandSpawnGroup)
+                {
+                    long expanded =
+                        (long)expandedCount + operation.Count;
+                    expandedCount = expanded >= int.MaxValue
+                        ? int.MaxValue
+                        : (int)expanded;
+                }
+            }
+        }
+
+        if (float.IsNaN(intervalMultiplier) ||
+            float.IsInfinity(intervalMultiplier) ||
+            intervalMultiplier <= 0f)
+        {
+            intervalMultiplier = 1f;
+        }
+        expandedCount = Mathf.Max(0, expandedCount);
+    }
+
+    private static void CommitSpawnQueueAbilities(
+        EnemyRuntime source,
+        int queueCount)
+    {
+        if (source == null)
+            return;
+
+        bool hasAlternateTarget = queueCount > 1;
+        foreach (EnemyAbilityRuntimeState state in source.AbilityStates)
+        {
+            EnemyAbilityDefinition ability = state.Definition;
+            if (!state.CanActivate ||
+                ability.Trigger !=
+                    EnemyAbilityTrigger.OnSpawnQueueEvaluation ||
+                !EnemyAbilityConditionEvaluator.MatchesSourceOnly(
+                    ability,
+                    source,
+                    hasAlternateTarget))
+            {
+                continue;
+            }
+
+            bool attempted = false;
+            foreach (EnemyAbilityOperationDefinition operation in
+                     ability.Operations)
+            {
+                if (operation != null && operation.Enabled &&
+                    (operation.Type ==
+                         EnemyAbilityOperationType.ModifySpawnInterval ||
+                     operation.Type ==
+                         EnemyAbilityOperationType.ExpandSpawnGroup))
+                {
+                    attempted = true;
+                    break;
+                }
+            }
+
+            state.RecordActivation(attempted, attempted);
+        }
     }
 }

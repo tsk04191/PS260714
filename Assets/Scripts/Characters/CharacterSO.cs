@@ -483,6 +483,32 @@ public sealed class CharacterEffectDefinition : IBattleEffectDefinition
     [SerializeField, Min(0)]
     private int statusRemovalCount;
 
+    internal static CharacterEffectDefinition CreateFixedRuntimeEffect(
+        CharacterEffectType effectType,
+        float amount,
+        StatusEffectSO appliedStatus = null,
+        float appliedStatusDuration = 1f,
+        float appliedStatusStacks = 1f)
+    {
+        return new CharacterEffectDefinition
+        {
+            type = effectType,
+            targetMode = CharacterEffectTargetMode.InheritAction,
+            preconditionFailurePolicy =
+                CharacterEffectPreconditionFailurePolicy.AbortAction,
+            failurePolicy = CharacterEffectFailurePolicy.Continue,
+            targetSelector = new CharacterEffectTargetSelector(),
+            damageType = CharacterAttackDamageType.Physical,
+            damageAmountMode = CharacterDamageAmountMode.Fixed,
+            damageAmount = Mathf.Max(0f, amount),
+            statusDuration = TimePrecision.Normalize(
+                appliedStatusDuration,
+                0.1f),
+            statusStacks = Mathf.Max(0.1f, appliedStatusStacks),
+            statusEffect = appliedStatus,
+        };
+    }
+
     public CharacterEffectType Type => type;
     public BattleEffectType BattleEffectType =>
         (BattleEffectType)(int)type;

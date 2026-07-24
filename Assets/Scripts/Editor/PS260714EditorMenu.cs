@@ -4,6 +4,8 @@ internal static class PS260714EditorMenu
 
     public const string CharacterEditor =
         Root + "Character Editor";
+    public const string EnemyEditor =
+        Root + "Enemy Editor";
     public const string StatusEffectEditor =
         Root + "Status Effect Editor";
     public const string LocalizationEditor =

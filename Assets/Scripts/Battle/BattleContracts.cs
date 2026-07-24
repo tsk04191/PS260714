@@ -198,6 +198,20 @@ public static class BattleEffectExecutor
         }
     }
 
+    private readonly struct AllyAmountSnapshot
+    {
+        public IBattleCharacter Target { get; }
+        public int Amount { get; }
+
+        public AllyAmountSnapshot(
+            IBattleCharacter target,
+            int amount)
+        {
+            Target = target;
+            Amount = Mathf.Max(0, amount);
+        }
+    }
+
     public static BattleEffectResult ExecuteSequence(
         BattleEffectContext context,
         IReadOnlyList<IBattleEffectDefinition> effects,
@@ -262,8 +276,8 @@ public static class BattleEffectExecutor
                     false,
                     amountMultiplier);
                 if (healthSpendAmount <= 0 ||
-                    effectContext.Source?.CanSpendHealth(
-                        healthSpendAmount) != true)
+                    !effectContext.SourceTarget.CanSpendHealth(
+                        healthSpendAmount))
                 {
                     if (effect.BattlePreconditionFailurePolicy ==
                         BattleEffectPreconditionFailurePolicy.AbortSequence)
@@ -467,7 +481,7 @@ public static class BattleEffectExecutor
                 if (amount <= 0)
                     return new BattleEffectResult(true, false);
                 bool changed =
-                    effectContext.Source?.TrySpendHealth(amount) == true;
+                    effectContext.SourceTarget.TrySpendHealth(amount);
                 return new BattleEffectResult(true, changed);
             }
 
@@ -493,10 +507,18 @@ public static class BattleEffectExecutor
         bool showAttackRange,
         Func<int, IBattleCharacter, bool> fallback)
     {
-        if (!IsDirectDamageType(effect.DamageType) ||
-            context.TargetFaction == CharacterTargetFaction.Ally)
+        if (!IsDirectDamageType(effect.DamageType))
         {
             return new BattleEffectResult(true, false);
+        }
+
+        if (context.TargetFaction == CharacterTargetFaction.Ally)
+        {
+            return ExecuteAlliedDamage(
+                context,
+                effect,
+                sourceData,
+                amountMultiplier);
         }
 
         if (effect.AmountScaling.HasTargetDependentTerm)
@@ -593,6 +615,63 @@ public static class BattleEffectExecutor
             true,
             fallbackSucceeded,
             fallbackSucceeded ? sharedDamage : 0);
+    }
+
+    private static BattleEffectResult ExecuteAlliedDamage(
+        BattleEffectContext context,
+        IBattleEffectDefinition effect,
+        CharacterData sourceData,
+        int amountMultiplier)
+    {
+        List<AllyAmountSnapshot> snapshots = new(
+            context.AllyTargets.Count);
+        HashSet<IBattleCharacter> uniqueTargets = new();
+        int sharedAmount = effect.AmountScaling.HasTargetDependentTerm
+            ? 0
+            : CalculateAmount(
+                effect,
+                context,
+                sourceData,
+                true,
+                amountMultiplier);
+        foreach (IBattleCharacter target in context.AllyTargets)
+        {
+            if (target == null || !uniqueTargets.Add(target))
+                continue;
+
+            int amount = effect.AmountScaling.HasTargetDependentTerm
+                ? CalculateAmount(
+                    effect,
+                    context.BindAllyTarget(
+                        target,
+                        effect.TargetStatusScalingEffect),
+                    sourceData,
+                    true,
+                    amountMultiplier)
+                : sharedAmount;
+            snapshots.Add(new AllyAmountSnapshot(target, amount));
+        }
+
+        if (snapshots.Count == 0)
+            return default;
+
+        int totalDamage = 0;
+        bool attempted = false;
+        foreach (AllyAmountSnapshot snapshot in snapshots)
+        {
+            if (snapshot.Amount <= 0)
+                continue;
+
+            attempted = true;
+            totalDamage += Mathf.Max(
+                0,
+                snapshot.Target.TakeDamage(snapshot.Amount));
+        }
+
+        return new BattleEffectResult(
+            attempted,
+            totalDamage > 0,
+            totalDamage);
     }
 
     private static int ApplyDamageGroup(
@@ -910,6 +989,14 @@ public readonly struct BattleStatusTarget
     public IBattleCharacter Ally { get; }
     public EnemyRuntime Enemy { get; }
     public bool IsValid => Ally != null || Enemy != null;
+    public bool IsAlly => Ally != null;
+    public bool IsEnemy => Enemy != null;
+    public int CurrentHealth => Ally != null
+        ? Ally.CurrentHealth
+        : Enemy?.Health ?? 0;
+    public int MaximumHealth => Ally != null
+        ? Ally.MaximumHealth
+        : Enemy?.MaxHealth ?? 0;
 
     private BattleStatusTarget(
         CharacterTargetFaction faction,
@@ -935,6 +1022,29 @@ public readonly struct BattleStatusTarget
             CharacterTargetFaction.Enemy,
             null,
             target);
+    }
+
+    public int GetStatusStackCount(StatusEffectSO statusEffect)
+    {
+        if (statusEffect == null)
+            return 0;
+        return Ally != null
+            ? Ally.GetStatusStackCount(statusEffect)
+            : Enemy?.GetStatusStackCount(statusEffect) ?? 0;
+    }
+
+    public bool CanSpendHealth(int amount)
+    {
+        return Ally != null
+            ? Ally.CanSpendHealth(amount)
+            : Enemy?.CanSpendHealth(amount) == true;
+    }
+
+    public bool TrySpendHealth(int amount)
+    {
+        return Ally != null
+            ? Ally.TrySpendHealth(amount)
+            : Enemy?.TrySpendHealth(amount) == true;
     }
 }
 
