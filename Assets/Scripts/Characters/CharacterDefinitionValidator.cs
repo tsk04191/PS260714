@@ -2427,6 +2427,8 @@ public static class StatusEffectDefinitionValidator
         }
 
         ValidateOperations(definition, result);
+        ValidateTriggerBlocks(definition, result);
+        ValidatePersistentModules(definition, result);
     }
 
     private static void ValidateLocalizationKey(
@@ -2704,6 +2706,304 @@ public static class StatusEffectDefinitionValidator
                         "DisableAction supports ally-only statuses.");
                 }
                 break;
+        }
+    }
+
+    private static void ValidateTriggerBlocks(
+        StatusEffectSO definition,
+        StatusEffectDefinitionValidationResult result)
+    {
+        IReadOnlyList<StatusEffectTriggerBlockDefinition> blocks =
+            definition.TriggerBlocks;
+        if (blocks == null)
+        {
+            AddError(
+                result,
+                "status.trigger_block_list_null",
+                "triggerBlocks",
+                "Status trigger block list is null.");
+            return;
+        }
+
+        bool usesTick = false;
+        for (int blockIndex = 0;
+             blockIndex < blocks.Count;
+             blockIndex++)
+        {
+            StatusEffectTriggerBlockDefinition block =
+                blocks[blockIndex];
+            string blockPath = $"triggerBlocks[{blockIndex}]";
+            if (block == null)
+            {
+                AddError(
+                    result,
+                    "status.trigger_block_null",
+                    blockPath,
+                    "Status trigger block is null.");
+                continue;
+            }
+
+            if (!Enum.IsDefined(
+                    typeof(StatusEffectLifecycleTrigger),
+                    block.Trigger))
+            {
+                AddError(
+                    result,
+                    "status.trigger_block_trigger_unknown",
+                    $"{blockPath}.trigger",
+                    $"Unsupported lifecycle trigger '{block.Trigger}'.");
+            }
+            else
+            {
+                usesTick |= block.Trigger ==
+                            StatusEffectLifecycleTrigger.OnTick;
+                if (definition.DurationMode ==
+                        StatusEffectDurationMode.Permanent &&
+                    block.Trigger ==
+                        StatusEffectLifecycleTrigger.OnExpire)
+                {
+                    AddWarning(
+                        result,
+                        "status.trigger_block_permanent_expire_unreachable",
+                        $"{blockPath}.trigger",
+                        "OnExpire cannot be reached by a permanent status.");
+                }
+            }
+
+            IReadOnlyList<CharacterEffectDefinition> effects =
+                block.Effects;
+            if (effects == null)
+            {
+                AddError(
+                    result,
+                    "status.trigger_block_effect_list_null",
+                    $"{blockPath}.effects",
+                    "Trigger block effect list is null.");
+                continue;
+            }
+            if (effects.Count == 0)
+            {
+                AddWarning(
+                    result,
+                    "status.trigger_block_empty",
+                    $"{blockPath}.effects",
+                    "Trigger block has no effects.");
+                continue;
+            }
+
+            for (int effectIndex = 0;
+                 effectIndex < effects.Count;
+                 effectIndex++)
+            {
+                ValidateTriggerBlockEffect(
+                    effects[effectIndex],
+                    $"{blockPath}.effects[{effectIndex}]",
+                    result);
+            }
+        }
+
+        if (usesTick &&
+            (!IsFinite(definition.ConfiguredTickInterval) ||
+             definition.ConfiguredTickInterval <= 0f))
+        {
+            AddError(
+                result,
+                "status.trigger_block_tick_interval_invalid",
+                "tickInterval",
+                "A status using an OnTick trigger block must have a " +
+                "finite tick interval greater than zero.");
+        }
+    }
+
+    private static void ValidateTriggerBlockEffect(
+        CharacterEffectDefinition effect,
+        string path,
+        StatusEffectDefinitionValidationResult result)
+    {
+        if (effect == null)
+        {
+            AddError(
+                result,
+                "status.trigger_block_effect_null",
+                path,
+                "Trigger block effect is null.");
+            return;
+        }
+
+        if (!Enum.IsDefined(typeof(CharacterEffectType), effect.Type))
+        {
+            AddError(
+                result,
+                "status.trigger_block_effect_type_unknown",
+                $"{path}.type",
+                $"Unsupported effect type '{effect.Type}'.");
+        }
+        if (!Enum.IsDefined(
+                typeof(CharacterEffectTargetMode),
+                effect.TargetMode))
+        {
+            AddError(
+                result,
+                "status.trigger_block_target_mode_unknown",
+                $"{path}.targetMode",
+                $"Unsupported target mode '{effect.TargetMode}'.");
+        }
+        if (!effect.AmountScaling.IsFinite)
+        {
+            AddError(
+                result,
+                "status.trigger_block_scaling_invalid",
+                $"{path}.amountScaling",
+                "Trigger block effect scaling must be finite.");
+        }
+    }
+
+    private static void ValidatePersistentModules(
+        StatusEffectSO definition,
+        StatusEffectDefinitionValidationResult result)
+    {
+        IReadOnlyList<StatusEffectStatModifierDefinition> modifiers =
+            definition.StatModifiers;
+        if (modifiers == null)
+        {
+            AddError(
+                result,
+                "status.stat_modifier_list_null",
+                "statModifiers",
+                "Status stat modifier list is null.");
+        }
+        else
+        {
+            for (int index = 0; index < modifiers.Count; index++)
+            {
+                ValidateStatModifier(
+                    definition,
+                    modifiers[index],
+                    $"statModifiers[{index}]",
+                    result);
+            }
+        }
+
+        IReadOnlyList<StatusEffectControlDefinition> controls =
+            definition.ControlEffects;
+        if (controls == null)
+        {
+            AddError(
+                result,
+                "status.control_effect_list_null",
+                "controlEffects",
+                "Status control effect list is null.");
+            return;
+        }
+
+        HashSet<StatusEffectControlType> seenControls = new();
+        for (int index = 0; index < controls.Count; index++)
+        {
+            StatusEffectControlDefinition control = controls[index];
+            string path = $"controlEffects[{index}]";
+            if (control == null)
+            {
+                AddError(
+                    result,
+                    "status.control_effect_null",
+                    path,
+                    "Status control effect is null.");
+                continue;
+            }
+            if (!Enum.IsDefined(
+                    typeof(StatusEffectControlType),
+                    control.ControlType))
+            {
+                AddError(
+                    result,
+                    "status.control_effect_type_unknown",
+                    $"{path}.controlType",
+                    $"Unsupported control type '{control.ControlType}'.");
+                continue;
+            }
+            if (!seenControls.Add(control.ControlType))
+            {
+                AddWarning(
+                    result,
+                    "status.control_effect_duplicate",
+                    $"{path}.controlType",
+                    $"Control type '{control.ControlType}' is duplicated.");
+            }
+            if (definition.CanTargetEnemy &&
+                control.ControlType !=
+                    StatusEffectControlType.DisableAllActions)
+            {
+                AddWarning(
+                    result,
+                    "status.control_effect_enemy_unsupported",
+                    $"{path}.controlType",
+                    $"{control.ControlType} currently affects allied " +
+                    "characters only.");
+            }
+        }
+    }
+
+    private static void ValidateStatModifier(
+        StatusEffectSO definition,
+        StatusEffectStatModifierDefinition modifier,
+        string path,
+        StatusEffectDefinitionValidationResult result)
+    {
+        if (modifier == null)
+        {
+            AddError(
+                result,
+                "status.stat_modifier_null",
+                path,
+                "Status stat modifier is null.");
+            return;
+        }
+        if (!Enum.IsDefined(
+                typeof(StatusEffectStatType),
+                modifier.StatType))
+        {
+            AddError(
+                result,
+                "status.stat_modifier_stat_unknown",
+                $"{path}.statType",
+                $"Unsupported stat type '{modifier.StatType}'.");
+        }
+        if (!Enum.IsDefined(
+                typeof(StatusEffectStatModifierMode),
+                modifier.Mode))
+        {
+            AddError(
+                result,
+                "status.stat_modifier_mode_unknown",
+                $"{path}.mode",
+                $"Unsupported modifier mode '{modifier.Mode}'.");
+        }
+        if (!IsFinite(modifier.Value))
+        {
+            AddError(
+                result,
+                "status.stat_modifier_value_invalid",
+                $"{path}.value",
+                "Status stat modifier value must be finite.");
+        }
+        else if (modifier.Mode ==
+                     StatusEffectStatModifierMode.MultiplicativeRatio &&
+                 modifier.Value < -1f)
+        {
+            AddError(
+                result,
+                "status.stat_modifier_multiplier_below_zero",
+                $"{path}.value",
+                "Multiplicative ratio cannot be less than -1.");
+        }
+        if (!definition.CanTargetAlly)
+        {
+            AddWarning(
+                result,
+                "status.stat_modifier_ally_required",
+                path,
+                "Attack stat modifiers currently affect allied " +
+                "characters only.");
         }
     }
 

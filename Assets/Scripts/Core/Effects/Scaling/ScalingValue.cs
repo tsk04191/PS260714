@@ -100,6 +100,11 @@ public struct ScalingValue
 
     public float Evaluate(EffectContext context)
     {
+        return EvaluateBattle(BattleEffectContext.FromCharacter(context));
+    }
+
+    public float EvaluateBattle(BattleEffectContext context)
+    {
         if (!IsFinite)
             return 0f;
 

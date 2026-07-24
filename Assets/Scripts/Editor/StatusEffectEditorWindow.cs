@@ -39,7 +39,7 @@ public sealed class StatusEffectEditorWindow : EditorWindow
     {
         "오래된 스택부터",
         "새로운 스택부터",
-        "랜덤"
+        "무작위"
     };
 
     private static readonly string[] OperationTriggerOptions =
@@ -56,7 +56,7 @@ public sealed class StatusEffectEditorWindow : EditorWindow
         "주기 피해",
         "즉시 피해",
         "공격력 변경",
-        "속도 변경",
+        "공격 속도 변경",
         "행동 불가"
     };
 
@@ -64,6 +64,88 @@ public sealed class StatusEffectEditorWindow : EditorWindow
     {
         "고정",
         "비율"
+    };
+
+    private static readonly string[] LifecycleTriggerOptions =
+    {
+        "최초 적용 시",
+        "재적용 시",
+        "주기마다",
+        "스택 변경 시",
+        "자연 만료 시",
+        "수동 제거 시"
+    };
+
+    private static readonly string[] EffectTypeOptions =
+    {
+        "피해",
+        "상태 부여",
+        "상태 제거",
+        "자원 획득",
+        "자원 소비",
+        "체력 회복",
+        "체력 소비",
+        "보호막 부여"
+    };
+
+    private static readonly string[] EffectTargetModeOptions =
+    {
+        "상태 보유자",
+        "효과 제공자",
+        "별도 새 대상"
+    };
+
+    private static readonly string[] EffectPreconditionOptions =
+    {
+        "블록 실행 중단",
+        "해당 효과 건너뜀"
+    };
+
+    private static readonly string[] EffectFailureOptions =
+    {
+        "후속 효과 계속",
+        "후속 효과 중단"
+    };
+
+    private static readonly string[] EffectAmountModeOptions =
+    {
+        "공격력 비율",
+        "고정"
+    };
+
+    private static readonly string[] DirectDamageTypeOptions =
+    {
+        "물리",
+        "마법",
+        "고정"
+    };
+
+    private static readonly string[] StatusRemovalTargetOptions =
+    {
+        "지정 상태",
+        "무작위 상태",
+        "모든 상태"
+    };
+
+    private static readonly string[] StatTypeOptions =
+    {
+        "공격력",
+        "공격 속도"
+    };
+
+    private static readonly string[] StatModifierModeOptions =
+    {
+        "고정 가산",
+        "기본값 기준 비율 가산",
+        "곱연산 비율"
+    };
+
+    private static readonly string[] ControlTypeOptions =
+    {
+        "전체 행동 불가",
+        "기본 공격 금지",
+        "액티브 스킬 금지",
+        "패시브 쿨다운 정지"
     };
 
     private readonly List<StatusEffectSO> _definitions = new();
@@ -84,7 +166,10 @@ public sealed class StatusEffectEditorWindow : EditorWindow
     private bool _durationExpanded = true;
     private bool _stackExpanded = true;
     private bool _removalExpanded = true;
-    private bool _operationsExpanded = true;
+    private bool _triggerBlocksExpanded = true;
+    private bool _statModifiersExpanded = true;
+    private bool _controlEffectsExpanded = true;
+    private bool _operationsExpanded;
 
     private readonly struct LocalizationKeyOption
     {
@@ -269,7 +354,7 @@ public sealed class StatusEffectEditorWindow : EditorWindow
         {
             EditorGUILayout.HelpBox(
                 _definitions.Count == 0
-                    ? "상태 이펙트 SO가 없습니다."
+                    ? "상태 효과 SO가 없습니다."
                     : "검색 결과가 없습니다.",
                 MessageType.Info);
         }
@@ -287,7 +372,7 @@ public sealed class StatusEffectEditorWindow : EditorWindow
         if (_selected == null || _serialized == null)
         {
             EditorGUILayout.HelpBox(
-                "편집할 상태 이펙트를 선택하거나 New로 생성하세요.",
+                "편집할 상태 효과를 선택하거나 New로 생성하세요.",
                 MessageType.Info);
             EditorGUILayout.EndVertical();
             return;
@@ -301,6 +386,9 @@ public sealed class StatusEffectEditorWindow : EditorWindow
         DrawDuration();
         DrawStack();
         DrawRemoval();
+        DrawTriggerBlocks();
+        DrawStatModifiers();
+        DrawControlEffects();
         DrawOperations();
         EditorGUILayout.Space(12f);
         EditorGUILayout.EndScrollView();
@@ -467,7 +555,7 @@ public sealed class StatusEffectEditorWindow : EditorWindow
         EditorGUILayout.PropertyField(removable, new GUIContent("제거 가능"));
         using (new EditorGUI.DisabledScope(!removable.boolValue))
         {
-            DrawProperty("includedInRandomRemoval", "랜덤 제거에 포함");
+            DrawProperty("includedInRandomRemoval", "무작위 제거에 포함");
             DrawProperty("includedInAllRemoval", "전체 제거에 포함");
         }
         if (!removable.boolValue)
@@ -478,17 +566,520 @@ public sealed class StatusEffectEditorWindow : EditorWindow
         EndFoldout();
     }
 
+    private void DrawTriggerBlocks()
+    {
+        EditorGUILayout.BeginVertical(EditorStyles.helpBox);
+        EditorGUILayout.BeginHorizontal();
+        _triggerBlocksExpanded = EditorGUILayout.Foldout(
+            _triggerBlocksExpanded,
+            "6. 수명주기 트리거 블록",
+            true,
+            EditorStyles.foldoutHeader);
+        bool add = GUILayout.Button(
+            new GUIContent("+", "트리거 블록 추가"),
+            EditorStyles.miniButton,
+            GUILayout.Width(28f),
+            GUILayout.Height(20f));
+        EditorGUILayout.EndHorizontal();
+
+        SerializedProperty blocks = Find("triggerBlocks");
+        if (blocks == null)
+        {
+            EditorGUILayout.HelpBox(
+                "트리거 블록 속성을 찾을 수 없습니다.",
+                MessageType.Error);
+            EditorGUILayout.EndVertical();
+            return;
+        }
+        if (add)
+            AddTriggerBlock(blocks);
+        if (!_triggerBlocksExpanded)
+        {
+            EditorGUILayout.EndVertical();
+            return;
+        }
+
+        EditorGUILayout.HelpBox(
+            "상태의 최초 적용·재적용·틱·스택 변경·만료·제거 시점마다 " +
+            "공통 BattleEffect 목록을 에셋에 저장된 순서대로 실행합니다.",
+            MessageType.Info);
+        if (blocks.arraySize == 0)
+        {
+            EditorGUILayout.HelpBox(
+                "트리거 블록이 없습니다.",
+                MessageType.Info);
+        }
+
+        int removeIndex = -1;
+        int moveFrom = -1;
+        int moveTo = -1;
+        for (int index = 0; index < blocks.arraySize; index++)
+        {
+            SerializedProperty block = blocks.GetArrayElementAtIndex(index);
+            SerializedProperty trigger =
+                block.FindPropertyRelative("trigger");
+            string triggerName = GetOptionName(
+                LifecycleTriggerOptions,
+                trigger?.enumValueIndex ?? 0);
+
+            EditorGUILayout.BeginVertical(EditorStyles.helpBox);
+            EditorGUILayout.BeginHorizontal();
+            block.isExpanded = EditorGUILayout.Foldout(
+                block.isExpanded,
+                $"블록 {index + 1}: {triggerName}",
+                true);
+            DrawMoveButtons(
+                index,
+                blocks.arraySize,
+                ref moveFrom,
+                ref moveTo);
+            if (GUILayout.Button(
+                    new GUIContent("×", "블록 삭제"),
+                    EditorStyles.miniButton,
+                    GUILayout.Width(24f)))
+            {
+                removeIndex = index;
+            }
+            EditorGUILayout.EndHorizontal();
+
+            if (block.isExpanded)
+            {
+                DrawEnumProperty(
+                    trigger,
+                    "작동 시점",
+                    LifecycleTriggerOptions);
+                EditorGUILayout.PropertyField(
+                    block.FindPropertyRelative("scaleWithCurrentStacks"),
+                    new GUIContent(
+                        "현재 이벤트 스택 적용",
+                        "공통 효과 수치에 현재 이벤트 스택 수를 곱합니다."));
+                EditorGUILayout.PropertyField(
+                    block.FindPropertyRelative("scaleWithOccurrences"),
+                    new GUIContent(
+                        "발생 횟수 적용",
+                        "누적 틱처럼 한 이벤트에 여러 번 발생한 횟수를 " +
+                        "공통 효과 수치에 곱합니다."));
+                DrawTriggerBlockEffects(
+                    block.FindPropertyRelative("effects"));
+            }
+            EditorGUILayout.EndVertical();
+
+            if (removeIndex >= 0 || moveFrom >= 0)
+                break;
+        }
+
+        ApplyListAction(blocks, removeIndex, moveFrom, moveTo);
+        EditorGUILayout.EndVertical();
+    }
+
+    private void DrawTriggerBlockEffects(SerializedProperty effects)
+    {
+        if (effects == null)
+        {
+            EditorGUILayout.HelpBox(
+                "공통 효과 목록 속성을 찾을 수 없습니다.",
+                MessageType.Error);
+            return;
+        }
+
+        EditorGUILayout.LabelField("공통 효과 목록", EditorStyles.boldLabel);
+        int removeIndex = -1;
+        int moveFrom = -1;
+        int moveTo = -1;
+        for (int index = 0; index < effects.arraySize; index++)
+        {
+            SerializedProperty effect = effects.GetArrayElementAtIndex(index);
+            SerializedProperty type = effect.FindPropertyRelative("type");
+            string effectName = GetOptionName(
+                EffectTypeOptions,
+                type?.enumValueIndex ?? 0);
+
+            EditorGUILayout.BeginVertical(EditorStyles.helpBox);
+            EditorGUILayout.BeginHorizontal();
+            effect.isExpanded = EditorGUILayout.Foldout(
+                effect.isExpanded,
+                $"효과 {index + 1}: {effectName}",
+                true);
+            DrawMoveButtons(
+                index,
+                effects.arraySize,
+                ref moveFrom,
+                ref moveTo);
+            if (GUILayout.Button(
+                    new GUIContent("×", "효과 삭제"),
+                    EditorStyles.miniButton,
+                    GUILayout.Width(24f)))
+            {
+                removeIndex = index;
+            }
+            EditorGUILayout.EndHorizontal();
+            if (effect.isExpanded)
+                DrawBattleEffect(effect);
+            EditorGUILayout.EndVertical();
+
+            if (removeIndex >= 0 || moveFrom >= 0)
+                break;
+        }
+
+        ApplyListAction(effects, removeIndex, moveFrom, moveTo);
+        if (GUILayout.Button("+ 공통 효과 추가"))
+            AddBattleEffect(effects);
+    }
+
+    private static void DrawBattleEffect(SerializedProperty effect)
+    {
+        SerializedProperty type = effect.FindPropertyRelative("type");
+        if (type == null)
+            return;
+
+        int previousType = type.enumValueIndex;
+        DrawEnumProperty(type, "효과 종류", EffectTypeOptions);
+        if (type.enumValueIndex != previousType)
+        {
+            ResetBattleEffect(
+                effect,
+                (CharacterEffectType)type.enumValueIndex);
+        }
+
+        CharacterEffectType selectedType =
+            (CharacterEffectType)type.enumValueIndex;
+        SerializedProperty targetMode =
+            effect.FindPropertyRelative("targetMode");
+        bool usesTargets =
+            selectedType != CharacterEffectType.GainResource &&
+            selectedType != CharacterEffectType.SpendResource &&
+            selectedType != CharacterEffectType.SpendHealth;
+        if (usesTargets)
+        {
+            DrawEnumProperty(
+                targetMode,
+                "효과 대상",
+                EffectTargetModeOptions);
+        }
+
+        DrawEnumProperty(
+            effect.FindPropertyRelative("preconditionFailurePolicy"),
+            "사전조건 실패",
+            EffectPreconditionOptions);
+        DrawEnumProperty(
+            effect.FindPropertyRelative("failurePolicy"),
+            "실행 실패",
+            EffectFailureOptions);
+
+        if (usesTargets &&
+            targetMode != null &&
+            targetMode.enumValueIndex ==
+                (int)CharacterEffectTargetMode.FreshSelection)
+        {
+            SerializedProperty selector =
+                effect.FindPropertyRelative("targetSelector");
+            EditorGUILayout.PropertyField(
+                selector,
+                new GUIContent(
+                    "별도 대상 선택",
+                    "상태 보유자와 별도로 새 대상을 선택합니다."),
+                true);
+        }
+
+        switch (selectedType)
+        {
+            case CharacterEffectType.ApplyStatus:
+                DrawEffectStatusApplication(effect);
+                break;
+
+            case CharacterEffectType.RemoveStatus:
+                DrawEffectStatusRemoval(effect);
+                break;
+
+            case CharacterEffectType.SpendResource:
+            case CharacterEffectType.SpendHealth:
+                DrawFixedSpendAmount(effect);
+                break;
+
+            case CharacterEffectType.Damage:
+                DrawEnumProperty(
+                    effect.FindPropertyRelative("damageType"),
+                    "피해 종류",
+                    DirectDamageTypeOptions);
+                DrawEffectScaling(effect);
+                break;
+
+            default:
+                DrawEffectScaling(effect);
+                break;
+        }
+    }
+
+    private static void DrawEffectScaling(SerializedProperty effect)
+    {
+        DrawEnumProperty(
+            effect.FindPropertyRelative("damageAmountMode"),
+            "기본 수치 방식",
+            EffectAmountModeOptions);
+        DrawFloatProperty(
+            effect,
+            "damageAmount",
+            "기본 수치");
+        DrawFloatProperty(
+            effect,
+            "sourceResourceScale",
+            "제공자 자원 배율");
+        DrawFloatProperty(
+            effect,
+            "targetCurrentHealthScale",
+            "대상 현재 체력 배율");
+        DrawFloatProperty(
+            effect,
+            "targetMaxHealthScale",
+            "대상 최대 체력 배율");
+        DrawStatusScale(
+            effect,
+            "sourceStatusScalingEffect",
+            "sourceStatusStacksScale",
+            "제공자 상태");
+        DrawStatusScale(
+            effect,
+            "targetStatusScalingEffect",
+            "targetStatusStacksScale",
+            "대상 상태");
+    }
+
+    private static void DrawEffectStatusApplication(
+        SerializedProperty effect)
+    {
+        EditorGUILayout.PropertyField(
+            effect.FindPropertyRelative("statusEffect"),
+            new GUIContent("부여 상태"));
+        DrawFloatProperty(effect, "statusDuration", "지속시간 (초)", 0.1f);
+        DrawFloatProperty(effect, "statusStacks", "부여 스택", 0.1f);
+    }
+
+    private static void DrawEffectStatusRemoval(
+        SerializedProperty effect)
+    {
+        SerializedProperty removalTarget =
+            effect.FindPropertyRelative("statusRemovalTarget");
+        DrawEnumProperty(
+            removalTarget,
+            "제거 범위",
+            StatusRemovalTargetOptions);
+        if (removalTarget != null &&
+            removalTarget.enumValueIndex ==
+                (int)CharacterStatusRemovalTarget.Single)
+        {
+            EditorGUILayout.PropertyField(
+                effect.FindPropertyRelative("statusEffect"),
+                new GUIContent("제거 상태"));
+        }
+
+        SerializedProperty count =
+            effect.FindPropertyRelative("statusRemovalCount");
+        if (count != null)
+        {
+            count.intValue = Mathf.Max(
+                0,
+                EditorGUILayout.IntField(
+                    new GUIContent("제거 스택", "0이면 모두 제거합니다."),
+                    count.intValue));
+        }
+    }
+
+    private static void DrawFixedSpendAmount(SerializedProperty effect)
+    {
+        SerializedProperty amount =
+            effect.FindPropertyRelative("damageAmount");
+        if (amount != null)
+        {
+            amount.floatValue = Mathf.Max(
+                1f,
+                EditorGUILayout.FloatField("소비 수치", amount.floatValue));
+        }
+        EditorGUILayout.HelpBox(
+            "소비 효과는 고정 정수 수치만 지원합니다.",
+            MessageType.Info);
+    }
+
+    private void DrawStatModifiers()
+    {
+        EditorGUILayout.BeginVertical(EditorStyles.helpBox);
+        EditorGUILayout.BeginHorizontal();
+        _statModifiersExpanded = EditorGUILayout.Foldout(
+            _statModifiersExpanded,
+            "7. 지속 능력치 수정자",
+            true,
+            EditorStyles.foldoutHeader);
+        bool add = GUILayout.Button(
+            new GUIContent("+", "능력치 수정자 추가"),
+            EditorStyles.miniButton,
+            GUILayout.Width(28f),
+            GUILayout.Height(20f));
+        EditorGUILayout.EndHorizontal();
+
+        SerializedProperty modifiers = Find("statModifiers");
+        if (modifiers == null)
+        {
+            EditorGUILayout.HelpBox(
+                "능력치 수정자 속성을 찾을 수 없습니다.",
+                MessageType.Error);
+            EditorGUILayout.EndVertical();
+            return;
+        }
+        if (add)
+            AddStatModifier(modifiers);
+        if (!_statModifiersExpanded)
+        {
+            EditorGUILayout.EndVertical();
+            return;
+        }
+
+        EditorGUILayout.HelpBox(
+            "계산 순서: (기본값 + 고정 가산 + 기본값×비율 가산) " +
+            "× 곱연산 비율",
+            MessageType.Info);
+        DrawStatModifierList(modifiers);
+        EditorGUILayout.EndVertical();
+    }
+
+    private static void DrawStatModifierList(SerializedProperty modifiers)
+    {
+        int removeIndex = -1;
+        int moveFrom = -1;
+        int moveTo = -1;
+        for (int index = 0; index < modifiers.arraySize; index++)
+        {
+            SerializedProperty modifier =
+                modifiers.GetArrayElementAtIndex(index);
+            EditorGUILayout.BeginVertical(EditorStyles.helpBox);
+            EditorGUILayout.BeginHorizontal();
+            EditorGUILayout.LabelField(
+                $"수정자 {index + 1}",
+                EditorStyles.boldLabel);
+            DrawMoveButtons(
+                index,
+                modifiers.arraySize,
+                ref moveFrom,
+                ref moveTo);
+            if (GUILayout.Button(
+                    new GUIContent("×", "수정자 삭제"),
+                    EditorStyles.miniButton,
+                    GUILayout.Width(24f)))
+            {
+                removeIndex = index;
+            }
+            EditorGUILayout.EndHorizontal();
+
+            DrawEnumProperty(
+                modifier.FindPropertyRelative("statType"),
+                "능력치",
+                StatTypeOptions);
+            SerializedProperty mode = modifier.FindPropertyRelative("mode");
+            DrawEnumProperty(
+                mode,
+                "연산",
+                StatModifierModeOptions);
+            SerializedProperty value = modifier.FindPropertyRelative("value");
+            if (value != null)
+            {
+                value.floatValue = EditorGUILayout.FloatField(
+                    "수치",
+                    value.floatValue);
+                if (mode != null &&
+                    mode.enumValueIndex ==
+                        (int)StatusEffectStatModifierMode.MultiplicativeRatio)
+                {
+                    value.floatValue = Mathf.Max(-1f, value.floatValue);
+                }
+            }
+            EditorGUILayout.PropertyField(
+                modifier.FindPropertyRelative("scaleWithStacks"),
+                new GUIContent("스택 수 적용"));
+            EditorGUILayout.EndVertical();
+
+            if (removeIndex >= 0 || moveFrom >= 0)
+                break;
+        }
+
+        ApplyListAction(modifiers, removeIndex, moveFrom, moveTo);
+    }
+
+    private void DrawControlEffects()
+    {
+        EditorGUILayout.BeginVertical(EditorStyles.helpBox);
+        EditorGUILayout.BeginHorizontal();
+        _controlEffectsExpanded = EditorGUILayout.Foldout(
+            _controlEffectsExpanded,
+            "8. 제어 효과",
+            true,
+            EditorStyles.foldoutHeader);
+        bool add = GUILayout.Button(
+            new GUIContent("+", "제어 효과 추가"),
+            EditorStyles.miniButton,
+            GUILayout.Width(28f),
+            GUILayout.Height(20f));
+        EditorGUILayout.EndHorizontal();
+
+        SerializedProperty controls = Find("controlEffects");
+        if (controls == null)
+        {
+            EditorGUILayout.HelpBox(
+                "제어 효과 속성을 찾을 수 없습니다.",
+                MessageType.Error);
+            EditorGUILayout.EndVertical();
+            return;
+        }
+        if (add)
+            AddControlEffect(controls);
+        if (!_controlEffectsExpanded)
+        {
+            EditorGUILayout.EndVertical();
+            return;
+        }
+
+        int removeIndex = -1;
+        int moveFrom = -1;
+        int moveTo = -1;
+        for (int index = 0; index < controls.arraySize; index++)
+        {
+            SerializedProperty control =
+                controls.GetArrayElementAtIndex(index);
+            EditorGUILayout.BeginHorizontal(EditorStyles.helpBox);
+            DrawEnumProperty(
+                control.FindPropertyRelative("controlType"),
+                $"제어 {index + 1}",
+                ControlTypeOptions);
+            DrawMoveButtons(
+                index,
+                controls.arraySize,
+                ref moveFrom,
+                ref moveTo);
+            if (GUILayout.Button(
+                    new GUIContent("×", "제어 효과 삭제"),
+                    EditorStyles.miniButton,
+                    GUILayout.Width(24f)))
+            {
+                removeIndex = index;
+            }
+            EditorGUILayout.EndHorizontal();
+
+            if (removeIndex >= 0 || moveFrom >= 0)
+                break;
+        }
+
+        ApplyListAction(controls, removeIndex, moveFrom, moveTo);
+        EditorGUILayout.EndVertical();
+    }
+
     private void DrawOperations()
     {
         EditorGUILayout.BeginVertical(EditorStyles.helpBox);
         EditorGUILayout.BeginHorizontal();
         _operationsExpanded = EditorGUILayout.Foldout(
             _operationsExpanded,
-            "6. 효과 블록",
+            "9. 기존 호환 효과 (Legacy)",
             true,
             EditorStyles.foldoutHeader);
         bool add = GUILayout.Button(
-            new GUIContent("+", "효과 블록 추가"),
+            new GUIContent("+", "Legacy 효과 추가"),
             EditorStyles.miniButton,
             GUILayout.Width(28f),
             GUILayout.Height(20f));
@@ -504,7 +1095,9 @@ public sealed class StatusEffectEditorWindow : EditorWindow
         }
 
         EditorGUILayout.HelpBox(
-            "P2-2 런타임 지원 범위:\n" +
+            "기존 Fire/Stun 및 이전 에셋 호환용 영역입니다. 새 상태는 " +
+            "위의 트리거·능력치·제어 모듈을 사용하세요.\n\n" +
+            "현재 Legacy 런타임 지원 범위:\n" +
             "• PeriodicDamage: 적 전용 / OnTick\n" +
             "• InstantDamage: 적 전용 / OnApply·OnExpire·OnRemove·" +
             "OnStackChanged\n" +
@@ -707,6 +1300,302 @@ public sealed class StatusEffectEditorWindow : EditorWindow
         operation.FindPropertyRelative("scaleWithStacks").boolValue = true;
     }
 
+    private static void AddTriggerBlock(SerializedProperty blocks)
+    {
+        if (blocks == null)
+            return;
+
+        int index = blocks.arraySize;
+        blocks.InsertArrayElementAtIndex(index);
+        SerializedProperty block = blocks.GetArrayElementAtIndex(index);
+        block.isExpanded = true;
+        block.FindPropertyRelative("trigger").enumValueIndex =
+            (int)StatusEffectLifecycleTrigger.OnApply;
+        block.FindPropertyRelative("scaleWithCurrentStacks").boolValue =
+            false;
+        block.FindPropertyRelative("scaleWithOccurrences").boolValue =
+            true;
+        SerializedProperty effects = block.FindPropertyRelative("effects");
+        effects.ClearArray();
+        AddBattleEffect(effects);
+    }
+
+    private static void AddBattleEffect(SerializedProperty effects)
+    {
+        if (effects == null)
+            return;
+
+        int index = effects.arraySize;
+        effects.InsertArrayElementAtIndex(index);
+        SerializedProperty effect = effects.GetArrayElementAtIndex(index);
+        ResetBattleEffect(effect, CharacterEffectType.Damage);
+        effect.isExpanded = true;
+    }
+
+    private static void ResetBattleEffect(
+        SerializedProperty effect,
+        CharacterEffectType effectType)
+    {
+        if (effect == null)
+            return;
+
+        SetEnumRelative(effect, "type", (int)effectType);
+        SetEnumRelative(
+            effect,
+            "targetMode",
+            (int)CharacterEffectTargetMode.InheritAction);
+        SetEnumRelative(
+            effect,
+            "preconditionFailurePolicy",
+            (int)CharacterEffectPreconditionFailurePolicy.AbortAction);
+        SetEnumRelative(
+            effect,
+            "failurePolicy",
+            (int)CharacterEffectFailurePolicy.Continue);
+        SerializedProperty selector =
+            effect.FindPropertyRelative("targetSelector");
+        if (selector != null)
+        {
+            SetEnumRelative(
+                selector,
+                "targetFaction",
+                (int)CharacterTargetFaction.Enemy);
+            SetEnumRelative(
+                selector,
+                "subject",
+                (int)CharacterAttackSubject.Random);
+            SetEnumRelative(
+                selector,
+                "subjectMetric",
+                (int)CharacterAttackSubjectMetric.Health);
+            SetEnumRelative(
+                selector,
+                "conditionMatchMode",
+                (int)CharacterConditionMatchMode.All);
+            SetIntRelative(selector, "subjectCount", 1);
+            selector.FindPropertyRelative("numericConditions")?.ClearArray();
+            selector.FindPropertyRelative("areaOffsets")?.ClearArray();
+        }
+
+        SetEnumRelative(
+            effect,
+            "damageType",
+            (int)CharacterAttackDamageType.Physical);
+        SetEnumRelative(
+            effect,
+            "damageAmountMode",
+            effectType == CharacterEffectType.SpendResource ||
+            effectType == CharacterEffectType.SpendHealth
+                ? (int)CharacterDamageAmountMode.Fixed
+                : (int)CharacterDamageAmountMode.Ratio);
+        SetFloatRelative(effect, "damageAmount", 1f);
+        SetFloatRelative(effect, "sourceResourceScale", 0f);
+        SetFloatRelative(effect, "targetCurrentHealthScale", 0f);
+        SetFloatRelative(effect, "targetMaxHealthScale", 0f);
+        SetObjectRelative(effect, "sourceStatusScalingEffect", null);
+        SetFloatRelative(effect, "sourceStatusStacksScale", 0f);
+        SetObjectRelative(effect, "targetStatusScalingEffect", null);
+        SetFloatRelative(effect, "targetStatusStacksScale", 0f);
+        SetFloatRelative(effect, "statusDuration", 1f);
+        SetFloatRelative(effect, "statusStacks", 1f);
+        SetObjectRelative(effect, "statusEffect", null);
+        SetEnumRelative(
+            effect,
+            "statusRemovalTarget",
+            (int)CharacterStatusRemovalTarget.Single);
+        SetIntRelative(effect, "statusRemovalCount", 0);
+    }
+
+    private static void AddStatModifier(SerializedProperty modifiers)
+    {
+        if (modifiers == null)
+            return;
+
+        int index = modifiers.arraySize;
+        modifiers.InsertArrayElementAtIndex(index);
+        SerializedProperty modifier =
+            modifiers.GetArrayElementAtIndex(index);
+        modifier.FindPropertyRelative("statType").enumValueIndex =
+            (int)StatusEffectStatType.AttackPower;
+        modifier.FindPropertyRelative("mode").enumValueIndex =
+            (int)StatusEffectStatModifierMode.Flat;
+        modifier.FindPropertyRelative("value").floatValue = 0f;
+        modifier.FindPropertyRelative("scaleWithStacks").boolValue = true;
+    }
+
+    private static void AddControlEffect(SerializedProperty controls)
+    {
+        if (controls == null)
+            return;
+
+        int index = controls.arraySize;
+        controls.InsertArrayElementAtIndex(index);
+        controls.GetArrayElementAtIndex(index)
+            .FindPropertyRelative("controlType")
+            .enumValueIndex =
+            (int)StatusEffectControlType.DisableAllActions;
+    }
+
+    private static void DrawMoveButtons(
+        int index,
+        int count,
+        ref int moveFrom,
+        ref int moveTo)
+    {
+        using (new EditorGUI.DisabledScope(index <= 0))
+        {
+            if (GUILayout.Button(
+                    new GUIContent("↑", "위로 이동"),
+                    EditorStyles.miniButton,
+                    GUILayout.Width(24f)))
+            {
+                moveFrom = index;
+                moveTo = index - 1;
+            }
+        }
+        using (new EditorGUI.DisabledScope(index >= count - 1))
+        {
+            if (GUILayout.Button(
+                    new GUIContent("↓", "아래로 이동"),
+                    EditorStyles.miniButton,
+                    GUILayout.Width(24f)))
+            {
+                moveFrom = index;
+                moveTo = index + 1;
+            }
+        }
+    }
+
+    private static void ApplyListAction(
+        SerializedProperty list,
+        int removeIndex,
+        int moveFrom,
+        int moveTo)
+    {
+        if (list == null)
+            return;
+        if (removeIndex >= 0)
+        {
+            list.DeleteArrayElementAtIndex(removeIndex);
+            GUI.changed = true;
+        }
+        else if (moveFrom >= 0)
+        {
+            list.MoveArrayElement(moveFrom, moveTo);
+            GUI.changed = true;
+        }
+    }
+
+    private static void DrawFloatProperty(
+        SerializedProperty parent,
+        string propertyName,
+        string label)
+    {
+        SerializedProperty property =
+            parent?.FindPropertyRelative(propertyName);
+        if (property != null)
+        {
+            property.floatValue = EditorGUILayout.FloatField(
+                label,
+                property.floatValue);
+        }
+    }
+
+    private static void DrawFloatProperty(
+        SerializedProperty parent,
+        string propertyName,
+        string label,
+        float minimum)
+    {
+        SerializedProperty property =
+            parent?.FindPropertyRelative(propertyName);
+        if (property != null)
+        {
+            property.floatValue = Mathf.Max(
+                minimum,
+                EditorGUILayout.FloatField(label, property.floatValue));
+        }
+    }
+
+    private static void DrawStatusScale(
+        SerializedProperty effect,
+        string statusPropertyName,
+        string scalePropertyName,
+        string label)
+    {
+        SerializedProperty status =
+            effect.FindPropertyRelative(statusPropertyName);
+        SerializedProperty scale =
+            effect.FindPropertyRelative(scalePropertyName);
+        if (status == null || scale == null)
+            return;
+
+        EditorGUILayout.PropertyField(
+            status,
+            new GUIContent($"{label} 기준"));
+        scale.floatValue = EditorGUILayout.FloatField(
+            $"{label} 스택 배율",
+            scale.floatValue);
+        if (scale.floatValue != 0f &&
+            status.objectReferenceValue == null)
+        {
+            EditorGUILayout.HelpBox(
+                $"{label} 스택 배율을 사용하려면 상태를 지정하세요.",
+                MessageType.Error);
+        }
+    }
+
+    private static void SetEnumRelative(
+        SerializedProperty parent,
+        string propertyName,
+        int value)
+    {
+        SerializedProperty property =
+            parent?.FindPropertyRelative(propertyName);
+        if (property != null)
+            property.enumValueIndex = value;
+    }
+
+    private static void SetFloatRelative(
+        SerializedProperty parent,
+        string propertyName,
+        float value)
+    {
+        SerializedProperty property =
+            parent?.FindPropertyRelative(propertyName);
+        if (property != null)
+            property.floatValue = value;
+    }
+
+    private static void SetIntRelative(
+        SerializedProperty parent,
+        string propertyName,
+        int value)
+    {
+        SerializedProperty property =
+            parent?.FindPropertyRelative(propertyName);
+        if (property != null)
+            property.intValue = value;
+    }
+
+    private static void SetObjectRelative(
+        SerializedProperty parent,
+        string propertyName,
+        UnityEngine.Object value)
+    {
+        SerializedProperty property =
+            parent?.FindPropertyRelative(propertyName);
+        if (property != null)
+            property.objectReferenceValue = value;
+    }
+
+    private static string GetOptionName(string[] options, int index)
+    {
+        return options != null && options.Length > 0
+            ? options[Mathf.Clamp(index, 0, options.Length - 1)]
+            : string.Empty;
+    }
+
     private void DrawLocalizationKey(
         string propertyName,
         string label,
@@ -734,7 +1623,7 @@ public sealed class StatusEffectEditorWindow : EditorWindow
         }
 
         int selectedIndex = EditorGUILayout.Popup(
-            "필터 선택",
+            "목록에서 선택",
             currentIndex,
             labels);
         if (selectedIndex > 0 && selectedIndex != currentIndex)
@@ -941,7 +1830,7 @@ public sealed class StatusEffectEditorWindow : EditorWindow
             "Create Status Effect",
             "NewStatusEffect",
             "asset",
-            "상태 이펙트 SO를 생성할 위치를 선택하세요.",
+            "상태 효과 SO를 생성할 위치를 선택하세요.",
             AssetFolder);
         if (string.IsNullOrEmpty(path))
             return;

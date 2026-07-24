@@ -39,6 +39,16 @@ public enum StatusEffectOperationTrigger
     OnStackChanged = 4
 }
 
+public enum StatusEffectLifecycleTrigger
+{
+    OnApply = 0,
+    OnReapply = 1,
+    OnTick = 2,
+    OnStackChanged = 3,
+    OnExpire = 4,
+    OnRemove = 5
+}
+
 public enum StatusEffectOperationType
 {
     PeriodicDamage = 0,
@@ -54,11 +64,448 @@ public enum StatusEffectValueMode
     Ratio = 1
 }
 
+public enum StatusEffectStatType
+{
+    AttackPower = 0,
+    AttackSpeed = 1
+}
+
+public enum StatusEffectStatModifierMode
+{
+    Flat = 0,
+    AdditiveRatio = 1,
+    MultiplicativeRatio = 2
+}
+
+public enum StatusEffectControlType
+{
+    DisableAllActions = 0,
+    DisableBasicAttack = 1,
+    DisableActiveSkill = 2,
+    PausePassiveCooldowns = 3
+}
+
 public static class StatusEffectIds
 {
     public const string Fire = "fire";
     public const string Stun = "stun";
     public const string EmergencyKit = "emergency_kit";
+}
+
+[Serializable]
+public sealed class StatusEffectStatModifierDefinition
+{
+    [SerializeField]
+    private StatusEffectStatType statType;
+    [SerializeField]
+    private StatusEffectStatModifierMode mode;
+    [SerializeField]
+    private float value;
+    [SerializeField]
+    private bool scaleWithStacks = true;
+
+    public StatusEffectStatType StatType => statType;
+    public StatusEffectStatModifierMode Mode => mode;
+    public float Value => value;
+    public bool ScaleWithStacks => scaleWithStacks;
+
+    public void Validate()
+    {
+        if (float.IsNaN(value) || float.IsInfinity(value))
+            value = 0f;
+        if (mode == StatusEffectStatModifierMode.MultiplicativeRatio)
+            value = Mathf.Max(-1f, value);
+    }
+}
+
+[Serializable]
+public sealed class StatusEffectControlDefinition
+{
+    [SerializeField]
+    private StatusEffectControlType controlType;
+
+    public StatusEffectControlType ControlType => controlType;
+}
+
+public struct StatusEffectStatAccumulator
+{
+    private float _flat;
+    private float _additiveRatio;
+    private float _multiplicativeFactor;
+    private bool _initialized;
+
+    public float Flat => _flat;
+    public float AdditiveRatio => _additiveRatio;
+    public float MultiplicativeFactor =>
+        _initialized ? _multiplicativeFactor : 1f;
+
+    public void Add(
+        StatusEffectStatModifierDefinition modifier,
+        int stacks)
+    {
+        if (modifier == null ||
+            float.IsNaN(modifier.Value) ||
+            float.IsInfinity(modifier.Value))
+        {
+            return;
+        }
+
+        EnsureInitialized();
+        int multiplier = modifier.ScaleWithStacks
+            ? Mathf.Max(1, stacks)
+            : 1;
+        switch (modifier.Mode)
+        {
+            case StatusEffectStatModifierMode.Flat:
+                _flat += modifier.Value * multiplier;
+                break;
+
+            case StatusEffectStatModifierMode.AdditiveRatio:
+                _additiveRatio += modifier.Value * multiplier;
+                break;
+
+            case StatusEffectStatModifierMode.MultiplicativeRatio:
+                float factor = Mathf.Max(0f, 1f + modifier.Value);
+                _multiplicativeFactor *= Mathf.Pow(factor, multiplier);
+                break;
+        }
+    }
+
+    public void AddFlat(float value)
+    {
+        if (float.IsNaN(value) || float.IsInfinity(value))
+            return;
+
+        EnsureInitialized();
+        _flat += value;
+    }
+
+    public void AddAdditiveRatio(float value)
+    {
+        if (float.IsNaN(value) || float.IsInfinity(value))
+            return;
+
+        EnsureInitialized();
+        _additiveRatio += value;
+    }
+
+    public float Evaluate(float baseValue)
+    {
+        if (float.IsNaN(baseValue) || float.IsInfinity(baseValue))
+            return 0f;
+
+        float value = (baseValue + _flat +
+                       baseValue * _additiveRatio) *
+                      MultiplicativeFactor;
+        return float.IsNaN(value) || float.IsInfinity(value)
+            ? 0f
+            : value;
+    }
+
+    private void EnsureInitialized()
+    {
+        if (_initialized)
+            return;
+
+        _initialized = true;
+        _multiplicativeFactor = 1f;
+    }
+}
+
+[Serializable]
+public sealed class StatusEffectTriggerBlockDefinition
+{
+    [SerializeField]
+    private StatusEffectLifecycleTrigger trigger;
+    [SerializeField]
+    private List<CharacterEffectDefinition> effects = new();
+    [SerializeField]
+    private bool scaleWithCurrentStacks;
+    [SerializeField]
+    private bool scaleWithOccurrences = true;
+
+    public StatusEffectLifecycleTrigger Trigger => trigger;
+    public IReadOnlyList<CharacterEffectDefinition> Effects => effects;
+    public IReadOnlyList<IBattleEffectDefinition> BattleEffects => effects;
+    public bool HasEffects => effects != null && effects.Count > 0;
+    public bool ScaleWithCurrentStacks => scaleWithCurrentStacks;
+    public bool ScaleWithOccurrences => scaleWithOccurrences;
+
+    public void Validate()
+    {
+        effects ??= new List<CharacterEffectDefinition>();
+        foreach (CharacterEffectDefinition effect in effects)
+            effect?.Validate();
+    }
+
+    public int GetAmountMultiplier(
+        StatusEffectLifecycleEvent eventData)
+    {
+        long multiplier = 1;
+        if (scaleWithCurrentStacks)
+            multiplier *= Mathf.Max(1, eventData.CurrentStacks);
+        if (scaleWithOccurrences)
+            multiplier *= Mathf.Max(1, eventData.OccurrenceCount);
+        return multiplier >= int.MaxValue
+            ? int.MaxValue
+            : Mathf.Max(1, (int)multiplier);
+    }
+}
+
+public readonly struct StatusEffectLifecycleEvent
+{
+    public StatusEffectSO Definition { get; }
+    public StatusEffectLifecycleTrigger Trigger { get; }
+    public BattleStatusTarget Target { get; }
+    public IBattleCharacter Source { get; }
+    public int PreviousStacks { get; }
+    public int CurrentStacks { get; }
+    public int OccurrenceCount { get; }
+    public int AddedStacks =>
+        Mathf.Max(0, CurrentStacks - PreviousStacks);
+    public int RemovedStacks =>
+        Mathf.Max(0, PreviousStacks - CurrentStacks);
+    public bool HasStackChange => PreviousStacks != CurrentStacks;
+    public bool IsValid =>
+        Definition != null &&
+        Target.IsValid &&
+        Enum.IsDefined(typeof(StatusEffectLifecycleTrigger), Trigger) &&
+        OccurrenceCount > 0;
+
+    public StatusEffectLifecycleEvent(
+        StatusEffectSO definition,
+        StatusEffectLifecycleTrigger trigger,
+        BattleStatusTarget target,
+        IBattleCharacter source,
+        int previousStacks,
+        int currentStacks,
+        int occurrenceCount = 1)
+    {
+        Definition = definition;
+        Trigger = trigger;
+        Target = target;
+        Source = source;
+        PreviousStacks = Mathf.Max(0, previousStacks);
+        CurrentStacks = Mathf.Max(0, currentStacks);
+        OccurrenceCount = Mathf.Max(1, occurrenceCount);
+    }
+
+    public BattleEffectContext CreateEffectContext(IBattleBoard board)
+    {
+        CharacterRuntime sourceRuntime = Source as CharacterRuntime;
+        BattleStatusTarget sourceTarget = Source != null
+            ? BattleStatusTarget.FromAlly(Source)
+            : default;
+        return BattleEffectContext.ForStatus(
+            Target,
+            sourceTarget,
+            board,
+            Source?.CurrentAttackPower ?? 0f,
+            PreviousStacks,
+            CurrentStacks,
+            OccurrenceCount,
+            sourceRuntime?.ActiveSkillResource);
+    }
+}
+
+public readonly struct StatusEffectTriggerInvocation
+{
+    public StatusEffectLifecycleEvent Event { get; }
+    public StatusEffectTriggerBlockDefinition Block { get; }
+    public int BlockIndex { get; }
+    public bool IsValid =>
+        Event.IsValid &&
+        Block != null &&
+        Block.Trigger == Event.Trigger &&
+        Block.HasEffects &&
+        BlockIndex >= 0;
+
+    public StatusEffectTriggerInvocation(
+        StatusEffectLifecycleEvent eventData,
+        StatusEffectTriggerBlockDefinition block,
+        int blockIndex)
+    {
+        Event = eventData;
+        Block = block;
+        BlockIndex = blockIndex;
+    }
+}
+
+public static class StatusEffectLifecycleResolver
+{
+    public static IReadOnlyList<StatusEffectLifecycleEvent> Resolve(
+        BattleStatusChangedEvent change)
+    {
+        if (!change.IsValid)
+            return Array.Empty<StatusEffectLifecycleEvent>();
+
+        List<StatusEffectLifecycleEvent> events = new(2);
+        IBattleCharacter source =
+            change.Current.ActiveSource ??
+            change.Previous.ActiveSource;
+        switch (change.ChangeType)
+        {
+            case BattleStatusChangeType.Applied:
+                Add(
+                    events,
+                    change,
+                    source,
+                    StatusEffectLifecycleTrigger.OnApply);
+                AddStackChange(events, change, source);
+                break;
+
+            case BattleStatusChangeType.Reapplied:
+                Add(
+                    events,
+                    change,
+                    source,
+                    StatusEffectLifecycleTrigger.OnReapply);
+                AddStackChange(events, change, source);
+                break;
+
+            case BattleStatusChangeType.StackChanged:
+                AddStackChange(events, change, source);
+                break;
+
+            case BattleStatusChangeType.Expired:
+                AddStackChange(events, change, source);
+                Add(
+                    events,
+                    change,
+                    source,
+                    StatusEffectLifecycleTrigger.OnExpire);
+                break;
+
+            case BattleStatusChangeType.Removed:
+                AddStackChange(events, change, source);
+                Add(
+                    events,
+                    change,
+                    source,
+                    StatusEffectLifecycleTrigger.OnRemove);
+                break;
+        }
+
+        return events.Count > 0
+            ? events.ToArray()
+            : Array.Empty<StatusEffectLifecycleEvent>();
+    }
+
+    public static StatusEffectLifecycleEvent ResolveTick(
+        BattleStatusTarget target,
+        BattleStatusSnapshot snapshot,
+        int occurrenceCount)
+    {
+        if (!target.IsValid || !snapshot.IsValid || occurrenceCount <= 0)
+            return default;
+
+        return new StatusEffectLifecycleEvent(
+            snapshot.Definition,
+            StatusEffectLifecycleTrigger.OnTick,
+            target,
+            snapshot.ActiveSource,
+            snapshot.StackCount,
+            snapshot.StackCount,
+            occurrenceCount);
+    }
+
+    public static IReadOnlyList<StatusEffectTriggerInvocation>
+        ResolveInvocations(StatusEffectLifecycleEvent eventData)
+    {
+        IReadOnlyList<StatusEffectTriggerBlockDefinition> blocks =
+            eventData.Definition?.TriggerBlocks;
+        if (!eventData.IsValid || blocks == null || blocks.Count == 0)
+            return Array.Empty<StatusEffectTriggerInvocation>();
+
+        List<StatusEffectTriggerInvocation> invocations = new();
+        for (int index = 0; index < blocks.Count; index++)
+        {
+            StatusEffectTriggerBlockDefinition block = blocks[index];
+            if (block == null ||
+                block.Trigger != eventData.Trigger ||
+                !block.HasEffects)
+            {
+                continue;
+            }
+
+            invocations.Add(new StatusEffectTriggerInvocation(
+                eventData,
+                block,
+                index));
+        }
+
+        return invocations.Count > 0
+            ? invocations.ToArray()
+            : Array.Empty<StatusEffectTriggerInvocation>();
+    }
+
+    private static void AddStackChange(
+        ICollection<StatusEffectLifecycleEvent> events,
+        BattleStatusChangedEvent change,
+        IBattleCharacter source)
+    {
+        if (change.PreviousStacks == change.CurrentStacks)
+            return;
+
+        Add(
+            events,
+            change,
+            source,
+            StatusEffectLifecycleTrigger.OnStackChanged);
+    }
+
+    private static void Add(
+        ICollection<StatusEffectLifecycleEvent> events,
+        BattleStatusChangedEvent change,
+        IBattleCharacter source,
+        StatusEffectLifecycleTrigger trigger)
+    {
+        events.Add(new StatusEffectLifecycleEvent(
+            change.StatusEffect,
+            trigger,
+            change.Target,
+            source,
+            change.PreviousStacks,
+            change.CurrentStacks));
+    }
+}
+
+public static class StatusEffectTriggerExecutor
+{
+    public static BattleEffectResult Execute(
+        StatusEffectLifecycleEvent eventData,
+        IBattleBoard board = null,
+        Func<int, IBattleCharacter, bool>
+            inheritedEnemyDamageFallback = null)
+    {
+        if (!eventData.IsValid)
+            return default;
+
+        CharacterRuntime sourceRuntime =
+            eventData.Source as CharacterRuntime;
+        board ??= sourceRuntime?.BoundBattleBoard;
+        BattleEffectContext context =
+            eventData.CreateEffectContext(board);
+        IReadOnlyList<StatusEffectTriggerInvocation> invocations =
+            StatusEffectLifecycleResolver.ResolveInvocations(eventData);
+        BattleEffectResult combined = default;
+        foreach (StatusEffectTriggerInvocation invocation in invocations)
+        {
+            if (!invocation.IsValid)
+                continue;
+
+            BattleEffectResult current =
+                BattleEffectExecutor.ExecuteSequence(
+                    context,
+                    invocation.Block.BattleEffects,
+                    sourceRuntime?.Data,
+                    invocation.Block.GetAmountMultiplier(eventData),
+                    inheritedEnemyDamageFallback);
+            combined = combined.Combine(current);
+        }
+
+        return combined;
+    }
 }
 
 [Serializable]
@@ -472,6 +919,18 @@ public sealed class StatusEffectSO : ScriptableObject
     [SerializeField]
     private List<StatusEffectOperationDefinition> operations = new();
 
+    [Header("Lifecycle Trigger Blocks")]
+    [SerializeField]
+    private List<StatusEffectTriggerBlockDefinition> triggerBlocks = new();
+
+    [Header("Persistent Stat Modifiers")]
+    [SerializeField]
+    private List<StatusEffectStatModifierDefinition> statModifiers = new();
+
+    [Header("Control Effects")]
+    [SerializeField]
+    private List<StatusEffectControlDefinition> controlEffects = new();
+
     public string StatusId => statusId;
     public Sprite Icon => icon;
     public string NameLocalizationKey => nameLocalizationKey;
@@ -506,6 +965,18 @@ public sealed class StatusEffectSO : ScriptableObject
     public bool IncludedInAllRemoval => removable && includedInAllRemoval;
     public IReadOnlyList<StatusEffectOperationDefinition> Operations =>
         operations;
+    public IReadOnlyList<StatusEffectTriggerBlockDefinition> TriggerBlocks =>
+        triggerBlocks;
+    public bool HasTriggerBlocks =>
+        triggerBlocks != null && triggerBlocks.Count > 0;
+    public IReadOnlyList<StatusEffectStatModifierDefinition> StatModifiers =>
+        statModifiers;
+    public IReadOnlyList<StatusEffectControlDefinition> ControlEffects =>
+        controlEffects;
+    public bool HasPersistentModifiers =>
+        statModifiers != null && statModifiers.Count > 0;
+    public bool HasControlEffects =>
+        controlEffects != null && controlEffects.Count > 0;
 
     private void OnEnable()
     {
@@ -536,6 +1007,30 @@ public sealed class StatusEffectSO : ScriptableObject
         operations ??= new List<StatusEffectOperationDefinition>();
         foreach (StatusEffectOperationDefinition operation in operations)
             operation?.Validate();
+
+        triggerBlocks ??= new List<StatusEffectTriggerBlockDefinition>();
+        foreach (StatusEffectTriggerBlockDefinition block in triggerBlocks)
+            block?.Validate();
+
+        statModifiers ??= new List<StatusEffectStatModifierDefinition>();
+        foreach (StatusEffectStatModifierDefinition modifier in statModifiers)
+            modifier?.Validate();
+
+        controlEffects ??= new List<StatusEffectControlDefinition>();
+    }
+
+    public bool HasControl(StatusEffectControlType controlType)
+    {
+        if (controlEffects == null)
+            return false;
+
+        foreach (StatusEffectControlDefinition control in controlEffects)
+        {
+            if (control != null && control.ControlType == controlType)
+                return true;
+        }
+
+        return false;
     }
 
     public void RegenerateStatusId()

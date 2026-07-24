@@ -165,6 +165,745 @@ public readonly struct BattleEffectResult
     }
 }
 
+public static class BattleEffectExecutor
+{
+    private readonly struct PreparedEffect
+    {
+        public bool IsPrepared { get; }
+        public BattleEffectContext Context { get; }
+        public int ResourceSpendAmount { get; }
+        public int HealthSpendAmount { get; }
+
+        public PreparedEffect(
+            BattleEffectContext context,
+            int resourceSpendAmount,
+            int healthSpendAmount)
+        {
+            IsPrepared = true;
+            Context = context;
+            ResourceSpendAmount = Mathf.Max(0, resourceSpendAmount);
+            HealthSpendAmount = Mathf.Max(0, healthSpendAmount);
+        }
+    }
+
+    private readonly struct EnemyAmountSnapshot
+    {
+        public EnemyRuntime Target { get; }
+        public int Amount { get; }
+
+        public EnemyAmountSnapshot(EnemyRuntime target, int amount)
+        {
+            Target = target;
+            Amount = Mathf.Max(0, amount);
+        }
+    }
+
+    public static BattleEffectResult ExecuteSequence(
+        BattleEffectContext context,
+        IReadOnlyList<IBattleEffectDefinition> effects,
+        CharacterData sourceData = null,
+        int amountMultiplier = 1,
+        Func<int, IBattleCharacter, bool>
+            inheritedEnemyDamageFallback = null)
+    {
+        if (effects == null || effects.Count == 0)
+            return default;
+
+        PreparedEffect[] prepared = new PreparedEffect[effects.Count];
+        bool hasPreparedEffect = false;
+        for (int index = 0; index < effects.Count; index++)
+        {
+            IBattleEffectDefinition effect = effects[index];
+            if (!IsUsable(effect) ||
+                !TryResolveContext(
+                    context,
+                    effect,
+                    out BattleEffectContext effectContext))
+            {
+                if (effect != null &&
+                    effect.BattlePreconditionFailurePolicy ==
+                        BattleEffectPreconditionFailurePolicy.AbortSequence)
+                {
+                    return default;
+                }
+                continue;
+            }
+
+            int resourceSpendAmount = 0;
+            int healthSpendAmount = 0;
+            if (effect.BattleEffectType ==
+                BattleEffectType.SpendResource)
+            {
+                resourceSpendAmount = CalculateAmount(
+                    effect,
+                    effectContext,
+                    sourceData,
+                    false,
+                    amountMultiplier);
+                if (resourceSpendAmount <= 0 ||
+                    effectContext.Resource?.CanSpend(
+                        resourceSpendAmount) != true)
+                {
+                    if (effect.BattlePreconditionFailurePolicy ==
+                        BattleEffectPreconditionFailurePolicy.AbortSequence)
+                    {
+                        return default;
+                    }
+                    continue;
+                }
+            }
+            else if (effect.BattleEffectType ==
+                     BattleEffectType.SpendHealth)
+            {
+                healthSpendAmount = CalculateAmount(
+                    effect,
+                    effectContext,
+                    sourceData,
+                    false,
+                    amountMultiplier);
+                if (healthSpendAmount <= 0 ||
+                    effectContext.Source?.CanSpendHealth(
+                        healthSpendAmount) != true)
+                {
+                    if (effect.BattlePreconditionFailurePolicy ==
+                        BattleEffectPreconditionFailurePolicy.AbortSequence)
+                    {
+                        return default;
+                    }
+                    continue;
+                }
+            }
+
+            prepared[index] = new PreparedEffect(
+                effectContext,
+                resourceSpendAmount,
+                healthSpendAmount);
+            hasPreparedEffect = true;
+        }
+
+        if (!hasPreparedEffect)
+            return default;
+
+        BattleEffectResult combined = default;
+        bool showAttackRange = true;
+        for (int index = 0; index < effects.Count; index++)
+        {
+            if (!prepared[index].IsPrepared)
+                continue;
+
+            IBattleEffectDefinition effect = effects[index];
+            BattleEffectResult current = ExecuteEffect(
+                prepared[index].Context,
+                effect,
+                sourceData,
+                amountMultiplier,
+                showAttackRange,
+                prepared[index].ResourceSpendAmount,
+                prepared[index].HealthSpendAmount,
+                inheritedEnemyDamageFallback);
+            combined = combined.Combine(current);
+            if (current.Attempted &&
+                effect.BattleTargetMode ==
+                    BattleEffectTargetMode.InheritContext &&
+                prepared[index].Context.TargetFaction ==
+                    CharacterTargetFaction.Enemy)
+            {
+                showAttackRange = false;
+            }
+            if (!current.Succeeded &&
+                effect.BattleFailurePolicy ==
+                    BattleEffectFailurePolicy.StopRemainingEffects)
+            {
+                break;
+            }
+        }
+
+        return combined;
+    }
+
+    public static BattleEffectResult ExecuteEffect(
+        BattleEffectContext context,
+        IBattleEffectDefinition effect,
+        CharacterData sourceData = null,
+        int amountMultiplier = 1,
+        bool showAttackRange = true,
+        int preparedResourceSpendAmount = 0,
+        int preparedHealthSpendAmount = 0,
+        Func<int, IBattleCharacter, bool>
+            inheritedEnemyDamageFallback = null)
+    {
+        if (!IsUsable(effect))
+            return default;
+
+        amountMultiplier = Mathf.Max(1, amountMultiplier);
+        BattleEffectContext effectContext =
+            context.SnapshotSourceStatus(
+                effect.SourceStatusScalingEffect);
+        switch (effect.BattleEffectType)
+        {
+            case BattleEffectType.Damage:
+                return ExecuteDamage(
+                    effectContext,
+                    effect,
+                    sourceData,
+                    amountMultiplier,
+                    showAttackRange,
+                    inheritedEnemyDamageFallback);
+
+            case BattleEffectType.ApplyStatus:
+            {
+                if (effect.StatusEffect == null ||
+                    effectContext.Board == null)
+                {
+                    return default;
+                }
+
+                float stacks = Mathf.Min(
+                    float.MaxValue,
+                    effect.StatusStacks * amountMultiplier);
+                bool changed = effectContext.TargetFaction ==
+                               CharacterTargetFaction.Ally
+                    ? effectContext.Board.TryApplyAlliedCharacterStatus(
+                        effectContext.Source,
+                        effectContext.AllyTargets,
+                        effect.StatusEffect,
+                        effect.StatusDuration,
+                        stacks)
+                    : effectContext.Board.TryApplyCharacterStatus(
+                        effectContext.Source,
+                        effectContext.EnemyTargets,
+                        effect.StatusEffect,
+                        effect.StatusDuration,
+                        stacks,
+                        effect.StatusEffect.TickInterval,
+                        showAttackRange);
+                return new BattleEffectResult(true, changed);
+            }
+
+            case BattleEffectType.RemoveStatus:
+            {
+                if (effectContext.Board == null ||
+                    (effect.StatusRemovalTarget ==
+                         CharacterStatusRemovalTarget.Single &&
+                     effect.StatusEffect == null))
+                {
+                    return default;
+                }
+
+                int removalCount = effect.StatusRemovalCount == 0
+                    ? 0
+                    : SaturatingMultiply(
+                        effect.StatusRemovalCount,
+                        amountMultiplier);
+                bool changed = effectContext.TargetFaction ==
+                               CharacterTargetFaction.Ally
+                    ? effectContext.Board.TryRemoveAlliedCharacterStatus(
+                        effectContext.Source,
+                        effectContext.AllyTargets,
+                        effect.StatusRemovalTarget,
+                        effect.StatusEffect,
+                        removalCount)
+                    : effectContext.Board.TryRemoveCharacterStatus(
+                        effectContext.Source,
+                        effectContext.EnemyTargets,
+                        effect.StatusRemovalTarget,
+                        effect.StatusEffect,
+                        removalCount,
+                        showAttackRange);
+                return new BattleEffectResult(true, changed);
+            }
+
+            case BattleEffectType.GainResource:
+            {
+                int amount = CalculateAmount(
+                    effect,
+                    effectContext,
+                    sourceData,
+                    false,
+                    amountMultiplier);
+                if (amount <= 0)
+                    return new BattleEffectResult(true, false);
+                bool changed =
+                    effectContext.Resource?.TryGain(amount) == true;
+                return new BattleEffectResult(true, changed);
+            }
+
+            case BattleEffectType.SpendResource:
+            {
+                int amount = preparedResourceSpendAmount > 0
+                    ? preparedResourceSpendAmount
+                    : CalculateAmount(
+                        effect,
+                        effectContext,
+                        sourceData,
+                        false,
+                        amountMultiplier);
+                if (amount <= 0)
+                    return new BattleEffectResult(true, false);
+                bool changed =
+                    effectContext.Resource?.TrySpend(amount) == true;
+                return new BattleEffectResult(true, changed);
+            }
+
+            case BattleEffectType.Heal:
+                return ExecuteRestore(
+                    effectContext,
+                    effect,
+                    sourceData,
+                    amountMultiplier,
+                    false,
+                    showAttackRange);
+
+            case BattleEffectType.SpendHealth:
+            {
+                int amount = preparedHealthSpendAmount > 0
+                    ? preparedHealthSpendAmount
+                    : CalculateAmount(
+                        effect,
+                        effectContext,
+                        sourceData,
+                        false,
+                        amountMultiplier);
+                if (amount <= 0)
+                    return new BattleEffectResult(true, false);
+                bool changed =
+                    effectContext.Source?.TrySpendHealth(amount) == true;
+                return new BattleEffectResult(true, changed);
+            }
+
+            case BattleEffectType.Shield:
+                return ExecuteRestore(
+                    effectContext,
+                    effect,
+                    sourceData,
+                    amountMultiplier,
+                    true,
+                    showAttackRange);
+
+            default:
+                return default;
+        }
+    }
+
+    private static BattleEffectResult ExecuteDamage(
+        BattleEffectContext context,
+        IBattleEffectDefinition effect,
+        CharacterData sourceData,
+        int amountMultiplier,
+        bool showAttackRange,
+        Func<int, IBattleCharacter, bool> fallback)
+    {
+        if (!IsDirectDamageType(effect.DamageType) ||
+            context.TargetFaction == CharacterTargetFaction.Ally)
+        {
+            return new BattleEffectResult(true, false);
+        }
+
+        if (effect.AmountScaling.HasTargetDependentTerm)
+        {
+            List<EnemyAmountSnapshot> snapshots = new(
+                context.EnemyTargets.Count);
+            HashSet<EnemyRuntime> uniqueTargets = new();
+            foreach (EnemyRuntime target in context.EnemyTargets)
+            {
+                if (target == null || !uniqueTargets.Add(target))
+                    continue;
+
+                snapshots.Add(new EnemyAmountSnapshot(
+                    target,
+                    CalculateAmount(
+                        effect,
+                        context.BindEnemyTarget(
+                            target,
+                            effect.TargetStatusScalingEffect),
+                        sourceData,
+                        true,
+                        amountMultiplier)));
+            }
+            if (snapshots.Count == 0)
+                return default;
+
+            int totalDamage = 0;
+            int groupedDamage = 0;
+            List<EnemyRuntime> groupedTargets = new();
+            foreach (EnemyAmountSnapshot snapshot in snapshots)
+            {
+                if (snapshot.Amount <= 0)
+                    continue;
+
+                if (groupedTargets.Count > 0 &&
+                    snapshot.Amount != groupedDamage)
+                {
+                    totalDamage += ApplyDamageGroup(
+                        context,
+                        effect,
+                        groupedTargets,
+                        groupedDamage,
+                        showAttackRange,
+                        fallback);
+                    groupedTargets.Clear();
+                }
+
+                groupedDamage = snapshot.Amount;
+                groupedTargets.Add(snapshot.Target);
+            }
+            if (groupedTargets.Count > 0)
+            {
+                totalDamage += ApplyDamageGroup(
+                    context,
+                    effect,
+                    groupedTargets,
+                    groupedDamage,
+                    showAttackRange,
+                    fallback);
+            }
+
+            return new BattleEffectResult(
+                true,
+                totalDamage > 0,
+                totalDamage);
+        }
+
+        int sharedDamage = CalculateAmount(
+            effect,
+            context,
+            sourceData,
+            true,
+            amountMultiplier);
+        if (sharedDamage <= 0)
+            return default;
+        if (context.Board != null)
+        {
+            int damageDealt =
+                context.Board.TryDamageCharacterTargets(
+                    context.Source,
+                    context.EnemyTargets,
+                    sharedDamage,
+                    effect.DamageType,
+                    showAttackRange);
+            return new BattleEffectResult(
+                true,
+                damageDealt > 0,
+                damageDealt);
+        }
+
+        bool fallbackSucceeded =
+            fallback?.Invoke(sharedDamage, context.Source) == true;
+        return new BattleEffectResult(
+            true,
+            fallbackSucceeded,
+            fallbackSucceeded ? sharedDamage : 0);
+    }
+
+    private static int ApplyDamageGroup(
+        BattleEffectContext context,
+        IBattleEffectDefinition effect,
+        IReadOnlyList<EnemyRuntime> targets,
+        int damage,
+        bool showAttackRange,
+        Func<int, IBattleCharacter, bool> fallback)
+    {
+        if (damage <= 0 || targets == null || targets.Count == 0)
+            return 0;
+        if (context.Board != null)
+        {
+            return context.Board.TryDamageCharacterTargets(
+                context.Source,
+                targets,
+                damage,
+                effect.DamageType,
+                showAttackRange);
+        }
+
+        return fallback?.Invoke(damage, context.Source) == true
+            ? damage
+            : 0;
+    }
+
+    private static BattleEffectResult ExecuteRestore(
+        BattleEffectContext context,
+        IBattleEffectDefinition effect,
+        CharacterData sourceData,
+        int amountMultiplier,
+        bool shield,
+        bool showAttackRange)
+    {
+        if (context.Board == null)
+            return default;
+
+        if (!effect.AmountScaling.HasTargetDependentTerm)
+        {
+            int amount = CalculateAmount(
+                effect,
+                context,
+                sourceData,
+                false,
+                amountMultiplier);
+            if (amount <= 0)
+                return default;
+
+            int changed = context.TargetFaction ==
+                          CharacterTargetFaction.Ally
+                ? shield
+                    ? context.Board.TryGrantShieldToAlliedCharacters(
+                        context.Source,
+                        context.AllyTargets,
+                        amount)
+                    : context.Board.TryHealAlliedCharacters(
+                        context.Source,
+                        context.AllyTargets,
+                        amount)
+                : shield
+                    ? context.Board.TryGrantShieldToCharacterTargets(
+                        context.Source,
+                        context.EnemyTargets,
+                        amount,
+                        showAttackRange)
+                    : context.Board.TryHealCharacterTargets(
+                        context.Source,
+                        context.EnemyTargets,
+                        amount,
+                        showAttackRange);
+            return new BattleEffectResult(true, changed > 0);
+        }
+
+        bool attempted = false;
+        int totalChanged = 0;
+        if (context.TargetFaction == CharacterTargetFaction.Ally)
+        {
+            HashSet<IBattleCharacter> uniqueTargets = new();
+            foreach (IBattleCharacter target in context.AllyTargets)
+            {
+                if (target == null || !uniqueTargets.Add(target))
+                    continue;
+
+                int amount = CalculateAmount(
+                    effect,
+                    context.BindAllyTarget(
+                        target,
+                        effect.TargetStatusScalingEffect),
+                    sourceData,
+                    false,
+                    amountMultiplier);
+                if (amount <= 0)
+                    continue;
+
+                attempted = true;
+                totalChanged += shield
+                    ? context.Board.TryGrantShieldToAlliedCharacters(
+                        context.Source,
+                        new[] { target },
+                        amount)
+                    : context.Board.TryHealAlliedCharacters(
+                        context.Source,
+                        new[] { target },
+                        amount);
+            }
+        }
+        else
+        {
+            HashSet<EnemyRuntime> uniqueTargets = new();
+            foreach (EnemyRuntime target in context.EnemyTargets)
+            {
+                if (target == null || !uniqueTargets.Add(target))
+                    continue;
+
+                int amount = CalculateAmount(
+                    effect,
+                    context.BindEnemyTarget(
+                        target,
+                        effect.TargetStatusScalingEffect),
+                    sourceData,
+                    false,
+                    amountMultiplier);
+                if (amount <= 0)
+                    continue;
+
+                attempted = true;
+                totalChanged += shield
+                    ? context.Board.TryGrantShieldToCharacterTargets(
+                        context.Source,
+                        new[] { target },
+                        amount,
+                        showAttackRange)
+                    : context.Board.TryHealCharacterTargets(
+                        context.Source,
+                        new[] { target },
+                        amount,
+                        showAttackRange);
+            }
+        }
+
+        return new BattleEffectResult(attempted, totalChanged > 0);
+    }
+
+    private static int CalculateAmount(
+        IBattleEffectDefinition effect,
+        BattleEffectContext context,
+        CharacterData sourceData,
+        bool damage,
+        int amountMultiplier)
+    {
+        ScalingValue scaling = effect.AmountScaling;
+        if (damage && sourceData != null)
+        {
+            scaling += context.OriginKind switch
+            {
+                BattleEffectOriginKind.CharacterAttack =>
+                    ScalingValue.Fixed(sourceData.AttackDamageFlatBonus),
+                BattleEffectOriginKind.CharacterPassive =>
+                    IsLegacyRatioDamage(effect)
+                        ? ScalingValue.SourceAttackPower(
+                            sourceData.PassiveDamageAmountBonus)
+                        : ScalingValue.Fixed(
+                            sourceData.PassiveDamageAmountBonus),
+                BattleEffectOriginKind.CharacterSkill =>
+                    ScalingValue.Fixed(sourceData.SkillDamageFlatBonus),
+                _ => default
+            };
+        }
+
+        double value = scaling.EvaluateBattle(context) *
+                       (double)Mathf.Max(1, amountMultiplier);
+        if (double.IsNaN(value) || value <= 0d)
+            return 0;
+        if (double.IsInfinity(value) || value >= int.MaxValue)
+            return int.MaxValue;
+        return Mathf.Max(0, Mathf.RoundToInt((float)value));
+    }
+
+    private static bool TryResolveContext(
+        BattleEffectContext context,
+        IBattleEffectDefinition effect,
+        out BattleEffectContext resolved)
+    {
+        resolved = default;
+        if (effect == null)
+            return false;
+        if (!RequiresTargets(effect.BattleEffectType))
+        {
+            resolved = context;
+            return true;
+        }
+
+        switch (effect.BattleTargetMode)
+        {
+            case BattleEffectTargetMode.InheritContext:
+                resolved = context;
+                return resolved.HasTargets;
+
+            case BattleEffectTargetMode.Source:
+                resolved = context.RetargetToSource();
+                return resolved.HasTargets;
+
+            case BattleEffectTargetMode.FreshSelection:
+                return TrySelectFreshTargets(context, effect, out resolved);
+
+            default:
+                return false;
+        }
+    }
+
+    private static bool TrySelectFreshTargets(
+        BattleEffectContext context,
+        IBattleEffectDefinition effect,
+        out BattleEffectContext resolved)
+    {
+        resolved = default;
+        IBattleEffectTargetSelector selector =
+            effect.BattleTargetSelector;
+        if (context.Board == null || selector == null ||
+            selector.Subject == CharacterAttackSubject.None)
+        {
+            return false;
+        }
+
+        IReadOnlyList<CharacterNumericCondition> conditions =
+            selector.HasNumericConditions
+                ? selector.NumericConditions
+                : Array.Empty<CharacterNumericCondition>();
+        if (selector.TargetFaction == CharacterTargetFaction.Ally)
+        {
+            IReadOnlyList<IBattleCharacter> allies =
+                context.Board.SelectAlliedCharacters(
+                    context.Source,
+                    selector.Subject,
+                    selector.SubjectMetric,
+                    selector.SubjectCount,
+                    selector.ConditionMatchMode,
+                    conditions);
+            resolved = context.RetargetTo(
+                CharacterTargetFaction.Ally,
+                null,
+                allies);
+            return resolved.HasTargets;
+        }
+
+        IReadOnlyList<EnemyRuntime> enemies =
+            context.Board.SelectCharacterTargets(
+                context.Source,
+                selector.Subject,
+                selector.SubjectMetric,
+                selector.SubjectCount,
+                selector.ConditionMatchMode,
+                conditions);
+        if (enemies != null && enemies.Count > 0 &&
+            selector.AreaOffsets != null &&
+            selector.AreaOffsets.Count > 0)
+        {
+            enemies = context.Board.ExpandCharacterAreaTargets(
+                enemies,
+                selector.AreaOffsets);
+        }
+        resolved = context.RetargetTo(
+            CharacterTargetFaction.Enemy,
+            enemies,
+            null);
+        return resolved.HasTargets;
+    }
+
+    private static bool IsUsable(IBattleEffectDefinition effect)
+    {
+        return effect != null &&
+               Enum.IsDefined(
+                   typeof(BattleEffectType),
+                   effect.BattleEffectType) &&
+               Enum.IsDefined(
+                   typeof(BattleEffectTargetMode),
+                   effect.BattleTargetMode) &&
+               effect.AmountScaling.IsFinite;
+    }
+
+    private static bool RequiresTargets(BattleEffectType effectType)
+    {
+        return effectType != BattleEffectType.GainResource &&
+               effectType != BattleEffectType.SpendResource &&
+               effectType != BattleEffectType.SpendHealth;
+    }
+
+    private static bool IsDirectDamageType(
+        CharacterAttackDamageType damageType)
+    {
+        return damageType == CharacterAttackDamageType.Physical ||
+               damageType == CharacterAttackDamageType.Magical ||
+               damageType == CharacterAttackDamageType.Fixed;
+    }
+
+    private static bool IsLegacyRatioDamage(
+        IBattleEffectDefinition effect)
+    {
+        return effect is CharacterEffectDefinition characterEffect &&
+               characterEffect.DamageAmountMode ==
+                   CharacterDamageAmountMode.Ratio;
+    }
+
+    private static int SaturatingMultiply(int left, int right)
+    {
+        long value = (long)Mathf.Max(0, left) * Mathf.Max(0, right);
+        return value >= int.MaxValue ? int.MaxValue : (int)value;
+    }
+}
+
 public readonly struct BattleStatusTarget
 {
     public CharacterTargetFaction Faction { get; }

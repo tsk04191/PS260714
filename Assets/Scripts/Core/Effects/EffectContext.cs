@@ -2,6 +2,69 @@ using System;
 using System.Collections.Generic;
 using UnityEngine;
 
+public enum BattleEffectType
+{
+    Damage = 0,
+    ApplyStatus = 1,
+    RemoveStatus = 2,
+    GainResource = 3,
+    SpendResource = 4,
+    Heal = 5,
+    SpendHealth = 6,
+    Shield = 7
+}
+
+public enum BattleEffectTargetMode
+{
+    InheritContext = 0,
+    Source = 1,
+    FreshSelection = 2
+}
+
+public enum BattleEffectPreconditionFailurePolicy
+{
+    AbortSequence = 0,
+    SkipEffect = 1
+}
+
+public enum BattleEffectFailurePolicy
+{
+    Continue = 0,
+    StopRemainingEffects = 1
+}
+
+public interface IBattleEffectTargetSelector
+{
+    CharacterTargetFaction TargetFaction { get; }
+    CharacterAttackSubject Subject { get; }
+    CharacterAttackSubjectMetric SubjectMetric { get; }
+    int SubjectCount { get; }
+    CharacterConditionMatchMode ConditionMatchMode { get; }
+    IReadOnlyList<CharacterNumericCondition> NumericConditions { get; }
+    IReadOnlyList<CharacterTargetAreaOffset> AreaOffsets { get; }
+    bool HasNumericConditions { get; }
+}
+
+public interface IBattleEffectDefinition
+{
+    BattleEffectType BattleEffectType { get; }
+    BattleEffectTargetMode BattleTargetMode { get; }
+    BattleEffectPreconditionFailurePolicy
+        BattlePreconditionFailurePolicy { get; }
+    BattleEffectFailurePolicy BattleFailurePolicy { get; }
+    IBattleEffectTargetSelector BattleTargetSelector { get; }
+    bool RequiresActionTargets { get; }
+    CharacterAttackDamageType DamageType { get; }
+    ScalingValue AmountScaling { get; }
+    StatusEffectSO SourceStatusScalingEffect { get; }
+    StatusEffectSO TargetStatusScalingEffect { get; }
+    float StatusDuration { get; }
+    float StatusStacks { get; }
+    StatusEffectSO StatusEffect { get; }
+    CharacterStatusRemovalTarget StatusRemovalTarget { get; }
+    int StatusRemovalCount { get; }
+}
+
 public enum CharacterActionKind
 {
     Attack = 0,
@@ -24,7 +87,7 @@ public readonly struct EffectContext
     public int SourceResourceMaximum { get; }
     public BattleStatusTarget Target { get; }
     public bool HasBoundTarget => Target.IsValid;
-    public bool HasTargetHealth => Target.Enemy != null;
+    public bool HasTargetHealth => Target.IsValid;
     public int TargetCurrentHealth { get; }
     public int TargetMaximumHealth { get; }
     public int SourceStatusStacks { get; }
@@ -96,7 +159,7 @@ public readonly struct EffectContext
             SourceResource,
             sourceResourceMaximum);
         Target = target;
-        bool hasTargetHealth = target.Enemy != null;
+        bool hasTargetHealth = target.IsValid;
         TargetCurrentHealth = hasTargetHealth
             ? Mathf.Max(0, targetCurrentHealth)
             : 0;
@@ -238,5 +301,244 @@ public readonly struct EffectContext
     private static bool IsFinite(float value)
     {
         return !float.IsNaN(value) && !float.IsInfinity(value);
+    }
+}
+
+public enum BattleEffectOriginKind
+{
+    CharacterAttack = 0,
+    CharacterPassive = 1,
+    CharacterSkill = 2,
+    StatusEffect = 3
+}
+
+public readonly struct BattleEffectContext
+{
+    private readonly EffectContext _characterContext;
+
+    public BattleEffectOriginKind OriginKind { get; }
+    public BattleStatusTarget SourceTarget { get; }
+    public BattleStatusTarget Target => _characterContext.Target;
+    public BattleStatusTarget Holder => Target;
+    public IBattleCharacter Source => _characterContext.Source;
+    public IBattleBoard Board => _characterContext.Board;
+    public IActiveSkillResource Resource => _characterContext.Resource;
+    public CharacterTargetFaction TargetFaction =>
+        _characterContext.TargetFaction;
+    public float SourceAttackPower => _characterContext.SourceAttackPower;
+    public int SourceResource => _characterContext.SourceResource;
+    public int SourceResourceMaximum =>
+        _characterContext.SourceResourceMaximum;
+    public bool HasBoundTarget => _characterContext.HasBoundTarget;
+    public bool HasTargetHealth => _characterContext.HasTargetHealth;
+    public int TargetCurrentHealth =>
+        _characterContext.TargetCurrentHealth;
+    public int TargetMaximumHealth =>
+        _characterContext.TargetMaximumHealth;
+    public int SourceStatusStacks =>
+        _characterContext.SourceStatusStacks;
+    public int TargetStatusStacks =>
+        _characterContext.TargetStatusStacks;
+    public IReadOnlyList<EnemyRuntime> EnemyTargets =>
+        _characterContext.EnemyTargets;
+    public IReadOnlyList<IBattleCharacter> AllyTargets =>
+        _characterContext.AllyTargets;
+    public int TargetCount => _characterContext.TargetCount;
+    public bool HasTargets => _characterContext.HasTargets;
+    public int PreviousStacks { get; }
+    public int CurrentStacks { get; }
+    public int AddedStacks =>
+        Math.Max(0, CurrentStacks - PreviousStacks);
+    public int RemovedStacks =>
+        Math.Max(0, PreviousStacks - CurrentStacks);
+    public int OccurrenceCount { get; }
+    public EffectContext CharacterContext => _characterContext;
+
+    private BattleEffectContext(
+        EffectContext characterContext,
+        BattleEffectOriginKind originKind,
+        BattleStatusTarget sourceTarget,
+        int previousStacks,
+        int currentStacks,
+        int occurrenceCount)
+    {
+        _characterContext = characterContext;
+        OriginKind = originKind;
+        SourceTarget = sourceTarget;
+        PreviousStacks = Math.Max(0, previousStacks);
+        CurrentStacks = Math.Max(0, currentStacks);
+        OccurrenceCount = Math.Max(1, occurrenceCount);
+    }
+
+    public static BattleEffectContext FromCharacter(
+        EffectContext context)
+    {
+        BattleStatusTarget sourceTarget = context.Source != null
+            ? BattleStatusTarget.FromAlly(context.Source)
+            : default;
+        return new BattleEffectContext(
+            context,
+            ToOriginKind(context.ActionKind),
+            sourceTarget,
+            0,
+            0,
+            1);
+    }
+
+    public static BattleEffectContext ForPreview(
+        BattleEffectOriginKind originKind,
+        float sourceAttackPower,
+        int sourceResource = 0,
+        int sourceResourceMaximum = 0)
+    {
+        EffectContext context = EffectContext.ForPreview(
+            ToCharacterActionKind(originKind),
+            sourceAttackPower,
+            sourceResource,
+            sourceResourceMaximum);
+        return new BattleEffectContext(
+            context,
+            originKind,
+            default,
+            0,
+            0,
+            1);
+    }
+
+    public static BattleEffectContext ForStatus(
+        BattleStatusTarget holder,
+        BattleStatusTarget sourceTarget,
+        IBattleBoard board,
+        float sourceAttackPower,
+        int previousStacks,
+        int currentStacks,
+        int occurrenceCount = 1,
+        IActiveSkillResource resource = null)
+    {
+        IBattleCharacter source = sourceTarget.Ally;
+        IReadOnlyList<EnemyRuntime> enemyTargets =
+            holder.Enemy != null
+                ? new[] { holder.Enemy }
+                : Array.Empty<EnemyRuntime>();
+        IReadOnlyList<IBattleCharacter> allyTargets =
+            holder.Ally != null
+                ? new[] { holder.Ally }
+                : Array.Empty<IBattleCharacter>();
+        EffectContext context = new(
+            source,
+            board,
+            resource,
+            CharacterActionKind.Passive,
+            holder.IsValid
+                ? holder.Faction
+                : CharacterTargetFaction.Enemy,
+            enemyTargets,
+            allyTargets,
+            sourceAttackPower);
+        if (holder.Enemy != null)
+            context = context.BindEnemyTarget(holder.Enemy, null);
+        else if (holder.Ally != null)
+            context = context.BindAllyTarget(holder.Ally, null);
+
+        return new BattleEffectContext(
+            context,
+            BattleEffectOriginKind.StatusEffect,
+            sourceTarget,
+            previousStacks,
+            currentStacks,
+            occurrenceCount);
+    }
+
+    public BattleEffectContext SnapshotSourceStatus(
+        StatusEffectSO statusEffect)
+    {
+        return Copy(_characterContext.SnapshotSourceStatus(statusEffect));
+    }
+
+    public BattleEffectContext RetargetToSource()
+    {
+        return Copy(_characterContext.RetargetToSource());
+    }
+
+    public BattleEffectContext RetargetTo(
+        CharacterTargetFaction targetFaction,
+        IReadOnlyList<EnemyRuntime> enemyTargets,
+        IReadOnlyList<IBattleCharacter> allyTargets)
+    {
+        return Copy(_characterContext.RetargetTo(
+            targetFaction,
+            enemyTargets,
+            allyTargets));
+    }
+
+    public BattleEffectContext BindEnemyTarget(
+        EnemyRuntime target,
+        StatusEffectSO scalingStatusEffect)
+    {
+        return Copy(_characterContext.BindEnemyTarget(
+            target,
+            scalingStatusEffect));
+    }
+
+    public BattleEffectContext BindAllyTarget(
+        IBattleCharacter target,
+        StatusEffectSO scalingStatusEffect)
+    {
+        return Copy(_characterContext.BindAllyTarget(
+            target,
+            scalingStatusEffect));
+    }
+
+    public BattleEffectContext WithStatusEvent(
+        int previousStacks,
+        int currentStacks,
+        int occurrenceCount = 1)
+    {
+        return new BattleEffectContext(
+            _characterContext,
+            OriginKind,
+            SourceTarget,
+            previousStacks,
+            currentStacks,
+            occurrenceCount);
+    }
+
+    private BattleEffectContext Copy(EffectContext context)
+    {
+        return new BattleEffectContext(
+            context,
+            OriginKind,
+            SourceTarget,
+            PreviousStacks,
+            CurrentStacks,
+            OccurrenceCount);
+    }
+
+    private static BattleEffectOriginKind ToOriginKind(
+        CharacterActionKind actionKind)
+    {
+        return actionKind switch
+        {
+            CharacterActionKind.Passive =>
+                BattleEffectOriginKind.CharacterPassive,
+            CharacterActionKind.Skill =>
+                BattleEffectOriginKind.CharacterSkill,
+            _ => BattleEffectOriginKind.CharacterAttack
+        };
+    }
+
+    private static CharacterActionKind ToCharacterActionKind(
+        BattleEffectOriginKind originKind)
+    {
+        return originKind switch
+        {
+            BattleEffectOriginKind.CharacterPassive =>
+                CharacterActionKind.Passive,
+            BattleEffectOriginKind.CharacterSkill =>
+                CharacterActionKind.Skill,
+            BattleEffectOriginKind.StatusEffect =>
+                CharacterActionKind.Passive,
+            _ => CharacterActionKind.Attack
+        };
     }
 }

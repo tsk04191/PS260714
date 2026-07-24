@@ -2974,6 +2974,123 @@ public sealed class CharacterP0RegressionTests
     }
 
     [Test]
+    public void MigratedStatusAssets_UseModularDefinitions()
+    {
+        StatusEffectSO fire = LoadAsset<StatusEffectSO>(FireAssetPath);
+        StatusEffectSO stun = LoadAsset<StatusEffectSO>(StunAssetPath);
+        StatusEffectSO emergencyKit =
+            LoadAsset<StatusEffectSO>(EmergencyKitAssetPath);
+
+        Assert.That(fire.Operations, Is.Empty);
+        Assert.That(fire.TriggerBlocks.Count, Is.EqualTo(1));
+        StatusEffectTriggerBlockDefinition fireTick =
+            fire.TriggerBlocks[0];
+        Assert.That(
+            fireTick.Trigger,
+            Is.EqualTo(StatusEffectLifecycleTrigger.OnTick));
+        Assert.That(fireTick.ScaleWithCurrentStacks, Is.True);
+        Assert.That(fireTick.ScaleWithOccurrences, Is.True);
+        Assert.That(fireTick.Effects.Count, Is.EqualTo(1));
+        Assert.That(
+            fireTick.Effects[0].Type,
+            Is.EqualTo(CharacterEffectType.Damage));
+        Assert.That(
+            fireTick.Effects[0].DamageType,
+            Is.EqualTo(CharacterAttackDamageType.Fixed));
+        Assert.That(
+            fireTick.Effects[0].DamageAmountMode,
+            Is.EqualTo(CharacterDamageAmountMode.Fixed));
+        Assert.That(fireTick.Effects[0].DamageAmount, Is.EqualTo(1f));
+
+        Assert.That(stun.Operations, Is.Empty);
+        Assert.That(stun.ControlEffects.Count, Is.EqualTo(1));
+        Assert.That(
+            stun.ControlEffects[0].ControlType,
+            Is.EqualTo(StatusEffectControlType.DisableAllActions));
+
+        Assert.That(emergencyKit.Operations, Is.Empty);
+        Assert.That(emergencyKit.TriggerBlocks, Is.Empty);
+        Assert.That(emergencyKit.StatModifiers, Is.Empty);
+        Assert.That(emergencyKit.ControlEffects, Is.Empty);
+    }
+
+    [Test]
+    public void MigratedFireTick_UsesSharedBoardEffectExecutor()
+    {
+        StatusEffectSO fire = LoadAsset<StatusEffectSO>(FireAssetPath);
+        EnemyRuntime enemy = CreateEnemyRuntime();
+        CharacterRuntime source = CreateCharacter(SuirenAssetPath);
+        FakeBattleBoard board = new();
+        source.BindBattle(null, board);
+        ApplyFire(enemy, 1f, 1f, 2, source);
+        int fallbackCalls = 0;
+
+        bool changed = TickEnemyStatuses(
+            enemy,
+            1f,
+            (_, _) =>
+            {
+                fallbackCalls++;
+                return true;
+            });
+
+        Assert.That(changed, Is.True);
+        Assert.That(board.DamageAmounts, Is.EqualTo(new[] { 2 }));
+        Assert.That(fallbackCalls, Is.Zero);
+        Assert.That(enemy.HasFire, Is.False);
+    }
+
+    [Test]
+    public void AlliedOnApplyTrigger_ExecutesSharedHealEffect()
+    {
+        StatusEffectSO status = CreateRuntimeStatus(
+            "test_on_apply_shared_heal",
+            false,
+            true,
+            StatusEffectStackMode.Replace,
+            0);
+        SerializedObject serializedStatus = new(status);
+        SerializedProperty blocks =
+            serializedStatus.FindProperty("triggerBlocks");
+        MethodInfo addTriggerBlock =
+            typeof(StatusEffectEditorWindow).GetMethod(
+                "AddTriggerBlock",
+                BindingFlags.Static | BindingFlags.NonPublic);
+        Assert.That(addTriggerBlock, Is.Not.Null);
+        addTriggerBlock.Invoke(null, new object[] { blocks });
+        SerializedProperty effect = blocks
+            .GetArrayElementAtIndex(0)
+            .FindPropertyRelative("effects")
+            .GetArrayElementAtIndex(0);
+        effect.FindPropertyRelative("type").enumValueIndex =
+            (int)CharacterEffectType.Heal;
+        effect.FindPropertyRelative("targetMode").enumValueIndex =
+            (int)CharacterEffectTargetMode.InheritAction;
+        effect.FindPropertyRelative("damageAmountMode").enumValueIndex =
+            (int)CharacterDamageAmountMode.Fixed;
+        effect.FindPropertyRelative("damageAmount").floatValue = 3f;
+        serializedStatus.ApplyModifiedPropertiesWithoutUndo();
+        status.ValidateDefinition();
+
+        CharacterRuntime character = CreateCharacter(AislingAssetPath);
+        FakeBattleBoard board = new();
+        character.BindBattle(null, board);
+        Assert.That(character.TrySpendHealth(5), Is.True);
+        int damagedHealth = character.CurrentHealth;
+
+        Assert.That(
+            character.ApplyStatusEffect(
+                status,
+                2f,
+                1,
+                character),
+            Is.True);
+        Assert.That(
+            character.CurrentHealth,
+            Is.EqualTo(damagedHealth + 3));
+    }
+
+    [Test]
     public void EnemyStatus_LifecycleDamage_HasOrderedExclusiveRemovalPaths()
     {
         StatusEffectSO status = CreateRuntimeStatus(
@@ -3254,6 +3371,207 @@ public sealed class CharacterP0RegressionTests
                 character.CurrentAttackSpeed,
                 Is.EqualTo(baseSpeed).Within(0.0001f));
         }
+    }
+
+    [Test]
+    public void ModularStatusModifiers_UseStableLayersAndRestoreOnRemoval()
+    {
+        StatusEffectSO status = CreateRuntimeStatus(
+            "test_modular_stat_modifiers",
+            false,
+            true,
+            StatusEffectStackMode.AddAndRefreshDuration,
+            0);
+        ConfigureRuntimeStatusModifier(
+            status,
+            0,
+            StatusEffectStatType.AttackPower,
+            StatusEffectStatModifierMode.Flat,
+            2f,
+            true);
+        ConfigureRuntimeStatusModifier(
+            status,
+            1,
+            StatusEffectStatType.AttackPower,
+            StatusEffectStatModifierMode.AdditiveRatio,
+            0.5f,
+            false);
+        ConfigureRuntimeStatusModifier(
+            status,
+            2,
+            StatusEffectStatType.AttackPower,
+            StatusEffectStatModifierMode.MultiplicativeRatio,
+            0.1f,
+            true);
+        ConfigureRuntimeStatusModifier(
+            status,
+            3,
+            StatusEffectStatType.AttackSpeed,
+            StatusEffectStatModifierMode.Flat,
+            0.1f,
+            true);
+        ConfigureRuntimeStatusModifier(
+            status,
+            4,
+            StatusEffectStatType.AttackSpeed,
+            StatusEffectStatModifierMode.MultiplicativeRatio,
+            0.2f,
+            false);
+
+        CharacterRuntime character = CreateCharacter(AislingAssetPath);
+        float basePower = character.CurrentAttackPower;
+        float baseSpeed = character.CurrentAttackSpeed;
+        float stackedPower =
+            (basePower + 4f + basePower * 0.5f) * 1.21f;
+        float stackedSpeed = (baseSpeed + 0.2f) * 1.2f;
+        float partialPower =
+            (basePower + 2f + basePower * 0.5f) * 1.1f;
+        float partialSpeed = (baseSpeed + 0.1f) * 1.2f;
+
+        Assert.That(character.ApplyStatusEffect(status, 2f, 2), Is.True);
+        Assert.That(
+            character.CurrentAttackPower,
+            Is.EqualTo(stackedPower).Within(0.0001f));
+        Assert.That(
+            character.CurrentAttackSpeed,
+            Is.EqualTo(stackedSpeed).Within(0.0001f));
+
+        Assert.That(
+            character.RemoveStatusEffects(
+                CharacterStatusRemovalTarget.Single,
+                status,
+                1),
+            Is.EqualTo(1));
+        Assert.That(
+            character.CurrentAttackPower,
+            Is.EqualTo(partialPower).Within(0.0001f));
+        Assert.That(
+            character.CurrentAttackSpeed,
+            Is.EqualTo(partialSpeed).Within(0.0001f));
+
+        Assert.That(
+            character.RemoveStatusEffects(
+                CharacterStatusRemovalTarget.Single,
+                status,
+                1),
+            Is.EqualTo(1));
+        Assert.That(
+            character.CurrentAttackPower,
+            Is.EqualTo(basePower).Within(0.0001f));
+        Assert.That(
+            character.CurrentAttackSpeed,
+            Is.EqualTo(baseSpeed).Within(0.0001f));
+    }
+
+    [Test]
+    public void ModularStatusControls_BlockOnlyConfiguredActionGroups()
+    {
+        StatusEffectSO granular = CreateRuntimeStatus(
+            "test_granular_controls",
+            false,
+            true,
+            StatusEffectStackMode.AddAndRefreshDuration,
+            0);
+        ConfigureRuntimeStatusControl(
+            granular,
+            0,
+            StatusEffectControlType.DisableBasicAttack);
+        ConfigureRuntimeStatusControl(
+            granular,
+            1,
+            StatusEffectControlType.DisableActiveSkill);
+        ConfigureRuntimeStatusControl(
+            granular,
+            2,
+            StatusEffectControlType.PausePassiveCooldowns);
+
+        CharacterRuntime character = CreateCharacter(AislingAssetPath);
+        Assert.That(
+            character.ApplyStatusEffect(granular, 2f, 1),
+            Is.True);
+        Assert.That(character.AreAllActionsDisabled, Is.False);
+        Assert.That(character.IsBasicAttackBlocked, Is.True);
+        Assert.That(character.IsActiveSkillBlocked, Is.True);
+        Assert.That(character.ArePassiveCooldownsPaused, Is.True);
+        Assert.That(character.DisabledTimeRemaining, Is.Zero);
+
+        Assert.That(
+            character.RemoveStatusEffects(
+                CharacterStatusRemovalTarget.Single,
+                granular,
+                0),
+            Is.EqualTo(1));
+        Assert.That(character.IsBasicAttackBlocked, Is.False);
+        Assert.That(character.IsActiveSkillBlocked, Is.False);
+        Assert.That(character.ArePassiveCooldownsPaused, Is.False);
+
+        StatusEffectSO fullDisable = CreateRuntimeStatus(
+            "test_disable_all_control",
+            false,
+            true,
+            StatusEffectStackMode.Replace,
+            0);
+        ConfigureRuntimeStatusControl(
+            fullDisable,
+            0,
+            StatusEffectControlType.DisableAllActions);
+
+        Assert.That(
+            character.ApplyStatusEffect(fullDisable, 2f, 1),
+            Is.True);
+        Assert.That(character.AreAllActionsDisabled, Is.True);
+        Assert.That(character.IsBasicAttackBlocked, Is.True);
+        Assert.That(character.IsActiveSkillBlocked, Is.True);
+        Assert.That(character.ArePassiveCooldownsPaused, Is.True);
+        Assert.That(
+            character.DisabledTimeRemaining,
+            Is.EqualTo(2f).Within(0.0001f));
+    }
+
+    [Test]
+    public void DisableAllControl_PausesEnemyAbilityCooldown()
+    {
+        StatusEffectSO status = CreateRuntimeStatus(
+            "test_enemy_disable_all",
+            true,
+            false,
+            StatusEffectStackMode.Replace,
+            0);
+        ConfigureRuntimeStatusControl(
+            status,
+            0,
+            StatusEffectControlType.DisableAllActions);
+        EnemyRuntime enemy = CreateEnemyRuntime(
+            maximumHealth: 20,
+            abilityCooldown: 3f);
+
+        Assert.That(
+            ApplyEnemyStatus(
+                enemy,
+                status,
+                2f,
+                1,
+                null,
+                1f),
+            Is.True);
+        Assert.That(enemy.AreAllActionsDisabled, Is.True);
+        Assert.That(TickEnemyAbilityCooldown(enemy, 1f), Is.False);
+        Assert.That(
+            enemy.AbilityCooldownRemaining,
+            Is.EqualTo(3f).Within(0.0001f));
+
+        Assert.That(
+            RemoveEnemyStatus(
+                enemy,
+                CharacterStatusRemovalTarget.Single,
+                status,
+                0),
+            Is.EqualTo(1));
+        Assert.That(enemy.AreAllActionsDisabled, Is.False);
+        Assert.That(TickEnemyAbilityCooldown(enemy, 1f), Is.False);
+        Assert.That(
+            enemy.AbilityCooldownRemaining,
+            Is.EqualTo(2f).Within(0.0001f));
     }
 
     [Test]
@@ -3776,6 +4094,49 @@ public sealed class CharacterP0RegressionTests
         status.ValidateDefinition();
     }
 
+    private static void ConfigureRuntimeStatusModifier(
+        StatusEffectSO status,
+        int modifierIndex,
+        StatusEffectStatType statType,
+        StatusEffectStatModifierMode mode,
+        float value,
+        bool scaleWithStacks)
+    {
+        SerializedObject serialized = new(status);
+        SerializedProperty modifiers =
+            serialized.FindProperty("statModifiers");
+        if (modifiers.arraySize <= modifierIndex)
+            modifiers.arraySize = modifierIndex + 1;
+        SerializedProperty modifier =
+            modifiers.GetArrayElementAtIndex(modifierIndex);
+        modifier.FindPropertyRelative("statType").enumValueIndex =
+            (int)statType;
+        modifier.FindPropertyRelative("mode").enumValueIndex =
+            (int)mode;
+        modifier.FindPropertyRelative("value").floatValue = value;
+        modifier.FindPropertyRelative("scaleWithStacks").boolValue =
+            scaleWithStacks;
+        serialized.ApplyModifiedPropertiesWithoutUndo();
+        status.ValidateDefinition();
+    }
+
+    private static void ConfigureRuntimeStatusControl(
+        StatusEffectSO status,
+        int controlIndex,
+        StatusEffectControlType controlType)
+    {
+        SerializedObject serialized = new(status);
+        SerializedProperty controls =
+            serialized.FindProperty("controlEffects");
+        if (controls.arraySize <= controlIndex)
+            controls.arraySize = controlIndex + 1;
+        controls.GetArrayElementAtIndex(controlIndex)
+            .FindPropertyRelative("controlType")
+            .enumValueIndex = (int)controlType;
+        serialized.ApplyModifiedPropertiesWithoutUndo();
+        status.ValidateDefinition();
+    }
+
     private StatusEffectSO CreateEnemyPeriodicDamageStatus(
         string statusId,
         StatusEffectStackRemovalOrder removalOrder,
@@ -3998,6 +4359,17 @@ public sealed class CharacterP0RegressionTests
             removalTarget,
             status,
             removalCount);
+    }
+
+    private static bool TickEnemyAbilityCooldown(
+        EnemyRuntime enemy,
+        float deltaTime)
+    {
+        return (bool)InvokeEnemyRuntime(
+            enemy,
+            "TickAbilityCooldown",
+            new[] { typeof(float) },
+            deltaTime);
     }
 
     private static int RemoveEnemyStatus(
@@ -4901,16 +5273,19 @@ public sealed class CharacterP0RegressionTests
 
     private EnemyRuntime CreateEnemyRuntime(
         int maximumHealth = 20,
-        float initialArmorMultiplier = 0f)
+        float initialArmorMultiplier = 0f,
+        float abilityCooldown = 0f)
     {
         EnemySO definition = ScriptableObject.CreateInstance<EnemySO>();
         definition.hideFlags = HideFlags.HideAndDontSave;
         _createdObjects.Add(definition);
-        if (initialArmorMultiplier > 0f)
+        if (initialArmorMultiplier > 0f || abilityCooldown > 0f)
         {
             SerializedObject serialized = new(definition);
             serialized.FindProperty("initialArmorMultiplier").floatValue =
                 initialArmorMultiplier;
+            serialized.FindProperty("abilityCooldown").floatValue =
+                abilityCooldown;
             serialized.ApplyModifiedPropertiesWithoutUndo();
         }
         return new EnemyRuntime(definition, maximumHealth);

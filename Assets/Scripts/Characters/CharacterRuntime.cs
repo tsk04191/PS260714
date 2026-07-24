@@ -245,6 +245,7 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
     private readonly Queue<BattleStatusChangedEvent> _statusChangeQueue =
         new();
     private bool _dispatchingStatusChanges;
+    private bool _suppressStatusTriggers;
     private float _attackRecoveryRemaining;
     private float _attackSpeedBoostRemaining;
     private float _attackSpeedMultiplier = 1f;
@@ -275,6 +276,9 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
 
     public CharacterSO Definition => original;
     public CharacterData Data { get; private set; }
+    internal IActiveSkillResource ActiveSkillResource =>
+        _activeSkillResource;
+    internal IBattleBoard BoundBattleBoard => _board;
     public int PartySlotIndex { get; private set; } = -1;
     public int PartySlotNumber => PartySlotIndex + 1;
     public Color EffectColor { get; private set; } = Color.white;
@@ -298,6 +302,16 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
     public StatusEffectSO DisabledStatusEffect => GetDisabledStatusEffect();
     public float CurrentAttackPower => GetEffectiveAttackPower();
     public float CurrentAttackSpeed => GetEffectiveAttackSpeed();
+    public bool AreAllActionsDisabled => IsActionDisabled();
+    public bool IsBasicAttackBlocked =>
+        AreAllActionsDisabled ||
+        HasStatusControl(StatusEffectControlType.DisableBasicAttack);
+    public bool IsActiveSkillBlocked =>
+        AreAllActionsDisabled ||
+        HasStatusControl(StatusEffectControlType.DisableActiveSkill);
+    public bool ArePassiveCooldownsPaused =>
+        AreAllActionsDisabled ||
+        HasStatusControl(StatusEffectControlType.PausePassiveCooldowns);
     public event System.Action<BattleStatusChangedEvent> StatusChanged;
 
     public IReadOnlyList<BattleStatusSnapshot> GetActiveStatusEffects()
@@ -621,15 +635,23 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
         IReadOnlyList<BattleStatusSnapshot> removedStatuses =
             GetActiveStatusEffects();
         _statusEffects.Clear();
-        foreach (BattleStatusSnapshot removedStatus in removedStatuses)
+        _suppressStatusTriggers = true;
+        try
         {
-            NotifyStatusChanged(
-                BattleStatusChangeType.Removed,
-                removedStatus,
-                new BattleStatusSnapshot(
-                    removedStatus.Definition,
-                    0,
-                    0f));
+            foreach (BattleStatusSnapshot removedStatus in removedStatuses)
+            {
+                NotifyStatusChanged(
+                    BattleStatusChangeType.Removed,
+                    removedStatus,
+                    new BattleStatusSnapshot(
+                        removedStatus.Definition,
+                        0,
+                        0f));
+            }
+        }
+        finally
+        {
+            _suppressStatusTriggers = false;
         }
         _remainingCooldown = GetEffectiveAttackCooldown();
         _attackRecoveryRemaining = 0f;
@@ -654,7 +676,7 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
         TickSdActionTimers(deltaTime);
         TickTemporaryBoosts(deltaTime);
 
-        bool passiveCooldownPaused = IsActionDisabled();
+        bool passiveCooldownPaused = ArePassiveCooldownsPaused;
         float activeDeltaTime = deltaTime;
         if (_attackRecoveryRemaining > 0f)
         {
@@ -684,7 +706,9 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
         }
 
         _remainingCooldown = Mathf.Max(0f, _remainingCooldown - activeDeltaTime);
-        if (_remainingCooldown <= 0f && TryAttack(board))
+        if (_remainingCooldown <= 0f &&
+            !IsBasicAttackBlocked &&
+            TryAttack(board))
         {
             if (Data.AttackRecoveryDuration > 0f)
                 BeginAttackRecovery(Data.AttackRecoveryDuration);
@@ -961,12 +985,26 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
                 continue;
             }
 
+            StatusEffectRuntimeBatch activeBatch = state.ActiveBatch;
             float activeDelta = state.AdvanceActiveDuration(remainingDelta);
             if (activeDelta <= 0f)
                 break;
 
             remainingDelta -= activeDelta;
-            state.ConsumePendingTickCount();
+            int tickCount = state.ConsumePendingTickCount();
+            if (tickCount > 0 && activeBatch != null)
+            {
+                StatusEffectLifecycleEvent tick =
+                    StatusEffectLifecycleResolver.ResolveTick(
+                        BattleStatusTarget.FromAlly(this),
+                        new BattleStatusSnapshot(
+                            state.Definition,
+                            activeBatch.Stacks,
+                            activeBatch.RemainingDuration,
+                            activeBatch.Source),
+                        tickCount);
+                StatusEffectTriggerExecutor.Execute(tick, _board);
+            }
             if (RemoveExpiredStatusBatch(state))
                 changed = true;
         }
@@ -1033,7 +1071,8 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
 
     private bool IsActionDisabled()
     {
-        return GetDisabledStatusEffect() != null;
+        return HasStatusControl(
+            StatusEffectControlType.DisableAllActions);
     }
 
     private float GetDisabledDuration()
@@ -1042,9 +1081,9 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
         foreach (StatusEffectRuntimeState state in _statusEffects.Values)
         {
             if (state == null || !state.HasStacks ||
-                !HasContinuousStatusOperation(
+                !DefinitionHasControl(
                     state.Definition,
-                    StatusEffectOperationType.DisableAction))
+                    StatusEffectControlType.DisableAllActions))
             {
                 continue;
             }
@@ -1064,9 +1103,9 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
         foreach (StatusEffectRuntimeState state in _statusEffects.Values)
         {
             if (state == null || !state.HasStacks ||
-                !HasContinuousStatusOperation(
+                !DefinitionHasControl(
                     state.Definition,
-                    StatusEffectOperationType.DisableAction))
+                    StatusEffectControlType.DisableAllActions))
             {
                 continue;
             }
@@ -1086,6 +1125,14 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
         StatusEffectSO definition,
         StatusEffectOperationType operationType)
     {
+        if (operationType == StatusEffectOperationType.DisableAction &&
+            DefinitionHasControl(
+                definition,
+                StatusEffectControlType.DisableAllActions))
+        {
+            return true;
+        }
+
         if (definition?.Operations == null)
             return false;
 
@@ -1095,6 +1142,50 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
             if (operation != null &&
                 operation.Trigger == StatusEffectOperationTrigger.OnApply &&
                 operation.OperationType == operationType)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private bool HasStatusControl(StatusEffectControlType controlType)
+    {
+        foreach (StatusEffectRuntimeState state in _statusEffects.Values)
+        {
+            if (state != null && state.HasStacks &&
+                DefinitionHasControl(state.Definition, controlType))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static bool DefinitionHasControl(
+        StatusEffectSO definition,
+        StatusEffectControlType controlType)
+    {
+        if (definition == null)
+            return false;
+        if (definition.HasControl(controlType))
+            return true;
+        if (controlType != StatusEffectControlType.DisableAllActions ||
+            definition.Operations == null)
+        {
+            return false;
+        }
+
+        foreach (StatusEffectOperationDefinition operation in
+                 definition.Operations)
+        {
+            if (operation != null &&
+                operation.Trigger ==
+                    StatusEffectOperationTrigger.OnApply &&
+                operation.OperationType ==
+                    StatusEffectOperationType.DisableAction)
             {
                 return true;
             }
@@ -1172,6 +1263,16 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
                     _statusChangeQueue.Dequeue();
                 dispatchedCount++;
                 StatusChanged?.Invoke(eventData);
+                if (!_suppressStatusTriggers)
+                {
+                    foreach (StatusEffectLifecycleEvent lifecycleEvent in
+                             StatusEffectLifecycleResolver.Resolve(eventData))
+                    {
+                        StatusEffectTriggerExecutor.Execute(
+                            lifecycleEvent,
+                            _board);
+                    }
+                }
             }
         }
         finally
@@ -1271,7 +1372,8 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
     {
         if ((!_initialized && !Initialize()) ||
             _activeSkillResource == null || _board == null ||
-            Data == null || !Data.HasCustomSkillDefinitions)
+            Data == null || !Data.HasCustomSkillDefinitions ||
+            IsActiveSkillBlocked)
         {
             return false;
         }
@@ -2558,150 +2660,14 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
         int preparedResourceSpendAmount,
         int preparedHealthSpendAmount)
     {
-        if (context.Board == null || effect == null ||
-            (!context.HasTargets &&
-             effect.Type != CharacterEffectType.GainResource &&
-             effect.Type != CharacterEffectType.SpendResource &&
-             effect.Type != CharacterEffectType.SpendHealth))
-        {
-            return default;
-        }
-
-        EffectContext effectContext = context.SnapshotSourceStatus(
-            effect.SourceStatusScalingEffect);
-        switch (effect.Type)
-        {
-            case CharacterEffectType.Damage:
-            {
-                if (!IsDirectDamageType(effect.DamageType))
-                    return default;
-
-                if (effectContext.TargetFaction ==
-                    CharacterTargetFaction.Ally)
-                {
-                    return new BattleEffectResult(true, false);
-                }
-
-                if (effect.DamageScaling.HasTargetDependentTerm)
-                {
-                    return ExecuteTargetScaledDamage(
-                        effectContext,
-                        effect,
-                        showAttackRange);
-                }
-
-                int damage = Data.CalculateEffectDamage(
-                    effect,
-                    effectContext);
-                if (damage <= 0)
-                    return default;
-
-                int damageDealt =
-                    effectContext.Board.TryDamageCharacterTargets(
-                    effectContext.Source,
-                    effectContext.EnemyTargets,
-                    damage,
-                    effect.DamageType,
-                    showAttackRange);
-                return new BattleEffectResult(
-                    true,
-                    damageDealt > 0,
-                    damageDealt);
-            }
-            case CharacterEffectType.ApplyStatus:
-            {
-                if (effect.StatusEffect == null)
-                    return default;
-
-                bool changed = effectContext.TargetFaction ==
-                               CharacterTargetFaction.Ally
-                    ? effectContext.Board.TryApplyAlliedCharacterStatus(
-                        effectContext.Source,
-                        effectContext.AllyTargets,
-                        effect.StatusEffect,
-                        effect.StatusDuration,
-                        effect.StatusStacks)
-                    : effectContext.Board.TryApplyCharacterStatus(
-                        effectContext.Source,
-                        effectContext.EnemyTargets,
-                        effect.StatusEffect,
-                        effect.StatusDuration,
-                        effect.StatusStacks,
-                        effect.StatusEffect.TickInterval,
-                        showAttackRange);
-                return new BattleEffectResult(true, changed);
-            }
-            case CharacterEffectType.RemoveStatus:
-            {
-                if (effect.StatusRemovalTarget ==
-                        CharacterStatusRemovalTarget.Single &&
-                    effect.StatusEffect == null)
-                {
-                    return default;
-                }
-
-                bool changed = effectContext.TargetFaction ==
-                               CharacterTargetFaction.Ally
-                    ? effectContext.Board.TryRemoveAlliedCharacterStatus(
-                        effectContext.Source,
-                        effectContext.AllyTargets,
-                        effect.StatusRemovalTarget,
-                        effect.StatusEffect,
-                        effect.StatusRemovalCount)
-                    : effectContext.Board.TryRemoveCharacterStatus(
-                        effectContext.Source,
-                        effectContext.EnemyTargets,
-                        effect.StatusRemovalTarget,
-                        effect.StatusEffect,
-                        effect.StatusRemovalCount,
-                        showAttackRange);
-                return new BattleEffectResult(true, changed);
-            }
-            case CharacterEffectType.GainResource:
-            {
-                int amount = Data.CalculateEffectAmount(
-                    effect,
-                    effectContext);
-                if (amount <= 0)
-                    return new BattleEffectResult(true, false);
-
-                bool changed =
-                    effectContext.Resource?.TryGain(amount) == true;
-                return new BattleEffectResult(true, changed);
-            }
-            case CharacterEffectType.SpendResource:
-            {
-                if (preparedResourceSpendAmount <= 0)
-                    return new BattleEffectResult(true, false);
-
-                bool changed =
-                    effectContext.Resource?.TrySpend(
-                        preparedResourceSpendAmount) == true;
-                return new BattleEffectResult(true, changed);
-            }
-            case CharacterEffectType.Heal:
-                return ExecuteHeal(
-                    effectContext,
-                    effect,
-                    showAttackRange);
-            case CharacterEffectType.Shield:
-                return ExecuteShield(
-                    effectContext,
-                    effect,
-                    showAttackRange);
-            case CharacterEffectType.SpendHealth:
-            {
-                if (preparedHealthSpendAmount <= 0)
-                    return new BattleEffectResult(true, false);
-
-                bool changed =
-                    effectContext.Source?.TrySpendHealth(
-                        preparedHealthSpendAmount) == true;
-                return new BattleEffectResult(true, changed);
-            }
-            default:
-                return default;
-        }
+        return BattleEffectExecutor.ExecuteEffect(
+            BattleEffectContext.FromCharacter(context),
+            effect,
+            Data,
+            1,
+            showAttackRange,
+            preparedResourceSpendAmount,
+            preparedHealthSpendAmount);
     }
 
     private BattleEffectResult ExecuteHeal(
@@ -3214,6 +3180,7 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
 
         float modifiedPower = GetStatusModifiedStat(
             Data.AttackPower,
+            StatusEffectStatType.AttackPower,
             StatusEffectOperationType.AttackPowerModifier);
         return Mathf.Max(0f, modifiedPower * _powerMultiplier);
     }
@@ -3241,6 +3208,7 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
 
         float modifiedSpeed = GetStatusModifiedStat(
             baseAttackSpeed,
+            StatusEffectStatType.AttackSpeed,
             StatusEffectOperationType.AttackSpeedModifier);
         return Mathf.Max(
             TimePrecision.Step,
@@ -3264,21 +3232,39 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
 
     private float GetStatusModifiedStat(
         float baseValue,
+        StatusEffectStatType statType,
         StatusEffectOperationType operationType)
     {
-        float fixedAmount = 0f;
-        float ratioAmount = 0f;
+        StatusEffectStatAccumulator accumulator = default;
         foreach (StatusEffectRuntimeState state in _statusEffects.Values)
         {
             if (state == null || !state.HasStacks ||
-                state.Definition?.Operations == null)
+                state.Definition == null)
             {
                 continue;
             }
 
             int stacks = Mathf.Max(1, state.StackCount);
-            foreach (StatusEffectOperationDefinition operation in
-                     state.Definition.Operations)
+            IReadOnlyList<StatusEffectStatModifierDefinition> modifiers =
+                state.Definition.StatModifiers;
+            if (modifiers != null)
+            {
+                foreach (StatusEffectStatModifierDefinition modifier in
+                         modifiers)
+                {
+                    if (modifier != null &&
+                        modifier.StatType == statType)
+                    {
+                        accumulator.Add(modifier, stacks);
+                    }
+                }
+            }
+
+            IReadOnlyList<StatusEffectOperationDefinition> operations =
+                state.Definition.Operations;
+            if (operations == null)
+                continue;
+            foreach (StatusEffectOperationDefinition operation in operations)
             {
                 if (operation == null ||
                     operation.Trigger !=
@@ -3293,13 +3279,13 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
                 float value = operation.Value *
                     (operation.ScaleWithStacks ? stacks : 1);
                 if (operation.ValueMode == StatusEffectValueMode.Fixed)
-                    fixedAmount += value;
+                    accumulator.AddFlat(value);
                 else if (operation.ValueMode == StatusEffectValueMode.Ratio)
-                    ratioAmount += value;
+                    accumulator.AddAdditiveRatio(value);
             }
         }
 
-        return baseValue + fixedAmount + baseValue * ratioAmount;
+        return accumulator.Evaluate(baseValue);
     }
 
     private void AdjustCooldownForAttackSpeedChange(

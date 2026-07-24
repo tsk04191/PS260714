@@ -228,7 +228,8 @@ public sealed class CharacterNumericCondition
 }
 
 [Serializable]
-public sealed class CharacterEffectTargetSelector
+public sealed class CharacterEffectTargetSelector :
+    IBattleEffectTargetSelector
 {
     [SerializeField]
     private CharacterTargetFaction targetFaction;
@@ -438,7 +439,7 @@ public sealed class CharacterDungeonUpgradeDefinition
 }
 
 [Serializable]
-public sealed class CharacterEffectDefinition
+public sealed class CharacterEffectDefinition : IBattleEffectDefinition
 {
     [SerializeField]
     private CharacterEffectType type;
@@ -483,11 +484,23 @@ public sealed class CharacterEffectDefinition
     private int statusRemovalCount;
 
     public CharacterEffectType Type => type;
+    public BattleEffectType BattleEffectType =>
+        (BattleEffectType)(int)type;
     public CharacterEffectTargetMode TargetMode => targetMode;
+    public BattleEffectTargetMode BattleTargetMode =>
+        (BattleEffectTargetMode)(int)targetMode;
     public CharacterEffectPreconditionFailurePolicy
         PreconditionFailurePolicy => preconditionFailurePolicy;
+    public BattleEffectPreconditionFailurePolicy
+        BattlePreconditionFailurePolicy =>
+            (BattleEffectPreconditionFailurePolicy)(int)
+            preconditionFailurePolicy;
     public CharacterEffectFailurePolicy FailurePolicy => failurePolicy;
+    public BattleEffectFailurePolicy BattleFailurePolicy =>
+        (BattleEffectFailurePolicy)(int)failurePolicy;
     public CharacterEffectTargetSelector TargetSelector => targetSelector;
+    public IBattleEffectTargetSelector BattleTargetSelector =>
+        targetSelector;
     public bool RequiresActionTargets =>
         type != CharacterEffectType.GainResource &&
         type != CharacterEffectType.SpendResource &&

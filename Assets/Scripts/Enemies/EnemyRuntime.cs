@@ -48,6 +48,8 @@ public sealed class EnemyRuntime
     public float SpawnIntervalMultiplier => Definition.SpawnIntervalMultiplier;
     public float AbilityCooldownRemaining =>
         TimePrecision.FloorToTenth(_abilityCooldownRemaining);
+    public bool AreAllActionsDisabled =>
+        HasStatusControl(StatusEffectControlType.DisableAllActions);
     public event Action<BattleStatusChangedEvent> StatusChanged;
 
     public IReadOnlyList<BattleStatusSnapshot> GetActiveStatusEffects()
@@ -621,16 +623,37 @@ public sealed class EnemyRuntime
 
             remainingDelta -= activeDelta;
             int tickCount = state.ConsumePendingTickCount();
-            if (tickCount > 0 &&
-                !ExecuteStatusDamageOperations(
-                    state.Definition,
-                    StatusEffectOperationTrigger.OnTick,
-                    activeBatch.Stacks,
-                    tickCount,
-                    activeBatch.Source,
-                    applyDamage))
+            if (tickCount > 0)
             {
-                return false;
+                StatusEffectLifecycleEvent tick =
+                    StatusEffectLifecycleResolver.ResolveTick(
+                        BattleStatusTarget.FromEnemy(this),
+                        new BattleStatusSnapshot(
+                            state.Definition,
+                            activeBatch.Stacks,
+                            activeBatch.RemainingDuration,
+                            activeBatch.Source),
+                        tickCount);
+                BattleEffectResult triggerResult =
+                    StatusEffectTriggerExecutor.Execute(
+                        tick,
+                        null,
+                        applyDamage);
+                if (triggerResult.Attempted &&
+                    !triggerResult.Succeeded)
+                {
+                    return false;
+                }
+                if (!ExecuteStatusDamageOperations(
+                        state.Definition,
+                        StatusEffectOperationTrigger.OnTick,
+                        activeBatch.Stacks,
+                        tickCount,
+                        activeBatch.Source,
+                        applyDamage))
+                {
+                    return false;
+                }
             }
 
             expiredMutation = RemoveExpiredStatusBatch(state);
@@ -824,6 +847,11 @@ public sealed class EnemyRuntime
                     _statusChangeQueue.Dequeue();
                 dispatchedCount++;
                 StatusChanged?.Invoke(eventData);
+                foreach (StatusEffectLifecycleEvent lifecycleEvent in
+                         StatusEffectLifecycleResolver.Resolve(eventData))
+                {
+                    StatusEffectTriggerExecutor.Execute(lifecycleEvent);
+                }
             }
         }
         finally
@@ -856,13 +884,48 @@ public sealed class EnemyRuntime
 
     internal bool TickAbilityCooldown(float deltaTime)
     {
-        if (Definition.AbilityCooldown <= 0f || deltaTime <= 0f)
+        if (Definition.AbilityCooldown <= 0f || deltaTime <= 0f ||
+            AreAllActionsDisabled)
             return false;
 
         _abilityCooldownRemaining = Mathf.Max(
             0f,
             _abilityCooldownRemaining - deltaTime);
         return _abilityCooldownRemaining <= 0f;
+    }
+
+    private bool HasStatusControl(StatusEffectControlType controlType)
+    {
+        foreach (StatusEffectRuntimeState state in _statusEffects.Values)
+        {
+            if (state == null || !state.HasStacks ||
+                state.Definition == null)
+            {
+                continue;
+            }
+            if (state.Definition.HasControl(controlType))
+                return true;
+            if (controlType != StatusEffectControlType.DisableAllActions ||
+                state.Definition.Operations == null)
+            {
+                continue;
+            }
+
+            foreach (StatusEffectOperationDefinition operation in
+                     state.Definition.Operations)
+            {
+                if (operation != null &&
+                    operation.Trigger ==
+                        StatusEffectOperationTrigger.OnApply &&
+                    operation.OperationType ==
+                        StatusEffectOperationType.DisableAction)
+                {
+                    return true;
+                }
+            }
+        }
+
+        return false;
     }
 
     internal void ResetAbilityCooldown()
