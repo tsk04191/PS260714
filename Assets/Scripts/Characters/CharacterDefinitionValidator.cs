@@ -403,19 +403,18 @@ public static class CharacterDefinitionValidator
             bool reusesTarget = hasSubject &&
                                 definition.Subject ==
                                 CharacterAttackSubject.None;
+            CharacterTargetFaction? abilityTargetFaction = reusesTarget
+                ? previousTargetFaction
+                : definition.TargetFaction;
             ValidateConditions(
                 definition.HasConditionSection,
                 definition.ConditionMatchMode,
                 definition.NumericConditions,
-                definition.TargetFaction,
-                reusesTarget,
+                abilityTargetFaction,
                 path,
                 result);
             if (hasAbility)
             {
-                CharacterTargetFaction? abilityTargetFaction = reusesTarget
-                    ? previousTargetFaction
-                    : definition.TargetFaction;
                 if (definition.HasExplicitEffects)
                 {
                     ValidateEffects(
@@ -500,6 +499,16 @@ public static class CharacterDefinitionValidator
                 continue;
             }
 
+            if (definition.IsEmptyPlaceholder)
+            {
+                AddWarning(
+                    result,
+                    "passive.empty_placeholder",
+                    $"{path}.sections",
+                    "An empty passive draft is ignored and can be removed.");
+                continue;
+            }
+
             ValidateSections(definition.Sections, $"{path}.sections", result);
             bool hasAbility = definition.HasSection(
                 CharacterPassiveSectionType.Ability);
@@ -526,9 +535,24 @@ public static class CharacterDefinitionValidator
                     "A cooldown passive has no event or previous target to " +
                     "reuse.");
             }
+            if (definition.Trigger == CharacterPassiveTrigger.OnKill &&
+                effectiveSubject == CharacterAttackSubject.None)
+            {
+                AddError(
+                    result,
+                    "passive.kill_target_missing",
+                    $"{path}.subject",
+                    "A kill passive cannot reuse the defeated enemy because " +
+                    "it has already left the board.");
+            }
 
             bool reusesTarget =
                 effectiveSubject == CharacterAttackSubject.None;
+            CharacterTargetFaction? abilityTargetFaction = reusesTarget
+                ? GetPassiveInheritedTargetFaction(
+                    definition,
+                    attackTargetFaction)
+                : definition.TargetFaction;
             if (!reusesTarget)
             {
                 ValidateSubject(
@@ -542,17 +566,11 @@ public static class CharacterDefinitionValidator
                 definition.HasConditionSection,
                 definition.ConditionMatchMode,
                 definition.NumericConditions,
-                definition.TargetFaction,
-                reusesTarget,
+                abilityTargetFaction,
                 path,
                 result);
             if (hasAbility)
             {
-                CharacterTargetFaction? abilityTargetFaction = reusesTarget
-                    ? GetPassiveInheritedTargetFaction(
-                        definition,
-                        attackTargetFaction)
-                    : definition.TargetFaction;
                 if (definition.HasExplicitEffects)
                 {
                     ValidateEffects(
@@ -613,6 +631,30 @@ public static class CharacterDefinitionValidator
                 "Linkage is evaluated only by OnAttack passives.");
         }
 
+        if (definition.Trigger == CharacterPassiveTrigger.OnKill)
+        {
+            if (!Enum.IsDefined(
+                    typeof(CharacterPassiveKillSource),
+                    definition.KillSource))
+            {
+                AddError(
+                    result,
+                    "passive.kill_source_invalid",
+                    $"{path}.killSource",
+                    $"Unsupported kill source '{definition.KillSource}'.");
+            }
+            else if (definition.KillSource ==
+                         CharacterPassiveKillSource.SpecificCharacter &&
+                     definition.SpecifiedKillerCharacter == null)
+            {
+                AddError(
+                    result,
+                    "passive.kill_character_required",
+                    $"{path}.specifiedKillerCharacter",
+                    "A specific-character kill passive requires a character.");
+            }
+        }
+
         if (definition.Trigger !=
                 CharacterPassiveTrigger.OnStatusAcquired ||
             definition.TriggerStatusEffect == null)
@@ -650,7 +692,8 @@ public static class CharacterDefinitionValidator
 
         if (definition.Trigger == CharacterPassiveTrigger.OnAttack)
             return attackTargetFaction;
-        if (definition.Trigger == CharacterPassiveTrigger.OnCooldown)
+        if (definition.Trigger == CharacterPassiveTrigger.OnCooldown ||
+            definition.Trigger == CharacterPassiveTrigger.OnKill)
             return null;
 
         if (definition.StatusTarget == CharacterPassiveStatusTarget.Ally)
@@ -781,6 +824,12 @@ public static class CharacterDefinitionValidator
                     : CharacterAttackSubject.Random;
             bool reusesTarget =
                 effectiveSubject == CharacterAttackSubject.None;
+            CharacterTargetFaction? abilityTargetFaction = reusesTarget
+                ? executionPolicy ==
+                  CharacterSkillExecutionPolicy.SequenceAll
+                    ? previousSequenceTargetFaction
+                    : attackTargetFaction
+                : definition.TargetFaction;
             if (!reusesTarget)
             {
                 ValidateSubject(
@@ -794,18 +843,11 @@ public static class CharacterDefinitionValidator
                 definition.HasConditionSection,
                 definition.ConditionMatchMode,
                 definition.NumericConditions,
-                definition.TargetFaction,
-                reusesTarget,
+                abilityTargetFaction,
                 path,
                 result);
             if (hasAbility)
             {
-                CharacterTargetFaction? abilityTargetFaction = reusesTarget
-                    ? executionPolicy ==
-                      CharacterSkillExecutionPolicy.SequenceAll
-                        ? previousSequenceTargetFaction
-                        : attackTargetFaction
-                    : definition.TargetFaction;
                 if (definition.HasExplicitEffects)
                 {
                     ValidateEffects(
@@ -1123,28 +1165,11 @@ public static class CharacterDefinitionValidator
         bool hasConditionSection,
         CharacterConditionMatchMode matchMode,
         IReadOnlyList<CharacterNumericCondition> conditions,
-        CharacterTargetFaction targetFaction,
-        bool ignoredByInheritedTarget,
+        CharacterTargetFaction? targetFaction,
         string actionPath,
         CharacterDefinitionValidationResult result)
     {
         string path = $"{actionPath}.numericConditions";
-        if (ignoredByInheritedTarget)
-        {
-            if (hasConditionSection ||
-                (conditions != null && conditions.Count > 0))
-            {
-                AddWarning(
-                    result,
-                    "condition.inherited_target_ignored",
-                    path,
-                    "Subject.None reuses inherited targets before condition " +
-                    "filtering, so these conditions are ignored.");
-            }
-
-            return;
-        }
-
         if (!hasConditionSection)
         {
             if (conditions != null && conditions.Count > 0)
@@ -1186,7 +1211,36 @@ public static class CharacterDefinitionValidator
                 continue;
             }
 
-            if (condition.Type == CharacterConditionType.HasStatus)
+            if (!Enum.IsDefined(
+                    typeof(CharacterConditionTarget),
+                    condition.Target))
+            {
+                AddError(
+                    result,
+                    "condition.target_invalid",
+                    $"{conditionPath}.target",
+                    $"Unsupported condition target '{condition.Target}'.");
+                continue;
+            }
+
+            CharacterTargetFaction? conditionTargetFaction =
+                condition.Target == CharacterConditionTarget.Source
+                    ? CharacterTargetFaction.Ally
+                    : targetFaction;
+            if (!conditionTargetFaction.HasValue)
+            {
+                AddError(
+                    result,
+                    "condition.action_target_unavailable",
+                    $"{conditionPath}.target",
+                    "The action target cannot be resolved for this " +
+                    "condition.");
+            }
+
+            bool checksStatusStacks =
+                condition.Metric ==
+                CharacterNumericConditionMetric.StatusStackCount;
+            if (checksStatusStacks)
             {
                 StatusEffectSO status = condition.StatusEffect;
                 if (status == null)
@@ -1195,32 +1249,34 @@ public static class CharacterDefinitionValidator
                         result,
                         "condition.status_required",
                         $"{conditionPath}.statusEffect",
-                        "HasStatus condition requires an explicit " +
+                        "Status stack condition requires an explicit " +
                         "StatusEffectSO.");
                 }
-                else if (!CanTargetFaction(status, targetFaction))
+                else if (conditionTargetFaction.HasValue &&
+                         !CanTargetFaction(
+                             status,
+                             conditionTargetFaction.Value))
                 {
                     AddError(
                         result,
                         "condition.status_faction_mismatch",
                         $"{conditionPath}.statusEffect",
                         $"Status '{status.name}' cannot exist on the selected " +
-                        "target faction.");
+                        "condition target.");
                 }
-
-                continue;
             }
 
-            if (!IsConditionMetricSupported(
+            if (conditionTargetFaction.HasValue &&
+                !IsConditionMetricSupported(
                     condition.Metric,
-                    targetFaction))
+                    conditionTargetFaction.Value))
             {
                 AddError(
                     result,
                     "condition.metric_faction_mismatch",
                     $"{conditionPath}.metric",
                     $"Metric '{condition.Metric}' is not supported for " +
-                    $"{targetFaction} targets.");
+                    $"{conditionTargetFaction.Value} condition targets.");
             }
             if (!IsFinite(condition.Threshold))
             {
@@ -1229,6 +1285,29 @@ public static class CharacterDefinitionValidator
                     "condition.threshold_invalid",
                     $"{conditionPath}.threshold",
                     "Condition threshold must be finite.");
+            }
+            else if (condition.Metric ==
+                         CharacterNumericConditionMetric.StackCount ||
+                     checksStatusStacks)
+            {
+                if (condition.Threshold < 0f)
+                {
+                    AddError(
+                        result,
+                        "condition.threshold_negative",
+                        $"{conditionPath}.threshold",
+                        "Stack condition threshold cannot be negative.");
+                }
+                else if (!Mathf.Approximately(
+                             condition.Threshold,
+                             Mathf.Round(condition.Threshold)))
+                {
+                    AddError(
+                        result,
+                        "condition.threshold_not_integer",
+                        $"{conditionPath}.threshold",
+                        "Stack condition threshold must be a whole number.");
+                }
             }
         }
     }
@@ -1605,7 +1684,6 @@ public static class CharacterDefinitionValidator
                 selector.ConditionMatchMode,
                 selector.NumericConditions,
                 selector.TargetFaction,
-                false,
                 selectorPath,
                 result);
             ValidateAreaOffsets(
@@ -2160,11 +2238,15 @@ public static class CharacterDefinitionValidator
               metric == CharacterNumericConditionMetric.AttackSpeed ||
               metric == CharacterNumericConditionMetric.Health ||
               metric == CharacterNumericConditionMetric.HealthPercentage ||
-              metric == CharacterNumericConditionMetric.Shield
+              metric == CharacterNumericConditionMetric.Shield ||
+              metric ==
+              CharacterNumericConditionMetric.StatusStackCount
             : metric == CharacterNumericConditionMetric.Health ||
               metric == CharacterNumericConditionMetric.HealthPercentage ||
               metric == CharacterNumericConditionMetric.StackCount ||
-              metric == CharacterNumericConditionMetric.Shield;
+              metric == CharacterNumericConditionMetric.Shield ||
+              metric ==
+              CharacterNumericConditionMetric.StatusStackCount;
     }
 
     private static bool CanTargetFaction(

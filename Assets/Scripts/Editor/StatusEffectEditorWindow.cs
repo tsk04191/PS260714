@@ -229,52 +229,35 @@ public sealed class StatusEffectEditorWindow : EditorWindow
 
     private void DrawToolbar()
     {
-        EditorGUILayout.BeginHorizontal(EditorStyles.toolbar);
-        if (GUILayout.Button("New", EditorStyles.toolbarButton,
-                GUILayout.Width(48f)))
-        {
-            CreateDefinition();
-            GUIUtility.ExitGUI();
-        }
-
-        if (GUILayout.Button("Refresh", EditorStyles.toolbarButton,
-                GUILayout.Width(62f)))
-        {
-            RefreshLocalizationKeys();
-            RefreshList();
-        }
-
-        GUILayout.FlexibleSpace();
-        using (new EditorGUI.DisabledScope(_selected == null))
-        {
-            if (GUILayout.Button("Save", EditorStyles.toolbarButton,
-                    GUILayout.Width(50f)))
+        PS260714AssetEditorToolbar.Draw(
+            $"Status Effects: {_definitions.Count}",
+            _selected != null,
+            () =>
+            {
+                CreateDefinition();
+                GUIUtility.ExitGUI();
+            },
+            () =>
             {
                 SaveSelected();
                 GUIUtility.ExitGUI();
-            }
-
-            if (GUILayout.Button("Duplicate", EditorStyles.toolbarButton,
-                    GUILayout.Width(72f)))
+            },
+            () =>
             {
                 DuplicateSelected();
                 GUIUtility.ExitGUI();
-            }
-
-            if (GUILayout.Button("Rename", EditorStyles.toolbarButton,
-                    GUILayout.Width(62f)))
-            {
-                BeginRename();
-            }
-
-            if (GUILayout.Button("Delete", EditorStyles.toolbarButton,
-                    GUILayout.Width(56f)))
+            },
+            BeginRename,
+            () =>
             {
                 DeleteSelected();
                 GUIUtility.ExitGUI();
-            }
-        }
-        EditorGUILayout.EndHorizontal();
+            },
+            () =>
+            {
+                RefreshLocalizationKeys();
+                RefreshList();
+            });
     }
 
     private void DrawRenameRow()
@@ -1180,7 +1163,11 @@ public sealed class StatusEffectEditorWindow : EditorWindow
         if (removeIndex >= 0)
             operations.DeleteArrayElementAtIndex(removeIndex);
         else if (moveFrom >= 0)
+        {
             operations.MoveArrayElement(moveFrom, moveTo);
+            ClearEditingFocus();
+            GUI.changed = true;
+        }
         EditorGUILayout.EndVertical();
     }
 
@@ -1499,8 +1486,16 @@ public sealed class StatusEffectEditorWindow : EditorWindow
         else if (moveFrom >= 0)
         {
             list.MoveArrayElement(moveFrom, moveTo);
+            ClearEditingFocus();
             GUI.changed = true;
         }
+    }
+
+    private static void ClearEditingFocus()
+    {
+        GUI.FocusControl(null);
+        GUIUtility.keyboardControl = 0;
+        EditorGUIUtility.editingTextField = false;
     }
 
     private static void DrawFloatProperty(

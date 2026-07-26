@@ -529,7 +529,10 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
         IBattleBoard board)
     {
         if (_board != null)
+        {
             _board.StatusApplied -= HandleStatusApplied;
+            _board.EnemyDefeated -= HandleEnemyDefeated;
+        }
         if (_activeSkillResource != null)
             _activeSkillResource.Changed -= HandleActiveSkillResourceChanged;
 
@@ -539,7 +542,10 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
         if (_activeSkillResource != null)
             _activeSkillResource.Changed += HandleActiveSkillResourceChanged;
         if (_board != null)
+        {
             _board.StatusApplied += HandleStatusApplied;
+            _board.EnemyDefeated += HandleEnemyDefeated;
+        }
 
         RefreshUi();
     }
@@ -1687,6 +1693,15 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
             actionCondition.MatchMode,
             actionCondition.NumericConditions,
             inheritedTargets);
+        if (!CharacterConditionEvaluator.AllowsAction(
+                this,
+                actionCondition.MatchMode,
+                actionCondition.NumericConditions,
+                selectedTargets.Count > 0))
+        {
+            return false;
+        }
+
         targets = ExpandCustomAbilityArea(
             _board,
             selectedTargets,
@@ -1786,27 +1801,38 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
                     actionCondition.MatchMode,
                     actionCondition.NumericConditions,
                     previousTargets);
-                targets = ExpandCustomAbilityArea(
-                    board,
-                    targets,
-                    definition.AreaOffsets);
-                IReadOnlyList<PreparedEffectExecution> effects =
-                    PrepareExplicitEffects(
+                if (!CharacterConditionEvaluator.AllowsAction(
+                        this,
+                        actionCondition.MatchMode,
+                        actionCondition.NumericConditions,
+                        targets.Count > 0))
+                {
+                    effectResult = default;
+                }
+                else
+                {
+                    targets = ExpandCustomAbilityArea(
                         board,
                         targets,
+                        definition.AreaOffsets);
+                    IReadOnlyList<PreparedEffectExecution> effects =
+                        PrepareExplicitEffects(
+                            board,
+                            targets,
+                            definition.Effects,
+                            CharacterActionKind.Attack,
+                            CreateEffectCostReservation());
+                    effectResult = HasUsableExplicitEffects(
                         definition.Effects,
-                        CharacterActionKind.Attack,
-                        CreateEffectCostReservation());
-                effectResult = HasUsableExplicitEffects(
-                    definition.Effects,
-                    CharacterActionKind.Attack)
-                    ? ExecuteExplicitEffectsOnTargets(
-                        board,
-                        targets,
-                        definition.Effects,
-                        CharacterActionKind.Attack,
-                        effects)
-                    : default;
+                        CharacterActionKind.Attack)
+                        ? ExecuteExplicitEffectsOnTargets(
+                            board,
+                            targets,
+                            definition.Effects,
+                            CharacterActionKind.Attack,
+                            effects)
+                        : default;
+                }
             }
             else
             {
@@ -2033,6 +2059,85 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
             NotifyPassiveActivated();
     }
 
+    private void HandleEnemyDefeated(BattleEnemyDefeatedEvent eventData)
+    {
+        if (!eventData.IsValid || !eventData.HasCharacterKiller ||
+            !_initialized || Data == null || _board == null ||
+            !Data.HasCustomPassiveDefinitions)
+        {
+            return;
+        }
+
+        bool anyPassiveSucceeded = false;
+        int totalDamage = 0;
+        foreach (CharacterPassiveDefinition definition in
+                 Data.PassiveDefinitions)
+        {
+            if (definition == null ||
+                definition.Trigger != CharacterPassiveTrigger.OnKill ||
+                !MatchesKillSource(definition, eventData.Killer) ||
+                !definition.HasSection(CharacterPassiveSectionType.Ability))
+            {
+                continue;
+            }
+
+            CharacterActionConditionData actionCondition =
+                Data.GetActionConditionData(definition);
+            bool succeeded = TryExecutePassiveAbility(
+                _board,
+                definition,
+                actionCondition,
+                default,
+                out int damageDealt);
+            totalDamage += damageDealt;
+            anyPassiveSucceeded |= succeeded;
+        }
+
+        RecordDamageDealt(totalDamage);
+        if (anyPassiveSucceeded)
+            NotifyPassiveActivated();
+    }
+
+    private bool MatchesKillSource(
+        CharacterPassiveDefinition definition,
+        IBattleCharacter killer)
+    {
+        if (definition == null || killer == null)
+            return false;
+
+        return definition.KillSource switch
+        {
+            CharacterPassiveKillSource.Self =>
+                ReferenceEquals(killer, this),
+            CharacterPassiveKillSource.Other =>
+                !ReferenceEquals(killer, this),
+            CharacterPassiveKillSource.SpecificCharacter =>
+                MatchesCharacterDefinition(
+                    killer,
+                    definition.SpecifiedKillerCharacter),
+            CharacterPassiveKillSource.All => true,
+            _ => false
+        };
+    }
+
+    private static bool MatchesCharacterDefinition(
+        IBattleCharacter character,
+        CharacterSO expectedDefinition)
+    {
+        if (character is not CharacterRuntime runtime ||
+            runtime.Definition == null ||
+            expectedDefinition == null)
+        {
+            return false;
+        }
+
+        return ReferenceEquals(runtime.Definition, expectedDefinition) ||
+               string.Equals(
+                   runtime.Definition.CharacterId,
+                   expectedDefinition.CharacterId,
+                   System.StringComparison.Ordinal);
+    }
+
     private static bool MatchesStatusTarget(
         CharacterPassiveStatusTarget configuredTarget,
         CharacterTargetFaction acquiredFaction)
@@ -2142,6 +2247,15 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
                 actionCondition.MatchMode,
                 actionCondition.NumericConditions,
                 inheritedTargets);
+            if (!CharacterConditionEvaluator.AllowsAction(
+                    this,
+                    actionCondition.MatchMode,
+                    actionCondition.NumericConditions,
+                    targets.Count > 0))
+            {
+                return false;
+            }
+
             targets = ExpandCustomAbilityArea(
                 board,
                 targets,
@@ -2238,6 +2352,16 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
             conditionMatchMode,
             numericConditions,
             inheritedTargets);
+        if (!CharacterConditionEvaluator.AllowsAction(
+                this,
+                conditionMatchMode,
+                numericConditions,
+                targets.Count > 0))
+        {
+            damageDealt = 0;
+            return false;
+        }
+
         targets = ExpandCustomAbilityArea(board, targets, areaOffsets);
 
         return ExecuteCustomAbilityOnTargets(
@@ -2285,13 +2409,32 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
         IReadOnlyList<CharacterNumericCondition> numericConditions,
         AbilityTargetSelection inheritedTargets)
     {
-        if (subject == CharacterAttackSubject.None)
-            return ReuseAbilityTargets(inheritedTargets);
-
         IReadOnlyList<CharacterNumericCondition> conditions =
             hasNumericConditions
                 ? numericConditions
                 : System.Array.Empty<CharacterNumericCondition>();
+        if (subject == CharacterAttackSubject.None)
+        {
+            AbilityTargetSelection reusedTargets =
+                ReuseAbilityTargets(inheritedTargets);
+            if (conditions.Count == 0 || board == null)
+                return reusedTargets;
+
+            return reusedTargets.Faction == CharacterTargetFaction.Ally
+                ? AbilityTargetSelection.Allies(
+                    board.FilterAlliedCharacters(
+                        this,
+                        reusedTargets.AllyTargets,
+                        conditionMatchMode,
+                        conditions))
+                : AbilityTargetSelection.Enemies(
+                    board.FilterCharacterTargets(
+                        this,
+                        reusedTargets.EnemyTargets,
+                        conditionMatchMode,
+                        conditions));
+        }
+
         if (targetFaction == CharacterTargetFaction.Ally)
         {
             return AbilityTargetSelection.Allies(

@@ -47,10 +47,30 @@ namespace PS260714.Localization.Editor
                     stringsPath);
             }
 
+            return FromDocuments(
+                LocalizationCsv.ReadFile(localesPath),
+                LocalizationCsv.ReadFile(stringsPath));
+        }
+
+        public static LocalizationSourceModel FromDocuments(
+            LocalizationCsvDocument localesDocument,
+            LocalizationCsvDocument stringsDocument)
+        {
+            if (localesDocument == null)
+            {
+                throw new ArgumentNullException(
+                    nameof(localesDocument));
+            }
+            if (stringsDocument == null)
+            {
+                throw new ArgumentNullException(
+                    nameof(stringsDocument));
+            }
+
             LocalizationSourceModel model = new LocalizationSourceModel
             {
-                LocalesDocument = LocalizationCsv.ReadFile(localesPath),
-                StringsDocument = LocalizationCsv.ReadFile(stringsPath),
+                LocalesDocument = localesDocument,
+                StringsDocument = stringsDocument,
             };
             model.ParseLocales();
             model.ParseStrings();

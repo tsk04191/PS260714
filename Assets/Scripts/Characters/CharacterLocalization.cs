@@ -516,6 +516,23 @@ public static class CharacterLocalization
                 return UsesKoreanLocale
                     ? $"매 {definition.Cooldown:0.##}초마다, "
                     : $"Every {definition.Cooldown:0.##}s, ";
+            case CharacterPassiveTrigger.OnKill:
+            {
+                string killerName = definition.KillSource switch
+                {
+                    CharacterPassiveKillSource.Self =>
+                        UsesKoreanLocale ? "자신" : "self",
+                    CharacterPassiveKillSource.Other =>
+                        UsesKoreanLocale ? "자신 외 아군" : "another ally",
+                    CharacterPassiveKillSource.SpecificCharacter =>
+                        GetCharacterDefinitionName(
+                            definition.SpecifiedKillerCharacter),
+                    _ => UsesKoreanLocale ? "아군" : "any ally"
+                };
+                return UsesKoreanLocale
+                    ? $"{killerName}이(가) 적 처치 시, "
+                    : $"Whenever {killerName} defeats an enemy, ";
+            }
             case CharacterPassiveTrigger.OnStatusAcquired:
             {
                 string targetName = definition.StatusTarget switch
@@ -594,30 +611,33 @@ public static class CharacterLocalization
             if (builder.Length > 0)
                 builder.Append(separator);
 
-            if (condition.Type == CharacterConditionType.HasStatus)
-            {
-                string statusName = GetStatusEffectName(
-                    condition.StatusEffect);
-                builder.Append(UsesKoreanLocale
-                    ? $"{statusName} 보유"
-                    : $"Has {statusName}");
-                continue;
-            }
-
             string metric = condition.Metric switch
             {
                 CharacterNumericConditionMetric.HealthPercentage =>
                     UsesKoreanLocale ? "체력 비율" : "health percentage",
                 CharacterNumericConditionMetric.StackCount =>
-                    UsesKoreanLocale ? "스택" : "stack",
+                    UsesKoreanLocale ? "적 타일 스택" : "enemy tile stack",
                 CharacterNumericConditionMetric.AttackPower =>
                     UsesKoreanLocale ? "공격력" : "attack power",
                 CharacterNumericConditionMetric.AttackSpeed =>
                     UsesKoreanLocale ? "속도" : "speed",
                 CharacterNumericConditionMetric.Shield =>
                     UsesKoreanLocale ? "보호막" : "shield",
+                CharacterNumericConditionMetric.StatusStackCount =>
+                    UsesKoreanLocale
+                        ? $"{GetStatusEffectName(condition.StatusEffect)} " +
+                          "상태 스택"
+                        : $"{GetStatusEffectName(condition.StatusEffect)} " +
+                          "status stacks",
                 _ => UsesKoreanLocale ? "체력" : "health"
             };
+            if (condition.Target == CharacterConditionTarget.Source)
+            {
+                metric = UsesKoreanLocale
+                    ? $"자신의 {metric}"
+                    : $"source {metric}";
+            }
+
             string comparison = condition.Comparison switch
             {
                 CharacterNumericComparison.GreaterThanOrEqual =>
@@ -1135,6 +1155,19 @@ public static class CharacterLocalization
         }
 
         return UsesKoreanLocale ? "미지정 상태" : "Unassigned status";
+    }
+
+    private static string GetCharacterDefinitionName(CharacterSO definition)
+    {
+        if (definition == null)
+            return UsesKoreanLocale
+                ? "미지정 캐릭터"
+                : "an unassigned character";
+        if (!string.IsNullOrWhiteSpace(definition.NameLocalizationKey))
+            return LocalizationService.Get(definition.NameLocalizationKey);
+        if (!string.IsNullOrWhiteSpace(definition.CharacterName))
+            return definition.CharacterName;
+        return definition.name;
     }
 
     private static string FormatArea(

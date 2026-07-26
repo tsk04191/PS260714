@@ -48,18 +48,25 @@ public enum CharacterAttackSubjectMetric
 
 public enum CharacterNumericConditionMetric
 {
-    Health,
-    HealthPercentage,
-    StackCount,
-    AttackPower,
-    AttackSpeed,
-    Shield
+    Health = 0,
+    HealthPercentage = 1,
+    StackCount = 2,
+    AttackPower = 3,
+    AttackSpeed = 4,
+    Shield = 5,
+    StatusStackCount = 6
 }
 
 public enum CharacterConditionType
 {
     Numeric,
     HasStatus
+}
+
+public enum CharacterConditionTarget
+{
+    ActionTarget = 0,
+    Source = 1
 }
 
 public enum CharacterNumericComparison
@@ -153,7 +160,16 @@ public enum CharacterPassiveTrigger
 {
     OnAttack,
     OnStatusAcquired,
-    OnCooldown
+    OnCooldown,
+    OnKill
+}
+
+public enum CharacterPassiveKillSource
+{
+    Self,
+    Other,
+    SpecificCharacter,
+    All
 }
 
 public enum CharacterPassiveStatusTarget
@@ -205,6 +221,8 @@ public sealed class CharacterNumericCondition
     [SerializeField]
     private CharacterConditionType type;
     [SerializeField]
+    private CharacterConditionTarget target;
+    [SerializeField]
     private CharacterNumericConditionMetric metric;
     [SerializeField]
     private CharacterNumericComparison comparison;
@@ -215,15 +233,132 @@ public sealed class CharacterNumericCondition
     private StatusEffectSO statusEffect;
 
     public CharacterConditionType Type => type;
-    public CharacterNumericConditionMetric Metric => metric;
-    public CharacterNumericComparison Comparison => comparison;
-    public float Threshold => threshold;
+    public CharacterConditionTarget Target => target;
+    public CharacterNumericConditionMetric Metric =>
+        type == CharacterConditionType.HasStatus
+            ? CharacterNumericConditionMetric.StatusStackCount
+            : metric;
+    public CharacterNumericComparison Comparison =>
+        type == CharacterConditionType.HasStatus
+            ? CharacterNumericComparison.GreaterThanOrEqual
+            : comparison;
+    public float Threshold =>
+        type == CharacterConditionType.HasStatus ? 1f : threshold;
     public StatusEffectSO StatusEffect => statusEffect;
 
     public void Validate()
     {
+        if (type == CharacterConditionType.HasStatus)
+        {
+            type = CharacterConditionType.Numeric;
+            metric = CharacterNumericConditionMetric.StatusStackCount;
+            comparison = CharacterNumericComparison.GreaterThanOrEqual;
+            threshold = 1f;
+        }
+
         if (float.IsNaN(threshold) || float.IsInfinity(threshold))
             threshold = 0f;
+    }
+}
+
+public static class CharacterConditionEvaluator
+{
+    public static bool MatchesCharacter(
+        CharacterNumericCondition condition,
+        IBattleCharacter character)
+    {
+        if (condition == null || character == null)
+            return false;
+
+        float value = condition.Metric switch
+        {
+            CharacterNumericConditionMetric.Health =>
+                character.CurrentHealth,
+            CharacterNumericConditionMetric.HealthPercentage =>
+                character.MaximumHealth > 0
+                    ? character.CurrentHealth * 100f /
+                      character.MaximumHealth
+                    : 0f,
+            CharacterNumericConditionMetric.AttackPower =>
+                character.CurrentAttackPower,
+            CharacterNumericConditionMetric.AttackSpeed =>
+                character.CurrentAttackSpeed,
+            CharacterNumericConditionMetric.Shield =>
+                character.CurrentShield,
+            CharacterNumericConditionMetric.StatusStackCount =>
+                character.GetStatusStackCount(condition.StatusEffect),
+            _ => 0f
+        };
+        return Compare(
+            value,
+            condition.Comparison,
+            condition.Threshold);
+    }
+
+    public static bool Compare(
+        float value,
+        CharacterNumericComparison comparison,
+        float threshold)
+    {
+        return comparison switch
+        {
+            CharacterNumericComparison.GreaterThanOrEqual =>
+                value >= threshold,
+            CharacterNumericComparison.LessThanOrEqual =>
+                value <= threshold,
+            CharacterNumericComparison.GreaterThan => value > threshold,
+            CharacterNumericComparison.LessThan => value < threshold,
+            CharacterNumericComparison.Equal =>
+                Mathf.Approximately(value, threshold),
+            CharacterNumericComparison.NotEqual =>
+                !Mathf.Approximately(value, threshold),
+            _ => false
+        };
+    }
+
+    public static bool AllowsAction(
+        IBattleCharacter source,
+        CharacterConditionMatchMode matchMode,
+        IReadOnlyList<CharacterNumericCondition> conditions,
+        bool hasMatchingActionTarget)
+    {
+        if (conditions == null || conditions.Count == 0)
+            return true;
+
+        bool hasSourceCondition = false;
+        bool hasActionTargetCondition = false;
+        bool anySourceMatched = false;
+        bool allSourceMatched = true;
+        bool evaluatedAny = false;
+        foreach (CharacterNumericCondition condition in conditions)
+        {
+            if (condition == null)
+                continue;
+
+            evaluatedAny = true;
+            if (condition.Target == CharacterConditionTarget.ActionTarget)
+            {
+                hasActionTargetCondition = true;
+                continue;
+            }
+
+            hasSourceCondition = true;
+            bool matched = MatchesCharacter(condition, source);
+            anySourceMatched |= matched;
+            allSourceMatched &= matched;
+        }
+
+        if (!evaluatedAny)
+            return true;
+
+        if (matchMode == CharacterConditionMatchMode.Any)
+        {
+            return (hasSourceCondition && anySourceMatched) ||
+                   (hasActionTargetCondition && hasMatchingActionTarget);
+        }
+
+        return (!hasSourceCondition || allSourceMatched) &&
+               (!hasActionTargetCondition || hasMatchingActionTarget);
     }
 }
 
@@ -758,6 +893,10 @@ public sealed class CharacterPassiveDefinition :
     [SerializeField]
     private CharacterPassiveTrigger trigger;
     [SerializeField]
+    private CharacterPassiveKillSource killSource;
+    [SerializeField]
+    private CharacterSO specifiedKillerCharacter;
+    [SerializeField]
     private CharacterPassiveStatusTarget statusTarget;
     [SerializeField]
     private StatusEffectSO triggerStatusEffect;
@@ -806,6 +945,8 @@ public sealed class CharacterPassiveDefinition :
     public IReadOnlyList<CharacterPassiveSectionType> Sections => sections;
     public AudioClip AudioClip => audioClip;
     public CharacterPassiveTrigger Trigger => trigger;
+    public CharacterPassiveKillSource KillSource => killSource;
+    public CharacterSO SpecifiedKillerCharacter => specifiedKillerCharacter;
     public CharacterPassiveStatusTarget StatusTarget => statusTarget;
     public StatusEffectSO TriggerStatusEffect => triggerStatusEffect;
     public float Cooldown => TimePrecision.Normalize(
@@ -845,6 +986,8 @@ public sealed class CharacterPassiveDefinition :
         selfStatusCost != null && selfStatusCost.IsConfigured;
     public IReadOnlyList<CharacterEffectDefinition> Effects => effects;
     public bool HasExplicitEffects => effects != null && effects.Count > 0;
+    public bool IsEmptyPlaceholder => sections != null &&
+        sections.Count == 0;
 
     public bool HasSection(CharacterPassiveSectionType sectionType)
     {
@@ -1177,6 +1320,8 @@ public sealed class CharacterSO : ScriptableObject
             RegenerateCharacterId();
 
         passiveDefinitions ??= new List<CharacterPassiveDefinition>();
+        passiveDefinitions.RemoveAll(definition =>
+            definition?.IsEmptyPlaceholder == true);
         foreach (CharacterPassiveDefinition definition in passiveDefinitions)
             definition?.Validate();
 

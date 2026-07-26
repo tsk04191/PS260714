@@ -8,10 +8,17 @@ namespace PS260714.Localization
     {
         public const string CharacterAislingDescription = "character.aisling.description";
         public const string CharacterAislingName = "character.aisling.name";
+        public const string CharacterByeolhaDescription = "character.byeolha.description";
+        public const string CharacterByeolhaName = "character.byeolha.name";
+        public const string CharacterIsoldeDescription = "character.isolde.description";
+        public const string CharacterIsoldeName = "character.isolde.name";
+        public const string CharacterMirinaeDescription = "character.mirinae.description";
+        public const string CharacterMirinaeName = "character.mirinae.name";
         public const string CharacterSaenaDescription = "character.saena.description";
         public const string CharacterSaenaName = "character.saena.name";
         public const string CharacterSuirenDescription = "character.suiren.description";
         public const string CharacterSuirenName = "character.suiren.name";
+        public const string CharacterUnnamedDescription = "character.unnamed.description";
         public const string CharacterUnnamedName = "character.unnamed.name";
         public const string CodexBattleBack = "codex.battle.back";
         public const string CodexBattleClassificationConsumable = "codex.battle.classification.consumable";
@@ -87,6 +94,8 @@ namespace PS260714.Localization
         public const string StatusFireName = "status.fire.name";
         public const string StatusOpeningDescription = "status.opening.description";
         public const string StatusOpeningName = "status.opening.name";
+        public const string StatusStarpowderDescription = "status.starpowder.description";
+        public const string StatusStarpowderName = "status.starpowder.name";
         public const string StatusStunDescription = "status.stun.description";
         public const string StatusStunName = "status.stun.name";
         public const string UiCharacterCompactSummary = "ui.character.compact_summary";

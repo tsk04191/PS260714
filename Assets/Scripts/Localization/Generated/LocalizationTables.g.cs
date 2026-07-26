@@ -9,7 +9,7 @@ namespace PS260714.Localization
 {
     public static class GeneratedLocalizationTables
     {
-        public const string SourceHash = "f49b19460e5c78b3cf936ba3f1b79e24d125e6fbb5eac94918ce65d382153407";
+        public const string SourceHash = "cb5ffb78766f852098ba1c3298e85b94d847e0a9a556586cbef0246f0a00e57d";
         public const string ReferenceLocale = "en-US";
 
         private static readonly LocalizationLocaleInfo[] LocaleData =
@@ -267,6 +267,15 @@ namespace PS260714.Localization
                 { "character.suiren.name", new LocalizationEntry("\uC2A4\uC774\uB80C", "title") },
                 { "character.suiren.description", new LocalizationEntry("\uC544\uCE74\uB370\uBBF8 1\uD559\uB144\uC0DD", "body") },
                 { "character.unnamed.name", new LocalizationEntry("\uC774\uB984 \uC5C6\uB294 \uCE90\uB9AD\uD130", "title") },
+                { "character.unnamed.description", new LocalizationEntry("\uC774\uB984 \uC5C6\uB294 \uCE90\uB9AD\uD130", "body") },
+                { "character.byeolha.name", new LocalizationEntry("\uBCC4\uD558", "title") },
+                { "character.byeolha.description", new LocalizationEntry("\uC544\uCE74\uB370\uBBF8 \uCC9C\uBB38\uD559\uBD80", "body") },
+                { "character.isolde.name", new LocalizationEntry("\uC774\uC878\uB370", "title") },
+                { "character.isolde.description", new LocalizationEntry("\uC544\uCE74\uB370\uBBF8 \uCC9C\uBB38\uD559\uBD80", "body") },
+                { "character.mirinae.name", new LocalizationEntry("\uBBF8\uB9AC\uB0B4", "title") },
+                { "character.mirinae.description", new LocalizationEntry("\uC544\uCE74\uB370\uBBF8 \uCC9C\uBB38\uD559\uBD80 \uBD80\uC7A5", "body") },
+                { "status.starpowder.name", new LocalizationEntry("\uBCC4\uAC00\uB8E8", "title") },
+                { "status.starpowder.description", new LocalizationEntry("\uD6A8\uACFC \uC5C6\uC774 \uC2A4\uD0DD\uB9CC \uB204\uC801\uB418\uB294 \uC601\uAD6C \uC0C1\uD0DC\uC785\uB2C8\uB2E4.", "tooltip") },
             };
 
         private static readonly Dictionary<string, LocalizationEntry>
@@ -515,6 +524,15 @@ namespace PS260714.Localization
                 { "character.suiren.name", new LocalizationEntry("Suiren", "title") },
                 { "character.suiren.description", new LocalizationEntry("Arcademy 1st grade", "body") },
                 { "character.unnamed.name", new LocalizationEntry("Unnamed Character", "title") },
+                { "character.unnamed.description", new LocalizationEntry("Unnamed Character", "body") },
+                { "character.byeolha.name", new LocalizationEntry("Byeolha", "title") },
+                { "character.byeolha.description", new LocalizationEntry("Astronomy of Academy", "body") },
+                { "character.isolde.name", new LocalizationEntry("Isolde", "title") },
+                { "character.isolde.description", new LocalizationEntry("Astronomy of Academy", "body") },
+                { "character.mirinae.name", new LocalizationEntry("Mirinae", "title") },
+                { "character.mirinae.description", new LocalizationEntry(" Director of the Astronomy of Academy", "body") },
+                { "status.starpowder.name", new LocalizationEntry("Star Dust", "title") },
+                { "status.starpowder.description", new LocalizationEntry("A permanent status that only stores stacks.", "tooltip") },
             };
 
         private static readonly IReadOnlyDictionary<string, LocalizationEntry>

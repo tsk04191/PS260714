@@ -10,8 +10,12 @@ public sealed class CharacterDefinitionValidationTests
 {
     private const string AislingCharacterPath =
         "Assets/Resources/Characters/2_Aisling.asset";
+    private const string MirinaeCharacterPath =
+        "Assets/Resources/Characters/2_Mirinae.asset";
     private const string FireStatusPath =
         "Assets/Resources/StatusEffects/Fire.asset";
+    private const string StarPowderStatusPath =
+        "Assets/Resources/StatusEffects/StarPowder.asset";
 
     private readonly List<UnityEngine.Object> _createdObjects = new();
 
@@ -123,6 +127,72 @@ public sealed class CharacterDefinitionValidationTests
     }
 
     [Test]
+    public void Validate_KillPassiveWithNoneSubject_ReturnsError()
+    {
+        CharacterSO definition = CreateDefinition();
+        SerializedObject serialized = new(definition);
+        SerializedProperty passives =
+            serialized.FindProperty("passiveDefinitions");
+        passives.arraySize = 1;
+        SerializedProperty passive = passives.GetArrayElementAtIndex(0);
+        SetSections(
+            passive.FindPropertyRelative("sections"),
+            (int)CharacterPassiveSectionType.Linkage,
+            (int)CharacterPassiveSectionType.Subject,
+            (int)CharacterPassiveSectionType.Ability);
+        passive.FindPropertyRelative("trigger").enumValueIndex =
+            (int)CharacterPassiveTrigger.OnKill;
+        passive.FindPropertyRelative("subject").enumValueIndex =
+            (int)CharacterAttackSubject.None;
+        passive.FindPropertyRelative("damageType").enumValueIndex =
+            (int)CharacterAttackDamageType.Fixed;
+        passive.FindPropertyRelative("damageAmount").floatValue = 1f;
+        serialized.ApplyModifiedPropertiesWithoutUndo();
+
+        CharacterDefinitionValidationResult result =
+            CharacterDefinitionValidator.Validate(definition);
+
+        Assert.That(
+            HasDiagnostic(result, "passive.kill_target_missing"),
+            Is.True);
+    }
+
+    [Test]
+    public void Validate_SpecificKillerWithoutCharacter_ReturnsError()
+    {
+        CharacterSO definition = CreateDefinition();
+        SerializedObject serialized = new(definition);
+        SerializedProperty passives =
+            serialized.FindProperty("passiveDefinitions");
+        passives.arraySize = 1;
+        SerializedProperty passive = passives.GetArrayElementAtIndex(0);
+        SetSections(
+            passive.FindPropertyRelative("sections"),
+            (int)CharacterPassiveSectionType.Linkage,
+            (int)CharacterPassiveSectionType.Subject,
+            (int)CharacterPassiveSectionType.Ability);
+        passive.FindPropertyRelative("trigger").enumValueIndex =
+            (int)CharacterPassiveTrigger.OnKill;
+        passive.FindPropertyRelative("killSource").enumValueIndex =
+            (int)CharacterPassiveKillSource.SpecificCharacter;
+        passive.FindPropertyRelative("subject").enumValueIndex =
+            (int)CharacterAttackSubject.Self;
+        passive.FindPropertyRelative("targetFaction").enumValueIndex =
+            (int)CharacterTargetFaction.Ally;
+        passive.FindPropertyRelative("damageType").enumValueIndex =
+            (int)CharacterAttackDamageType.Fixed;
+        passive.FindPropertyRelative("damageAmount").floatValue = 1f;
+        serialized.ApplyModifiedPropertiesWithoutUndo();
+
+        CharacterDefinitionValidationResult result =
+            CharacterDefinitionValidator.Validate(definition);
+
+        Assert.That(
+            HasDiagnostic(result, "passive.kill_character_required"),
+            Is.True);
+    }
+
+    [Test]
     public void Validate_SelfStatusCostWithoutStatus_ReturnsError()
     {
         CharacterSO definition = CreateDefinition();
@@ -214,7 +284,7 @@ public sealed class CharacterDefinitionValidationTests
     }
 
     [Test]
-    public void Validate_HasStatusWithoutExplicitStatus_ReturnsError()
+    public void Validate_StatusStacksWithoutExplicitStatus_ReturnsError()
     {
         CharacterSO definition = CreateDefinition();
         SerializedObject serialized = new(definition);
@@ -234,9 +304,14 @@ public sealed class CharacterDefinitionValidationTests
         SerializedProperty conditions =
             attack.FindPropertyRelative("numericConditions");
         conditions.arraySize = 1;
-        conditions.GetArrayElementAtIndex(0)
-            .FindPropertyRelative("type")
-            .enumValueIndex = (int)CharacterConditionType.HasStatus;
+        SerializedProperty condition = conditions.GetArrayElementAtIndex(0);
+        condition.FindPropertyRelative("type").enumValueIndex =
+            (int)CharacterConditionType.Numeric;
+        condition.FindPropertyRelative("metric").enumValueIndex =
+            (int)CharacterNumericConditionMetric.StatusStackCount;
+        condition.FindPropertyRelative("comparison").enumValueIndex =
+            (int)CharacterNumericComparison.GreaterThanOrEqual;
+        condition.FindPropertyRelative("threshold").floatValue = 1f;
         attack.FindPropertyRelative("damageType").enumValueIndex =
             (int)CharacterAttackDamageType.Fixed;
         attack.FindPropertyRelative("damageAmount").floatValue = 1f;
@@ -247,6 +322,46 @@ public sealed class CharacterDefinitionValidationTests
 
         Assert.That(
             HasDiagnostic(result, "condition.status_required"),
+            Is.True);
+    }
+
+    [Test]
+    public void Validate_SourceConditionRejectsEnemyOnlyMetric()
+    {
+        CharacterSO definition = CreateDefinition();
+        SerializedObject serialized = new(definition);
+        SerializedProperty attacks =
+            serialized.FindProperty("attackDefinitions");
+        attacks.arraySize = 1;
+        SerializedProperty attack = attacks.GetArrayElementAtIndex(0);
+        SetSections(
+            attack.FindPropertyRelative("sections"),
+            (int)CharacterAttackSectionType.Subject,
+            (int)CharacterAttackSectionType.Condition,
+            (int)CharacterAttackSectionType.Ability);
+        attack.FindPropertyRelative("targetFaction").enumValueIndex =
+            (int)CharacterTargetFaction.Enemy;
+        attack.FindPropertyRelative("subject").enumValueIndex =
+            (int)CharacterAttackSubject.Random;
+        SerializedProperty conditions =
+            attack.FindPropertyRelative("numericConditions");
+        conditions.arraySize = 1;
+        SerializedProperty condition = conditions.GetArrayElementAtIndex(0);
+        condition.FindPropertyRelative("target").enumValueIndex =
+            (int)CharacterConditionTarget.Source;
+        condition.FindPropertyRelative("metric").enumValueIndex =
+            (int)CharacterNumericConditionMetric.StackCount;
+        condition.FindPropertyRelative("threshold").floatValue = 1f;
+        attack.FindPropertyRelative("damageType").enumValueIndex =
+            (int)CharacterAttackDamageType.Fixed;
+        attack.FindPropertyRelative("damageAmount").floatValue = 1f;
+        serialized.ApplyModifiedPropertiesWithoutUndo();
+
+        CharacterDefinitionValidationResult result =
+            CharacterDefinitionValidator.Validate(definition);
+
+        Assert.That(
+            HasDiagnostic(result, "condition.metric_faction_mismatch"),
             Is.True);
     }
 
@@ -404,7 +519,45 @@ public sealed class CharacterDefinitionValidationTests
     }
 
     [Test]
-    public void Aisling_HasStatusCondition_ReferencesFireExplicitly()
+    public void LegacyHasStatus_Validate_MigratesToStatusStackCondition()
+    {
+        CharacterSO definition = CreateDefinition();
+        SerializedObject serialized = new(definition);
+        SerializedProperty attacks =
+            serialized.FindProperty("attackDefinitions");
+        attacks.arraySize = 1;
+        SerializedProperty conditions = attacks.GetArrayElementAtIndex(0)
+            .FindPropertyRelative("numericConditions");
+        conditions.arraySize = 1;
+        SerializedProperty serializedCondition =
+            conditions.GetArrayElementAtIndex(0);
+        serializedCondition.FindPropertyRelative("type").enumValueIndex =
+            (int)CharacterConditionType.HasStatus;
+        serializedCondition.FindPropertyRelative("metric").enumValueIndex =
+            (int)CharacterNumericConditionMetric.Health;
+        serializedCondition.FindPropertyRelative("comparison").enumValueIndex =
+            (int)CharacterNumericComparison.LessThan;
+        serializedCondition.FindPropertyRelative("threshold").floatValue = 9f;
+        serialized.ApplyModifiedPropertiesWithoutUndo();
+
+        CharacterNumericCondition condition =
+            definition.AttackDefinitions[0].NumericConditions[0];
+        condition.Validate();
+
+        Assert.That(
+            condition.Type,
+            Is.EqualTo(CharacterConditionType.Numeric));
+        Assert.That(
+            condition.Metric,
+            Is.EqualTo(CharacterNumericConditionMetric.StatusStackCount));
+        Assert.That(
+            condition.Comparison,
+            Is.EqualTo(CharacterNumericComparison.GreaterThanOrEqual));
+        Assert.That(condition.Threshold, Is.EqualTo(1f));
+    }
+
+    [Test]
+    public void Aisling_StatusStackCondition_ReferencesFireExplicitly()
     {
         CharacterSO aisling =
             AssetDatabase.LoadAssetAtPath<CharacterSO>(AislingCharacterPath);
@@ -419,7 +572,14 @@ public sealed class CharacterDefinitionValidationTests
             aisling.PassiveDefinitions[0].NumericConditions[0];
         Assert.That(
             condition.Type,
-            Is.EqualTo(CharacterConditionType.HasStatus));
+            Is.EqualTo(CharacterConditionType.Numeric));
+        Assert.That(
+            condition.Metric,
+            Is.EqualTo(CharacterNumericConditionMetric.StatusStackCount));
+        Assert.That(
+            condition.Comparison,
+            Is.EqualTo(CharacterNumericComparison.GreaterThanOrEqual));
+        Assert.That(condition.Threshold, Is.EqualTo(1f));
 
         string fireGuid = AssetDatabase.AssetPathToGUID(FireStatusPath);
         Assert.That(fireGuid, Is.Not.Empty);
@@ -430,6 +590,47 @@ public sealed class CharacterDefinitionValidationTests
             "The persisted Aisling asset must explicitly reference Fire. " +
             "Reading the YAML avoids false failures from an unsaved " +
             "Character Editor object cache.");
+    }
+
+    [Test]
+    public void Mirinae_StarPowderConditionAndKillReward_AreConfigured()
+    {
+        CharacterSO mirinae =
+            AssetDatabase.LoadAssetAtPath<CharacterSO>(
+                MirinaeCharacterPath);
+        StatusEffectSO starPowder =
+            AssetDatabase.LoadAssetAtPath<StatusEffectSO>(
+                StarPowderStatusPath);
+
+        Assert.That(mirinae, Is.Not.Null);
+        Assert.That(starPowder, Is.Not.Null);
+        Assert.That(mirinae.PassiveDefinitions, Is.Not.Empty);
+        Assert.That(mirinae.SkillDefinitions, Has.Count.GreaterThanOrEqualTo(2));
+
+        CharacterPassiveDefinition passive =
+            mirinae.PassiveDefinitions[0];
+        Assert.That(
+            passive.Trigger,
+            Is.EqualTo(CharacterPassiveTrigger.OnKill));
+        Assert.That(
+            passive.Effects,
+            Has.Some.Matches<CharacterEffectDefinition>(effect =>
+                effect != null &&
+                effect.Type == CharacterEffectType.ApplyStatus &&
+                effect.TargetMode == CharacterEffectTargetMode.Source &&
+                effect.StatusEffect == starPowder &&
+                Mathf.Approximately(effect.StatusStacks, 1f)));
+
+        CharacterNumericCondition condition =
+            mirinae.SkillDefinitions[1].NumericConditions[0];
+        Assert.That(
+            condition.Target,
+            Is.EqualTo(CharacterConditionTarget.Source));
+        Assert.That(
+            condition.Metric,
+            Is.EqualTo(CharacterNumericConditionMetric.StatusStackCount));
+        Assert.That(condition.StatusEffect, Is.SameAs(starPowder));
+        Assert.That(condition.Threshold, Is.EqualTo(12f));
     }
 
     [Test]

@@ -91,70 +91,31 @@ public sealed class EnemyEditorWindow : EditorWindow
 
     private void DrawToolbar()
     {
-        using (new EditorGUILayout.HorizontalScope(EditorStyles.toolbar))
-        {
-            GUILayout.Label(
-                $"Enemies: {_definitions.Count}",
-                EditorStyles.miniLabel,
-                GUILayout.Width(90f));
-            GUILayout.FlexibleSpace();
-
-            using (new EditorGUI.DisabledScope(
-                       EditorApplication.isPlayingOrWillChangePlaymode))
+        PS260714AssetEditorToolbar.Draw(
+            $"Enemies: {_definitions.Count}",
+            _selected != null,
+            () =>
             {
-                if (GUILayout.Button(
-                        "New",
-                        EditorStyles.toolbarButton,
-                        GUILayout.Width(48f)))
-                {
-                    CreateDefinition();
-                    GUIUtility.ExitGUI();
-                }
-
-                using (new EditorGUI.DisabledScope(_selected == null))
-                {
-                    if (GUILayout.Button(
-                            "Save",
-                            EditorStyles.toolbarButton,
-                            GUILayout.Width(50f)))
-                    {
-                        SaveSelected();
-                        GUIUtility.ExitGUI();
-                    }
-                    if (GUILayout.Button(
-                            "Duplicate",
-                            EditorStyles.toolbarButton,
-                            GUILayout.Width(72f)))
-                    {
-                        DuplicateSelected();
-                        GUIUtility.ExitGUI();
-                    }
-                    if (GUILayout.Button(
-                            "Rename",
-                            EditorStyles.toolbarButton,
-                            GUILayout.Width(62f)))
-                    {
-                        BeginRename();
-                    }
-                    if (GUILayout.Button(
-                            "Delete",
-                            EditorStyles.toolbarButton,
-                            GUILayout.Width(56f)))
-                    {
-                        DeleteSelected();
-                        GUIUtility.ExitGUI();
-                    }
-                }
-            }
-
-            if (GUILayout.Button(
-                    "Refresh",
-                    EditorStyles.toolbarButton,
-                    GUILayout.Width(62f)))
+                CreateDefinition();
+                GUIUtility.ExitGUI();
+            },
+            () =>
             {
-                RefreshList();
-            }
-        }
+                SaveSelected();
+                GUIUtility.ExitGUI();
+            },
+            () =>
+            {
+                DuplicateSelected();
+                GUIUtility.ExitGUI();
+            },
+            BeginRename,
+            () =>
+            {
+                DeleteSelected();
+                GUIUtility.ExitGUI();
+            },
+            RefreshList);
     }
 
     private void DrawRenameRow()

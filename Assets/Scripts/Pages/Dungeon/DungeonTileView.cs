@@ -198,7 +198,7 @@ public sealed class DungeonTileView : MonoBehaviour, IPointerClickHandler
         float duration,
         float tickInterval,
         int tickDamage,
-        Func<DungeonTileView, int, int> applyDamage)
+        Func<DungeonTileView, int, IBattleCharacter, int> applyDamage)
     {
         StatusEffectSO fire =
             StatusEffectDefinitionCatalog.FindById(StatusEffectIds.Fire);
@@ -236,7 +236,7 @@ public sealed class DungeonTileView : MonoBehaviour, IPointerClickHandler
         int stacks,
         IBattleCharacter source,
         float tickInterval,
-        Func<DungeonTileView, int, int> applyDamage)
+        Func<DungeonTileView, int, IBattleCharacter, int> applyDamage)
     {
         if (_enemies.Count == 0 || statusEffect == null)
             return false;
@@ -277,7 +277,7 @@ public sealed class DungeonTileView : MonoBehaviour, IPointerClickHandler
         CharacterStatusRemovalTarget removalTarget,
         StatusEffectSO statusEffect,
         int removalCount,
-        Func<DungeonTileView, int, int> applyDamage)
+        Func<DungeonTileView, int, IBattleCharacter, int> applyDamage)
     {
         if (_enemies.Count == 0)
             return 0;
@@ -311,7 +311,7 @@ public sealed class DungeonTileView : MonoBehaviour, IPointerClickHandler
 
     internal void TickStatusEffects(
         float deltaTime,
-        Func<DungeonTileView, int, int> applyDamage)
+        Func<DungeonTileView, int, IBattleCharacter, int> applyDamage)
     {
         if (deltaTime <= 0f || _enemies.Count == 0 || applyDamage == null)
             return;
@@ -337,7 +337,7 @@ public sealed class DungeonTileView : MonoBehaviour, IPointerClickHandler
 
     private Func<int, IBattleCharacter, bool> CreateStatusDamageCallback(
         EnemyRuntime target,
-        Func<DungeonTileView, int, int> applyDamage)
+        Func<DungeonTileView, int, IBattleCharacter, int> applyDamage)
     {
         if (target == null || applyDamage == null)
             return null;
@@ -347,7 +347,7 @@ public sealed class DungeonTileView : MonoBehaviour, IPointerClickHandler
             if (!ReferenceEquals(TopEnemy, target))
                 return false;
 
-            int appliedDamage = applyDamage(this, damage);
+            int appliedDamage = applyDamage(this, damage, source);
             if (appliedDamage > 0)
                 source?.RecordDamageDealt(appliedDamage);
             return ReferenceEquals(TopEnemy, target);

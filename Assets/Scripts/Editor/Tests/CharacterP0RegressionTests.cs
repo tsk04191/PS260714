@@ -13,6 +13,8 @@ public sealed class CharacterP0RegressionTests
         "Assets/Resources/Characters/2_Suiren.asset";
     private const string AislingAssetPath =
         "Assets/Resources/Characters/2_Aisling.asset";
+    private const string MirinaeAssetPath =
+        "Assets/Resources/Characters/2_Mirinae.asset";
     private const string SaenaAssetPath =
         "Assets/Resources/Characters/2_Saena.asset";
     private const string EmergencyKitAssetPath =
@@ -21,6 +23,8 @@ public sealed class CharacterP0RegressionTests
         "Assets/Resources/StatusEffects/Fire.asset";
     private const string OpeningAssetPath =
         "Assets/Resources/StatusEffects/Opening.asset";
+    private const string StarPowderAssetPath =
+        "Assets/Resources/StatusEffects/StarPowder.asset";
     private const string StunAssetPath =
         "Assets/Resources/StatusEffects/Stun.asset";
 
@@ -44,6 +48,273 @@ public sealed class CharacterP0RegressionTests
 
         _characters.Clear();
         _createdObjects.Clear();
+    }
+
+    [Test]
+    public void CharacterEditorStandingPreview_FitsOneByTwoWithoutStretching()
+    {
+        Rect fitted = CharacterEditorWindow.CalculateAspectFitRect(
+            new Rect(0f, 0f, 200f, 200f),
+            1024f / 2048f);
+
+        Assert.That(fitted.x, Is.EqualTo(50f).Within(0.001f));
+        Assert.That(fitted.y, Is.EqualTo(0f).Within(0.001f));
+        Assert.That(fitted.width, Is.EqualTo(100f).Within(0.001f));
+        Assert.That(fitted.height, Is.EqualTo(200f).Within(0.001f));
+    }
+
+    [Test]
+    public void CharacterEditorIconAndSdPreview_FitSquareWithoutStretching()
+    {
+        Rect fitted = CharacterEditorWindow.CalculateAspectFitRect(
+            new Rect(0f, 0f, 240f, 120f),
+            1024f / 1024f);
+
+        Assert.That(fitted.x, Is.EqualTo(60f).Within(0.001f));
+        Assert.That(fitted.y, Is.EqualTo(0f).Within(0.001f));
+        Assert.That(fitted.width, Is.EqualTo(120f).Within(0.001f));
+        Assert.That(fitted.height, Is.EqualTo(120f).Within(0.001f));
+    }
+
+    [Test]
+    public void CharacterEditorPreview_TightSpriteUsesFullSourceCanvas()
+    {
+        Texture2D texture = new(8, 16, TextureFormat.RGBA32, false);
+        _createdObjects.Add(texture);
+        Color32[] pixels = new Color32[texture.width * texture.height];
+        for (int y = 4; y < 12; y++)
+        {
+            for (int x = 2; x < 6; x++)
+                pixels[y * texture.width + x] = Color.white;
+        }
+
+        texture.SetPixels32(pixels);
+        texture.Apply();
+        Sprite sprite = Sprite.Create(
+            texture,
+            new Rect(0f, 0f, texture.width, texture.height),
+            new Vector2(0.5f, 0.5f),
+            100f,
+            0,
+            SpriteMeshType.Tight);
+        _createdObjects.Add(sprite);
+
+        bool found = CharacterEditorWindow.TryGetSpriteTextureCoordinates(
+            sprite,
+            out Texture2D previewTexture,
+            out Rect textureCoordinates);
+
+        Assert.That(found, Is.True);
+        Assert.That(previewTexture, Is.SameAs(texture));
+        Assert.That(textureCoordinates.x, Is.EqualTo(0f).Within(0.001f));
+        Assert.That(textureCoordinates.y, Is.EqualTo(0f).Within(0.001f));
+        Assert.That(textureCoordinates.width, Is.EqualTo(1f).Within(0.001f));
+        Assert.That(textureCoordinates.height, Is.EqualTo(1f).Within(0.001f));
+    }
+
+    [Test]
+    public void OnKillPassive_SelfOtherAndAllFilterExpectedKillers()
+    {
+        StatusEffectSO selfReward = CreateRuntimeStatus(
+            "test_kill_self_reward",
+            false,
+            true,
+            StatusEffectStackMode.AddAndRefreshDuration,
+            0);
+        StatusEffectSO otherReward = CreateRuntimeStatus(
+            "test_kill_other_reward",
+            false,
+            true,
+            StatusEffectStackMode.AddAndRefreshDuration,
+            0);
+        StatusEffectSO allReward = CreateRuntimeStatus(
+            "test_kill_all_reward",
+            false,
+            true,
+            StatusEffectStackMode.AddAndRefreshDuration,
+            0);
+        CharacterRuntime selfOwner = CreateCharacter(
+            CreateKillPassiveCharacter(
+                CharacterPassiveKillSource.Self,
+                selfReward));
+        CharacterRuntime otherOwner = CreateCharacter(
+            CreateKillPassiveCharacter(
+                CharacterPassiveKillSource.Other,
+                otherReward));
+        CharacterRuntime allOwner = CreateCharacter(
+            CreateKillPassiveCharacter(
+                CharacterPassiveKillSource.All,
+                allReward));
+        FakeBattleBoard board = new();
+        selfOwner.BindBattle(null, board);
+        otherOwner.BindBattle(null, board);
+        allOwner.BindBattle(null, board);
+        EnemyRuntime defeatedEnemy = CreateEnemyRuntime();
+
+        board.RaiseEnemyDefeated(new BattleEnemyDefeatedEvent(
+            defeatedEnemy,
+            selfOwner));
+
+        Assert.That(selfOwner.GetStatusStackCount(selfReward), Is.EqualTo(1));
+        Assert.That(otherOwner.GetStatusStackCount(otherReward), Is.EqualTo(1));
+        Assert.That(allOwner.GetStatusStackCount(allReward), Is.EqualTo(1));
+
+        board.RaiseEnemyDefeated(new BattleEnemyDefeatedEvent(
+            defeatedEnemy,
+            otherOwner));
+
+        Assert.That(selfOwner.GetStatusStackCount(selfReward), Is.EqualTo(1));
+        Assert.That(otherOwner.GetStatusStackCount(otherReward), Is.EqualTo(1));
+        Assert.That(allOwner.GetStatusStackCount(allReward), Is.EqualTo(2));
+
+        board.RaiseEnemyDefeated(new BattleEnemyDefeatedEvent(
+            defeatedEnemy,
+            null));
+
+        Assert.That(selfOwner.GetStatusStackCount(selfReward), Is.EqualTo(1));
+        Assert.That(otherOwner.GetStatusStackCount(otherReward), Is.EqualTo(1));
+        Assert.That(allOwner.GetStatusStackCount(allReward), Is.EqualTo(2));
+    }
+
+    [Test]
+    public void OnKillPassive_SpecificCharacterMatchesDefinition()
+    {
+        StatusEffectSO reward = CreateRuntimeStatus(
+            "test_kill_specific_reward",
+            false,
+            true,
+            StatusEffectStackMode.AddAndRefreshDuration,
+            0);
+        CharacterSO designatedDefinition =
+            LoadAsset<CharacterSO>(AislingAssetPath);
+        CharacterRuntime owner = CreateCharacter(
+            CreateKillPassiveCharacter(
+                CharacterPassiveKillSource.SpecificCharacter,
+                reward,
+                designatedDefinition));
+        CharacterRuntime designatedKiller =
+            CreateCharacter(designatedDefinition);
+        CharacterRuntime otherKiller = CreateCharacter(SuirenAssetPath);
+        FakeBattleBoard board = new();
+        owner.BindBattle(null, board);
+        EnemyRuntime defeatedEnemy = CreateEnemyRuntime();
+
+        board.RaiseEnemyDefeated(new BattleEnemyDefeatedEvent(
+            defeatedEnemy,
+            otherKiller));
+        Assert.That(owner.GetStatusStackCount(reward), Is.Zero);
+
+        board.RaiseEnemyDefeated(new BattleEnemyDefeatedEvent(
+            defeatedEnemy,
+            designatedKiller));
+        Assert.That(owner.GetStatusStackCount(reward), Is.EqualTo(1));
+    }
+
+    [Test]
+    public void OnKillPassive_RebindingDoesNotDuplicateSubscription()
+    {
+        StatusEffectSO reward = CreateRuntimeStatus(
+            "test_kill_rebind_reward",
+            false,
+            true,
+            StatusEffectStackMode.AddAndRefreshDuration,
+            0);
+        CharacterRuntime owner = CreateCharacter(
+            CreateKillPassiveCharacter(
+                CharacterPassiveKillSource.Self,
+                reward));
+        FakeBattleBoard board = new();
+        owner.BindBattle(null, board);
+        owner.BindBattle(null, board);
+        EnemyRuntime defeatedEnemy = CreateEnemyRuntime();
+
+        board.RaiseEnemyDefeated(new BattleEnemyDefeatedEvent(
+            defeatedEnemy,
+            owner));
+        Assert.That(owner.GetStatusStackCount(reward), Is.EqualTo(1));
+
+        owner.BindBattle(null, null);
+        board.RaiseEnemyDefeated(new BattleEnemyDefeatedEvent(
+            defeatedEnemy,
+            owner));
+        Assert.That(owner.GetStatusStackCount(reward), Is.EqualTo(1));
+    }
+
+    [Test]
+    public void MirinaeKillPassive_GainsResourceAndStarPowder()
+    {
+        CharacterRuntime mirinae = CreateCharacter(MirinaeAssetPath);
+        CharacterRuntime killer = CreateCharacter(SuirenAssetPath);
+        StatusEffectSO starPowder =
+            LoadAsset<StatusEffectSO>(StarPowderAssetPath);
+        FakeActiveSkillResource resource = new(0);
+        FakeBattleBoard board = new();
+        mirinae.BindBattle(resource, board);
+
+        board.RaiseEnemyDefeated(new BattleEnemyDefeatedEvent(
+            CreateEnemyRuntime(),
+            killer));
+
+        Assert.That(resource.Current, Is.EqualTo(1));
+        Assert.That(resource.TryGainCallCount, Is.EqualTo(1));
+        Assert.That(
+            mirinae.GetStatusStackCount(starPowder),
+            Is.EqualTo(1));
+    }
+
+    [Test]
+    public void MirinaeSequence_SourceStarPowderConditionFiltersReusedTarget()
+    {
+        CharacterRuntime mirinae = CreateCharacter(MirinaeAssetPath);
+        StatusEffectSO starPowder =
+            LoadAsset<StatusEffectSO>(StarPowderAssetPath);
+        EnemyRuntime target = CreateEnemyRuntime();
+        FakeActiveSkillResource resource = new(10);
+        FakeBattleBoard board = new()
+        {
+            LivingEnemyCountValue = 1,
+            SelectedEnemyTargets = new[] { target },
+            ReturnCenterTargetsForAreaExpansion = true,
+        };
+        mirinae.BindBattle(resource, board);
+        mirinae.TickBattle(3f, board);
+        Assert.That(
+            board.DamageTargetSnapshots,
+            Has.Count.EqualTo(1),
+            "A normal attack must establish the reusable skill target.");
+
+        Assert.That(
+            mirinae.ApplyStatusEffect(starPowder, 1f, 11),
+            Is.True);
+        Assert.That(mirinae.TryActivateActiveSkill(), Is.True);
+
+        Assert.That(
+            board.FilterCharacterTargetCallCount,
+            Is.EqualTo(1));
+        Assert.That(
+            board.DamageTargetSnapshots,
+            Has.Count.EqualTo(2),
+            "At 11 stacks only the first sequence step may execute.");
+        Assert.That(
+            mirinae.GetStatusStackCount(starPowder),
+            Is.EqualTo(11));
+
+        Assert.That(
+            mirinae.ApplyStatusEffect(starPowder, 1f, 1),
+            Is.True);
+        Assert.That(mirinae.TryActivateActiveSkill(), Is.True);
+
+        Assert.That(
+            board.FilterCharacterTargetCallCount,
+            Is.EqualTo(2));
+        Assert.That(
+            board.DamageTargetSnapshots,
+            Has.Count.EqualTo(4),
+            "At 12 stacks the source-gated second sequence step must run.");
+        Assert.That(
+            mirinae.GetStatusStackCount(starPowder),
+            Is.Zero,
+            "The second step must consume all 12 StarPowder stacks.");
     }
 
     [Test]
@@ -4575,6 +4846,55 @@ public sealed class CharacterP0RegressionTests
         return character;
     }
 
+    private CharacterSO CreateKillPassiveCharacter(
+        CharacterPassiveKillSource killSource,
+        StatusEffectSO rewardStatus,
+        CharacterSO specifiedKiller = null)
+    {
+        CharacterSO definition =
+            ScriptableObject.CreateInstance<CharacterSO>();
+        definition.hideFlags = HideFlags.HideAndDontSave;
+        definition.name = $"KillPassive_{killSource}";
+        _createdObjects.Add(definition);
+
+        SerializedObject serialized = new(definition);
+        serialized.FindProperty("characterId").stringValue =
+            Guid.NewGuid().ToString("N");
+        serialized.FindProperty("characterName").stringValue =
+            definition.name;
+        SerializedProperty passives =
+            serialized.FindProperty("passiveDefinitions");
+        passives.arraySize = 1;
+        SerializedProperty passive = passives.GetArrayElementAtIndex(0);
+        SetSections(
+            passive.FindPropertyRelative("sections"),
+            (int)CharacterPassiveSectionType.Linkage,
+            (int)CharacterPassiveSectionType.Subject,
+            (int)CharacterPassiveSectionType.Ability);
+        passive.FindPropertyRelative("trigger").enumValueIndex =
+            (int)CharacterPassiveTrigger.OnKill;
+        passive.FindPropertyRelative("killSource").enumValueIndex =
+            (int)killSource;
+        passive.FindPropertyRelative(
+            "specifiedKillerCharacter").objectReferenceValue =
+            specifiedKiller;
+        passive.FindPropertyRelative("linkage").enumValueIndex =
+            (int)CharacterActionLinkage.None;
+        passive.FindPropertyRelative("targetFaction").enumValueIndex =
+            (int)CharacterTargetFaction.Ally;
+        passive.FindPropertyRelative("subject").enumValueIndex =
+            (int)CharacterAttackSubject.Self;
+        passive.FindPropertyRelative("subjectCount").intValue = 1;
+        passive.FindPropertyRelative("damageType").enumValueIndex =
+            (int)CharacterAttackDamageType.StatusEffect;
+        passive.FindPropertyRelative("statusEffect").objectReferenceValue =
+            rewardStatus;
+        passive.FindPropertyRelative("statusDuration").floatValue = 5f;
+        passive.FindPropertyRelative("statusStacks").floatValue = 1f;
+        serialized.ApplyModifiedPropertiesWithoutUndo();
+        return definition;
+    }
+
     private CharacterSO CreateExplicitDamageAndStatusCharacter(
         StatusEffectSO statusEffect)
     {
@@ -5474,6 +5794,7 @@ public sealed class CharacterP0RegressionTests
         public bool HasEmptyEnemyTile => false;
         public int LivingEnemyCountValue { get; set; }
         public bool SimulateAislingAreaSequence { get; set; }
+        public bool ReturnCenterTargetsForAreaExpansion { get; set; }
         public bool ApplyEffectsToEnemyRuntime { get; set; }
         public bool ForceStatusApplyFailure { get; set; }
         public Action<EnemyRuntime, int> TargetDamageApplied { get; set; }
@@ -5484,6 +5805,7 @@ public sealed class CharacterP0RegressionTests
         public int AreaExpansionCountAtFirstDamage { get; private set; }
         public int AlliedStatusRemovalCallCount { get; private set; }
         public int CharacterTargetSelectionCallCount { get; private set; }
+        public int FilterCharacterTargetCallCount { get; private set; }
         public int AlliedCharacterTargetSelectionCallCount
             { get; private set; }
         public Queue<IReadOnlyList<EnemyRuntime>> PlannedEnemySelections
@@ -5504,11 +5826,7 @@ public sealed class CharacterP0RegressionTests
         public List<StatusEffectSO> AppliedStatuses { get; } = new();
         public int StatusApplyCallCount { get; private set; }
 
-        public event Action<EnemyRuntime> EnemyDefeated
-        {
-            add { }
-            remove { }
-        }
+        public event Action<BattleEnemyDefeatedEvent> EnemyDefeated;
         public event Action<BattleStatusAppliedEvent> StatusApplied;
 
         public void ConfigureAislingTargets(
@@ -5527,6 +5845,11 @@ public sealed class CharacterP0RegressionTests
         public void RaiseStatusApplied(BattleStatusAppliedEvent eventData)
         {
             NotifyStatusApplied(eventData);
+        }
+
+        public void RaiseEnemyDefeated(BattleEnemyDefeatedEvent eventData)
+        {
+            EnemyDefeated?.Invoke(eventData);
         }
 
         public void NotifyStatusApplied(BattleStatusAppliedEvent eventData)
@@ -5596,10 +5919,48 @@ public sealed class CharacterP0RegressionTests
                 : Array.Empty<IBattleCharacter>();
         }
 
+        public IReadOnlyList<EnemyRuntime> FilterCharacterTargets(
+            IBattleCharacter source,
+            IReadOnlyList<EnemyRuntime> targets,
+            CharacterConditionMatchMode conditionMatchMode,
+            IReadOnlyList<CharacterNumericCondition> numericConditions)
+        {
+            FilterCharacterTargetCallCount++;
+            bool hasTargets = targets != null && targets.Count > 0;
+            return CharacterConditionEvaluator.AllowsAction(
+                    source,
+                    conditionMatchMode,
+                    numericConditions,
+                    hasTargets)
+                ? targets ?? Array.Empty<EnemyRuntime>()
+                : Array.Empty<EnemyRuntime>();
+        }
+
+        public IReadOnlyList<IBattleCharacter> FilterAlliedCharacters(
+            IBattleCharacter source,
+            IReadOnlyList<IBattleCharacter> targets,
+            CharacterConditionMatchMode conditionMatchMode,
+            IReadOnlyList<CharacterNumericCondition> numericConditions)
+        {
+            bool hasTargets = targets != null && targets.Count > 0;
+            return CharacterConditionEvaluator.AllowsAction(
+                    source,
+                    conditionMatchMode,
+                    numericConditions,
+                    hasTargets)
+                ? targets ?? Array.Empty<IBattleCharacter>()
+                : Array.Empty<IBattleCharacter>();
+        }
+
         public IReadOnlyList<EnemyRuntime> ExpandCharacterAreaTargets(
             IReadOnlyList<EnemyRuntime> centerTargets,
             IReadOnlyList<CharacterTargetAreaOffset> areaOffsets)
         {
+            if (ReturnCenterTargetsForAreaExpansion)
+            {
+                return centerTargets ?? Array.Empty<EnemyRuntime>();
+            }
+
             if (!SimulateAislingAreaSequence ||
                 centerTargets == null ||
                 centerTargets.Count == 0 ||

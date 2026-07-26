@@ -241,3 +241,12 @@ character.aisling.description,캐릭터 설명,body,,아카데미 1학년생,Arc
 character.suiren.name,캐릭터 이름,title,,스이렌,Suiren
 character.suiren.description,캐릭터 설명,body,,아카데미 1학년생,Arcademy 1st grade
 character.unnamed.name,캐릭터 이름,title,,이름 없는 캐릭터,Unnamed Character
+character.unnamed.description,캐릭터 설명,body,,이름 없는 캐릭터,Unnamed Character
+character.byeolha.name,캐릭터 이름,title,,별하,Byeolha
+character.byeolha.description,캐릭터 설명,body,,아카데미 천문학부,Astronomy of Academy
+character.isolde.name,캐릭터 이름,title,,이졸데,Isolde
+character.isolde.description,캐릭터 설명,body,,아카데미 천문학부,Astronomy of Academy
+character.mirinae.name,캐릭터 이름,title,,미리내,Mirinae
+character.mirinae.description,캐릭터 설명,body,,아카데미 천문학부 부장," Director of the Astronomy of Academy"
+status.starpowder.name,상태 이름,title,,별가루,Star Dust
+status.starpowder.description,상태 설명,tooltip,,효과 없이 스택만 누적되는 영구 상태입니다.,A permanent status that only stores stacks.

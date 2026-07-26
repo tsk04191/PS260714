@@ -9,6 +9,7 @@ using Random = UnityEngine.Random;
 public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard
 {
     private const int MaximumStatusEventsPerDispatch = 128;
+    private const int MaximumDefeatEventsPerDispatch = 128;
     public const int MinimumGridSize = 3;
     public const int MaximumGridSize = 9;
 
@@ -25,6 +26,8 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard
     private bool _initialized;
     private readonly Queue<BattleStatusAppliedEvent> _statusEventQueue = new();
     private bool _dispatchingStatusEvents;
+    private readonly Queue<BattleEnemyDefeatedEvent> _defeatEventQueue = new();
+    private bool _dispatchingDefeatEvents;
 
     public int GridSize { get; private set; } = MinimumGridSize;
     public RectTransform HighlightRect => boardRect != null
@@ -58,7 +61,7 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard
             return false;
         }
     }
-    public event Action<EnemyRuntime> EnemyDefeated;
+    public event Action<BattleEnemyDefeatedEvent> EnemyDefeated;
     public event Action<EnemyRuntime> EnemyClicked;
     public event Action<BattleStatusAppliedEvent> StatusApplied;
 
@@ -96,6 +99,43 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard
         finally
         {
             _dispatchingStatusEvents = false;
+        }
+    }
+
+    private void NotifyEnemyDefeated(BattleEnemyDefeatedEvent eventData)
+    {
+        if (!eventData.IsValid)
+            return;
+
+        _defeatEventQueue.Enqueue(eventData);
+        if (_dispatchingDefeatEvents)
+            return;
+
+        _dispatchingDefeatEvents = true;
+        try
+        {
+            int processedCount = 0;
+            while (_defeatEventQueue.Count > 0 &&
+                   processedCount < MaximumDefeatEventsPerDispatch)
+            {
+                BattleEnemyDefeatedEvent queuedEvent =
+                    _defeatEventQueue.Dequeue();
+                EnemyDefeated?.Invoke(queuedEvent);
+                processedCount++;
+            }
+
+            if (_defeatEventQueue.Count > 0)
+            {
+                Debug.LogError(
+                    "Enemy defeat event dispatch limit exceeded. " +
+                    "Remaining chained defeat events were discarded.",
+                    this);
+                _defeatEventQueue.Clear();
+            }
+        }
+        finally
+        {
+            _dispatchingDefeatEvents = false;
         }
     }
 
@@ -410,6 +450,7 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard
         targetCount = Mathf.Max(1, targetCount);
         List<DungeonTileView> candidates = CollectPriorityTargetTiles();
         candidates.RemoveAll(tile => !MatchesCharacterConditions(
+            source,
             tile,
             conditionMatchMode,
             numericConditions));
@@ -494,6 +535,7 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard
         foreach (IBattleCharacter character in _battleCharacters)
         {
             if (character != null && MatchesCharacterConditions(
+                    source,
                     character,
                     conditionMatchMode,
                     numericConditions))
@@ -564,6 +606,62 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard
         return candidates;
     }
 
+    public IReadOnlyList<EnemyRuntime> FilterCharacterTargets(
+        IBattleCharacter source,
+        IReadOnlyList<EnemyRuntime> targets,
+        CharacterConditionMatchMode conditionMatchMode,
+        IReadOnlyList<CharacterNumericCondition> numericConditions)
+    {
+        if (source == null || targets == null || targets.Count == 0)
+            return Array.Empty<EnemyRuntime>();
+        if (numericConditions == null || numericConditions.Count == 0)
+            return targets;
+
+        List<EnemyRuntime> result = new(targets.Count);
+        foreach (EnemyRuntime target in targets)
+        {
+            if (target != null &&
+                TryFindEnemyTile(target, out DungeonTileView tile) &&
+                MatchesCharacterConditions(
+                    source,
+                    tile,
+                    conditionMatchMode,
+                    numericConditions))
+            {
+                result.Add(target);
+            }
+        }
+
+        return result;
+    }
+
+    public IReadOnlyList<IBattleCharacter> FilterAlliedCharacters(
+        IBattleCharacter source,
+        IReadOnlyList<IBattleCharacter> targets,
+        CharacterConditionMatchMode conditionMatchMode,
+        IReadOnlyList<CharacterNumericCondition> numericConditions)
+    {
+        if (source == null || targets == null || targets.Count == 0)
+            return Array.Empty<IBattleCharacter>();
+        if (numericConditions == null || numericConditions.Count == 0)
+            return targets;
+
+        List<IBattleCharacter> result = new(targets.Count);
+        foreach (IBattleCharacter target in targets)
+        {
+            if (target != null && MatchesCharacterConditions(
+                    source,
+                    target,
+                    conditionMatchMode,
+                    numericConditions))
+            {
+                result.Add(target);
+            }
+        }
+
+        return result;
+    }
+
     public IReadOnlyList<EnemyRuntime> ExpandCharacterAreaTargets(
         IReadOnlyList<EnemyRuntime> centerTargets,
         IReadOnlyList<CharacterTargetAreaOffset> areaOffsets)
@@ -613,6 +711,7 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard
     }
 
     private static bool MatchesCharacterConditions(
+        IBattleCharacter source,
         DungeonTileView tile,
         CharacterConditionMatchMode matchMode,
         IReadOnlyList<CharacterNumericCondition> conditions)
@@ -630,35 +729,41 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard
                 continue;
 
             evaluatedAny = true;
-            bool matched;
-            if (condition.Type == CharacterConditionType.HasStatus)
+            if (condition.Target == CharacterConditionTarget.Source)
             {
-                matched = EnemyHasCharacterStatus(
-                    tile.TopEnemy,
-                    condition.StatusEffect);
+                bool sourceMatched =
+                    CharacterConditionEvaluator.MatchesCharacter(
+                        condition,
+                        source);
+                if (matchAny && sourceMatched)
+                    return true;
+                if (!matchAny && !sourceMatched)
+                    return false;
+                continue;
             }
-            else
+
+            float value = condition.Metric switch
             {
-                float value = condition.Metric switch
-                {
-                    CharacterNumericConditionMetric.Health =>
-                        tile.TopEnemy.Health,
-                    CharacterNumericConditionMetric.HealthPercentage =>
-                        tile.TopEnemy.MaxHealth > 0
-                            ? tile.TopEnemy.Health * 100f /
-                              tile.TopEnemy.MaxHealth
-                            : 0f,
-                    CharacterNumericConditionMetric.StackCount =>
-                        tile.StackCount,
-                    CharacterNumericConditionMetric.Shield =>
-                        tile.TopEnemy.CurrentShield,
-                    _ => 0f
-                };
-                matched = CompareCharacterCondition(
-                    value,
-                    condition.Comparison,
-                    condition.Threshold);
-            }
+                CharacterNumericConditionMetric.Health =>
+                    tile.TopEnemy.Health,
+                CharacterNumericConditionMetric.HealthPercentage =>
+                    tile.TopEnemy.MaxHealth > 0
+                        ? tile.TopEnemy.Health * 100f /
+                          tile.TopEnemy.MaxHealth
+                        : 0f,
+                CharacterNumericConditionMetric.StackCount =>
+                    tile.StackCount,
+                CharacterNumericConditionMetric.Shield =>
+                    tile.TopEnemy.CurrentShield,
+                CharacterNumericConditionMetric.StatusStackCount =>
+                    tile.TopEnemy.GetStatusStackCount(
+                        condition.StatusEffect),
+                _ => 0f
+            };
+            bool matched = CharacterConditionEvaluator.Compare(
+                value,
+                condition.Comparison,
+                condition.Threshold);
             if (matchAny && matched)
                 return true;
             if (!matchAny && !matched)
@@ -669,6 +774,7 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard
     }
 
     private static bool MatchesCharacterConditions(
+        IBattleCharacter source,
         IBattleCharacter character,
         CharacterConditionMatchMode matchMode,
         IReadOnlyList<CharacterNumericCondition> conditions)
@@ -686,36 +792,14 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard
                 continue;
 
             evaluatedAny = true;
-            bool matched;
-            if (condition.Type == CharacterConditionType.HasStatus)
-            {
-                matched = character.HasStatusEffect(
-                    condition.StatusEffect);
-            }
-            else
-            {
-                float value = condition.Metric switch
-                {
-                    CharacterNumericConditionMetric.Health =>
-                        character.CurrentHealth,
-                    CharacterNumericConditionMetric.HealthPercentage =>
-                        character.MaximumHealth > 0
-                            ? character.CurrentHealth * 100f /
-                              character.MaximumHealth
-                            : 0f,
-                    CharacterNumericConditionMetric.AttackPower =>
-                        character.CurrentAttackPower,
-                    CharacterNumericConditionMetric.AttackSpeed =>
-                        character.CurrentAttackSpeed,
-                    CharacterNumericConditionMetric.Shield =>
-                        character.CurrentShield,
-                    _ => 0f
-                };
-                matched = CompareCharacterCondition(
-                    value,
-                    condition.Comparison,
-                    condition.Threshold);
-            }
+            IBattleCharacter evaluatedCharacter =
+                condition.Target == CharacterConditionTarget.Source
+                    ? source
+                    : character;
+            bool matched =
+                CharacterConditionEvaluator.MatchesCharacter(
+                    condition,
+                    evaluatedCharacter);
             if (matchAny && matched)
                 return true;
             if (!matchAny && !matched)
@@ -723,13 +807,6 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard
         }
 
         return !evaluatedAny || !matchAny;
-    }
-
-    private static bool EnemyHasCharacterStatus(
-        EnemyRuntime enemy,
-        StatusEffectSO statusEffect)
-    {
-        return enemy != null && enemy.HasStatusEffect(statusEffect);
     }
 
     private static float GetCharacterMetric(
@@ -797,7 +874,11 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard
 
             if (showAttackRange)
                 tile.ShowAttackRange();
-            totalDamage += TryDamageTile(tile, damage, damageType);
+            totalDamage += TryDamageTile(
+                tile,
+                damage,
+                damageType,
+                source);
         }
 
         return totalDamage;
@@ -1921,6 +2002,8 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard
     {
         _forcedPriorityTarget = null;
         _forcedPriorityRemaining = 0f;
+        _statusEventQueue.Clear();
+        _defeatEventQueue.Clear();
         ClearAllStacks();
     }
 
@@ -1992,6 +2075,27 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard
         int damage,
         CharacterAttackDamageType damageType)
     {
+        return TryDamageTile(targetTile, damage, damageType, null);
+    }
+
+    private int TryDamageTile(
+        DungeonTileView targetTile,
+        int damage,
+        IBattleCharacter source)
+    {
+        return TryDamageTile(
+            targetTile,
+            damage,
+            CharacterAttackDamageType.Physical,
+            source);
+    }
+
+    private int TryDamageTile(
+        DungeonTileView targetTile,
+        int damage,
+        CharacterAttackDamageType damageType,
+        IBattleCharacter source)
+    {
         if (targetTile == null || targetTile.TopEnemy == null || damage <= 0)
             return 0;
 
@@ -2013,7 +2117,9 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard
         if (appliedDamage > 0 && damagedEnemy.Health <= 0)
         {
             ExecuteDeathAbilities(damageReceiver, damagedEnemy);
-            EnemyDefeated?.Invoke(damagedEnemy);
+            NotifyEnemyDefeated(new BattleEnemyDefeatedEvent(
+                damagedEnemy,
+                source));
         }
 
         return appliedDamage;

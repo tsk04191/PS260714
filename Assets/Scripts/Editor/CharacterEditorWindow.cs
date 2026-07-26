@@ -13,6 +13,9 @@ public sealed class CharacterEditorWindow : EditorWindow
     private const string PassiveDefinitionsPropertyName = "passiveDefinitions";
     private const string PassiveSectionsPropertyName = "sections";
     private const string PassiveTriggerPropertyName = "trigger";
+    private const string PassiveKillSourcePropertyName = "killSource";
+    private const string PassiveSpecifiedKillerPropertyName =
+        "specifiedKillerCharacter";
     private const string PassiveStatusTargetPropertyName = "statusTarget";
     private const string PassiveTriggerStatusEffectPropertyName =
         "triggerStatusEffect";
@@ -48,6 +51,7 @@ public sealed class CharacterEditorWindow : EditorWindow
     private const string ConditionMatchModePropertyName = "conditionMatchMode";
     private const string NumericConditionsPropertyName = "numericConditions";
     private const string ConditionTypePropertyName = "type";
+    private const string ConditionTargetPropertyName = "target";
     private const string NumericConditionMetricPropertyName = "metric";
     private const string NumericComparisonPropertyName = "comparison";
     private const string NumericThresholdPropertyName = "threshold";
@@ -108,7 +112,16 @@ public sealed class CharacterEditorWindow : EditorWindow
     {
         "공격 시",
         "상태 획득 시",
-        "쿨다운마다"
+        "쿨다운마다",
+        "킬 마다"
+    };
+
+    private static readonly string[] PassiveKillSourceOptions =
+    {
+        "자신",
+        "자신 외",
+        "지정된 캐릭터",
+        "전체"
     };
 
     private static readonly string[] PassiveStatusTargetOptions =
@@ -179,18 +192,19 @@ public sealed class CharacterEditorWindow : EditorWindow
         "하나 이상 만족 (OR)"
     };
 
-    private static readonly string[] ConditionTypeOptions =
+    private static readonly string[] ConditionTargetOptions =
     {
-        "수치",
-        "상태 보유"
+        "행동 대상",
+        "시전자 (자신)"
     };
 
     private static readonly string[] NumericConditionMetricOptions =
     {
         "체력",
         "체력 비율 (%)",
-        "스택",
-        "보호막"
+        "적 타일 스택",
+        "보호막",
+        "상태 스택"
     };
 
     private static readonly int[] EnemyNumericConditionMetricValues =
@@ -198,7 +212,8 @@ public sealed class CharacterEditorWindow : EditorWindow
         (int)CharacterNumericConditionMetric.Health,
         (int)CharacterNumericConditionMetric.HealthPercentage,
         (int)CharacterNumericConditionMetric.StackCount,
-        (int)CharacterNumericConditionMetric.Shield
+        (int)CharacterNumericConditionMetric.Shield,
+        (int)CharacterNumericConditionMetric.StatusStackCount
     };
 
     private static readonly string[] AllyNumericConditionMetricOptions =
@@ -207,7 +222,8 @@ public sealed class CharacterEditorWindow : EditorWindow
         "체력 비율 (%)",
         "공격력",
         "속도",
-        "보호막"
+        "보호막",
+        "상태 스택"
     };
 
     private static readonly int[] AllyNumericConditionMetricValues =
@@ -216,7 +232,8 @@ public sealed class CharacterEditorWindow : EditorWindow
         (int)CharacterNumericConditionMetric.HealthPercentage,
         (int)CharacterNumericConditionMetric.AttackPower,
         (int)CharacterNumericConditionMetric.AttackSpeed,
-        (int)CharacterNumericConditionMetric.Shield
+        (int)CharacterNumericConditionMetric.Shield,
+        (int)CharacterNumericConditionMetric.StatusStackCount
     };
 
     private static readonly string[] NumericComparisonOptions =
@@ -502,73 +519,35 @@ public sealed class CharacterEditorWindow : EditorWindow
 
     private void DrawTopToolbar()
     {
-        EditorGUILayout.BeginHorizontal(EditorStyles.toolbar);
-        GUILayout.Label(
+        PS260714AssetEditorToolbar.Draw(
             $"Characters: {_characters.Count}",
-            EditorStyles.miniLabel,
-            GUILayout.Width(96f));
-
-        GUILayout.FlexibleSpace();
-        using (new EditorGUI.DisabledScope(
-                   EditorApplication.isPlayingOrWillChangePlaymode))
-        {
-            if (GUILayout.Button(
-                    "New",
-                    EditorStyles.toolbarButton,
-                    GUILayout.Width(56f)))
+            _selectedCharacter != null,
+            () =>
             {
                 CreateCharacter();
                 GUIUtility.ExitGUI();
-            }
-
-            using (new EditorGUI.DisabledScope(_selectedCharacter == null))
+            },
+            () =>
             {
-                if (GUILayout.Button(
-                        "Save",
-                        EditorStyles.toolbarButton,
-                        GUILayout.Width(56f)))
-                {
-                    SaveSelectedCharacter();
-                    GUIUtility.ExitGUI();
-                }
-
-                if (GUILayout.Button(
-                        "Duplicate",
-                        EditorStyles.toolbarButton,
-                        GUILayout.Width(76f)))
-                {
-                    DuplicateSelectedCharacter();
-                    GUIUtility.ExitGUI();
-                }
-
-                if (GUILayout.Button(
-                        "Rename",
-                        EditorStyles.toolbarButton,
-                        GUILayout.Width(64f)))
-                {
-                    BeginRenameSelectedCharacter();
-                }
-
-                if (GUILayout.Button(
-                        "Delete",
-                        EditorStyles.toolbarButton,
-                        GUILayout.Width(60f)))
-                {
-                    DeleteSelectedCharacter();
-                    GUIUtility.ExitGUI();
-                }
-            }
-        }
-
-        if (GUILayout.Button(
-                "Refresh",
-                EditorStyles.toolbarButton,
-                GUILayout.Width(64f)))
-        {
-            RefreshLocalizationKeys();
-            RefreshCharacterList();
-        }
-        EditorGUILayout.EndHorizontal();
+                SaveSelectedCharacter();
+                GUIUtility.ExitGUI();
+            },
+            () =>
+            {
+                DuplicateSelectedCharacter();
+                GUIUtility.ExitGUI();
+            },
+            BeginRenameSelectedCharacter,
+            () =>
+            {
+                DeleteSelectedCharacter();
+                GUIUtility.ExitGUI();
+            },
+            () =>
+            {
+                RefreshLocalizationKeys();
+                RefreshCharacterList();
+            });
 
         if (_isRenamingSelectedCharacter)
             DrawRenameSelectedCharacter();
@@ -666,7 +645,7 @@ public sealed class CharacterEditorWindow : EditorWindow
             "Button",
             GUILayout.Height(42f));
         if (clicked && !selected)
-            SelectCharacter(character, true);
+            SelectCharacter(character, false);
     }
 
     private static void DrawSeparator()
@@ -798,13 +777,13 @@ public sealed class CharacterEditorWindow : EditorWindow
         DrawSpriteProfile(
             "스탠딩 스프라이트",
             "standingSprite",
-            1f / 2f,
+            new Vector2Int(1024, 2048),
             new Vector2(110f, 220f));
         EditorGUILayout.Space(8f);
         DrawSpriteProfile(
             "Icon 스프라이트",
             "iconSprite",
-            1f,
+            new Vector2Int(1024, 1024),
             new Vector2(150f, 150f));
         EditorGUILayout.Space(12f);
 
@@ -858,36 +837,36 @@ public sealed class CharacterEditorWindow : EditorWindow
             _sdSpriteScroll,
             true,
             false,
-            GUILayout.Height(235f));
+            GUILayout.Height(260f));
         EditorGUILayout.BeginHorizontal();
         DrawSpriteProfile(
             "대기 SD",
             "waitingSdSprite",
-            1f,
+            new Vector2Int(1024, 1024),
             new Vector2(150f, 150f));
         EditorGUILayout.Space(8f);
         DrawSpriteProfile(
             "공격 SD",
             "attackSdSprite",
-            1f,
+            new Vector2Int(1024, 1024),
             new Vector2(150f, 150f));
         EditorGUILayout.Space(8f);
         DrawSpriteProfile(
             "피격 SD",
             "damagedSdSprite",
-            1f,
+            new Vector2Int(1024, 1024),
             new Vector2(150f, 150f));
         EditorGUILayout.Space(8f);
         DrawSpriteProfile(
             "기술 SD",
             "skillSdSprite",
-            1f,
+            new Vector2Int(1024, 1024),
             new Vector2(150f, 150f));
         EditorGUILayout.Space(8f);
         DrawSpriteProfile(
             "패시브 SD",
             "passiveSdSprite",
-            1f,
+            new Vector2Int(1024, 1024),
             new Vector2(150f, 150f));
         EditorGUILayout.EndHorizontal();
         EditorGUILayout.EndScrollView();
@@ -898,13 +877,20 @@ public sealed class CharacterEditorWindow : EditorWindow
     private void DrawSpriteProfile(
         string label,
         string propertyName,
-        float expectedAspect,
+        Vector2Int expectedPixelSize,
         Vector2 previewSize)
     {
+        float expectedAspect =
+            expectedPixelSize.x / (float)expectedPixelSize.y;
         EditorGUILayout.BeginVertical(GUILayout.Width(previewSize.x));
         EditorGUILayout.LabelField(
-            $"{label} ({FormatAspect(expectedAspect)})",
+            label,
             EditorStyles.boldLabel,
+            GUILayout.Width(previewSize.x));
+        EditorGUILayout.LabelField(
+            $"{expectedPixelSize.x} × {expectedPixelSize.y} · " +
+            FormatAspect(expectedAspect),
+            EditorStyles.miniLabel,
             GUILayout.Width(previewSize.x));
 
         SerializedProperty property =
@@ -933,20 +919,21 @@ public sealed class CharacterEditorWindow : EditorWindow
         EditorGUI.DrawRect(previewRect, new Color(0.08f, 0.08f, 0.08f, 1f));
         if (sprite != null)
         {
-            Texture2D preview = AssetPreview.GetAssetPreview(sprite) ??
-                                AssetPreview.GetMiniThumbnail(sprite);
-            if (preview != null)
-                GUI.DrawTexture(previewRect, preview, ScaleMode.ScaleToFit, true);
+            DrawSpritePreview(previewRect, sprite);
 
             float actualAspect = sprite.rect.height > 0f
                 ? sprite.rect.width / sprite.rect.height
                 : 0f;
-            if (!Mathf.Approximately(actualAspect, expectedAspect) &&
-                Mathf.Abs(actualAspect - expectedAspect) > 0.01f)
+            int actualWidth = Mathf.RoundToInt(sprite.rect.width);
+            int actualHeight = Mathf.RoundToInt(sprite.rect.height);
+            if (actualWidth != expectedPixelSize.x ||
+                actualHeight != expectedPixelSize.y)
             {
                 EditorGUILayout.HelpBox(
-                    $"현재 비율 {actualAspect:0.##}:1 / " +
-                    $"권장 {FormatAspect(expectedAspect)}",
+                    $"현재 {actualWidth} × {actualHeight} " +
+                    $"({actualAspect:0.##}:1) / 권장 " +
+                    $"{expectedPixelSize.x} × {expectedPixelSize.y} " +
+                    $"({FormatAspect(expectedAspect)})",
                     MessageType.Warning);
             }
         }
@@ -962,6 +949,92 @@ public sealed class CharacterEditorWindow : EditorWindow
         }
 
         EditorGUILayout.EndVertical();
+    }
+
+    private static void DrawSpritePreview(Rect previewRect, Sprite sprite)
+    {
+        if (TryGetSpriteTextureCoordinates(sprite, out Texture2D texture,
+                out Rect textureCoordinates))
+        {
+            float spriteAspect = sprite.rect.height > 0f
+                ? sprite.rect.width / sprite.rect.height
+                : 1f;
+            Rect contentRect = CalculateAspectFitRect(
+                new Rect(
+                    previewRect.x + 1f,
+                    previewRect.y + 1f,
+                    Mathf.Max(0f, previewRect.width - 2f),
+                    Mathf.Max(0f, previewRect.height - 2f)),
+                spriteAspect);
+            GUI.DrawTextureWithTexCoords(
+                contentRect,
+                texture,
+                textureCoordinates,
+                true);
+            return;
+        }
+
+        Texture2D fallback = AssetPreview.GetAssetPreview(sprite) ??
+                             AssetPreview.GetMiniThumbnail(sprite);
+        if (fallback != null)
+            GUI.DrawTexture(previewRect, fallback, ScaleMode.ScaleToFit, true);
+    }
+
+    internal static bool TryGetSpriteTextureCoordinates(
+        Sprite sprite,
+        out Texture2D texture,
+        out Rect textureCoordinates)
+    {
+        texture = sprite != null ? sprite.texture : null;
+        textureCoordinates = default;
+        if (texture == null || texture.width <= 0 || texture.height <= 0)
+            return false;
+
+        // textureRect may exclude transparent margins for Tight mesh sprites.
+        // Character artwork relies on its full source canvas for composition.
+        if (sprite.packed)
+            return false;
+
+        Rect sourceRect = sprite.rect;
+        textureCoordinates = new Rect(
+            sourceRect.x / texture.width,
+            sourceRect.y / texture.height,
+            sourceRect.width / texture.width,
+            sourceRect.height / texture.height);
+        return textureCoordinates.width > 0f &&
+               textureCoordinates.height > 0f;
+    }
+
+    internal static Rect CalculateAspectFitRect(
+        Rect bounds,
+        float contentAspect)
+    {
+        if (bounds.width <= 0f ||
+            bounds.height <= 0f ||
+            contentAspect <= 0f ||
+            float.IsNaN(contentAspect) ||
+            float.IsInfinity(contentAspect))
+        {
+            return bounds;
+        }
+
+        float boundsAspect = bounds.width / bounds.height;
+        if (contentAspect > boundsAspect)
+        {
+            float height = bounds.width / contentAspect;
+            return new Rect(
+                bounds.x,
+                bounds.y + (bounds.height - height) * 0.5f,
+                bounds.width,
+                height);
+        }
+
+        float width = bounds.height * contentAspect;
+        return new Rect(
+            bounds.x + (bounds.width - width) * 0.5f,
+            bounds.y,
+            width,
+            bounds.height);
     }
 
     private void DrawProfileProperty(string propertyName, string label)
@@ -1336,6 +1409,50 @@ public sealed class CharacterEditorWindow : EditorWindow
                         "전투 시작 후 설정 시간이 지날 때마다 패시브 발동을 시도합니다. 행동불가 중에는 쿨다운이 정지합니다.",
                         MessageType.Info);
                 }
+                else if (trigger == CharacterPassiveTrigger.OnKill)
+                {
+                    SetEnumValue(
+                        definition,
+                        ActionLinkagePropertyName,
+                        (int)CharacterActionLinkage.None);
+                    SerializedProperty killSourceProperty =
+                        definition.FindPropertyRelative(
+                            PassiveKillSourcePropertyName);
+                    DrawAttackEnumPopup(
+                        killSourceProperty,
+                        "킬 주체",
+                        PassiveKillSourceOptions);
+                    CharacterPassiveKillSource killSource =
+                        killSourceProperty != null
+                            ? (CharacterPassiveKillSource)
+                                killSourceProperty.enumValueIndex
+                            : CharacterPassiveKillSource.Self;
+                    if (killSource ==
+                        CharacterPassiveKillSource.SpecificCharacter)
+                    {
+                        SerializedProperty specifiedKiller =
+                            definition.FindPropertyRelative(
+                                PassiveSpecifiedKillerPropertyName);
+                        if (specifiedKiller == null)
+                        {
+                            EditorGUILayout.HelpBox(
+                                "지정 캐릭터 속성을 찾을 수 없습니다.",
+                                MessageType.Error);
+                        }
+                        else
+                        {
+                            EditorGUILayout.PropertyField(
+                                specifiedKiller,
+                                new GUIContent("지정된 캐릭터"));
+                        }
+                    }
+
+                    EditorGUILayout.HelpBox(
+                        "선택한 아군 캐릭터가 적을 처치할 때마다 " +
+                        "패시브 발동을 시도합니다. 킬러 정보가 없는 " +
+                        "아이템 및 환경 처치는 제외됩니다.",
+                        MessageType.Info);
+                }
                 else
                 {
                     DrawAttackEnumPopup(
@@ -1384,7 +1501,16 @@ public sealed class CharacterEditorWindow : EditorWindow
             definitions.GetArrayElementAtIndex(newIndex);
         SerializedProperty sections = definition.FindPropertyRelative(
             PassiveSectionsPropertyName);
-        sections?.ClearArray();
+        if (sections != null)
+        {
+            sections.arraySize = 3;
+            sections.GetArrayElementAtIndex(0).enumValueIndex =
+                (int)CharacterPassiveSectionType.Linkage;
+            sections.GetArrayElementAtIndex(1).enumValueIndex =
+                (int)CharacterPassiveSectionType.Subject;
+            sections.GetArrayElementAtIndex(2).enumValueIndex =
+                (int)CharacterPassiveSectionType.Ability;
+        }
         ResetPassiveDefinitionValues(definition);
         definition.isExpanded = true;
 
@@ -1427,6 +1553,15 @@ public sealed class CharacterEditorWindow : EditorWindow
                     definition,
                     PassiveTriggerPropertyName,
                     (int)CharacterPassiveTrigger.OnAttack);
+                SetEnumValue(
+                    definition,
+                    PassiveKillSourcePropertyName,
+                    (int)CharacterPassiveKillSource.Self);
+                SerializedProperty specifiedKiller =
+                    definition.FindPropertyRelative(
+                        PassiveSpecifiedKillerPropertyName);
+                if (specifiedKiller != null)
+                    specifiedKiller.objectReferenceValue = null;
                 SetEnumValue(
                     definition,
                     PassiveStatusTargetPropertyName,
@@ -2581,16 +2716,34 @@ public sealed class CharacterEditorWindow : EditorWindow
             }
             EditorGUILayout.EndHorizontal();
 
+            MigrateLegacyStatusCondition(condition);
+
+            SerializedProperty conditionTarget =
+                condition.FindPropertyRelative(ConditionTargetPropertyName);
             DrawAttackEnumPopup(
-                condition.FindPropertyRelative(ConditionTypePropertyName),
-                "조건 종류",
-                ConditionTypeOptions);
-            SerializedProperty conditionType =
-                condition.FindPropertyRelative(ConditionTypePropertyName);
-            bool checksStatus = conditionType != null &&
-                conditionType.enumValueIndex ==
-                (int)CharacterConditionType.HasStatus;
-            if (checksStatus)
+                conditionTarget,
+                "조건 대상",
+                ConditionTargetOptions);
+            bool checksSource = conditionTarget != null &&
+                conditionTarget.enumValueIndex ==
+                (int)CharacterConditionTarget.Source;
+
+            SerializedProperty metric = condition.FindPropertyRelative(
+                NumericConditionMetricPropertyName);
+            DrawMappedEnumPopup(
+                metric,
+                "비교 수치",
+                targetsAllies || checksSource
+                    ? AllyNumericConditionMetricOptions
+                    : NumericConditionMetricOptions,
+                targetsAllies || checksSource
+                    ? AllyNumericConditionMetricValues
+                    : EnemyNumericConditionMetricValues);
+
+            bool checksStatusStacks = metric != null &&
+                metric.enumValueIndex ==
+                (int)CharacterNumericConditionMetric.StatusStackCount;
+            if (checksStatusStacks)
             {
                 SerializedProperty heldStatus =
                     condition.FindPropertyRelative(StatusEffectPropertyName);
@@ -2605,49 +2758,62 @@ public sealed class CharacterEditorWindow : EditorWindow
                     EditorGUILayout.PropertyField(
                         heldStatus,
                         new GUIContent(
-                            "보유 상태",
-                            "대상이 보유하고 있어야 하는 StatusEffectSO입니다."));
+                            "상태 종류",
+                            "스택 수를 확인할 StatusEffectSO입니다."));
                     if (heldStatus.objectReferenceValue == null)
                     {
                         EditorGUILayout.HelpBox(
-                            "보유 여부를 확인할 StatusEffectSO를 선택하세요.",
+                            "스택 수를 확인할 StatusEffectSO를 선택하세요.",
                             MessageType.Error);
                     }
                 }
-            }
-            else
-            {
-                DrawMappedEnumPopup(
-                    condition.FindPropertyRelative(
-                        NumericConditionMetricPropertyName),
-                    "비교 수치",
-                    targetsAllies
-                        ? AllyNumericConditionMetricOptions
-                        : NumericConditionMetricOptions,
-                    targetsAllies
-                        ? AllyNumericConditionMetricValues
-                        : EnemyNumericConditionMetricValues);
-                DrawAttackEnumPopup(
-                    condition.FindPropertyRelative(
-                        NumericComparisonPropertyName),
-                    "비교 방식",
-                    NumericComparisonOptions);
 
-                SerializedProperty threshold =
-                    condition.FindPropertyRelative(
-                        NumericThresholdPropertyName);
-                if (threshold != null)
+                EditorGUILayout.HelpBox(
+                    "보유 중은 1 이상, 미보유는 0과 같음으로 " +
+                    "설정할 수 있습니다.",
+                    MessageType.Info);
+            }
+
+            DrawAttackEnumPopup(
+                condition.FindPropertyRelative(
+                    NumericComparisonPropertyName),
+                "비교 방식",
+                NumericComparisonOptions);
+
+            SerializedProperty threshold =
+                condition.FindPropertyRelative(
+                    NumericThresholdPropertyName);
+            if (threshold != null)
+            {
+                bool usesWholeNumber = checksStatusStacks ||
+                    (metric != null &&
+                     metric.enumValueIndex ==
+                     (int)CharacterNumericConditionMetric.StackCount);
+                if (usesWholeNumber)
+                {
+                    int currentValue = Mathf.Max(
+                        0,
+                        Mathf.RoundToInt(threshold.floatValue));
+                    threshold.floatValue = Mathf.Max(
+                        0,
+                        EditorGUILayout.IntField(
+                            checksStatusStacks
+                                ? "기준 스택"
+                                : "기준값",
+                            currentValue));
+                }
+                else
                 {
                     threshold.floatValue = EditorGUILayout.FloatField(
                         "기준값",
                         threshold.floatValue);
                 }
-                else
-                {
-                    EditorGUILayout.HelpBox(
-                        "기준값 속성을 찾을 수 없습니다.",
-                        MessageType.Error);
-                }
+            }
+            else
+            {
+                EditorGUILayout.HelpBox(
+                    "기준값 속성을 찾을 수 없습니다.",
+                    MessageType.Error);
             }
             EditorGUILayout.EndVertical();
 
@@ -2727,6 +2893,10 @@ public sealed class CharacterEditorWindow : EditorWindow
             (int)CharacterConditionType.Numeric);
         SetEnumValue(
             condition,
+            ConditionTargetPropertyName,
+            (int)CharacterConditionTarget.ActionTarget);
+        SetEnumValue(
+            condition,
             NumericConditionMetricPropertyName,
             (int)metric);
         SetEnumValue(
@@ -2740,10 +2910,36 @@ public sealed class CharacterEditorWindow : EditorWindow
         SerializedProperty statusEffect = condition.FindPropertyRelative(
             StatusEffectPropertyName);
         if (statusEffect != null)
+            statusEffect.objectReferenceValue = null;
+    }
+
+    private static void MigrateLegacyStatusCondition(
+        SerializedProperty condition)
+    {
+        SerializedProperty conditionType =
+            condition?.FindPropertyRelative(ConditionTypePropertyName);
+        if (conditionType == null ||
+            conditionType.enumValueIndex !=
+            (int)CharacterConditionType.HasStatus)
         {
-            statusEffect.objectReferenceValue =
-                StatusEffectDefinitionCatalog.FindById(StatusEffectIds.Fire);
+            return;
         }
+
+        conditionType.enumValueIndex =
+            (int)CharacterConditionType.Numeric;
+        SetEnumValue(
+            condition,
+            NumericConditionMetricPropertyName,
+            (int)CharacterNumericConditionMetric.StatusStackCount);
+        SetEnumValue(
+            condition,
+            NumericComparisonPropertyName,
+            (int)CharacterNumericComparison.GreaterThanOrEqual);
+        SerializedProperty threshold = condition.FindPropertyRelative(
+            NumericThresholdPropertyName);
+        if (threshold != null)
+            threshold.floatValue = 1f;
+        GUI.changed = true;
     }
 
     private static void DrawMappedEnumPopup(

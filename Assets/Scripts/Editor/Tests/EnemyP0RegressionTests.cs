@@ -804,6 +804,105 @@ public sealed class EnemyP0RegressionTests
     }
 
     [Test]
+    public void CharacterDamage_EnemyDefeatedEventPreservesKiller()
+    {
+        EnemyRuntime enemy = LoadEnemy("Basic").CreateRuntime();
+        DungeonBoardView board = CreateBoard((1, 1, enemy));
+        FakeBattleCharacter killer = new(0, 20);
+        List<BattleEnemyDefeatedEvent> events = new();
+        board.EnemyDefeated += events.Add;
+
+        int damage = board.TryDamageCharacterTargets(
+            killer,
+            new[] { enemy },
+            enemy.MaxHealth,
+            CharacterAttackDamageType.Fixed,
+            false);
+
+        Assert.That(damage, Is.EqualTo(enemy.MaxHealth));
+        Assert.That(events, Has.Count.EqualTo(1));
+        Assert.That(events[0].Enemy, Is.SameAs(enemy));
+        Assert.That(events[0].Killer, Is.SameAs(killer));
+    }
+
+    [Test]
+    public void StatusDamage_EnemyDefeatedEventPreservesApplyingCharacter()
+    {
+        EnemyRuntime enemy = LoadEnemy("Basic").CreateRuntime();
+        DungeonBoardView board = CreateBoard((1, 1, enemy));
+        FakeBattleCharacter killer = new(0, 20);
+        StatusEffectSO fire =
+            AssetDatabase.LoadAssetAtPath<StatusEffectSO>(FireStatusPath);
+        List<BattleEnemyDefeatedEvent> events = new();
+        board.EnemyDefeated += events.Add;
+
+        Assert.That(
+            board.TryApplyCharacterStatus(
+                killer,
+                new[] { enemy },
+                fire,
+                3f,
+                enemy.MaxHealth,
+                1f,
+                false),
+            Is.True);
+        board.TickStatusEffects(1f);
+
+        Assert.That(events, Has.Count.EqualTo(1));
+        Assert.That(events[0].Enemy, Is.SameAs(enemy));
+        Assert.That(events[0].Killer, Is.SameAs(killer));
+    }
+
+    [Test]
+    public void ChainedEnemyDefeats_AreDispatchedInQueueOrder()
+    {
+        EnemyRuntime firstEnemy = LoadEnemy("Basic").CreateRuntime();
+        EnemyRuntime secondEnemy = LoadEnemy("Basic").CreateRuntime();
+        DungeonBoardView board = CreateBoard(
+            (1, 1, firstEnemy),
+            (1, 2, secondEnemy));
+        FakeBattleCharacter killer = new(0, 20);
+        List<string> sequence = new();
+        board.EnemyDefeated += eventData =>
+        {
+            bool isFirst = ReferenceEquals(eventData.Enemy, firstEnemy);
+            sequence.Add(isFirst ? "first-handler:first" : "first-handler:second");
+            if (isFirst)
+            {
+                board.TryDamageCharacterTargets(
+                    killer,
+                    new[] { secondEnemy },
+                    secondEnemy.MaxHealth,
+                    CharacterAttackDamageType.Fixed,
+                    false);
+            }
+        };
+        board.EnemyDefeated += eventData =>
+        {
+            sequence.Add(ReferenceEquals(eventData.Enemy, firstEnemy)
+                ? "second-handler:first"
+                : "second-handler:second");
+        };
+
+        board.TryDamageCharacterTargets(
+            killer,
+            new[] { firstEnemy },
+            firstEnemy.MaxHealth,
+            CharacterAttackDamageType.Fixed,
+            false);
+
+        Assert.That(
+            sequence,
+            Is.EqualTo(new[]
+            {
+                "first-handler:first",
+                "second-handler:first",
+                "first-handler:second",
+                "second-handler:second",
+            }));
+    }
+
+    [Test]
     public void ModularSpawnQueue_ModifiesPendingSpawnInterval()
     {
         EnemyRuntime source = CreateModularTriggeredEnemy(
@@ -1336,7 +1435,7 @@ public sealed class EnemyP0RegressionTests
         public int LivingEnemyCount => 0;
         public bool HasEmptyEnemyTile => true;
 
-        public event Action<EnemyRuntime> EnemyDefeated
+        public event Action<BattleEnemyDefeatedEvent> EnemyDefeated
         {
             add { }
             remove { }
@@ -1409,6 +1508,24 @@ public sealed class EnemyP0RegressionTests
             IReadOnlyList<CharacterNumericCondition> numericConditions)
         {
             return Array.Empty<IBattleCharacter>();
+        }
+
+        public IReadOnlyList<EnemyRuntime> FilterCharacterTargets(
+            IBattleCharacter source,
+            IReadOnlyList<EnemyRuntime> targets,
+            CharacterConditionMatchMode conditionMatchMode,
+            IReadOnlyList<CharacterNumericCondition> numericConditions)
+        {
+            return targets ?? Array.Empty<EnemyRuntime>();
+        }
+
+        public IReadOnlyList<IBattleCharacter> FilterAlliedCharacters(
+            IBattleCharacter source,
+            IReadOnlyList<IBattleCharacter> targets,
+            CharacterConditionMatchMode conditionMatchMode,
+            IReadOnlyList<CharacterNumericCondition> numericConditions)
+        {
+            return targets ?? Array.Empty<IBattleCharacter>();
         }
 
         public IReadOnlyList<EnemyRuntime> ExpandCharacterAreaTargets(

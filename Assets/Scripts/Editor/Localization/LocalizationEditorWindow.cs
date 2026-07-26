@@ -15,6 +15,8 @@ namespace PS260714.Localization.Editor
             CatalogDirectory + "/LocalizationFontCatalog.asset";
         private const string MarkupCatalogPath =
             CatalogDirectory + "/LocalizationMarkupCatalog.asset";
+        private const string TranslationEditorControlName =
+            "LocalizationTranslationEditor";
 
         private static readonly string[] Tabs =
         {
@@ -41,6 +43,9 @@ namespace PS260714.Localization.Editor
         private UnityEditor.Editor markupCatalogEditor;
         private bool showFontCatalog = true;
         private bool showMarkupCatalog = true;
+        private int translationCursorIndex = -1;
+        private int translationSelectIndex = -1;
+        private bool restoreTranslationSelection;
 
         [MenuItem(PS260714EditorMenu.LocalizationEditor)]
         public static void Open()
@@ -95,42 +100,52 @@ namespace PS260714.Localization.Editor
         {
             using (new EditorGUILayout.HorizontalScope(EditorStyles.toolbar))
             {
-                if (GUILayout.Button("Reload", EditorStyles.toolbarButton))
-                {
-                    if (!dirty || EditorUtility.DisplayDialog(
-                        "Discard changes?",
-                        "Reload CSV and discard unsaved editor changes?",
-                        "Reload",
-                        "Cancel"))
-                    {
-                        Reload();
-                    }
-                }
+                GUILayout.Label(
+                    dirty ? "Unsaved CSV changes" : "CSV saved",
+                    EditorStyles.miniLabel);
+                GUILayout.FlexibleSpace();
 
                 GUI.enabled = locales != null && strings != null;
-                if (GUILayout.Button("Save CSV", EditorStyles.toolbarButton))
+                if (GUILayout.Button(
+                        "Save CSV",
+                        EditorStyles.toolbarButton,
+                        GUILayout.Width(68f)))
                 {
                     Save();
                 }
 
-                if (GUILayout.Button("Validate", EditorStyles.toolbarButton))
+                if (GUILayout.Button(
+                        "Validate",
+                        EditorStyles.toolbarButton,
+                        GUILayout.Width(64f)))
                 {
                     Validate();
                 }
 
                 if (GUILayout.Button(
-                    "Generate C#",
-                    EditorStyles.toolbarButton))
+                        "Generate C#",
+                        EditorStyles.toolbarButton,
+                        GUILayout.Width(84f)))
                 {
                     Save();
                     Generate();
                 }
 
                 GUI.enabled = true;
-                GUILayout.FlexibleSpace();
-                GUILayout.Label(
-                    dirty ? "Unsaved CSV changes" : "CSV saved",
-                    EditorStyles.miniLabel);
+                if (GUILayout.Button(
+                        "Reload",
+                        EditorStyles.toolbarButton,
+                        GUILayout.Width(64f)))
+                {
+                    if (!dirty || EditorUtility.DisplayDialog(
+                            "Discard changes?",
+                            "Reload CSV and discard unsaved editor changes?",
+                            "Reload",
+                            "Cancel"))
+                    {
+                        Reload();
+                    }
+                }
             }
         }
 
@@ -175,6 +190,7 @@ namespace PS260714.Localization.Editor
                     {
                         selectedStringRow = document.RowCount - 1;
                         stringSearchText = string.Empty;
+                        ResetTranslationSelection();
                     }
                     dirty = true;
                 }
@@ -208,6 +224,7 @@ namespace PS260714.Localization.Editor
                         GUILayout.Width(24f)))
                     {
                         selectedStringRow = row;
+                        ResetTranslationSelection();
                     }
 
                     for (int column = 0;
@@ -226,6 +243,13 @@ namespace PS260714.Localization.Editor
                             StringComparison.Ordinal))
                         {
                             document.Set(row, column, after);
+                            if (isStrings &&
+                                row == selectedStringRow &&
+                                column >= 4)
+                            {
+                                previewLocaleColumn = column;
+                                ResetTranslationSelection();
+                            }
                             dirty = true;
                         }
                     }
@@ -239,7 +263,10 @@ namespace PS260714.Localization.Editor
                         if (isStrings)
                         {
                             if (selectedStringRow == row)
+                            {
                                 selectedStringRow = -1;
+                                ResetTranslationSelection();
+                            }
                             else if (selectedStringRow > row)
                                 selectedStringRow--;
                         }
@@ -371,6 +398,7 @@ namespace PS260714.Localization.Editor
                 return;
             }
 
+            int previousRow = selectedStringRow;
             selectedStringRow = -1;
             for (int row = 1; row < document.RowCount; row++)
             {
@@ -378,8 +406,11 @@ namespace PS260714.Localization.Editor
                     continue;
 
                 selectedStringRow = row;
-                return;
+                break;
             }
+
+            if (selectedStringRow != previousRow)
+                ResetTranslationSelection();
         }
 
         private bool MatchesStringFilters(
@@ -470,7 +501,9 @@ namespace PS260714.Localization.Editor
             }
 
             EditorGUILayout.Space(6f);
-            EditorGUILayout.LabelField("Markup preview", EditorStyles.boldLabel);
+            EditorGUILayout.LabelField(
+                "Selected translation",
+                EditorStyles.boldLabel);
             string[] localeLabels = new string[strings.ColumnCount - 4];
             for (int index = 0; index < localeLabels.Length; index++)
             {
@@ -481,19 +514,53 @@ namespace PS260714.Localization.Editor
                 previewLocaleColumn,
                 4,
                 strings.ColumnCount - 1);
+            int previousLocaleColumn = previewLocaleColumn;
             int selected = EditorGUILayout.Popup(
                 "Locale",
                 previewLocaleColumn - 4,
                 localeLabels);
             previewLocaleColumn = selected + 4;
+            if (previewLocaleColumn != previousLocaleColumn)
+                ResetTranslationSelection();
+
+            EditorGUILayout.LabelField(
+                "Key",
+                strings.Get(
+                    selectedStringRow,
+                    ResolveKeyColumn(strings)));
             string source = strings.Get(
                 selectedStringRow,
                 previewLocaleColumn);
-            EditorGUILayout.LabelField("Source");
-            EditorGUILayout.SelectableLabel(
+            EditorGUILayout.LabelField("Translation source");
+            GUI.SetNextControlName(TranslationEditorControlName);
+            GUIStyle textArea = new(EditorStyles.textArea)
+            {
+                wordWrap = true,
+            };
+            string edited = EditorGUILayout.TextArea(
                 source,
-                EditorStyles.textArea,
-                GUILayout.Height(42f));
+                textArea,
+                GUILayout.MinHeight(72f));
+            if (!string.Equals(
+                    source,
+                    edited,
+                    StringComparison.Ordinal))
+            {
+                strings.Set(
+                    selectedStringRow,
+                    previewLocaleColumn,
+                    edited);
+                source = edited;
+                dirty = true;
+            }
+
+            RestoreTranslationSelection(source);
+            CaptureTranslationSelection();
+            DrawMarkupTools(source);
+
+            source = strings.Get(
+                selectedStringRow,
+                previewLocaleColumn);
             EditorGUILayout.LabelField("Generated TMP rich text");
             EditorGUILayout.SelectableLabel(
                 LocalizationMarkupParser.Render(source, markupCatalog),
@@ -512,6 +579,232 @@ namespace PS260714.Localization.Editor
                 LocalizationMarkupParser.Render(source, markupCatalog),
                 renderedPreview,
                 GUILayout.MinHeight(42f));
+        }
+
+        private void DrawMarkupTools(string source)
+        {
+            using (new EditorGUILayout.VerticalScope(
+                       EditorStyles.helpBox))
+            {
+                using (new EditorGUILayout.HorizontalScope())
+                {
+                    EditorGUILayout.LabelField(
+                        "Insert",
+                        EditorStyles.boldLabel,
+                        GUILayout.Width(42f));
+                    if (GUILayout.Button(
+                            "Line Break",
+                            GUILayout.Width(82f)))
+                    {
+                        ApplyMarkupEdit(
+                            source,
+                            LocalizationMarkupEditUtility
+                                .InsertLineBreak(
+                                    source,
+                                    ResolveTranslationCursor(source),
+                                    ResolveTranslationSelection(source)));
+                    }
+
+                    GUILayout.FlexibleSpace();
+                    if (GUILayout.Button(
+                            "Manage Markup",
+                            GUILayout.Width(108f)))
+                    {
+                        if (markupCatalog == null)
+                        {
+                            markupCatalog =
+                                CreateCatalog<
+                                    LocalizationMarkupCatalog>(
+                                    "LocalizationMarkupCatalog.asset");
+                        }
+
+                        tab = 2;
+                        showMarkupCatalog = true;
+                        if (markupCatalog != null)
+                        {
+                            Selection.activeObject = markupCatalog;
+                            EditorGUIUtility.PingObject(markupCatalog);
+                        }
+                        GUIUtility.ExitGUI();
+                    }
+                }
+
+                if (markupCatalog == null)
+                {
+                    EditorGUILayout.HelpBox(
+                        "Create a Markup Catalog to insert registered " +
+                        "styles and icons.",
+                        MessageType.Warning);
+                    return;
+                }
+
+                using (new EditorGUILayout.HorizontalScope())
+                {
+                    EditorGUILayout.LabelField(
+                        "Style",
+                        GUILayout.Width(42f));
+                    foreach (LocalizationMarkupStyleDefinition style in
+                             markupCatalog.Styles)
+                    {
+                        if (style == null ||
+                            string.IsNullOrWhiteSpace(style.Id))
+                        {
+                            continue;
+                        }
+
+                        Color previousBackground = GUI.backgroundColor;
+                        GUI.backgroundColor = style.Color;
+                        string traits =
+                            (style.Bold ? "Bold " : string.Empty) +
+                            (style.Italic ? "Italic " : string.Empty) +
+                            (style.Underline
+                                ? "Underline"
+                                : string.Empty);
+                        GUIContent content = new(
+                            style.Id,
+                            $"Wrap the selected text with '{style.Id}'. " +
+                            traits.Trim());
+                        bool clicked = GUILayout.Button(
+                            content,
+                            GUILayout.MinWidth(64f),
+                            GUILayout.Height(24f));
+                        GUI.backgroundColor = previousBackground;
+                        if (clicked)
+                        {
+                            ApplyMarkupEdit(
+                                source,
+                                LocalizationMarkupEditUtility.ApplyStyle(
+                                    source,
+                                    ResolveTranslationCursor(source),
+                                    ResolveTranslationSelection(source),
+                                    style.Id));
+                        }
+                    }
+                }
+
+                using (new EditorGUILayout.HorizontalScope())
+                {
+                    EditorGUILayout.LabelField(
+                        "Icon",
+                        GUILayout.Width(42f));
+                    foreach (LocalizationIconDefinition icon in
+                             markupCatalog.Icons)
+                    {
+                        if (icon == null ||
+                            string.IsNullOrWhiteSpace(icon.Id))
+                        {
+                            continue;
+                        }
+
+                        Texture thumbnail = icon.Sprite != null
+                            ? AssetPreview.GetMiniThumbnail(icon.Sprite)
+                            : null;
+                        GUIContent content = new(
+                            icon.Id,
+                            thumbnail,
+                            $"Insert icon '{icon.Id}'. Fallback: " +
+                            markupCatalog.GetIconFallback(icon.Id));
+                        if (GUILayout.Button(
+                                content,
+                                GUILayout.MinWidth(72f),
+                                GUILayout.Height(28f)))
+                        {
+                            ApplyMarkupEdit(
+                                source,
+                                LocalizationMarkupEditUtility.InsertIcon(
+                                    source,
+                                    ResolveTranslationCursor(source),
+                                    ResolveTranslationSelection(source),
+                                    icon.Id));
+                        }
+                    }
+                }
+            }
+        }
+
+        private void ApplyMarkupEdit(
+            string source,
+            LocalizationMarkupEditResult result)
+        {
+            if (!string.Equals(
+                    source,
+                    result.Text,
+                    StringComparison.Ordinal))
+            {
+                strings.Set(
+                    selectedStringRow,
+                    previewLocaleColumn,
+                    result.Text);
+                dirty = true;
+            }
+
+            translationCursorIndex = result.CursorIndex;
+            translationSelectIndex = result.SelectIndex;
+            restoreTranslationSelection = true;
+            Validate(false);
+            Repaint();
+        }
+
+        private int ResolveTranslationCursor(string source)
+        {
+            return translationCursorIndex >= 0
+                ? translationCursorIndex
+                : (source ?? string.Empty).Length;
+        }
+
+        private int ResolveTranslationSelection(string source)
+        {
+            return translationSelectIndex >= 0
+                ? translationSelectIndex
+                : ResolveTranslationCursor(source);
+        }
+
+        private void ResetTranslationSelection()
+        {
+            translationCursorIndex = -1;
+            translationSelectIndex = -1;
+            restoreTranslationSelection = false;
+        }
+
+        private void RestoreTranslationSelection(string source)
+        {
+            if (!restoreTranslationSelection)
+                return;
+
+            EditorGUI.FocusTextInControl(
+                TranslationEditorControlName);
+            TextEditor editor = (TextEditor)GUIUtility.GetStateObject(
+                typeof(TextEditor),
+                GUIUtility.keyboardControl);
+            editor.text = source ?? string.Empty;
+            editor.cursorIndex = Mathf.Clamp(
+                translationCursorIndex,
+                0,
+                editor.text.Length);
+            editor.selectIndex = Mathf.Clamp(
+                translationSelectIndex,
+                0,
+                editor.text.Length);
+            translationCursorIndex = editor.cursorIndex;
+            translationSelectIndex = editor.selectIndex;
+            restoreTranslationSelection = false;
+        }
+
+        private void CaptureTranslationSelection()
+        {
+            if (!string.Equals(
+                    GUI.GetNameOfFocusedControl(),
+                    TranslationEditorControlName,
+                    StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            TextEditor editor = (TextEditor)GUIUtility.GetStateObject(
+                typeof(TextEditor),
+                GUIUtility.keyboardControl);
+            translationCursorIndex = editor.cursorIndex;
+            translationSelectIndex = editor.selectIndex;
         }
 
         private void DrawCatalogs()
@@ -715,9 +1008,21 @@ namespace PS260714.Localization.Editor
             }
         }
 
-        private void Validate()
+        private void Validate(bool validateGlyphs = true)
         {
-            validation = LocalizationCodeGenerator.Validate();
+            try
+            {
+                validation = LocalizationValidator.Validate(
+                    LocalizationSourceModel.FromDocuments(
+                        locales,
+                        strings),
+                    validateGlyphs);
+            }
+            catch (Exception exception)
+            {
+                validation = new LocalizationValidationResult();
+                validation.Error("source", exception.Message);
+            }
             Repaint();
         }
 

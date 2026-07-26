@@ -1151,12 +1151,28 @@ public readonly struct BattleStatusChangedEvent
     }
 }
 
+public readonly struct BattleEnemyDefeatedEvent
+{
+    public EnemyRuntime Enemy { get; }
+    public IBattleCharacter Killer { get; }
+    public bool IsValid => Enemy != null;
+    public bool HasCharacterKiller => Killer != null;
+
+    public BattleEnemyDefeatedEvent(
+        EnemyRuntime enemy,
+        IBattleCharacter killer)
+    {
+        Enemy = enemy;
+        Killer = killer;
+    }
+}
+
 public interface IBattleBoard
 {
     int InitialEnemyCapacity { get; }
     int LivingEnemyCount { get; }
     bool HasEmptyEnemyTile { get; }
-    event Action<EnemyRuntime> EnemyDefeated;
+    event Action<BattleEnemyDefeatedEvent> EnemyDefeated;
     event Action<BattleStatusAppliedEvent> StatusApplied;
 
     bool TryAddEnemy(EnemyRuntime enemy);
@@ -1182,6 +1198,16 @@ public interface IBattleBoard
         CharacterAttackSubject subject,
         CharacterAttackSubjectMetric metric,
         int targetCount,
+        CharacterConditionMatchMode conditionMatchMode,
+        IReadOnlyList<CharacterNumericCondition> numericConditions);
+    IReadOnlyList<EnemyRuntime> FilterCharacterTargets(
+        IBattleCharacter source,
+        IReadOnlyList<EnemyRuntime> targets,
+        CharacterConditionMatchMode conditionMatchMode,
+        IReadOnlyList<CharacterNumericCondition> numericConditions);
+    IReadOnlyList<IBattleCharacter> FilterAlliedCharacters(
+        IBattleCharacter source,
+        IReadOnlyList<IBattleCharacter> targets,
         CharacterConditionMatchMode conditionMatchMode,
         IReadOnlyList<CharacterNumericCondition> numericConditions);
     IReadOnlyList<EnemyRuntime> ExpandCharacterAreaTargets(
