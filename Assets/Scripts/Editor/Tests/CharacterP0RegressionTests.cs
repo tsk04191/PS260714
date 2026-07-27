@@ -12,13 +12,9 @@ using UnityEngine.UI;
 public sealed class CharacterP0RegressionTests
 {
     private const string SuirenAssetPath =
-        "Assets/Resources/Characters/2_Suiren.asset";
+        "fixture:cooldown-cleanse";
     private const string AislingAssetPath =
-        "Assets/Resources/Characters/2_Aisling.asset";
-    private const string MirinaeAssetPath =
-        "Assets/Resources/Characters/2_Mirinae.asset";
-    private const string SaenaAssetPath =
-        "Assets/Resources/Characters/2_Saena.asset";
+        "fixture:previous-target-status";
     private const string EmergencyKitAssetPath =
         "Assets/Resources/StatusEffects/EmergencyKit.asset";
     private const string FireAssetPath =
@@ -117,7 +113,8 @@ public sealed class CharacterP0RegressionTests
     [Test]
     public void DungeonCharacterInfo_UsesOverflowSdAndFullWidthCooldown()
     {
-        CharacterRuntime character = CreateCharacter(AislingAssetPath);
+        CharacterRuntime character = CreateCharacter(
+            CreateBaseCharacterFixture("CharacterInfoLayoutFixture"));
 
         RectTransform sdRect = character.transform
             .Find("imgCharacterSd") as RectTransform;
@@ -166,7 +163,8 @@ public sealed class CharacterP0RegressionTests
     [Test]
     public void DungeonCharacterInfo_AbilityIconsTooltipAndAvailabilityRefresh()
     {
-        CharacterRuntime character = CreateCharacter(AislingAssetPath);
+        CharacterRuntime character = CreateCharacter(
+            CreateBaseCharacterFixture("CharacterInfoAbilityFixture"));
         Transform passiveFrame =
             character.transform.Find("grpPassiveAbilityIcon");
         Transform activeFrame =
@@ -246,7 +244,12 @@ public sealed class CharacterP0RegressionTests
                 character.Data.ActiveSkillCost),
             tooltipText.text);
 
-        Assert.That(resource.TrySpend(9), Is.True);
+        int amountToLeaveBelowSkillCost =
+            resource.Current -
+            Mathf.Max(0, character.Data.ActiveSkillCost - 1);
+        Assert.That(
+            resource.TrySpend(amountToLeaveBelowSkillCost),
+            Is.True);
         Assert.That(character.CanActivateActiveSkill(), Is.False);
         Assert.That(activeImage.color.r, Is.EqualTo(0.28f).Within(0.001f));
     }
@@ -254,10 +257,8 @@ public sealed class CharacterP0RegressionTests
     [Test]
     public void DungeonCharacterInfo_UsesDefinitionAbilityIconSprites()
     {
-        CharacterSO definition = UnityEngine.Object.Instantiate(
-            LoadAsset<CharacterSO>(AislingAssetPath));
-        definition.hideFlags = HideFlags.HideAndDontSave;
-        _createdObjects.Add(definition);
+        CharacterSO definition = CreateBaseCharacterFixture(
+            "CharacterInfoIconFixture");
         Texture2D passiveTexture =
             new(8, 8, TextureFormat.RGBA32, false);
         Texture2D activeTexture =
@@ -729,7 +730,7 @@ public sealed class CharacterP0RegressionTests
             StatusEffectStackMode.AddAndRefreshDuration,
             0);
         CharacterSO designatedDefinition =
-            LoadAsset<CharacterSO>(AislingAssetPath);
+            CreateBaseCharacterFixture("DesignatedKillerFixture");
         CharacterRuntime owner = CreateCharacter(
             CreateKillPassiveCharacter(
                 CharacterPassiveKillSource.SpecificCharacter,
@@ -784,9 +785,10 @@ public sealed class CharacterP0RegressionTests
     }
 
     [Test]
-    public void MirinaeKillPassive_GainsResourceAndStarPowder()
+    public void KillRewardPassive_GainsResourceAndSourceStatus()
     {
-        CharacterRuntime mirinae = CreateCharacter(MirinaeAssetPath);
+        CharacterRuntime mirinae = CreateCharacter(
+            CreateMirinaeFeatureFixture());
         CharacterRuntime killer = CreateCharacter(SuirenAssetPath);
         StatusEffectSO starPowder =
             LoadAsset<StatusEffectSO>(StarPowderAssetPath);
@@ -806,9 +808,10 @@ public sealed class CharacterP0RegressionTests
     }
 
     [Test]
-    public void MirinaeSequence_SourceStarPowderConditionFiltersReusedTarget()
+    public void SourceStatusSequence_ConditionFiltersReusedTarget()
     {
-        CharacterRuntime mirinae = CreateCharacter(MirinaeAssetPath);
+        CharacterRuntime mirinae = CreateCharacter(
+            CreateMirinaeFeatureFixture());
         StatusEffectSO starPowder =
             LoadAsset<StatusEffectSO>(StarPowderAssetPath);
         EnemyRuntime target = CreateEnemyRuntime();
@@ -861,9 +864,10 @@ public sealed class CharacterP0RegressionTests
     }
 
     [Test]
-    public void SuirenCooldownPassive_ChargesEmergencyKitUpToThreeStacks()
+    public void CooldownPassive_ChargesStatusUpToConfiguredMaximum()
     {
-        CharacterRuntime suiren = CreateCharacter(SuirenAssetPath);
+        CharacterRuntime suiren = CreateCharacter(
+            CreateSuirenFeatureFixture());
         StatusEffectSO emergencyKit =
             LoadAsset<StatusEffectSO>(EmergencyKitAssetPath);
         FakeBattleBoard board = new();
@@ -885,10 +889,12 @@ public sealed class CharacterP0RegressionTests
     }
 
     [Test]
-    public void SuirenStatusPassive_CleansExactStunnedAlly_AndConsumesOneKit()
+    public void StatusPassive_CleansExactTarget_AndConsumesOneStack()
     {
-        CharacterRuntime suiren = CreateCharacter(SuirenAssetPath);
-        CharacterRuntime ally = CreateCharacter(SuirenAssetPath);
+        CharacterRuntime suiren = CreateCharacter(
+            CreateSuirenFeatureFixture());
+        CharacterRuntime ally = CreateCharacter(
+            CreateBaseCharacterFixture("CleanseTargetFixture"));
         StatusEffectSO emergencyKit =
             LoadAsset<StatusEffectSO>(EmergencyKitAssetPath);
         StatusEffectSO stun = LoadAsset<StatusEffectSO>(StunAssetPath);
@@ -912,10 +918,12 @@ public sealed class CharacterP0RegressionTests
     }
 
     [Test]
-    public void SuirenStatusPassive_IgnoresEnemyOtherStatusAndMissingKit()
+    public void StatusPassive_IgnoresWrongTargetStatusAndMissingCost()
     {
-        CharacterRuntime suiren = CreateCharacter(SuirenAssetPath);
-        CharacterRuntime ally = CreateCharacter(SuirenAssetPath);
+        CharacterRuntime suiren = CreateCharacter(
+            CreateSuirenFeatureFixture());
+        CharacterRuntime ally = CreateCharacter(
+            CreateBaseCharacterFixture("IgnoredStatusTargetFixture"));
         StatusEffectSO emergencyKit =
             LoadAsset<StatusEffectSO>(EmergencyKitAssetPath);
         StatusEffectSO stun = LoadAsset<StatusEffectSO>(StunAssetPath);
@@ -960,11 +968,14 @@ public sealed class CharacterP0RegressionTests
     }
 
     [Test]
-    public void MultipleSuirens_OnlySuccessfulCleanserConsumesEmergencyKit()
+    public void MultipleCleansers_OnlySuccessfulOneConsumesStatusCost()
     {
-        CharacterRuntime firstSuiren = CreateCharacter(SuirenAssetPath);
-        CharacterRuntime secondSuiren = CreateCharacter(SuirenAssetPath);
-        CharacterRuntime ally = CreateCharacter(SuirenAssetPath);
+        CharacterRuntime firstSuiren = CreateCharacter(
+            CreateSuirenFeatureFixture());
+        CharacterRuntime secondSuiren = CreateCharacter(
+            CreateSuirenFeatureFixture());
+        CharacterRuntime ally = CreateCharacter(
+            CreateBaseCharacterFixture("SharedCleanseTargetFixture"));
         StatusEffectSO emergencyKit =
             LoadAsset<StatusEffectSO>(EmergencyKitAssetPath);
         StatusEffectSO stun = LoadAsset<StatusEffectSO>(StunAssetPath);
@@ -994,9 +1005,10 @@ public sealed class CharacterP0RegressionTests
     }
 
     [Test]
-    public void SuirenActiveSkill_UsesConfiguredCustomDefinition()
+    public void ConfiguredActiveSkill_UsesFixtureDefinition()
     {
-        CharacterRuntime suiren = CreateCharacter(SuirenAssetPath);
+        CharacterRuntime suiren = CreateCharacter(
+            CreateSuirenFeatureFixture());
         CharacterData data = suiren.Data;
 
         Assert.That(data.HasCustomSkillDefinitions, Is.True);
@@ -1104,9 +1116,10 @@ public sealed class CharacterP0RegressionTests
     }
 
     [Test]
-    public void ActualSaenaSkill_UsesSourceAttackPowerContextAndPreservesDamage()
+    public void RatioSkill_UsesSourceAttackPowerContextAndPreservesDamage()
     {
-        CharacterRuntime saena = CreateCharacter(SaenaAssetPath);
+        CharacterRuntime saena = CreateCharacter(
+            CreateSaenaFeatureFixture());
         CharacterSkillDefinition skill = saena.Data.SkillDefinitions[0];
         CharacterEffectDefinition damageEffect = skill.Effects[0];
         EnemyRuntime target = CreateEnemyRuntime();
@@ -1128,16 +1141,29 @@ public sealed class CharacterP0RegressionTests
             CharacterDamageAmountMode.Ratio));
         Assert.That(damageEffect.DamageAmount, Is.EqualTo(3f));
 
+        saena.TickBattle(saena.Data.AttackCooldown, board);
+        Assert.That(
+            board.DamageTargetSnapshots,
+            Has.Count.EqualTo(1),
+            "A normal attack must establish Saena's reusable skill target.");
+        int damageBeforeSkill = saena.TotalDamageDealt;
+        int selectionCountBeforeSkill =
+            board.CharacterTargetSelectionCallCount;
+
         Assert.That(saena.TryActivateActiveSkill(), Is.True);
 
         Assert.That(resource.Current, Is.EqualTo(7));
         Assert.That(resource.TrySpendCallCount, Is.EqualTo(1));
-        Assert.That(saena.TotalDamageDealt, Is.EqualTo(15));
+        Assert.That(
+            saena.TotalDamageDealt - damageBeforeSkill,
+            Is.EqualTo(15));
         Assert.That(
             board.CharacterTargetSelectionCallCount,
-            Is.EqualTo(1));
-        Assert.That(board.DamageTargetSnapshots, Has.Count.EqualTo(1));
-        Assert.That(board.DamageTargetSnapshots[0], Does.Contain(target));
+            Is.EqualTo(selectionCountBeforeSkill),
+            "Subject None must reuse the normal-attack target without " +
+            "selecting a new target.");
+        Assert.That(board.DamageTargetSnapshots, Has.Count.EqualTo(2));
+        Assert.That(board.DamageTargetSnapshots[1], Does.Contain(target));
     }
 
     [Test]
@@ -1415,23 +1441,24 @@ public sealed class CharacterP0RegressionTests
     }
 
     [Test]
-    public void ActualExplicitEffects_PreserveDefaultOrUseSourceStatusOverride()
+    public void ExplicitEffects_PreserveDefaultOrUseSourceStatusOverride()
     {
-        string[] characterGuids = AssetDatabase.FindAssets(
-            "t:CharacterSO",
-            new[] { "Assets/Resources/Characters" });
-        Assert.That(characterGuids, Is.Not.Empty);
+        StatusEffectSO status = CreateRuntimeStatus(
+            "test_explicit_target_default",
+            false,
+            true,
+            StatusEffectStackMode.Replace,
+            0);
+        CharacterSO[] definitions =
+        {
+            CreateExplicitDamageAndStatusCharacter(status),
+            CreateSourceRetargetCharacter(status),
+        };
 
         int explicitEffectCount = 0;
-        foreach (string guid in characterGuids)
+        foreach (CharacterSO definition in definitions)
         {
-            string assetPath = AssetDatabase.GUIDToAssetPath(guid);
-            CharacterSO definition =
-                AssetDatabase.LoadAssetAtPath<CharacterSO>(assetPath);
-            Assert.That(
-                definition,
-                Is.Not.Null,
-                $"Failed to load CharacterSO at '{assetPath}'.");
+            string fixtureName = definition.name;
 
             foreach (CharacterAttackDefinition attack in
                      definition.AttackDefinitions)
@@ -1439,10 +1466,10 @@ public sealed class CharacterP0RegressionTests
                 Assert.That(
                     attack,
                     Is.Not.Null,
-                    $"{assetPath} contains a null attack definition.");
+                    $"{fixtureName} contains a null attack definition.");
                 AssertEffectsPreserveTargetDefault(
                     attack.Effects,
-                    $"{assetPath}.attack",
+                    $"{fixtureName}.attack",
                     ref explicitEffectCount);
             }
 
@@ -1452,10 +1479,10 @@ public sealed class CharacterP0RegressionTests
                 Assert.That(
                     passive,
                     Is.Not.Null,
-                    $"{assetPath} contains a null passive definition.");
+                    $"{fixtureName} contains a null passive definition.");
                 AssertEffectsPreserveTargetDefault(
                     passive.Effects,
-                    $"{assetPath}.passive",
+                    $"{fixtureName}.passive",
                     ref explicitEffectCount);
             }
 
@@ -1465,10 +1492,10 @@ public sealed class CharacterP0RegressionTests
                 Assert.That(
                     skill,
                     Is.Not.Null,
-                    $"{assetPath} contains a null skill definition.");
+                    $"{fixtureName} contains a null skill definition.");
                 AssertEffectsPreserveTargetDefault(
                     skill.Effects,
-                    $"{assetPath}.skill",
+                    $"{fixtureName}.skill",
                     ref explicitEffectCount);
             }
         }
@@ -1476,7 +1503,7 @@ public sealed class CharacterP0RegressionTests
         Assert.That(
             explicitEffectCount,
             Is.GreaterThan(0),
-            "At least one actual explicit effect must protect the " +
+            "At least one fixture effect must protect the " +
             "serialized target defaults.");
     }
 
@@ -3619,45 +3646,57 @@ public sealed class CharacterP0RegressionTests
     }
 
     [Test]
-    public void AislingSequence_KeepsDiagonalSnapshot_WhenCrossKillsCenter()
+    public void PreviousTargetSkill_ReusesBasicAttackTarget_AndAppliesStatus()
     {
-        CharacterRuntime aisling = CreateCharacter(AislingAssetPath);
+        CharacterRuntime aisling = CreateCharacter(
+            CreateAislingFeatureFixture());
+        StatusEffectSO opening =
+            LoadAsset<StatusEffectSO>(OpeningAssetPath);
+        EnemyRuntime target = CreateEnemyRuntime();
         FakeActiveSkillResource resource = new(10);
         FakeBattleBoard board = new()
         {
-            SimulateAislingAreaSequence = true,
             LivingEnemyCountValue = 1,
+            SelectedEnemyTargets = new[] { target },
+            ReturnCenterTargetsForAreaExpansion = true,
         };
-        board.ConfigureAislingTargets(
-            CreateEnemyRuntime(),
-            CreateEnemyRuntime(),
-            CreateEnemyRuntime(),
-            CreateEnemyRuntime());
         aisling.BindBattle(resource, board);
+        aisling.TickBattle(aisling.Data.AttackCooldown, board);
+
+        Assert.That(
+            board.DamageTargetSnapshots,
+            Has.Count.EqualTo(1),
+            "A normal attack must establish the reusable skill target.");
+        Assert.That(
+            board.DamageTargetSnapshots[0],
+            Does.Contain(target));
 
         bool activated = aisling.TryActivateActiveSkill();
 
         Assert.That(activated, Is.True);
-        Assert.That(resource.Current, Is.EqualTo(5));
+        Assert.That(
+            resource.Current,
+            Is.EqualTo(10 - aisling.Data.ActiveSkillCost));
         Assert.That(
             board.DamageTargetSnapshots,
             Has.Count.EqualTo(2),
-            "Both simultaneous area steps must be snapshotted before " +
-            "the first step removes the center enemy.");
-        Assert.That(
-            board.AreaExpansionCountAtFirstDamage,
-            Is.EqualTo(2),
-            "All simultaneous target areas must be resolved before the " +
-            "first effect executes.");
+            "The active skill must damage the target saved by the normal " +
+            "attack.");
         Assert.That(
             board.DamageTargetSnapshots[1],
-            Does.Contain(board.DiagonalTarget));
+            Does.Contain(target));
         Assert.That(
-            new List<EnemyRuntime>(board.DamageTargetSnapshots[1]).Contains(
-                board.ExposedCenterTarget),
-            Is.False,
-            "The second step must not retarget an enemy exposed after the " +
-            "center target dies.");
+            board.CharacterTargetSelectionCallCount,
+            Is.EqualTo(1),
+            "Subject None must reuse the normal-attack target without " +
+            "selecting a new target.");
+        Assert.That(board.StatusApplyCallCount, Is.EqualTo(1));
+        Assert.That(board.AppliedStatuses, Does.Contain(opening));
+        Assert.That(
+            board.StatusTargetSnapshots[0],
+            Does.Contain(target),
+            "The active skill must apply its configured status to the " +
+            "reused target.");
     }
 
     [Test]
@@ -5367,10 +5406,518 @@ public sealed class CharacterP0RegressionTests
         return method.Invoke(enemy, arguments);
     }
 
-    private CharacterRuntime CreateCharacter(string characterAssetPath)
+    private CharacterRuntime CreateCharacter(string fixtureId)
     {
-        CharacterSO definition = LoadAsset<CharacterSO>(characterAssetPath);
-        return CreateCharacter(definition);
+        // Runtime tests use an isolated definition. The string only provides
+        // a readable fixture name and is never resolved through AssetDatabase.
+        return CreateCharacter(CreateBaseCharacterFixture(fixtureId));
+    }
+
+    private CharacterSO CreateBaseCharacterFixture(
+        string fixtureName,
+        float attackPower = 10f,
+        float attackCooldown = 1f)
+    {
+        CharacterSO definition =
+            ScriptableObject.CreateInstance<CharacterSO>();
+        definition.hideFlags = HideFlags.HideAndDontSave;
+        definition.name = fixtureName;
+        _createdObjects.Add(definition);
+
+        Texture2D fixtureTexture =
+            new(1, 1, TextureFormat.RGBA32, false);
+        fixtureTexture.hideFlags = HideFlags.HideAndDontSave;
+        fixtureTexture.SetPixel(0, 0, Color.white);
+        fixtureTexture.Apply();
+        Sprite fixtureSprite = Sprite.Create(
+            fixtureTexture,
+            new Rect(0f, 0f, 1f, 1f),
+            new Vector2(0.5f, 0.5f));
+        fixtureSprite.hideFlags = HideFlags.HideAndDontSave;
+        _createdObjects.Add(fixtureTexture);
+        _createdObjects.Add(fixtureSprite);
+
+        SerializedObject serialized = new(definition);
+        serialized.FindProperty("characterId").stringValue =
+            Guid.NewGuid().ToString("N");
+        serialized.FindProperty("characterName").stringValue =
+            fixtureName;
+        serialized.FindProperty("characterDescription").stringValue =
+            "Runtime composition test fixture.";
+        serialized.FindProperty("maximumHealth").intValue = 100;
+        serialized.FindProperty("attackPower").intValue =
+            Mathf.RoundToInt(attackPower);
+        serialized.FindProperty("attackCooldown").floatValue =
+            attackCooldown;
+        serialized.FindProperty("attackRecoveryDuration").floatValue = 0f;
+        serialized.FindProperty("activeSkillRecoveryDuration").floatValue =
+            0f;
+        serialized.FindProperty("waitingSdSprite").objectReferenceValue =
+            fixtureSprite;
+        serialized.FindProperty("attackSdSprite").objectReferenceValue =
+            fixtureSprite;
+        serialized.FindProperty("damagedSdSprite").objectReferenceValue =
+            fixtureSprite;
+        serialized.FindProperty("skillSdSprite").objectReferenceValue =
+            fixtureSprite;
+        serialized.FindProperty("passiveSdSprite").objectReferenceValue =
+            fixtureSprite;
+
+        SerializedProperty passives =
+            serialized.FindProperty("passiveDefinitions");
+        passives.arraySize = 1;
+        SerializedProperty passive = passives.GetArrayElementAtIndex(0);
+        SetSections(
+            passive.FindPropertyRelative("sections"),
+            (int)CharacterPassiveSectionType.Linkage,
+            (int)CharacterPassiveSectionType.Subject,
+            (int)CharacterPassiveSectionType.Ability);
+        passive.FindPropertyRelative("trigger").enumValueIndex =
+            (int)CharacterPassiveTrigger.OnKill;
+        passive.FindPropertyRelative("killSource").enumValueIndex =
+            (int)CharacterPassiveKillSource.Self;
+        passive.FindPropertyRelative("linkage").enumValueIndex =
+            (int)CharacterActionLinkage.None;
+        passive.FindPropertyRelative("targetFaction").enumValueIndex =
+            (int)CharacterTargetFaction.Ally;
+        passive.FindPropertyRelative("subject").enumValueIndex =
+            (int)CharacterAttackSubject.Self;
+        SerializedProperty passiveEffects =
+            passive.FindPropertyRelative("effects");
+        passiveEffects.arraySize = 1;
+        SerializedProperty passiveEffect =
+            passiveEffects.GetArrayElementAtIndex(0);
+        passiveEffect.FindPropertyRelative("type").enumValueIndex =
+            (int)CharacterEffectType.GainResource;
+        passiveEffect.FindPropertyRelative("targetMode").enumValueIndex =
+            (int)CharacterEffectTargetMode.Source;
+        passiveEffect.FindPropertyRelative(
+            "damageAmountMode").enumValueIndex =
+            (int)CharacterDamageAmountMode.Fixed;
+        passiveEffect.FindPropertyRelative("damageAmount").floatValue = 1f;
+
+        SerializedProperty attacks =
+            serialized.FindProperty("attackDefinitions");
+        attacks.arraySize = 1;
+        SerializedProperty attack = attacks.GetArrayElementAtIndex(0);
+        SetSections(
+            attack.FindPropertyRelative("sections"),
+            (int)CharacterAttackSectionType.Subject,
+            (int)CharacterAttackSectionType.Ability);
+        attack.FindPropertyRelative("targetFaction").enumValueIndex =
+            (int)CharacterTargetFaction.Enemy;
+        attack.FindPropertyRelative("subject").enumValueIndex =
+            (int)CharacterAttackSubject.Random;
+        attack.FindPropertyRelative("subjectCount").intValue = 1;
+        attack.FindPropertyRelative("damageType").enumValueIndex =
+            (int)CharacterAttackDamageType.Fixed;
+        attack.FindPropertyRelative("damageAmountMode").enumValueIndex =
+            (int)CharacterDamageAmountMode.Fixed;
+        attack.FindPropertyRelative("damageAmount").floatValue = 1f;
+        SerializedProperty attackEffects =
+            attack.FindPropertyRelative("effects");
+        attackEffects.arraySize = 1;
+        ConfigureFixedDamageEffect(
+            attackEffects.GetArrayElementAtIndex(0),
+            CharacterEffectTargetMode.InheritAction,
+            1f);
+
+        serialized.FindProperty("skillExecutionPolicy").enumValueIndex =
+            (int)CharacterSkillExecutionPolicy.FirstSuccessful;
+        SerializedProperty skills =
+            serialized.FindProperty("skillDefinitions");
+        skills.arraySize = 1;
+        SerializedProperty skill = skills.GetArrayElementAtIndex(0);
+        SetSections(
+            skill.FindPropertyRelative("sections"),
+            (int)CharacterSkillSectionType.Cost,
+            (int)CharacterSkillSectionType.Subject,
+            (int)CharacterSkillSectionType.Ability);
+        skill.FindPropertyRelative("cost").intValue = 1;
+        skill.FindPropertyRelative("targetFaction").enumValueIndex =
+            (int)CharacterTargetFaction.Enemy;
+        skill.FindPropertyRelative("subject").enumValueIndex =
+            (int)CharacterAttackSubject.Random;
+        skill.FindPropertyRelative("subjectCount").intValue = 1;
+        skill.FindPropertyRelative("damageType").enumValueIndex =
+            (int)CharacterAttackDamageType.Fixed;
+        skill.FindPropertyRelative("damageAmountMode").enumValueIndex =
+            (int)CharacterDamageAmountMode.Fixed;
+        skill.FindPropertyRelative("damageAmount").floatValue = 1f;
+        SerializedProperty skillEffects =
+            skill.FindPropertyRelative("effects");
+        skillEffects.arraySize = 1;
+        ConfigureFixedDamageEffect(
+            skillEffects.GetArrayElementAtIndex(0),
+            CharacterEffectTargetMode.InheritAction,
+            1f);
+
+        serialized.ApplyModifiedPropertiesWithoutUndo();
+        return definition;
+    }
+
+    private CharacterSO CreateSuirenFeatureFixture()
+    {
+        StatusEffectSO emergencyKit =
+            LoadAsset<StatusEffectSO>(EmergencyKitAssetPath);
+        StatusEffectSO stun = LoadAsset<StatusEffectSO>(StunAssetPath);
+        CharacterSO definition = CreateBaseCharacterFixture(
+            "CooldownCleanseFeatureFixture",
+            1f,
+            3f);
+        SerializedObject serialized = new(definition);
+
+        SerializedProperty passives =
+            serialized.FindProperty("passiveDefinitions");
+        passives.arraySize = 2;
+
+        SerializedProperty charge = passives.GetArrayElementAtIndex(0);
+        SetSections(
+            charge.FindPropertyRelative("sections"),
+            (int)CharacterPassiveSectionType.Linkage,
+            (int)CharacterPassiveSectionType.Subject,
+            (int)CharacterPassiveSectionType.Ability);
+        charge.FindPropertyRelative("trigger").enumValueIndex =
+            (int)CharacterPassiveTrigger.OnCooldown;
+        charge.FindPropertyRelative("cooldown").floatValue = 10f;
+        charge.FindPropertyRelative("linkage").enumValueIndex =
+            (int)CharacterActionLinkage.None;
+        charge.FindPropertyRelative("targetFaction").enumValueIndex =
+            (int)CharacterTargetFaction.Ally;
+        charge.FindPropertyRelative("subject").enumValueIndex =
+            (int)CharacterAttackSubject.Self;
+        SerializedProperty chargeEffects =
+            charge.FindPropertyRelative("effects");
+        chargeEffects.arraySize = 1;
+        ConfigureApplyStatusEffect(
+            chargeEffects.GetArrayElementAtIndex(0),
+            CharacterEffectTargetMode.InheritAction,
+            emergencyKit,
+            0.1f,
+            1f);
+
+        SerializedProperty cleanse = passives.GetArrayElementAtIndex(1);
+        SetSections(
+            cleanse.FindPropertyRelative("sections"),
+            (int)CharacterPassiveSectionType.Linkage,
+            (int)CharacterPassiveSectionType.SelfStatusCost,
+            (int)CharacterPassiveSectionType.Subject,
+            (int)CharacterPassiveSectionType.Ability);
+        cleanse.FindPropertyRelative("trigger").enumValueIndex =
+            (int)CharacterPassiveTrigger.OnStatusAcquired;
+        cleanse.FindPropertyRelative("statusTarget").enumValueIndex =
+            (int)CharacterPassiveStatusTarget.Ally;
+        cleanse.FindPropertyRelative(
+            "triggerStatusEffect").objectReferenceValue = stun;
+        cleanse.FindPropertyRelative("linkage").enumValueIndex =
+            (int)CharacterActionLinkage.None;
+        cleanse.FindPropertyRelative("targetFaction").enumValueIndex =
+            (int)CharacterTargetFaction.Ally;
+        cleanse.FindPropertyRelative("subject").enumValueIndex =
+            (int)CharacterAttackSubject.None;
+        SerializedProperty selfCost =
+            cleanse.FindPropertyRelative("selfStatusCost");
+        selfCost.FindPropertyRelative("statusEffect").objectReferenceValue =
+            emergencyKit;
+        selfCost.FindPropertyRelative("requiredStacks").intValue = 1;
+        selfCost.FindPropertyRelative("consumedStacks").intValue = 1;
+        SerializedProperty cleanseEffects =
+            cleanse.FindPropertyRelative("effects");
+        cleanseEffects.arraySize = 1;
+        ConfigureRemoveStatusEffect(
+            cleanseEffects.GetArrayElementAtIndex(0),
+            CharacterEffectTargetMode.InheritAction,
+            stun,
+            1);
+
+        ConfigureFirstSkill(
+            serialized,
+            CharacterAttackSubject.LowestValue,
+            CharacterAttackSubjectMetric.Health,
+            1,
+            CharacterDamageAmountMode.Fixed,
+            2f);
+        serialized.ApplyModifiedPropertiesWithoutUndo();
+        return definition;
+    }
+
+    private CharacterSO CreateAislingFeatureFixture()
+    {
+        StatusEffectSO opening =
+            LoadAsset<StatusEffectSO>(OpeningAssetPath);
+        CharacterSO definition = CreateBaseCharacterFixture(
+            "PreviousTargetStatusFeatureFixture",
+            7f,
+            4f);
+        SerializedObject serialized = new(definition);
+        ConfigureFirstSkill(
+            serialized,
+            CharacterAttackSubject.None,
+            CharacterAttackSubjectMetric.Health,
+            2,
+            CharacterDamageAmountMode.Ratio,
+            2.5f,
+            opening);
+        serialized.ApplyModifiedPropertiesWithoutUndo();
+        return definition;
+    }
+
+    private CharacterSO CreateSaenaFeatureFixture()
+    {
+        CharacterSO definition = CreateBaseCharacterFixture(
+            "SourceAttackPowerFeatureFixture",
+            5f,
+            2f);
+        SerializedObject serialized = new(definition);
+        ConfigureFirstSkill(
+            serialized,
+            CharacterAttackSubject.None,
+            CharacterAttackSubjectMetric.Health,
+            3,
+            CharacterDamageAmountMode.Ratio,
+            3f);
+        serialized.ApplyModifiedPropertiesWithoutUndo();
+        return definition;
+    }
+
+    private CharacterSO CreateMirinaeFeatureFixture()
+    {
+        StatusEffectSO starPowder =
+            LoadAsset<StatusEffectSO>(StarPowderAssetPath);
+        CharacterSO definition = CreateBaseCharacterFixture(
+            "KillRewardSequenceFeatureFixture",
+            3f,
+            3f);
+        SerializedObject serialized = new(definition);
+
+        SerializedProperty passive = serialized
+            .FindProperty("passiveDefinitions")
+            .GetArrayElementAtIndex(0);
+        passive.FindPropertyRelative("trigger").enumValueIndex =
+            (int)CharacterPassiveTrigger.OnKill;
+        passive.FindPropertyRelative("killSource").enumValueIndex =
+            (int)CharacterPassiveKillSource.All;
+        SerializedProperty passiveEffects =
+            passive.FindPropertyRelative("effects");
+        passiveEffects.arraySize = 2;
+        SerializedProperty gain =
+            passiveEffects.GetArrayElementAtIndex(0);
+        gain.FindPropertyRelative("type").enumValueIndex =
+            (int)CharacterEffectType.GainResource;
+        gain.FindPropertyRelative("targetMode").enumValueIndex =
+            (int)CharacterEffectTargetMode.Source;
+        gain.FindPropertyRelative("damageAmountMode").enumValueIndex =
+            (int)CharacterDamageAmountMode.Fixed;
+        gain.FindPropertyRelative("damageAmount").floatValue = 1f;
+        ConfigureApplyStatusEffect(
+            passiveEffects.GetArrayElementAtIndex(1),
+            CharacterEffectTargetMode.Source,
+            starPowder,
+            1f,
+            1f);
+
+        serialized.FindProperty("skillExecutionPolicy").enumValueIndex =
+            (int)CharacterSkillExecutionPolicy.SequenceAll;
+        SerializedProperty skills =
+            serialized.FindProperty("skillDefinitions");
+        skills.arraySize = 2;
+        ConfigureSkillStep(
+            skills.GetArrayElementAtIndex(0),
+            CharacterAttackSubject.None,
+            1,
+            CharacterActionLinkage.None,
+            false,
+            starPowder);
+        ConfigureSkillStep(
+            skills.GetArrayElementAtIndex(1),
+            CharacterAttackSubject.None,
+            1,
+            CharacterActionLinkage.SimultaneousWithPreviousAttack,
+            true,
+            starPowder);
+
+        serialized.ApplyModifiedPropertiesWithoutUndo();
+        return definition;
+    }
+
+    private static void ConfigureFirstSkill(
+        SerializedObject serialized,
+        CharacterAttackSubject subject,
+        CharacterAttackSubjectMetric metric,
+        int cost,
+        CharacterDamageAmountMode amountMode,
+        float amount,
+        StatusEffectSO appliedStatus = null)
+    {
+        SerializedProperty skill = serialized
+            .FindProperty("skillDefinitions")
+            .GetArrayElementAtIndex(0);
+        SetSections(
+            skill.FindPropertyRelative("sections"),
+            (int)CharacterSkillSectionType.Cost,
+            (int)CharacterSkillSectionType.Subject,
+            (int)CharacterSkillSectionType.Ability);
+        skill.FindPropertyRelative("cost").intValue = cost;
+        skill.FindPropertyRelative("targetFaction").enumValueIndex =
+            (int)CharacterTargetFaction.Enemy;
+        skill.FindPropertyRelative("subject").enumValueIndex =
+            (int)subject;
+        skill.FindPropertyRelative("subjectMetric").enumValueIndex =
+            (int)metric;
+        skill.FindPropertyRelative("subjectCount").intValue = 1;
+        skill.FindPropertyRelative("damageType").enumValueIndex =
+            (int)CharacterAttackDamageType.Fixed;
+        skill.FindPropertyRelative("damageAmountMode").enumValueIndex =
+            (int)amountMode;
+        skill.FindPropertyRelative("damageAmount").floatValue = amount;
+        SerializedProperty effects =
+            skill.FindPropertyRelative("effects");
+        effects.arraySize = appliedStatus == null ? 1 : 2;
+        SerializedProperty damage = effects.GetArrayElementAtIndex(0);
+        ConfigureDamageEffect(
+            damage,
+            CharacterEffectTargetMode.InheritAction,
+            amountMode,
+            amount);
+        if (appliedStatus != null)
+        {
+            ConfigureApplyStatusEffect(
+                effects.GetArrayElementAtIndex(1),
+                CharacterEffectTargetMode.InheritAction,
+                appliedStatus,
+                10f,
+                1f);
+        }
+    }
+
+    private static void ConfigureSkillStep(
+        SerializedProperty skill,
+        CharacterAttackSubject subject,
+        int cost,
+        CharacterActionLinkage linkage,
+        bool requiresTwelveStacks,
+        StatusEffectSO sourceStatus)
+    {
+        if (requiresTwelveStacks)
+        {
+            SetSections(
+                skill.FindPropertyRelative("sections"),
+                (int)CharacterSkillSectionType.Cost,
+                (int)CharacterSkillSectionType.Linkage,
+                (int)CharacterSkillSectionType.Subject,
+                (int)CharacterSkillSectionType.Ability,
+                (int)CharacterSkillSectionType.Condition);
+        }
+        else
+        {
+            SetSections(
+                skill.FindPropertyRelative("sections"),
+                (int)CharacterSkillSectionType.Cost,
+                (int)CharacterSkillSectionType.Linkage,
+                (int)CharacterSkillSectionType.Subject,
+                (int)CharacterSkillSectionType.Ability);
+        }
+        skill.FindPropertyRelative("cost").intValue = cost;
+        skill.FindPropertyRelative("linkage").enumValueIndex =
+            (int)linkage;
+        skill.FindPropertyRelative("targetFaction").enumValueIndex =
+            (int)CharacterTargetFaction.Enemy;
+        skill.FindPropertyRelative("subject").enumValueIndex =
+            (int)subject;
+        skill.FindPropertyRelative("subjectCount").intValue = 1;
+        skill.FindPropertyRelative("damageType").enumValueIndex =
+            (int)CharacterAttackDamageType.Fixed;
+        skill.FindPropertyRelative("damageAmountMode").enumValueIndex =
+            (int)CharacterDamageAmountMode.Fixed;
+        skill.FindPropertyRelative("damageAmount").floatValue = 1f;
+
+        SerializedProperty conditions =
+            skill.FindPropertyRelative("numericConditions");
+        conditions.arraySize = requiresTwelveStacks ? 1 : 0;
+        if (requiresTwelveStacks)
+        {
+            SerializedProperty condition =
+                conditions.GetArrayElementAtIndex(0);
+            condition.FindPropertyRelative("type").enumValueIndex =
+                (int)CharacterConditionType.Numeric;
+            condition.FindPropertyRelative("target").enumValueIndex =
+                (int)CharacterConditionTarget.Source;
+            condition.FindPropertyRelative("metric").enumValueIndex =
+                (int)CharacterNumericConditionMetric.StatusStackCount;
+            condition.FindPropertyRelative("comparison").enumValueIndex =
+                (int)CharacterNumericComparison.GreaterThanOrEqual;
+            condition.FindPropertyRelative("threshold").floatValue = 12f;
+            condition.FindPropertyRelative(
+                "statusEffect").objectReferenceValue = sourceStatus;
+        }
+
+        SerializedProperty effects =
+            skill.FindPropertyRelative("effects");
+        effects.arraySize = requiresTwelveStacks ? 2 : 1;
+        ConfigureFixedDamageEffect(
+            effects.GetArrayElementAtIndex(0),
+            CharacterEffectTargetMode.InheritAction,
+            1f);
+        if (requiresTwelveStacks)
+        {
+            ConfigureRemoveStatusEffect(
+                effects.GetArrayElementAtIndex(1),
+                CharacterEffectTargetMode.Source,
+                sourceStatus,
+                12);
+        }
+    }
+
+    private static void ConfigureDamageEffect(
+        SerializedProperty effect,
+        CharacterEffectTargetMode targetMode,
+        CharacterDamageAmountMode amountMode,
+        float amount)
+    {
+        effect.FindPropertyRelative("type").enumValueIndex =
+            (int)CharacterEffectType.Damage;
+        effect.FindPropertyRelative("targetMode").enumValueIndex =
+            (int)targetMode;
+        effect.FindPropertyRelative("damageType").enumValueIndex =
+            (int)CharacterAttackDamageType.Fixed;
+        effect.FindPropertyRelative("damageAmountMode").enumValueIndex =
+            (int)amountMode;
+        effect.FindPropertyRelative("damageAmount").floatValue = amount;
+    }
+
+    private static void ConfigureApplyStatusEffect(
+        SerializedProperty effect,
+        CharacterEffectTargetMode targetMode,
+        StatusEffectSO status,
+        float duration,
+        float stacks)
+    {
+        effect.FindPropertyRelative("type").enumValueIndex =
+            (int)CharacterEffectType.ApplyStatus;
+        effect.FindPropertyRelative("targetMode").enumValueIndex =
+            (int)targetMode;
+        effect.FindPropertyRelative("statusEffect").objectReferenceValue =
+            status;
+        effect.FindPropertyRelative("statusDuration").floatValue = duration;
+        effect.FindPropertyRelative("statusStacks").floatValue = stacks;
+    }
+
+    private static void ConfigureRemoveStatusEffect(
+        SerializedProperty effect,
+        CharacterEffectTargetMode targetMode,
+        StatusEffectSO status,
+        int removalCount)
+    {
+        effect.FindPropertyRelative("type").enumValueIndex =
+            (int)CharacterEffectType.RemoveStatus;
+        effect.FindPropertyRelative("targetMode").enumValueIndex =
+            (int)targetMode;
+        effect.FindPropertyRelative("statusEffect").objectReferenceValue =
+            status;
+        effect.FindPropertyRelative("statusRemovalTarget").enumValueIndex =
+            (int)CharacterStatusRemovalTarget.Single;
+        effect.FindPropertyRelative("statusRemovalCount").intValue =
+            removalCount;
     }
 
     private CharacterRuntime CreateCharacter(CharacterSO definition)

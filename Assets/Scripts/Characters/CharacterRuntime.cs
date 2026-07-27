@@ -80,6 +80,7 @@ internal sealed class CharacterInfoHoverView : MonoBehaviour,
 [DisallowMultipleComponent]
 [RequireComponent(typeof(AudioSource))]
 public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
+    IBattleVfxAnchorProvider,
     IPointerClickHandler,
     IPointerEnterHandler,
     IPointerExitHandler
@@ -396,6 +397,20 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
         AreAllActionsDisabled ||
         HasStatusControl(StatusEffectControlType.PausePassiveCooldowns);
     public event System.Action<BattleStatusChangedEvent> StatusChanged;
+    public event System.Action<StatusEffectLifecycleEvent> StatusLifecycle;
+
+    public bool TryGetVfxAnchor(
+        BattleVfxAnchorType anchorType,
+        out BattleVfxAnchorSnapshot snapshot)
+    {
+        RectTransform anchorRect = sdImage != null
+            ? sdImage.rectTransform
+            : transform as RectTransform;
+        return BattleVfxUiAnchorUtility.TryCreateScreenAnchor(
+            anchorRect,
+            anchorType,
+            out snapshot);
+    }
 
     public IReadOnlyList<BattleStatusSnapshot> GetActiveStatusEffects()
     {
@@ -1097,6 +1112,7 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
                             activeBatch.RemainingDuration,
                             activeBatch.Source),
                         tickCount);
+                StatusLifecycle?.Invoke(tick);
                 StatusEffectTriggerExecutor.Execute(tick, _board);
             }
             if (RemoveExpiredStatusBatch(state))
@@ -1362,6 +1378,7 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
                     foreach (StatusEffectLifecycleEvent lifecycleEvent in
                              StatusEffectLifecycleResolver.Resolve(eventData))
                     {
+                        StatusLifecycle?.Invoke(lifecycleEvent);
                         StatusEffectTriggerExecutor.Execute(
                             lifecycleEvent,
                             _board);
@@ -2781,6 +2798,21 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
         CharacterStatusRemovalTarget statusRemovalTarget,
         int statusRemovalCount)
     {
+        List<EnemyRuntime> livingTargets = new();
+        if (targets.Faction == CharacterTargetFaction.Enemy)
+        {
+            HashSet<EnemyRuntime> uniqueTargets = new();
+            foreach (EnemyRuntime target in targets.EnemyTargets)
+            {
+                if (target != null &&
+                    target.Health > 0 &&
+                    uniqueTargets.Add(target))
+                {
+                    livingTargets.Add(target);
+                }
+            }
+        }
+
         bool succeeded = ExecuteCustomAbilityOnTargets(
             board,
             targets,
@@ -2793,6 +2825,21 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
             statusRemovalTarget,
             statusRemovalCount,
             out int damageDealt);
+        if (succeeded &&
+            board is IBattlePresentationEventPublisher publisher)
+        {
+            foreach (EnemyRuntime target in livingTargets)
+            {
+                if (target.Health > 0 || target.Definition == null)
+                    continue;
+
+                publisher.PublishUnitLifecycle(
+                    new BattleUnitLifecycleEvent(
+                        BattleUnitLifecycleType.Defeated,
+                        BattleStatusTarget.FromEnemy(target),
+                        target.Definition));
+            }
+        }
         return new BattleEffectResult(
             targets.Count > 0 &&
             HasUsableAbilityValue(damageType, damage),

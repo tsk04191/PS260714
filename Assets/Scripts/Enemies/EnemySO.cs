@@ -3,7 +3,8 @@ using System.Collections.Generic;
 using UnityEngine;
 
 [CreateAssetMenu(fileName = "Enemy", menuName = "Dungeon/Enemy")]
-public sealed class EnemySO : ScriptableObject
+public sealed class EnemySO : ScriptableObject,
+    IBattlePresentationUnitDefinition
 {
     [Header("Identity")]
     [SerializeField] private string enemyId;
@@ -14,6 +15,10 @@ public sealed class EnemySO : ScriptableObject
     [SerializeField] private string cardCode;
     [SerializeField] private EEnemyGrade grade = EEnemyGrade.Normal;
     [SerializeField] private EEnemyType type = EEnemyType.Basic;
+
+    [Header("3D VFX")]
+    [SerializeField] private BattleVfxCueSO spawnVfxCue;
+    [SerializeField] private BattleVfxCueSO deathVfxCue;
 
     [Header("Base Stats")]
     [SerializeField, Min(1)] private int baseHealth = 20;
@@ -34,6 +39,8 @@ public sealed class EnemySO : ScriptableObject
     public string CardCode => cardCode ?? string.Empty;
     public EEnemyGrade Grade => grade;
     public EEnemyType Type => type;
+    public BattleVfxCueSO SpawnVfxCue => spawnVfxCue;
+    public BattleVfxCueSO DeathVfxCue => deathVfxCue;
     public int BaseHealth => baseHealth;
     public float SpawnIntervalMultiplier =>
         TimePrecision.Normalize(spawnIntervalMultiplier, 0.1f);

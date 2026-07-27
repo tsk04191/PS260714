@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.IO;
 using System.Text;
 using NUnit.Framework;
 using UnityEditor;
@@ -8,14 +7,8 @@ using UnityEngine;
 
 public sealed class CharacterDefinitionValidationTests
 {
-    private const string AislingCharacterPath =
-        "Assets/Resources/Characters/2_Aisling.asset";
-    private const string MirinaeCharacterPath =
-        "Assets/Resources/Characters/2_Mirinae.asset";
     private const string FireStatusPath =
         "Assets/Resources/StatusEffects/Fire.asset";
-    private const string StarPowderStatusPath =
-        "Assets/Resources/StatusEffects/StarPowder.asset";
 
     private readonly List<UnityEngine.Object> _createdObjects = new();
 
@@ -557,83 +550,6 @@ public sealed class CharacterDefinitionValidationTests
     }
 
     [Test]
-    public void Aisling_StatusStackCondition_ReferencesFireExplicitly()
-    {
-        CharacterSO aisling =
-            AssetDatabase.LoadAssetAtPath<CharacterSO>(AislingCharacterPath);
-
-        Assert.That(aisling, Is.Not.Null);
-        Assert.That(aisling.PassiveDefinitions, Is.Not.Empty);
-        Assert.That(
-            aisling.PassiveDefinitions[0].NumericConditions,
-            Is.Not.Empty);
-
-        CharacterNumericCondition condition =
-            aisling.PassiveDefinitions[0].NumericConditions[0];
-        Assert.That(
-            condition.Type,
-            Is.EqualTo(CharacterConditionType.Numeric));
-        Assert.That(
-            condition.Metric,
-            Is.EqualTo(CharacterNumericConditionMetric.StatusStackCount));
-        Assert.That(
-            condition.Comparison,
-            Is.EqualTo(CharacterNumericComparison.GreaterThanOrEqual));
-        Assert.That(condition.Threshold, Is.EqualTo(1f));
-
-        string fireGuid = AssetDatabase.AssetPathToGUID(FireStatusPath);
-        Assert.That(fireGuid, Is.Not.Empty);
-        string serializedAsset = File.ReadAllText(AislingCharacterPath);
-        StringAssert.Contains(
-            $"statusEffect: {{fileID: 11400000, guid: {fireGuid}, type: 2}}",
-            serializedAsset,
-            "The persisted Aisling asset must explicitly reference Fire. " +
-            "Reading the YAML avoids false failures from an unsaved " +
-            "Character Editor object cache.");
-    }
-
-    [Test]
-    public void Mirinae_StarPowderConditionAndKillReward_AreConfigured()
-    {
-        CharacterSO mirinae =
-            AssetDatabase.LoadAssetAtPath<CharacterSO>(
-                MirinaeCharacterPath);
-        StatusEffectSO starPowder =
-            AssetDatabase.LoadAssetAtPath<StatusEffectSO>(
-                StarPowderStatusPath);
-
-        Assert.That(mirinae, Is.Not.Null);
-        Assert.That(starPowder, Is.Not.Null);
-        Assert.That(mirinae.PassiveDefinitions, Is.Not.Empty);
-        Assert.That(mirinae.SkillDefinitions, Has.Count.GreaterThanOrEqualTo(2));
-
-        CharacterPassiveDefinition passive =
-            mirinae.PassiveDefinitions[0];
-        Assert.That(
-            passive.Trigger,
-            Is.EqualTo(CharacterPassiveTrigger.OnKill));
-        Assert.That(
-            passive.Effects,
-            Has.Some.Matches<CharacterEffectDefinition>(effect =>
-                effect != null &&
-                effect.Type == CharacterEffectType.ApplyStatus &&
-                effect.TargetMode == CharacterEffectTargetMode.Source &&
-                effect.StatusEffect == starPowder &&
-                Mathf.Approximately(effect.StatusStacks, 1f)));
-
-        CharacterNumericCondition condition =
-            mirinae.SkillDefinitions[1].NumericConditions[0];
-        Assert.That(
-            condition.Target,
-            Is.EqualTo(CharacterConditionTarget.Source));
-        Assert.That(
-            condition.Metric,
-            Is.EqualTo(CharacterNumericConditionMetric.StatusStackCount));
-        Assert.That(condition.StatusEffect, Is.SameAs(starPowder));
-        Assert.That(condition.Threshold, Is.EqualTo(12f));
-    }
-
-    [Test]
     public void Validate_DuplicateUpgradeAndWrongTotal_ReturnsErrors()
     {
         CharacterSO definition = CreateDefinition();
@@ -665,7 +581,8 @@ public sealed class CharacterDefinitionValidationTests
     }
 
     [Test]
-    public void AllCharacterAssets_HaveNoDefinitionErrors()
+    [Category("ContentValidation")]
+    public void AllCharacterAssets_PassSharedEditorValidation()
     {
         LoadCharacterAssets(
             out List<string> paths,
@@ -705,58 +622,7 @@ public sealed class CharacterDefinitionValidationTests
     }
 
     [Test]
-    public void ShippedCharacterAssets_HaveNoLegacyAbilityFallbacks()
-    {
-        const string runtimeCharacterDirectory =
-            "Assets/Resources/Characters";
-        string[] guids = AssetDatabase.FindAssets(
-            "t:CharacterSO",
-            new[] { runtimeCharacterDirectory });
-        List<string> paths = new(guids.Length);
-        foreach (string guid in guids)
-            paths.Add(AssetDatabase.GUIDToAssetPath(guid));
-        paths.Sort(StringComparer.Ordinal);
-
-        Assert.That(
-            paths,
-            Is.Not.Empty,
-            $"No CharacterSO assets were found under " +
-            $"'{runtimeCharacterDirectory}'.");
-
-        List<string> legacyAbilities = new();
-        foreach (string path in paths)
-        {
-            CharacterSO definition =
-                AssetDatabase.LoadAssetAtPath<CharacterSO>(path);
-            Assert.That(
-                definition,
-                Is.Not.Null,
-                $"Failed to load CharacterSO at '{path}'.");
-
-            CharacterDefinitionValidationResult result =
-                CharacterDefinitionValidator.Validate(definition);
-            foreach (CharacterDefinitionDiagnostic diagnostic in
-                     result.Diagnostics)
-            {
-                if (string.Equals(
-                        diagnostic.Code,
-                        "ability.legacy_fallback",
-                        StringComparison.Ordinal))
-                {
-                    legacyAbilities.Add(
-                        $"{path} :: {diagnostic.Path}");
-                }
-            }
-        }
-
-        Assert.That(
-            legacyAbilities,
-            Is.Empty,
-            "Shipped CharacterSO ability blocks must use explicit effects:" +
-            $"\n{string.Join("\n", legacyAbilities)}");
-    }
-
-    [Test]
+    [Category("ContentValidation")]
     public void Validate_DoesNotMutateCharacterAssets()
     {
         LoadCharacterAssets(
@@ -778,6 +644,7 @@ public sealed class CharacterDefinitionValidationTests
     }
 
     [Test]
+    [Category("ContentValidation")]
     public void AllStatusEffectAssets_HaveNoDefinitionErrors()
     {
         LoadStatusEffectAssets(

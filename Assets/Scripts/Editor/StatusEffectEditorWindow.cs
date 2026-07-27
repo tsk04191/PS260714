@@ -488,7 +488,19 @@ public sealed class StatusEffectEditorWindow : EditorWindow
         if (!BeginFoldout(ref _presentationExpanded, "2. 표시 및 오디오"))
             return;
 
-        DrawProperty("visualEffectPrefab", "VFX 프리팹");
+        DrawProperty("applyVfxCue", "적용 VFX 큐");
+        DrawProperty("loopVfxCue", "유지 VFX 큐");
+        DrawProperty("tickVfxCue", "틱 VFX 큐");
+        DrawProperty("removeVfxCue", "제거 VFX 큐");
+        SerializedProperty legacyVfx = Find("visualEffectPrefab");
+        if (legacyVfx != null && legacyVfx.objectReferenceValue != null)
+        {
+            EditorGUILayout.HelpBox(
+                "기존 VFX 프리팹은 호환 목적으로만 유지됩니다. " +
+                "3D 전환에는 위 VFX 큐를 사용하세요.",
+                MessageType.Warning);
+            DrawProperty("visualEffectPrefab", "기존 VFX 프리팹");
+        }
         DrawProperty("iconAnimatorController", "아이콘 애니메이터");
         DrawProperty("applyAudioClip", "적용 오디오");
         DrawProperty("tickAudioClip", "틱 오디오");

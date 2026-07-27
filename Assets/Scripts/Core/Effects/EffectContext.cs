@@ -349,7 +349,8 @@ public enum BattleEffectOriginKind
     CharacterPassive = 1,
     CharacterSkill = 2,
     StatusEffect = 3,
-    EnemyAbility = 4
+    EnemyAbility = 4,
+    BattleLifecycle = 5
 }
 
 public readonly struct BattleEffectContext

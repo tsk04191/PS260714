@@ -24,6 +24,7 @@ public sealed class EnemyEditorWindow : EditorWindow
     private bool _validationExpanded = true;
     private bool _identityExpanded = true;
     private bool _statsExpanded = true;
+    private bool _presentationExpanded = true;
     private bool _abilitiesExpanded = true;
 
     [MenuItem(MenuPath)]
@@ -259,6 +260,7 @@ public sealed class EnemyEditorWindow : EditorWindow
                     EditorGUI.BeginChangeCheck();
                     DrawIdentity();
                     DrawBaseStats();
+                    DrawPresentation();
                     DrawAbilities();
 
                     if (EditorGUI.EndChangeCheck() &&
@@ -472,6 +474,26 @@ public sealed class EnemyEditorWindow : EditorWindow
             moveTo);
         if (GUILayout.Button("Add Ability"))
             AddAbility(abilities);
+    }
+
+    private void DrawPresentation()
+    {
+        _presentationExpanded = EditorGUILayout.Foldout(
+            _presentationExpanded,
+            "Battle Lifecycle 3D VFX",
+            true,
+            EditorStyles.foldoutHeader);
+        if (!_presentationExpanded)
+            return;
+
+        using (new EditorGUILayout.VerticalScope(EditorStyles.helpBox))
+        {
+            DrawProperty("spawnVfxCue", "Spawn VFX Cue");
+            DrawProperty("deathVfxCue", "Death VFX Cue");
+            EditorGUILayout.HelpBox(
+                "Spawn plays after the enemy card is placed. Death uses the cached card anchor after removal.",
+                MessageType.Info);
+        }
     }
 
     private static void DrawAbility(SerializedProperty ability)
@@ -993,6 +1015,9 @@ public sealed class EnemyEditorWindow : EditorWindow
             "statusRemovalTarget",
             (int)CharacterStatusRemovalTarget.Single);
         SetInt(effect, "statusRemovalCount", 0);
+        SetObject(effect, "castVfxCue", null);
+        SetObject(effect, "projectileVfxCue", null);
+        SetObject(effect, "impactVfxCue", null);
 
         SerializedProperty selector =
             effect.FindPropertyRelative("targetSelector");

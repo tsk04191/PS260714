@@ -90,6 +90,7 @@ public sealed class EnemyRuntime
     public bool AreAllActionsDisabled =>
         HasStatusControl(StatusEffectControlType.DisableAllActions);
     public event Action<BattleStatusChangedEvent> StatusChanged;
+    public event Action<StatusEffectLifecycleEvent> StatusLifecycle;
 
     public IReadOnlyList<BattleStatusSnapshot> GetActiveStatusEffects()
     {
@@ -736,6 +737,7 @@ public sealed class EnemyRuntime
                             activeBatch.RemainingDuration,
                             activeBatch.Source),
                         tickCount);
+                StatusLifecycle?.Invoke(tick);
                 BattleEffectResult triggerResult =
                     StatusEffectTriggerExecutor.Execute(
                         tick,
@@ -952,6 +954,7 @@ public sealed class EnemyRuntime
                 foreach (StatusEffectLifecycleEvent lifecycleEvent in
                          StatusEffectLifecycleResolver.Resolve(eventData))
                 {
+                    StatusLifecycle?.Invoke(lifecycleEvent);
                     StatusEffectTriggerExecutor.Execute(lifecycleEvent);
                 }
             }

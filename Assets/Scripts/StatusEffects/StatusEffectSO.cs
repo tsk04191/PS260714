@@ -880,6 +880,14 @@ public sealed class StatusEffectSO : ScriptableObject
     [SerializeField]
     private GameObject visualEffectPrefab;
     [SerializeField]
+    private BattleVfxCueSO applyVfxCue;
+    [SerializeField]
+    private BattleVfxCueSO loopVfxCue;
+    [SerializeField]
+    private BattleVfxCueSO tickVfxCue;
+    [SerializeField]
+    private BattleVfxCueSO removeVfxCue;
+    [SerializeField]
     private RuntimeAnimatorController iconAnimatorController;
     [SerializeField]
     private AudioClip applyAudioClip;
@@ -941,6 +949,10 @@ public sealed class StatusEffectSO : ScriptableObject
     public bool CanTargetEnemy => canTargetEnemy;
     public bool CanTargetAlly => canTargetAlly;
     public GameObject VisualEffectPrefab => visualEffectPrefab;
+    public BattleVfxCueSO ApplyVfxCue => applyVfxCue;
+    public BattleVfxCueSO LoopVfxCue => loopVfxCue;
+    public BattleVfxCueSO TickVfxCue => tickVfxCue;
+    public BattleVfxCueSO RemoveVfxCue => removeVfxCue;
     public RuntimeAnimatorController IconAnimatorController =>
         iconAnimatorController;
     public AudioClip ApplyAudioClip => applyAudioClip;

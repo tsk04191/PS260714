@@ -12,6 +12,10 @@ internal static class PS260714EditorMenu
         Root + "Enemy Editor";
     public const string StatusEffectEditor =
         Root + "Status Effect Editor";
+    public const string BattleVfxEditor =
+        Root + "Effects/Battle VFX Editor";
+    public const string ValidateBattleVfx =
+        Root + "Effects/Validate Battle VFX";
     public const string LocalizationEditor =
         Root + "Localization/Localization Editor";
     public const string ValidateLocalization =

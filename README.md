@@ -35,6 +35,7 @@ Unity가 생성하는 `Library`, `Temp`, IDE 프로젝트 파일과 로컬 에�
 - Unity 6
 - C#
 - Visual Studio Code
+- Codex
 
 ## 로컬라이제이션
 

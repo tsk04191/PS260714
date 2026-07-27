@@ -574,7 +574,9 @@ public sealed class CharacterDungeonUpgradeDefinition
 }
 
 [Serializable]
-public sealed class CharacterEffectDefinition : IBattleEffectDefinition
+public sealed class CharacterEffectDefinition :
+    IBattleEffectDefinition,
+    IBattlePresentationEffectDefinition
 {
     [SerializeField]
     private CharacterEffectType type;
@@ -617,6 +619,12 @@ public sealed class CharacterEffectDefinition : IBattleEffectDefinition
     private CharacterStatusRemovalTarget statusRemovalTarget;
     [SerializeField, Min(0)]
     private int statusRemovalCount;
+    [SerializeField]
+    private BattleVfxCueSO castVfxCue;
+    [SerializeField]
+    private BattleVfxCueSO projectileVfxCue;
+    [SerializeField]
+    private BattleVfxCueSO impactVfxCue;
 
     internal static CharacterEffectDefinition CreateFixedRuntimeEffect(
         CharacterEffectType effectType,
@@ -696,6 +704,9 @@ public sealed class CharacterEffectDefinition : IBattleEffectDefinition
     public CharacterStatusRemovalTarget StatusRemovalTarget =>
         statusRemovalTarget;
     public int StatusRemovalCount => statusRemovalCount;
+    public BattleVfxCueSO CastVfxCue => castVfxCue;
+    public BattleVfxCueSO ProjectileVfxCue => projectileVfxCue;
+    public BattleVfxCueSO ImpactVfxCue => impactVfxCue;
 
     public void Validate()
     {
@@ -1211,7 +1222,8 @@ public sealed class CharacterAttackDefinition :
 }
 
 [CreateAssetMenu(fileName = "Character", menuName = "Dungeon/Character")]
-public sealed class CharacterSO : ScriptableObject
+public sealed class CharacterSO : ScriptableObject,
+    IBattlePresentationUnitDefinition
 {
     [SerializeField, HideInInspector] private string characterId;
     [SerializeField] private bool initiallyOwned = true;
@@ -1229,6 +1241,10 @@ public sealed class CharacterSO : ScriptableObject
     [SerializeField] private string descriptionLocalizationKey;
     [SerializeField] private string characterName = "CHARACTER";
     [SerializeField, TextArea(3, 8)] private string characterDescription;
+
+    [Header("3D VFX")]
+    [SerializeField] private BattleVfxCueSO spawnVfxCue;
+    [SerializeField] private BattleVfxCueSO deathVfxCue;
 
     [Header("Editor Passive Definitions")]
     [SerializeField]
@@ -1276,6 +1292,8 @@ public sealed class CharacterSO : ScriptableObject
     public string DescriptionLocalizationKey => descriptionLocalizationKey;
     public string CharacterName => characterName;
     public string CharacterDescription => characterDescription;
+    public BattleVfxCueSO SpawnVfxCue => spawnVfxCue;
+    public BattleVfxCueSO DeathVfxCue => deathVfxCue;
     public IReadOnlyList<CharacterPassiveDefinition> PassiveDefinitions =>
         passiveDefinitions;
     public IReadOnlyList<CharacterAttackDefinition> AttackDefinitions =>

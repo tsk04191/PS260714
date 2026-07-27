@@ -353,16 +353,20 @@ public static class BattleEffectExecutor
         BattleEffectContext effectContext =
             context.SnapshotSourceStatus(
                 effect.SourceStatusScalingEffect);
+        IReadOnlyList<BattleStatusTarget> livingDamageTargets =
+            CaptureLivingDamageTargets(effectContext, effect);
+        BattleEffectResult result;
         switch (effect.BattleEffectType)
         {
             case BattleEffectType.Damage:
-                return ExecuteDamage(
+                result = ExecuteDamage(
                     effectContext,
                     effect,
                     sourceData,
                     amountMultiplier,
                     showAttackRange,
                     inheritedEnemyDamageFallback);
+                break;
 
             case BattleEffectType.ApplyStatus:
             {
@@ -391,7 +395,8 @@ public static class BattleEffectExecutor
                         stacks,
                         effect.StatusEffect.TickInterval,
                         showAttackRange);
-                return new BattleEffectResult(true, changed);
+                result = new BattleEffectResult(true, changed);
+                break;
             }
 
             case BattleEffectType.RemoveStatus:
@@ -424,7 +429,8 @@ public static class BattleEffectExecutor
                         effect.StatusEffect,
                         removalCount,
                         showAttackRange);
-                return new BattleEffectResult(true, changed);
+                result = new BattleEffectResult(true, changed);
+                break;
             }
 
             case BattleEffectType.GainResource:
@@ -436,10 +442,14 @@ public static class BattleEffectExecutor
                     false,
                     amountMultiplier);
                 if (amount <= 0)
-                    return new BattleEffectResult(true, false);
+                {
+                    result = new BattleEffectResult(true, false);
+                    break;
+                }
                 bool changed =
                     effectContext.Resource?.TryGain(amount) == true;
-                return new BattleEffectResult(true, changed);
+                result = new BattleEffectResult(true, changed);
+                break;
             }
 
             case BattleEffectType.SpendResource:
@@ -453,20 +463,25 @@ public static class BattleEffectExecutor
                         false,
                         amountMultiplier);
                 if (amount <= 0)
-                    return new BattleEffectResult(true, false);
+                {
+                    result = new BattleEffectResult(true, false);
+                    break;
+                }
                 bool changed =
                     effectContext.Resource?.TrySpend(amount) == true;
-                return new BattleEffectResult(true, changed);
+                result = new BattleEffectResult(true, changed);
+                break;
             }
 
             case BattleEffectType.Heal:
-                return ExecuteRestore(
+                result = ExecuteRestore(
                     effectContext,
                     effect,
                     sourceData,
                     amountMultiplier,
                     false,
                     showAttackRange);
+                break;
 
             case BattleEffectType.SpendHealth:
             {
@@ -479,24 +494,167 @@ public static class BattleEffectExecutor
                         false,
                         amountMultiplier);
                 if (amount <= 0)
-                    return new BattleEffectResult(true, false);
+                {
+                    result = new BattleEffectResult(true, false);
+                    break;
+                }
                 bool changed =
                     effectContext.SourceTarget.TrySpendHealth(amount);
-                return new BattleEffectResult(true, changed);
+                result = new BattleEffectResult(true, changed);
+                break;
             }
 
             case BattleEffectType.Shield:
-                return ExecuteRestore(
+                result = ExecuteRestore(
                     effectContext,
                     effect,
                     sourceData,
                     amountMultiplier,
                     true,
                     showAttackRange);
+                break;
 
             default:
                 return default;
         }
+
+        if (result.Attempted &&
+            effectContext.Board is IBattlePresentationEventPublisher publisher)
+        {
+            publisher.PublishEffectResolved(
+                new BattleEffectResolvedEvent(
+                    effectContext,
+                    effect,
+                    result));
+            if (result.Succeeded)
+            {
+                PublishDefeatedTargets(
+                    publisher,
+                    effect,
+                    livingDamageTargets);
+            }
+        }
+
+        return result;
+    }
+
+    private static IReadOnlyList<BattleStatusTarget>
+        CaptureLivingDamageTargets(
+            BattleEffectContext context,
+            IBattleEffectDefinition effect)
+    {
+        if (effect == null ||
+            effect.BattleEffectType != BattleEffectType.Damage)
+        {
+            return Array.Empty<BattleStatusTarget>();
+        }
+
+        List<BattleStatusTarget> living = new();
+        if (context.TargetFaction == CharacterTargetFaction.Ally)
+        {
+            HashSet<IBattleCharacter> unique = new();
+            foreach (IBattleCharacter target in context.AllyTargets)
+            {
+                if (target != null &&
+                    target.CurrentHealth > 0 &&
+                    unique.Add(target))
+                {
+                    living.Add(BattleStatusTarget.FromAlly(target));
+                }
+            }
+        }
+        else
+        {
+            HashSet<EnemyRuntime> unique = new();
+            foreach (EnemyRuntime target in context.EnemyTargets)
+            {
+                if (target != null &&
+                    target.Health > 0 &&
+                    unique.Add(target))
+                {
+                    living.Add(BattleStatusTarget.FromEnemy(target));
+                }
+            }
+        }
+
+        return living.Count > 0
+            ? living.ToArray()
+            : Array.Empty<BattleStatusTarget>();
+    }
+
+    private static void PublishDefeatedTargets(
+        IBattlePresentationEventPublisher publisher,
+        IBattleEffectDefinition effect,
+        IReadOnlyList<BattleStatusTarget> livingTargets)
+    {
+        if (publisher == null ||
+            livingTargets == null ||
+            livingTargets.Count == 0)
+        {
+            return;
+        }
+
+        float delaySeconds = GetImpactDelay(effect);
+        foreach (BattleStatusTarget target in livingTargets)
+        {
+            if (!IsDefeated(target) ||
+                !TryGetPresentationDefinition(
+                    target,
+                    out IBattlePresentationUnitDefinition definition))
+            {
+                continue;
+            }
+
+            publisher.PublishUnitLifecycle(
+                new BattleUnitLifecycleEvent(
+                    BattleUnitLifecycleType.Defeated,
+                    target,
+                    definition,
+                    delaySeconds));
+        }
+    }
+
+    private static float GetImpactDelay(IBattleEffectDefinition effect)
+    {
+        if (effect is not IBattlePresentationEffectDefinition presentation)
+            return 0f;
+
+        float delay = presentation.CastVfxCue != null
+            ? presentation.CastVfxCue.StageDuration
+            : 0f;
+        if (presentation.ProjectileVfxCue != null)
+            delay += presentation.ProjectileVfxCue.StageDuration;
+        return delay;
+    }
+
+    private static bool IsDefeated(BattleStatusTarget target)
+    {
+        if (target.Enemy != null)
+            return target.Enemy.Health <= 0;
+        return target.Ally != null &&
+               target.Ally.CurrentHealth <= 0;
+    }
+
+    private static bool TryGetPresentationDefinition(
+        BattleStatusTarget target,
+        out IBattlePresentationUnitDefinition definition)
+    {
+        if (target.Enemy?.Definition is
+            IBattlePresentationUnitDefinition enemyDefinition)
+        {
+            definition = enemyDefinition;
+            return true;
+        }
+        if (target.Ally is CharacterRuntime character &&
+            character.Definition is
+                IBattlePresentationUnitDefinition characterDefinition)
+        {
+            definition = characterDefinition;
+            return true;
+        }
+
+        definition = null;
+        return false;
     }
 
     private static BattleEffectResult ExecuteDamage(

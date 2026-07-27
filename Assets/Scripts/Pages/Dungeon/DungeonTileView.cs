@@ -397,6 +397,22 @@ public sealed class DungeonTileView : MonoBehaviour, IPointerClickHandler
         return new List<EnemyRuntime>(_enemies);
     }
 
+    internal bool TryGetEnemyVfxAnchor(
+        EnemyRuntime enemy,
+        BattleVfxAnchorType anchorType,
+        out BattleVfxAnchorSnapshot snapshot)
+    {
+        snapshot = default;
+        int index = enemy != null ? _enemies.IndexOf(enemy) : -1;
+        if (index < 0 || index >= _cards.Count || _cards[index] == null)
+            return false;
+
+        return BattleVfxUiAnchorUtility.TryCreateScreenAnchor(
+            _cards[index].transform as RectTransform,
+            anchorType,
+            out snapshot);
+    }
+
     private void HandleEnemyCardClicked(EnemyRuntime enemy)
     {
         if (enemy != null && ReferenceEquals(enemy, TopEnemy))

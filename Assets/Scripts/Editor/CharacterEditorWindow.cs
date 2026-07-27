@@ -92,6 +92,10 @@ public sealed class CharacterEditorWindow : EditorWindow
         "statusRemovalTarget";
     private const string StatusRemovalCountPropertyName =
         "statusRemovalCount";
+    private const string CastVfxCuePropertyName = "castVfxCue";
+    private const string ProjectileVfxCuePropertyName =
+        "projectileVfxCue";
+    private const string ImpactVfxCuePropertyName = "impactVfxCue";
     private const string AreaOffsetsPropertyName = "areaOffsets";
     private const string AreaRowOffsetPropertyName = "rowOffset";
     private const string AreaColumnOffsetPropertyName = "columnOffset";
@@ -682,6 +686,7 @@ public sealed class CharacterEditorWindow : EditorWindow
         {
             EditorGUI.BeginChangeCheck();
             DrawCharacterProfile();
+            DrawCharacterPresentation();
             DrawCharacterReferenceStats();
             if (EditorGUI.EndChangeCheck() &&
                 _serializedCharacter.ApplyModifiedProperties())
@@ -1099,6 +1104,21 @@ public sealed class CharacterEditorWindow : EditorWindow
                 MessageType.Error);
         }
 
+        EditorGUILayout.EndVertical();
+        EditorGUILayout.Space(8f);
+    }
+
+    private void DrawCharacterPresentation()
+    {
+        EditorGUILayout.BeginVertical(EditorStyles.helpBox);
+        EditorGUILayout.LabelField(
+            "전투 생명주기 3D VFX",
+            EditorStyles.boldLabel);
+        DrawProfileProperty("spawnVfxCue", "배치 VFX 큐");
+        DrawProfileProperty("deathVfxCue", "사망 VFX 큐");
+        EditorGUILayout.HelpBox(
+            "배치 Cue는 파티가 전투 보드에 등록될 때, 사망 Cue는 체력이 0이 된 위치에서 재생됩니다.",
+            MessageType.Info);
         EditorGUILayout.EndVertical();
         EditorGUILayout.Space(8f);
     }
@@ -3344,6 +3364,48 @@ public sealed class CharacterEditorWindow : EditorWindow
                 DrawDamageAmount(effect);
                 break;
         }
+
+        EditorGUILayout.LabelField("3D VFX 단계", EditorStyles.miniBoldLabel);
+        SerializedProperty castVfx = effect.FindPropertyRelative(
+            CastVfxCuePropertyName);
+        if (castVfx != null)
+        {
+            EditorGUILayout.PropertyField(
+                castVfx,
+                new GUIContent(
+                    "시전 VFX 큐",
+                    "효과가 성공하면 소스 위치에서 한 번 재생합니다."));
+        }
+
+        SerializedProperty projectileVfx = effect.FindPropertyRelative(
+            ProjectileVfxCuePropertyName);
+        if (projectileVfx != null)
+        {
+            EditorGUILayout.PropertyField(
+                projectileVfx,
+                new GUIContent(
+                    "투사체 VFX 큐",
+                    "효과가 성공한 각 대상까지 이동시키는 3D VFX 큐입니다."));
+            if (projectileVfx.objectReferenceValue is BattleVfxCueSO cue &&
+                !cue.HasMotion)
+            {
+                EditorGUILayout.HelpBox(
+                    "선택한 투사체 Cue의 이동 방식이 Stationary입니다. " +
+                    "Battle VFX Editor에서 Linear 또는 Arc를 선택해야 실제로 이동합니다.",
+                    MessageType.Warning);
+            }
+        }
+
+        SerializedProperty impactVfx = effect.FindPropertyRelative(
+            ImpactVfxCuePropertyName);
+        if (impactVfx != null)
+        {
+            EditorGUILayout.PropertyField(
+                impactVfx,
+                new GUIContent(
+                    "적중 VFX 큐",
+                    "이 효과가 실제로 성공한 대상마다 재생할 3D VFX 큐입니다."));
+        }
     }
 
     private static void AddDefaultEffect(SerializedProperty effects)
@@ -3548,6 +3610,18 @@ public sealed class CharacterEditorWindow : EditorWindow
             StatusRemovalCountPropertyName);
         if (removalCount != null)
             removalCount.intValue = 0;
+        SetObjectReferenceValue(
+            effect,
+            CastVfxCuePropertyName,
+            null);
+        SetObjectReferenceValue(
+            effect,
+            ProjectileVfxCuePropertyName,
+            null);
+        SetObjectReferenceValue(
+            effect,
+            ImpactVfxCuePropertyName,
+            null);
     }
 
     private static void ResetExplicitEffects(

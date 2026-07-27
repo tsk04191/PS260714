@@ -6,16 +6,24 @@ using Random = UnityEngine.Random;
 
 [DisallowMultipleComponent]
 [RequireComponent(typeof(RectTransform))]
-public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard
+public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
+    IBattlePresentationEventPublisher,
+    IBattleVfxTargetResolver
 {
     private const int MaximumStatusEventsPerDispatch = 128;
     private const int MaximumDefeatEventsPerDispatch = 128;
+    private const int MaximumPresentationEventsPerDispatch = 256;
     public const int MinimumGridSize = 3;
     public const int MaximumGridSize = 9;
 
     [SerializeField] private RectTransform boardRect;
     [SerializeField] private GridLayoutGroup gridLayout;
     [SerializeField] private DungeonTileView tilePrefab;
+
+    [Header("3D VFX")]
+    [SerializeField] private BattleVfxPlayer vfxPlayer;
+    [SerializeField]
+    private BattleVfxQualityProfileSO vfxQualityProfile;
 
     private readonly List<DungeonTileView> _tiles = new();
     private readonly List<IBattleCharacter> _battleCharacters = new();
@@ -28,6 +36,28 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard
     private bool _dispatchingStatusEvents;
     private readonly Queue<BattleEnemyDefeatedEvent> _defeatEventQueue = new();
     private bool _dispatchingDefeatEvents;
+    private readonly Queue<BattleEffectResolvedEvent>
+        _effectResolvedEventQueue = new();
+    private readonly Queue<StatusEffectLifecycleEvent>
+        _statusLifecycleEventQueue = new();
+    private readonly Queue<BattleUnitLifecycleEvent>
+        _unitLifecycleEventQueue = new();
+    private bool _dispatchingEffectResolvedEvents;
+    private bool _dispatchingStatusLifecycleEvents;
+    private bool _dispatchingUnitLifecycleEvents;
+    private readonly HashSet<EnemyRuntime> _boundPresentationEnemies = new();
+    private readonly HashSet<CharacterRuntime>
+        _boundPresentationCharacters = new();
+    private readonly Dictionary<EnemyRuntime, BattleVfxTargetHandle>
+        _enemyVfxHandles = new();
+    private readonly Dictionary<IBattleCharacter, BattleVfxTargetHandle>
+        _allyVfxHandles = new();
+    private readonly Dictionary<
+        EnemyRuntime,
+        Dictionary<BattleVfxAnchorType, BattleVfxAnchorSnapshot>>
+        _lastEnemyVfxAnchors = new();
+    private int _nextVfxTargetHandle = 1;
+    private BattlePresentationDispatcher _presentationDispatcher;
 
     public int GridSize { get; private set; } = MinimumGridSize;
     public RectTransform HighlightRect => boardRect != null
@@ -61,9 +91,143 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard
             return false;
         }
     }
+    public BattleVfxPlayer VfxPlayer => vfxPlayer;
     public event Action<BattleEnemyDefeatedEvent> EnemyDefeated;
     public event Action<EnemyRuntime> EnemyClicked;
     public event Action<BattleStatusAppliedEvent> StatusApplied;
+    public event Action<BattleEffectResolvedEvent> EffectResolved;
+    public event Action<StatusEffectLifecycleEvent> StatusLifecycle;
+    public event Action<BattleUnitLifecycleEvent> UnitLifecycle;
+
+    public void PublishEffectResolved(BattleEffectResolvedEvent eventData)
+    {
+        if (!eventData.IsValid)
+            return;
+
+        _effectResolvedEventQueue.Enqueue(eventData);
+        if (_dispatchingEffectResolvedEvents)
+            return;
+
+        _dispatchingEffectResolvedEvents = true;
+        try
+        {
+            int processedCount = 0;
+            while (_effectResolvedEventQueue.Count > 0 &&
+                   processedCount < MaximumPresentationEventsPerDispatch)
+            {
+                InvokeSafely(
+                    EffectResolved,
+                    _effectResolvedEventQueue.Dequeue());
+                processedCount++;
+            }
+
+            DiscardExcessPresentationEvents(
+                _effectResolvedEventQueue,
+                "effect result");
+        }
+        finally
+        {
+            _dispatchingEffectResolvedEvents = false;
+        }
+    }
+
+    public void PublishStatusLifecycle(StatusEffectLifecycleEvent eventData)
+    {
+        if (!eventData.IsValid)
+            return;
+
+        _statusLifecycleEventQueue.Enqueue(eventData);
+        if (_dispatchingStatusLifecycleEvents)
+            return;
+
+        _dispatchingStatusLifecycleEvents = true;
+        try
+        {
+            int processedCount = 0;
+            while (_statusLifecycleEventQueue.Count > 0 &&
+                   processedCount < MaximumPresentationEventsPerDispatch)
+            {
+                InvokeSafely(
+                    StatusLifecycle,
+                    _statusLifecycleEventQueue.Dequeue());
+                processedCount++;
+            }
+
+            DiscardExcessPresentationEvents(
+                _statusLifecycleEventQueue,
+                "status lifecycle");
+        }
+        finally
+        {
+            _dispatchingStatusLifecycleEvents = false;
+        }
+    }
+
+    public void PublishUnitLifecycle(BattleUnitLifecycleEvent eventData)
+    {
+        if (!eventData.IsValid)
+            return;
+
+        _unitLifecycleEventQueue.Enqueue(eventData);
+        if (_dispatchingUnitLifecycleEvents)
+            return;
+
+        _dispatchingUnitLifecycleEvents = true;
+        try
+        {
+            int processedCount = 0;
+            while (_unitLifecycleEventQueue.Count > 0 &&
+                   processedCount < MaximumPresentationEventsPerDispatch)
+            {
+                InvokeSafely(
+                    UnitLifecycle,
+                    _unitLifecycleEventQueue.Dequeue());
+                processedCount++;
+            }
+
+            DiscardExcessPresentationEvents(
+                _unitLifecycleEventQueue,
+                "unit lifecycle");
+        }
+        finally
+        {
+            _dispatchingUnitLifecycleEvents = false;
+        }
+    }
+
+    private void InvokeSafely<T>(Action<T> handlers, T eventData)
+    {
+        if (handlers == null)
+            return;
+
+        foreach (Delegate handler in handlers.GetInvocationList())
+        {
+            try
+            {
+                ((Action<T>)handler).Invoke(eventData);
+            }
+            catch (Exception exception)
+            {
+                Debug.LogException(exception, this);
+            }
+        }
+    }
+
+    private void DiscardExcessPresentationEvents<T>(
+        Queue<T> queue,
+        string eventName)
+    {
+        if (queue.Count == 0)
+            return;
+
+        int discardedCount = queue.Count;
+        queue.Clear();
+        Debug.LogError(
+            $"Battle presentation {eventName} dispatch exceeded " +
+            $"{MaximumPresentationEventsPerDispatch} events. " +
+            $"Discarded {discardedCount} queued events.",
+            this);
+    }
 
     public void NotifyStatusApplied(BattleStatusAppliedEvent eventData)
     {
@@ -148,6 +312,9 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard
     public void SetBattleCharacters(
         IReadOnlyList<IBattleCharacter> characters)
     {
+        HashSet<IBattleCharacter> previousCharacters =
+            new(_battleCharacters);
+        UnbindAllPresentationCharacters();
         _battleCharacters.Clear();
         if (characters == null)
             return;
@@ -155,12 +322,65 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard
         foreach (IBattleCharacter character in characters)
         {
             if (character != null && !_battleCharacters.Contains(character))
+            {
                 _battleCharacters.Add(character);
+                CharacterRuntime runtime = character as CharacterRuntime;
+                BindPresentationCharacter(runtime);
+                if (!previousCharacters.Contains(character) &&
+                    runtime?.Definition != null)
+                {
+                    PublishUnitLifecycle(new BattleUnitLifecycleEvent(
+                        BattleUnitLifecycleType.Spawned,
+                        BattleStatusTarget.FromAlly(character),
+                        runtime.Definition));
+                }
+            }
         }
+    }
+
+    public BattleVfxTarget ResolveVfxTarget(
+        BattleStatusTarget target,
+        BattleVfxAnchorType anchorType)
+    {
+        if (!target.IsValid)
+            return default;
+
+        if (target.Enemy != null)
+        {
+            BattleVfxTargetHandle handle =
+                GetOrCreateEnemyVfxHandle(target.Enemy);
+            BattleVfxAnchorSnapshot anchor = default;
+            if (TryFindEnemyTile(target.Enemy, out DungeonTileView tile) &&
+                tile.TryGetEnemyVfxAnchor(
+                    target.Enemy,
+                    anchorType,
+                    out BattleVfxAnchorSnapshot liveAnchor))
+            {
+                anchor = liveAnchor;
+                StoreEnemyVfxAnchor(target.Enemy, anchorType, liveAnchor);
+            }
+            else
+            {
+                TryGetStoredEnemyVfxAnchor(
+                    target.Enemy,
+                    anchorType,
+                    out anchor);
+            }
+
+            return new BattleVfxTarget(handle, target, anchor);
+        }
+
+        BattleVfxTargetHandle allyHandle =
+            GetOrCreateAllyVfxHandle(target.Ally);
+        BattleVfxAnchorSnapshot allyAnchor = default;
+        if (target.Ally is IBattleVfxAnchorProvider provider)
+            provider.TryGetVfxAnchor(anchorType, out allyAnchor);
+        return new BattleVfxTarget(allyHandle, target, allyAnchor);
     }
 
     public void Initialize(int gridSize, int stackSize)
     {
+        EnsurePresentationPipeline();
         if (boardRect == null || gridLayout == null || tilePrefab == null)
         {
             Debug.LogError("DungeonBoardView scene and prefab references are incomplete.", this);
@@ -220,6 +440,7 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard
         }
 
         RestoreExistingStacks(previousEnemies, previousSize);
+        SynchronizeEnemyPresentationBindings();
         RefreshLayout();
     }
 
@@ -353,6 +574,11 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard
         if (tile == null || enemy == null || !tile.TryAdd(enemy))
             return false;
 
+        BindPresentationEnemy(enemy);
+        PublishUnitLifecycle(new BattleUnitLifecycleEvent(
+            BattleUnitLifecycleType.Spawned,
+            BattleStatusTarget.FromEnemy(enemy),
+            enemy.Definition));
         ExecuteSpawnAbilities(tile, enemy);
         tile.RefreshTopEnemyCard();
         return true;
@@ -360,7 +586,17 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard
 
     public bool TryRemoveTopEnemyCard(int row, int column)
     {
-        return TryGetTile(row, column, out DungeonTileView tile) && tile.TryRemoveTop();
+        if (!TryGetTile(row, column, out DungeonTileView tile) ||
+            tile.TopEnemy == null)
+        {
+            return false;
+        }
+
+        CaptureEnemyVfxAnchor(tile.TopEnemy, tile);
+        bool removed = tile.TryRemoveTop();
+        if (removed)
+            SynchronizeEnemyPresentationBindings();
+        return removed;
     }
 
     public int GetStackCount(int row, int column)
@@ -392,8 +628,17 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard
             return 0;
         }
 
+        bool wasAlive = enemy.Health > 0;
         tile.ShowAttackRange();
-        return TryDamageTile(tile, damage);
+        int appliedDamage = TryDamageTile(tile, damage);
+        if (wasAlive && enemy.Health <= 0)
+        {
+            PublishUnitLifecycle(new BattleUnitLifecycleEvent(
+                BattleUnitLifecycleType.Defeated,
+                BattleStatusTarget.FromEnemy(enemy),
+                enemy.Definition));
+        }
+        return appliedDamage;
     }
 
     public bool TryApplyFireToEnemy(
@@ -1991,6 +2236,7 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard
 
     public void ClearAllStacks()
     {
+        UnbindAllPresentationEnemies();
         foreach (DungeonTileView tile in _tiles)
         {
             if (tile != null)
@@ -2004,13 +2250,57 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard
         _forcedPriorityRemaining = 0f;
         _statusEventQueue.Clear();
         _defeatEventQueue.Clear();
+        _effectResolvedEventQueue.Clear();
+        _statusLifecycleEventQueue.Clear();
+        _unitLifecycleEventQueue.Clear();
         ClearAllStacks();
+        _enemyVfxHandles.Clear();
+        _lastEnemyVfxAnchors.Clear();
     }
 
     private void OnRectTransformDimensionsChange()
     {
         if (_initialized)
             RefreshLayout();
+    }
+
+    private void OnDestroy()
+    {
+        _presentationDispatcher?.Dispose();
+        _presentationDispatcher = null;
+        UnbindAllPresentationEnemies();
+        UnbindAllPresentationCharacters();
+    }
+
+    private void Awake()
+    {
+        EnsurePresentationPipeline();
+    }
+
+    private void OnEnable()
+    {
+        EnsurePresentationPipeline();
+    }
+
+    private void OnDisable()
+    {
+        _presentationDispatcher?.Unbind();
+        vfxPlayer?.ClearActive();
+    }
+
+    private void EnsurePresentationPipeline()
+    {
+        if (vfxPlayer == null)
+            vfxPlayer = GetComponent<BattleVfxPlayer>();
+        if (vfxPlayer == null)
+            vfxPlayer = gameObject.AddComponent<BattleVfxPlayer>();
+
+        if (vfxQualityProfile != null)
+            vfxPlayer.ConfigureQuality(vfxQualityProfile);
+        vfxPlayer.BindTargetResolver(this);
+        _presentationDispatcher ??=
+            new BattlePresentationDispatcher(vfxPlayer);
+        _presentationDispatcher.Bind(this, this);
     }
 
     private void RefreshLayout()
@@ -2105,6 +2395,7 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard
             ? redirectTile
             : targetTile;
         EnemyRuntime damagedEnemy = damageReceiver.TopEnemy;
+        CaptureEnemyVfxAnchor(damagedEnemy, damageReceiver);
         damage = ExecuteBeforeSelfDamageAbilities(
             damageReceiver,
             damagedEnemy,
@@ -2120,6 +2411,7 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard
             NotifyEnemyDefeated(new BattleEnemyDefeatedEvent(
                 damagedEnemy,
                 source));
+            SynchronizeEnemyPresentationBindings();
         }
 
         return appliedDamage;
@@ -2330,6 +2622,187 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard
     {
         if (tile != null)
             tile.EnemyClicked -= HandleEnemyClicked;
+    }
+
+    private void BindPresentationEnemy(EnemyRuntime enemy)
+    {
+        if (enemy == null || !_boundPresentationEnemies.Add(enemy))
+            return;
+
+        enemy.StatusLifecycle += HandleStatusLifecycle;
+        GetOrCreateEnemyVfxHandle(enemy);
+    }
+
+    private void UnbindPresentationEnemy(EnemyRuntime enemy)
+    {
+        if (enemy == null || !_boundPresentationEnemies.Remove(enemy))
+            return;
+
+        enemy.StatusLifecycle -= HandleStatusLifecycle;
+    }
+
+    private void UnbindAllPresentationEnemies()
+    {
+        foreach (EnemyRuntime enemy in _boundPresentationEnemies)
+        {
+            if (enemy != null)
+                enemy.StatusLifecycle -= HandleStatusLifecycle;
+        }
+
+        _boundPresentationEnemies.Clear();
+    }
+
+    private void SynchronizeEnemyPresentationBindings()
+    {
+        HashSet<EnemyRuntime> currentEnemies = new();
+        foreach (DungeonTileView tile in _tiles)
+        {
+            if (tile == null)
+                continue;
+
+            foreach (EnemyRuntime enemy in tile.CopyEnemyRuntimes())
+            {
+                if (enemy != null)
+                    currentEnemies.Add(enemy);
+            }
+        }
+
+        List<EnemyRuntime> removedEnemies = new();
+        foreach (EnemyRuntime enemy in _boundPresentationEnemies)
+        {
+            if (enemy == null || !currentEnemies.Contains(enemy))
+                removedEnemies.Add(enemy);
+        }
+        foreach (EnemyRuntime enemy in removedEnemies)
+            UnbindPresentationEnemy(enemy);
+        foreach (EnemyRuntime enemy in currentEnemies)
+            BindPresentationEnemy(enemy);
+    }
+
+    private void BindPresentationCharacter(CharacterRuntime character)
+    {
+        if (character == null ||
+            !_boundPresentationCharacters.Add(character))
+        {
+            return;
+        }
+
+        character.StatusLifecycle += HandleStatusLifecycle;
+        GetOrCreateAllyVfxHandle(character);
+    }
+
+    private void UnbindAllPresentationCharacters()
+    {
+        foreach (CharacterRuntime character in _boundPresentationCharacters)
+        {
+            if (character != null)
+                character.StatusLifecycle -= HandleStatusLifecycle;
+        }
+
+        _boundPresentationCharacters.Clear();
+    }
+
+    private void HandleStatusLifecycle(StatusEffectLifecycleEvent eventData)
+    {
+        PublishStatusLifecycle(eventData);
+    }
+
+    private BattleVfxTargetHandle GetOrCreateEnemyVfxHandle(
+        EnemyRuntime enemy)
+    {
+        if (enemy == null)
+            return default;
+        if (_enemyVfxHandles.TryGetValue(enemy, out BattleVfxTargetHandle handle))
+            return handle;
+
+        handle = CreateVfxTargetHandle();
+        _enemyVfxHandles.Add(enemy, handle);
+        return handle;
+    }
+
+    private BattleVfxTargetHandle GetOrCreateAllyVfxHandle(
+        IBattleCharacter ally)
+    {
+        if (ally == null)
+            return default;
+        if (_allyVfxHandles.TryGetValue(ally, out BattleVfxTargetHandle handle))
+            return handle;
+
+        handle = CreateVfxTargetHandle();
+        _allyVfxHandles.Add(ally, handle);
+        return handle;
+    }
+
+    private BattleVfxTargetHandle CreateVfxTargetHandle()
+    {
+        if (_nextVfxTargetHandle <= 0)
+            _nextVfxTargetHandle = 1;
+
+        BattleVfxTargetHandle handle =
+            new(_nextVfxTargetHandle);
+        _nextVfxTargetHandle = _nextVfxTargetHandle == int.MaxValue
+            ? 1
+            : _nextVfxTargetHandle + 1;
+        return handle;
+    }
+
+    private void CaptureEnemyVfxAnchor(
+        EnemyRuntime enemy,
+        DungeonTileView tile)
+    {
+        if (enemy == null || tile == null)
+            return;
+
+        foreach (BattleVfxAnchorType anchorType in
+                 Enum.GetValues(typeof(BattleVfxAnchorType)))
+        {
+            if (tile.TryGetEnemyVfxAnchor(
+                    enemy,
+                    anchorType,
+                    out BattleVfxAnchorSnapshot snapshot))
+            {
+                StoreEnemyVfxAnchor(enemy, anchorType, snapshot);
+            }
+        }
+    }
+
+    private void StoreEnemyVfxAnchor(
+        EnemyRuntime enemy,
+        BattleVfxAnchorType anchorType,
+        BattleVfxAnchorSnapshot snapshot)
+    {
+        if (enemy == null || !snapshot.IsValid)
+            return;
+
+        if (!_lastEnemyVfxAnchors.TryGetValue(
+                enemy,
+                out Dictionary<
+                    BattleVfxAnchorType,
+                    BattleVfxAnchorSnapshot> anchors))
+        {
+            anchors = new Dictionary<
+                BattleVfxAnchorType,
+                BattleVfxAnchorSnapshot>();
+            _lastEnemyVfxAnchors.Add(enemy, anchors);
+        }
+
+        anchors[anchorType] = snapshot;
+    }
+
+    private bool TryGetStoredEnemyVfxAnchor(
+        EnemyRuntime enemy,
+        BattleVfxAnchorType anchorType,
+        out BattleVfxAnchorSnapshot snapshot)
+    {
+        snapshot = default;
+        return enemy != null &&
+               _lastEnemyVfxAnchors.TryGetValue(
+                   enemy,
+                   out Dictionary<
+                       BattleVfxAnchorType,
+                       BattleVfxAnchorSnapshot> anchors) &&
+               anchors.TryGetValue(anchorType, out snapshot) &&
+               snapshot.IsValid;
     }
 
     private void HandleEnemyClicked(EnemyRuntime enemy)
