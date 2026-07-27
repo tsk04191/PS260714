@@ -679,6 +679,10 @@ public sealed class CharacterData
     public bool HasCustomAttackDefinitions => AttackDefinitions.Count > 0;
     public bool HasCustomPassiveDefinitions => PassiveDefinitions.Count > 0;
     public bool HasCustomSkillDefinitions => SkillDefinitions.Count > 0;
+    public Sprite PassiveAbilityIconSprite =>
+        ResolvePassiveAbilityIconSprite();
+    public Sprite ActiveAbilityIconSprite =>
+        ResolveActiveAbilityIconSprite();
     public bool HasCustomCumulativeUpgrades =>
         CumulativeUpgradeDefinitions.Count > 0;
     public bool HasCustomDungeonUpgrades => DungeonUpgradeDefinitions.Count > 0;
@@ -719,6 +723,34 @@ public sealed class CharacterData
     public int SkillAttackDamage => HasCustomSkillDefinitions
         ? CalculateSkillDamage(SkillDefinitions[0])
         : 0;
+
+    private Sprite ResolvePassiveAbilityIconSprite()
+    {
+        foreach (CharacterPassiveDefinition definition in
+                 PassiveDefinitions)
+        {
+            if (definition?.IconSprite != null)
+                return definition.IconSprite;
+        }
+
+        return PassiveSdSprite != null
+            ? PassiveSdSprite
+            : IconSprite;
+    }
+
+    private Sprite ResolveActiveAbilityIconSprite()
+    {
+        foreach (CharacterSkillDefinition definition in
+                 SkillDefinitions)
+        {
+            if (definition?.IconSprite != null)
+                return definition.IconSprite;
+        }
+
+        return SkillSdSprite != null
+            ? SkillSdSprite
+            : IconSprite;
+    }
 
     public CharacterData(
         CharacterSO original,

@@ -95,6 +95,7 @@ public sealed class CharacterEditorWindow : EditorWindow
     private const string AreaOffsetsPropertyName = "areaOffsets";
     private const string AreaRowOffsetPropertyName = "rowOffset";
     private const string AreaColumnOffsetPropertyName = "columnOffset";
+    private const string ActionIconSpritePropertyName = "iconSprite";
     private const string ActionAudioClipPropertyName = "audioClip";
     private const string RenameControlName = "CharacterAssetRenameField";
     private const float ListWidth = 230f;
@@ -1276,6 +1277,7 @@ public sealed class CharacterEditorWindow : EditorWindow
 
         if (definition.isExpanded)
         {
+            DrawActionIconSprite(definition);
             DrawActionAudioClip(definition);
             EditorGUILayout.Space(4f);
             SerializedProperty sections = definition.FindPropertyRelative(
@@ -1523,6 +1525,7 @@ public sealed class CharacterEditorWindow : EditorWindow
     private static void ResetPassiveDefinitionValues(
         SerializedProperty definition)
     {
+        ResetActionIconSprite(definition);
         ResetActionAudioClip(definition);
         ResetPassiveSectionValue(
             definition,
@@ -1948,6 +1951,7 @@ public sealed class CharacterEditorWindow : EditorWindow
 
         if (definition.isExpanded)
         {
+            DrawActionIconSprite(definition);
             DrawActionAudioClip(definition);
             EditorGUILayout.Space(4f);
             SerializedProperty sections = definition.FindPropertyRelative(
@@ -2094,6 +2098,7 @@ public sealed class CharacterEditorWindow : EditorWindow
     private static void ResetSkillDefinitionValues(
         SerializedProperty definition)
     {
+        ResetActionIconSprite(definition);
         ResetActionAudioClip(definition);
         foreach (CharacterSkillSectionType sectionType in SkillSectionOrder)
             ResetSkillSectionValue(definition, sectionType);
@@ -3012,6 +3017,35 @@ public sealed class CharacterEditorWindow : EditorWindow
             new GUIContent(
                 "오디오 클립",
                 "이 블록이 실제로 실행될 때 재생됩니다."));
+    }
+
+    private static void DrawActionIconSprite(
+        SerializedProperty definition)
+    {
+        SerializedProperty iconSprite = definition?.FindPropertyRelative(
+            ActionIconSpritePropertyName);
+        if (iconSprite == null)
+        {
+            EditorGUILayout.HelpBox(
+                "아이콘 Sprite 속성을 찾을 수 없습니다.",
+                MessageType.Error);
+            return;
+        }
+
+        EditorGUILayout.PropertyField(
+            iconSprite,
+            new GUIContent(
+                "아이콘 Sprite",
+                "인 게임 캐릭터 정보창의 패시브 또는 액티브 아이콘에 표시됩니다."));
+    }
+
+    private static void ResetActionIconSprite(
+        SerializedProperty definition)
+    {
+        SerializedProperty iconSprite = definition?.FindPropertyRelative(
+            ActionIconSpritePropertyName);
+        if (iconSprite != null)
+            iconSprite.objectReferenceValue = null;
     }
 
     private static void ResetActionAudioClip(SerializedProperty definition)

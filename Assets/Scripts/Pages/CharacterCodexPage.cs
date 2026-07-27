@@ -10,12 +10,14 @@ public sealed class CharacterCodexPage : RuntimeMenuPageBase
 {
     private readonly struct CharacterCodexEntry
     {
+        public string Id { get; }
         public string AssetName { get; }
         public CharacterSO Definition { get; }
         public CharacterData Data { get; }
 
         public CharacterCodexEntry(CharacterSO definition)
         {
+            Id = definition.CharacterId;
             AssetName = definition.name;
             Definition = definition;
             CharacterCollectionData collection =
@@ -37,10 +39,10 @@ public sealed class CharacterCodexPage : RuntimeMenuPageBase
         Array.Empty<CharacterSO>();
 
     private readonly List<CharacterCodexEntry> _entries = new();
-    private readonly List<Button> _tabButtons = new();
+    private readonly List<CharacterCodexEntry> _visibleEntries = new();
+    private CodexBrowserView _browser;
     private Image _detailPanelImage;
     private Image _standingImage;
-    private Image _iconImage;
     private ScrollRect _detailScrollRect;
     private TextMeshProUGUI _detailTitle;
     private TextMeshProUGUI _ownershipText;
@@ -57,7 +59,10 @@ public sealed class CharacterCodexPage : RuntimeMenuPageBase
     private TextMeshProUGUI _dungeonUpgradeTitleText;
     private TextMeshProUGUI _dungeonUpgradeText;
     private CharacterCollectionData _boundCharacterCollection;
-    private int _selectedIndex;
+    private string _selectedCharacterId;
+    private string _searchQuery = string.Empty;
+    private int _filterIndex;
+    private int _sortIndex;
 
     protected override string PageTitle => "CHARACTER CODEX";
     protected override string PageDescription =>
@@ -67,28 +72,18 @@ public sealed class CharacterCodexPage : RuntimeMenuPageBase
     protected override string PageDescriptionLocalizationKey =>
         LocalizationKeys.CodexCharacterDescription;
     protected override Vector2 PanelSize => new(1220f, 900f);
+    protected override bool FillAvailableSpace => true;
 
     protected override void BuildButtons()
     {
         RefreshEntries();
-        BuildCharacterTabStrip();
-        BuildDetailPanel();
-        CreateLocalizedMenuButton(
+        BuildCharacterBrowser();
+        BuildDetailPanel(_browser.DetailRoot);
+        CreateLocalizedTopLeftOverlayMenuButton(
             "btnBACKTOCODEX",
             LocalizationKeys.UiCommonBack,
             HandleBackClicked);
-
-        if (_entries.Count > 0)
-        {
-            SelectCharacter(Mathf.Clamp(
-                _selectedIndex,
-                0,
-                _entries.Count - 1));
-        }
-        else
-        {
-            ShowEmptyState();
-        }
+        RefreshBrowser();
     }
 
     private void RefreshEntries()
@@ -132,91 +127,36 @@ public sealed class CharacterCodexPage : RuntimeMenuPageBase
         }
     }
 
-    private void BuildCharacterTabStrip()
+    private void BuildCharacterBrowser()
     {
-        GameObject tabStripObject = GetOrCreateChild(
-            ButtonRoot,
-            "grpCharacterTabStrip",
-            typeof(RectTransform),
-            typeof(ScrollRect),
-            typeof(LayoutElement));
-        LayoutElement stripLayout =
-            tabStripObject.GetComponent<LayoutElement>();
-        stripLayout.preferredHeight = 70f;
-
-        GameObject viewportObject = GetOrCreateChild(
-            tabStripObject.transform,
-            "vptCharacterTabs",
-            typeof(RectTransform),
-            typeof(RectMask2D));
-        StretchToParent((RectTransform)viewportObject.transform);
-
-        GameObject contentObject = GetOrCreateChild(
-            viewportObject.transform,
-            "grpCharacterTabContent",
-            typeof(RectTransform),
-            typeof(HorizontalLayoutGroup),
-            typeof(ContentSizeFitter));
-        RectTransform contentRect =
-            (RectTransform)contentObject.transform;
-        contentRect.anchorMin = new Vector2(0f, 0f);
-        contentRect.anchorMax = new Vector2(0f, 1f);
-        contentRect.pivot = new Vector2(0f, 0.5f);
-        contentRect.anchoredPosition = Vector2.zero;
-        contentRect.sizeDelta = Vector2.zero;
-
-        HorizontalLayoutGroup layout =
-            contentObject.GetComponent<HorizontalLayoutGroup>();
-        layout.padding = new RectOffset(4, 4, 4, 4);
-        layout.spacing = 8f;
-        layout.childAlignment = TextAnchor.MiddleLeft;
-        layout.childControlWidth = true;
-        layout.childControlHeight = true;
-        layout.childForceExpandWidth = false;
-        layout.childForceExpandHeight = true;
-
-        ContentSizeFitter fitter =
-            contentObject.GetComponent<ContentSizeFitter>();
-        fitter.horizontalFit = ContentSizeFitter.FitMode.PreferredSize;
-        fitter.verticalFit = ContentSizeFitter.FitMode.Unconstrained;
-
-        ScrollRect scrollRect = tabStripObject.GetComponent<ScrollRect>();
-        scrollRect.viewport = (RectTransform)viewportObject.transform;
-        scrollRect.content = contentRect;
-        scrollRect.horizontal = true;
-        scrollRect.vertical = false;
-        scrollRect.inertia = true;
-        scrollRect.scrollSensitivity = 28f;
-
-        _tabButtons.Clear();
-        for (int index = 0; index < _entries.Count; index++)
-        {
-            int selectedIndex = index;
-            CharacterCodexEntry entry = _entries[index];
-            Button button = CreateStyledButton(
-                contentObject.transform,
-                $"btnCharacterTab_{index}",
-                GetCharacterTabLabel(entry.Data),
-                () => SelectCharacter(selectedIndex),
-                60f);
-            LayoutElement buttonLayout =
-                button.GetComponent<LayoutElement>();
-            buttonLayout.minWidth = 156f;
-            buttonLayout.preferredWidth = 188f;
-            buttonLayout.flexibleWidth = 0f;
-            _tabButtons.Add(button);
-        }
-
-        SyncIndexedChildren(
-            contentObject.transform,
-            "btnCharacterTab_",
-            _entries.Count);
+        _browser = CodexBrowserView.Build(ButtonRoot);
+        _browser.HideLegacyList("grpCharacterTabStrip");
+        _browser.AdoptExistingDetail("grpCharacterDetail");
+        _browser.SetCallbacks(
+            query =>
+            {
+                _searchQuery = (query ?? string.Empty).Trim();
+                RefreshBrowser();
+            },
+            () =>
+            {
+                _filterIndex = (_filterIndex + 1) % 3;
+                RefreshBrowser();
+            },
+            () =>
+            {
+                _sortIndex = (_sortIndex + 1) % 3;
+                RefreshBrowser();
+            },
+            SelectCharacter);
+        RefreshBrowserToolbar();
     }
 
-    private void BuildDetailPanel()
+    private void BuildDetailPanel(Transform parent)
     {
+        bool detailCreated = parent.Find("grpCharacterDetail") == null;
         GameObject detailObject = GetOrCreateChild(
-            ButtonRoot,
+            parent,
             "grpCharacterDetail",
             typeof(RectTransform),
             typeof(CanvasRenderer),
@@ -224,59 +164,80 @@ public sealed class CharacterCodexPage : RuntimeMenuPageBase
             typeof(HorizontalLayoutGroup),
             typeof(LayoutElement));
         _detailPanelImage = detailObject.GetComponent<Image>();
-        _detailPanelImage.color = PanelColor;
-        _detailPanelImage.raycastTarget = false;
+        if (detailCreated)
+        {
+            _detailPanelImage.color = PanelColor;
+            _detailPanelImage.raycastTarget = false;
 
-        VerticalLayoutGroup obsoleteVerticalLayout =
-            detailObject.GetComponent<VerticalLayoutGroup>();
-        if (obsoleteVerticalLayout != null)
-            obsoleteVerticalLayout.enabled = false;
+            VerticalLayoutGroup obsoleteVerticalLayout =
+                detailObject.GetComponent<VerticalLayoutGroup>();
+            if (obsoleteVerticalLayout != null)
+                obsoleteVerticalLayout.enabled = false;
 
-        LayoutElement detailLayout =
-            detailObject.GetComponent<LayoutElement>();
-        detailLayout.preferredHeight = 440f;
-        detailLayout.flexibleHeight = 1f;
+            LayoutElement detailLayout =
+                detailObject.GetComponent<LayoutElement>();
+            detailLayout.preferredHeight = 440f;
+            detailLayout.flexibleHeight = 1f;
 
-        HorizontalLayoutGroup detailLayoutGroup =
-            detailObject.GetComponent<HorizontalLayoutGroup>();
-        detailLayoutGroup.padding = new RectOffset(20, 20, 18, 18);
-        detailLayoutGroup.spacing = 18f;
-        detailLayoutGroup.childAlignment = TextAnchor.UpperCenter;
-        detailLayoutGroup.childControlWidth = true;
-        detailLayoutGroup.childControlHeight = true;
-        detailLayoutGroup.childForceExpandWidth = false;
-        detailLayoutGroup.childForceExpandHeight = true;
+            HorizontalLayoutGroup detailLayoutGroup =
+                detailObject.GetComponent<HorizontalLayoutGroup>();
+            detailLayoutGroup.padding = new RectOffset(20, 20, 18, 18);
+            detailLayoutGroup.spacing = 18f;
+            detailLayoutGroup.childAlignment = TextAnchor.UpperCenter;
+            detailLayoutGroup.childControlWidth = true;
+            detailLayoutGroup.childControlHeight = true;
+            detailLayoutGroup.childForceExpandWidth = false;
+            detailLayoutGroup.childForceExpandHeight = true;
+        }
 
+        bool visualsCreated =
+            detailObject.transform.Find("grpCharacterVisuals") == null;
         GameObject visualObject = GetOrCreateChild(
             detailObject.transform,
             "grpCharacterVisuals",
             typeof(RectTransform),
             typeof(VerticalLayoutGroup),
             typeof(LayoutElement));
-        LayoutElement visualLayout = visualObject.GetComponent<LayoutElement>();
-        visualLayout.minWidth = 170f;
-        visualLayout.preferredWidth = 190f;
-        visualLayout.flexibleWidth = 0f;
-        VerticalLayoutGroup visualGroup =
-            visualObject.GetComponent<VerticalLayoutGroup>();
-        visualGroup.spacing = 12f;
-        visualGroup.childAlignment = TextAnchor.UpperCenter;
-        visualGroup.childControlWidth = true;
-        visualGroup.childControlHeight = true;
-        visualGroup.childForceExpandWidth = false;
-        visualGroup.childForceExpandHeight = false;
+        if (visualsCreated)
+        {
+            LayoutElement visualLayout =
+                visualObject.GetComponent<LayoutElement>();
+            visualLayout.minWidth = 280f;
+            visualLayout.preferredWidth = 340f;
+            visualLayout.flexibleWidth = 0f;
+            VerticalLayoutGroup visualGroup =
+                visualObject.GetComponent<VerticalLayoutGroup>();
+            visualGroup.spacing = 12f;
+            visualGroup.childAlignment = TextAnchor.UpperCenter;
+            visualGroup.childControlWidth = true;
+            visualGroup.childControlHeight = true;
+            visualGroup.childForceExpandWidth = false;
+            visualGroup.childForceExpandHeight = false;
+        }
 
+        bool standingCreated =
+            visualObject.transform.Find("imgCharacterStanding") == null;
         _standingImage = CreateProfileImage(
             visualObject.transform,
             "imgCharacterStanding",
-            160f,
-            270f);
-        _iconImage = CreateProfileImage(
-            visualObject.transform,
-            "imgCharacterIcon",
-            112f,
-            112f);
+            320f,
+            640f);
+        if (standingCreated)
+        {
+            LayoutElement standingLayout =
+                _standingImage.GetComponent<LayoutElement>();
+            standingLayout.minWidth = 220f;
+            standingLayout.minHeight = 400f;
+            standingLayout.flexibleHeight = 1f;
+        }
 
+        Transform obsoleteIcon =
+            visualObject.transform.Find("imgCharacterIcon");
+        if (obsoleteIcon != null)
+            obsoleteIcon.gameObject.SetActive(false);
+
+        bool scrollCreated =
+            detailObject.transform.Find("scrCharacterDetails") == null;
         GameObject scrollObject = GetOrCreateChild(
             detailObject.transform,
             "scrCharacterDetails",
@@ -286,19 +247,29 @@ public sealed class CharacterCodexPage : RuntimeMenuPageBase
             typeof(ScrollRect),
             typeof(LayoutElement));
         Image scrollRaycastImage = scrollObject.GetComponent<Image>();
-        scrollRaycastImage.color = new Color(0f, 0f, 0f, 0.01f);
-        scrollRaycastImage.raycastTarget = true;
-        LayoutElement scrollLayout = scrollObject.GetComponent<LayoutElement>();
-        scrollLayout.flexibleWidth = 1f;
-        scrollLayout.flexibleHeight = 1f;
+        if (scrollCreated)
+        {
+            scrollRaycastImage.color = new Color(0f, 0f, 0f, 0.01f);
+            scrollRaycastImage.raycastTarget = true;
+            LayoutElement scrollLayout =
+                scrollObject.GetComponent<LayoutElement>();
+            scrollLayout.flexibleWidth = 1f;
+            scrollLayout.flexibleHeight = 1f;
+        }
 
+        bool viewportCreated =
+            scrollObject.transform.Find("vptCharacterDetails") == null;
         GameObject viewportObject = GetOrCreateChild(
             scrollObject.transform,
             "vptCharacterDetails",
             typeof(RectTransform),
             typeof(RectMask2D));
-        StretchToParent((RectTransform)viewportObject.transform);
+        if (viewportCreated)
+            StretchToParent((RectTransform)viewportObject.transform);
 
+        bool contentCreated =
+            viewportObject.transform.Find(
+                "grpCharacterDetailContent") == null;
         GameObject contentObject = GetOrCreateChild(
             viewportObject.transform,
             "grpCharacterDetailContent",
@@ -306,35 +277,43 @@ public sealed class CharacterCodexPage : RuntimeMenuPageBase
             typeof(VerticalLayoutGroup),
             typeof(ContentSizeFitter));
         RectTransform contentRect = (RectTransform)contentObject.transform;
-        contentRect.anchorMin = new Vector2(0f, 1f);
-        contentRect.anchorMax = new Vector2(1f, 1f);
-        contentRect.pivot = new Vector2(0.5f, 1f);
-        contentRect.anchoredPosition = Vector2.zero;
-        contentRect.sizeDelta = Vector2.zero;
+        if (contentCreated)
+        {
+            contentRect.anchorMin = new Vector2(0f, 1f);
+            contentRect.anchorMax = new Vector2(1f, 1f);
+            contentRect.pivot = new Vector2(0.5f, 1f);
+            contentRect.anchoredPosition = Vector2.zero;
+            contentRect.sizeDelta = Vector2.zero;
 
-        VerticalLayoutGroup contentLayout =
-            contentObject.GetComponent<VerticalLayoutGroup>();
-        contentLayout.padding = new RectOffset(8, 12, 4, 12);
-        contentLayout.spacing = 6f;
-        contentLayout.childAlignment = TextAnchor.UpperLeft;
-        contentLayout.childControlWidth = true;
-        contentLayout.childControlHeight = true;
-        contentLayout.childForceExpandWidth = true;
-        contentLayout.childForceExpandHeight = false;
-        ContentSizeFitter contentFitter =
-            contentObject.GetComponent<ContentSizeFitter>();
-        contentFitter.horizontalFit = ContentSizeFitter.FitMode.Unconstrained;
-        contentFitter.verticalFit = ContentSizeFitter.FitMode.PreferredSize;
+            VerticalLayoutGroup contentLayout =
+                contentObject.GetComponent<VerticalLayoutGroup>();
+            contentLayout.padding = new RectOffset(8, 12, 4, 12);
+            contentLayout.spacing = 6f;
+            contentLayout.childAlignment = TextAnchor.UpperLeft;
+            contentLayout.childControlWidth = true;
+            contentLayout.childControlHeight = true;
+            contentLayout.childForceExpandWidth = true;
+            contentLayout.childForceExpandHeight = false;
+            ContentSizeFitter contentFitter =
+                contentObject.GetComponent<ContentSizeFitter>();
+            contentFitter.horizontalFit =
+                ContentSizeFitter.FitMode.Unconstrained;
+            contentFitter.verticalFit =
+                ContentSizeFitter.FitMode.PreferredSize;
+        }
 
         ScrollRect scrollRect = scrollObject.GetComponent<ScrollRect>();
         _detailScrollRect = scrollRect;
         scrollRect.viewport = (RectTransform)viewportObject.transform;
         scrollRect.content = contentRect;
-        scrollRect.horizontal = false;
-        scrollRect.vertical = true;
-        scrollRect.inertia = true;
-        scrollRect.movementType = ScrollRect.MovementType.Clamped;
-        scrollRect.scrollSensitivity = 28f;
+        if (scrollCreated)
+        {
+            scrollRect.horizontal = false;
+            scrollRect.vertical = true;
+            scrollRect.inertia = true;
+            scrollRect.movementType = ScrollRect.MovementType.Clamped;
+            scrollRect.scrollSensitivity = 28f;
+        }
 
         string[] detailTextNames =
         {
@@ -355,10 +334,13 @@ public sealed class CharacterCodexPage : RuntimeMenuPageBase
         };
         foreach (string textName in detailTextNames)
         {
-            MoveExistingChild(
-                detailObject.transform,
-                contentObject.transform,
-                textName);
+            if (contentCreated)
+            {
+                MoveExistingChild(
+                    detailObject.transform,
+                    contentObject.transform,
+                    textName);
+            }
         }
 
         _detailTitle = CreateContentText(
@@ -476,23 +458,141 @@ public sealed class CharacterCodexPage : RuntimeMenuPageBase
             TextAlignmentOptions.TopLeft);
     }
 
-    private void SelectCharacter(int index)
+    private void RefreshBrowser()
     {
-        if (index < 0 || index >= _entries.Count)
+        if (_browser == null)
             return;
 
-        _selectedIndex = index;
-        CharacterCodexEntry entry = _entries[index];
+        RefreshBrowserToolbar();
+        _visibleEntries.Clear();
+        foreach (CharacterCodexEntry entry in _entries)
+        {
+            if (!MatchesSearch(entry) || !MatchesFilter(entry))
+                continue;
+
+            _visibleEntries.Add(entry);
+        }
+
+        _visibleEntries.Sort(CompareEntries);
+        List<CodexBrowserItemModel> items =
+            new(_visibleEntries.Count);
+        Color accentColor = new(0.22f, 0.48f, 0.68f, 1f);
+        foreach (CharacterCodexEntry entry in _visibleEntries)
+        {
+            items.Add(new CodexBrowserItemModel(
+                entry.Id,
+                CharacterLocalization.GetName(entry.Data),
+                entry.Data.IconSprite,
+                !entry.Data.IsOwned,
+                accentColor));
+        }
+
+        bool selectionVisible = _visibleEntries.Exists(entry =>
+            string.Equals(
+                entry.Id,
+                _selectedCharacterId,
+                StringComparison.Ordinal));
+        if (!selectionVisible)
+        {
+            _selectedCharacterId = _visibleEntries.Count > 0
+                ? _visibleEntries[0].Id
+                : string.Empty;
+        }
+
+        _browser.SetItems(items, _selectedCharacterId);
+        if (_visibleEntries.Count > 0)
+            SelectCharacter(_selectedCharacterId);
+        else
+            ShowEmptyState();
+    }
+
+    private bool MatchesSearch(CharacterCodexEntry entry)
+    {
+        if (string.IsNullOrWhiteSpace(_searchQuery))
+            return true;
+
+        return ContainsIgnoreCase(
+                   CharacterLocalization.GetName(entry.Data),
+                   _searchQuery) ||
+               ContainsIgnoreCase(entry.AssetName, _searchQuery) ||
+               ContainsIgnoreCase(entry.Id, _searchQuery);
+    }
+
+    private bool MatchesFilter(CharacterCodexEntry entry)
+    {
+        return _filterIndex switch
+        {
+            1 => entry.Data.IsOwned,
+            2 => !entry.Data.IsOwned,
+            _ => true
+        };
+    }
+
+    private int CompareEntries(
+        CharacterCodexEntry left,
+        CharacterCodexEntry right)
+    {
+        if (_sortIndex == 2)
+        {
+            int ownedOrder = right.Data.IsOwned.CompareTo(
+                left.Data.IsOwned);
+            if (ownedOrder != 0)
+                return ownedOrder;
+        }
+
+        int nameOrder = string.Compare(
+            CharacterLocalization.GetName(left.Data),
+            CharacterLocalization.GetName(right.Data),
+            StringComparison.OrdinalIgnoreCase);
+        if (_sortIndex == 1)
+            nameOrder = -nameOrder;
+        if (nameOrder != 0)
+            return nameOrder;
+        return string.Compare(
+            left.Id,
+            right.Id,
+            StringComparison.Ordinal);
+    }
+
+    private void RefreshBrowserToolbar()
+    {
+        if (_browser == null)
+            return;
+
+        string filter = _filterIndex switch
+        {
+            1 => IsKoreanLocale ? "필터: 보유" : "FILTER: OWNED",
+            2 => IsKoreanLocale ? "필터: 미보유" : "FILTER: LOCKED",
+            _ => IsKoreanLocale ? "필터: 전체" : "FILTER: ALL"
+        };
+        string sort = _sortIndex switch
+        {
+            1 => IsKoreanLocale ? "정렬: 이름↓" : "SORT: NAME↓",
+            2 => IsKoreanLocale ? "정렬: 보유" : "SORT: OWNED",
+            _ => IsKoreanLocale ? "정렬: 이름↑" : "SORT: NAME↑"
+        };
+        _browser.SetToolbar(
+            _searchQuery,
+            IsKoreanLocale ? "이름 또는 ID" : "NAME OR ID",
+            IsKoreanLocale ? "검색" : "SEARCH",
+            filter,
+            sort);
+    }
+
+    private void SelectCharacter(string characterId)
+    {
+        int index = _visibleEntries.FindIndex(entry => string.Equals(
+            entry.Id,
+            characterId,
+            StringComparison.Ordinal));
+        if (index < 0)
+            return;
+
+        _selectedCharacterId = characterId;
+        _browser?.SetSelected(characterId);
+        CharacterCodexEntry entry = _visibleEntries[index];
         CharacterData data = entry.Data;
         Color accentColor = new(0.22f, 0.48f, 0.68f, 1f);
-        for (int buttonIndex = 0;
-             buttonIndex < _tabButtons.Count;
-             buttonIndex++)
-        {
-            SetButtonColor(
-                _tabButtons[buttonIndex],
-                buttonIndex == index ? accentColor : ButtonColor);
-        }
 
         if (_detailPanelImage != null)
         {
@@ -503,7 +603,6 @@ public sealed class CharacterCodexPage : RuntimeMenuPageBase
         }
 
         SetProfileImage(_standingImage, data.StandingSprite);
-        SetProfileImage(_iconImage, data.IconSprite);
 
         _detailTitle.text = CharacterLocalization.GetName(data);
         _ownershipText.text = CharacterLocalization.GetOwnership(data);
@@ -568,7 +667,6 @@ public sealed class CharacterCodexPage : RuntimeMenuPageBase
     private void ShowEmptyState()
     {
         SetProfileImage(_standingImage, null);
-        SetProfileImage(_iconImage, null);
         if (_detailTitle != null)
         {
             _detailTitle.text = LocalizationService.Get(
@@ -658,31 +756,7 @@ public sealed class CharacterCodexPage : RuntimeMenuPageBase
             return;
 
         RefreshEntries();
-        BuildCharacterTabStrip();
-
-        for (int index = 0;
-             index < _tabButtons.Count && index < _entries.Count;
-             index++)
-        {
-            TextMeshProUGUI label = _tabButtons[index]
-                .GetComponentInChildren<TextMeshProUGUI>(true);
-            if (label != null)
-            {
-                label.text = GetCharacterTabLabel(_entries[index].Data);
-            }
-        }
-
-        if (_entries.Count > 0)
-        {
-            SelectCharacter(Mathf.Clamp(
-                _selectedIndex,
-                0,
-                _entries.Count - 1));
-        }
-        else
-        {
-            ShowEmptyState();
-        }
+        RefreshBrowser();
     }
 
     private void HandleBackClicked()
@@ -690,21 +764,12 @@ public sealed class CharacterCodexPage : RuntimeMenuPageBase
         NavigateTo(codexPage, PageOpenMode.Resume);
     }
 
-    private static void SetButtonColor(Button button, Color color)
+    private static bool ContainsIgnoreCase(string source, string value)
     {
-        if (button == null)
-            return;
-
-        if (button.targetGraphic is Image image)
-            image.color = color;
-
-        ColorBlock colors = button.colors;
-        colors.normalColor = color;
-        colors.highlightedColor = Color.Lerp(color, Color.white, 0.14f);
-        colors.pressedColor = Color.Lerp(color, Color.black, 0.18f);
-        colors.selectedColor = colors.highlightedColor;
-        colors.disabledColor = Color.Lerp(color, Color.black, 0.5f);
-        button.colors = colors;
+        return !string.IsNullOrEmpty(source) &&
+               source.IndexOf(
+                   value,
+                   StringComparison.OrdinalIgnoreCase) >= 0;
     }
 
     private static void SetTextPreferredHeight(
@@ -740,21 +805,13 @@ public sealed class CharacterCodexPage : RuntimeMenuPageBase
             text.gameObject.SetActive(active);
     }
 
-    private static string GetCharacterTabLabel(CharacterData data)
-    {
-        if (data == null)
-            return string.Empty;
-
-        return (data.IsOwned ? "● " : "○ ") +
-               CharacterLocalization.GetName(data);
-    }
-
     private static Image CreateProfileImage(
         Transform parent,
         string objectName,
         float preferredWidth,
         float preferredHeight)
     {
+        bool created = parent.Find(objectName) == null;
         GameObject imageObject = GetOrCreateChild(
             parent,
             objectName,
@@ -763,15 +820,18 @@ public sealed class CharacterCodexPage : RuntimeMenuPageBase
             typeof(Image),
             typeof(LayoutElement));
         Image image = imageObject.GetComponent<Image>();
-        image.preserveAspect = true;
-        image.raycastTarget = false;
-        LayoutElement layout = imageObject.GetComponent<LayoutElement>();
-        layout.minWidth = preferredWidth;
-        layout.preferredWidth = preferredWidth;
-        layout.minHeight = preferredHeight;
-        layout.preferredHeight = preferredHeight;
-        layout.flexibleWidth = 0f;
-        layout.flexibleHeight = 0f;
+        if (created)
+        {
+            image.preserveAspect = true;
+            image.raycastTarget = false;
+            LayoutElement layout = imageObject.GetComponent<LayoutElement>();
+            layout.minWidth = preferredWidth;
+            layout.preferredWidth = preferredWidth;
+            layout.minHeight = preferredHeight;
+            layout.preferredHeight = preferredHeight;
+            layout.flexibleWidth = 0f;
+            layout.flexibleHeight = 0f;
+        }
         return image;
     }
 

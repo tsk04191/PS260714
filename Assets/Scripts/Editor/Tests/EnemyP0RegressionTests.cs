@@ -46,6 +46,62 @@ public sealed class EnemyP0RegressionTests
     }
 
     [Test]
+    public void EnemyCodex_DeduplicatesDefinitionsByIdAndEnemyType()
+    {
+        EnemySO basic = LoadEnemy("Basic");
+        EnemySO duplicateId =
+            UnityEngine.Object.Instantiate(basic);
+        duplicateId.hideFlags = HideFlags.HideAndDontSave;
+        _createdObjects.Add(duplicateId);
+        EnemySO duplicateType =
+            UnityEngine.Object.Instantiate(basic);
+        duplicateType.hideFlags = HideFlags.HideAndDontSave;
+        SerializedObject serializedDuplicate =
+            new(duplicateType);
+        serializedDuplicate.FindProperty("enemyId").stringValue =
+            "basic_variant";
+        serializedDuplicate.ApplyModifiedPropertiesWithoutUndo();
+        _createdObjects.Add(duplicateType);
+        GameObject pageObject = new(
+            "EnemyCodexDuplicateTest",
+            typeof(RectTransform),
+            typeof(EnemyCodexPage));
+        _createdObjects.Add(pageObject);
+        EnemyCodexPage page =
+            pageObject.GetComponent<EnemyCodexPage>();
+        SerializedObject serializedPage = new(page);
+        SerializedProperty definitions =
+            serializedPage.FindProperty("enemyDefinitions");
+        definitions.arraySize = 3;
+        definitions.GetArrayElementAtIndex(0).objectReferenceValue =
+            basic;
+        definitions.GetArrayElementAtIndex(1).objectReferenceValue =
+            duplicateId;
+        definitions.GetArrayElementAtIndex(2).objectReferenceValue =
+            duplicateType;
+        serializedPage.ApplyModifiedPropertiesWithoutUndo();
+
+        MethodInfo refreshEntries = typeof(EnemyCodexPage).GetMethod(
+            "RefreshEntries",
+            InstanceNonPublic);
+        Assert.That(refreshEntries, Is.Not.Null);
+        refreshEntries.Invoke(page, null);
+
+        object entries = typeof(EnemyCodexPage).GetField(
+                "_entries",
+                InstanceNonPublic)
+            ?.GetValue(page);
+        Assert.That(entries, Is.Not.Null);
+        int count = (int)entries.GetType()
+            .GetProperty("Count")
+            ?.GetValue(entries);
+        Assert.That(
+            count,
+            Is.EqualTo(
+                Enum.GetValues(typeof(EEnemyType)).Length));
+    }
+
+    [Test]
     public void Assault_MultipliesThePendingSpawnIntervalByOneHalf()
     {
         BattleManager manager = CreateBattleManager();

@@ -746,6 +746,8 @@ public sealed class CharacterSkillDefinition :
     [SerializeField]
     private List<CharacterSkillSectionType> sections = new();
     [SerializeField]
+    private Sprite iconSprite;
+    [SerializeField]
     private AudioClip audioClip;
     [SerializeField, Min(1)]
     private int cost = 1;
@@ -788,6 +790,7 @@ public sealed class CharacterSkillDefinition :
     private List<CharacterEffectDefinition> effects = new();
 
     public IReadOnlyList<CharacterSkillSectionType> Sections => sections;
+    public Sprite IconSprite => iconSprite;
     public AudioClip AudioClip => audioClip;
     public int Cost => cost;
     public bool HasLinkageSection =>
@@ -889,6 +892,8 @@ public sealed class CharacterPassiveDefinition :
     [SerializeField]
     private List<CharacterPassiveSectionType> sections = new();
     [SerializeField]
+    private Sprite iconSprite;
+    [SerializeField]
     private AudioClip audioClip;
     [SerializeField]
     private CharacterPassiveTrigger trigger;
@@ -943,6 +948,7 @@ public sealed class CharacterPassiveDefinition :
     private List<CharacterEffectDefinition> effects = new();
 
     public IReadOnlyList<CharacterPassiveSectionType> Sections => sections;
+    public Sprite IconSprite => iconSprite;
     public AudioClip AudioClip => audioClip;
     public CharacterPassiveTrigger Trigger => trigger;
     public CharacterPassiveKillSource KillSource => killSource;

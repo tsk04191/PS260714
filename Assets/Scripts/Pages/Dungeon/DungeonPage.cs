@@ -567,6 +567,7 @@ public class DungeonPage : MonoBehaviour, IPage
             return;
         }
 
+        RefreshAvailableCharacterDefinitions();
         if (_battleManager.HasSession)
             _battleManager.EndBattle(board);
 
@@ -636,6 +637,14 @@ public class DungeonPage : MonoBehaviour, IPage
         NavigateToCompletionDestination(destination);
     }
 
+    public void ReturnToStageSelect(GameObject sourcePage = null)
+    {
+        ResetCurrentRunForNavigation();
+        NavigateToCompletionDestination(
+            EDungeonCompletionDestination.StageSelect,
+            sourcePage);
+    }
+
     public void ToggleBattlePause()
     {
         if (!_session.IsActive || _battleManager == null ||
@@ -663,6 +672,7 @@ public class DungeonPage : MonoBehaviour, IPage
     {
         if (!_startingCharacterSelectionPending || definition == null ||
             !_startingCharacterChoices.Contains(definition) ||
+            !IsCharacterOwnedForDungeon(definition) ||
             playerCharacters.Length == 0 || playerCharacters[0] == null)
         {
             return false;
@@ -838,8 +848,11 @@ public class DungeonPage : MonoBehaviour, IPage
         CharacterSO definition,
         int replacementSlotIndex = -1)
     {
-        if (!_eventRewardPending || definition == null)
+        if (!_eventRewardPending || definition == null ||
+            !IsCharacterOwnedForDungeon(definition))
+        {
             return false;
+        }
 
         CharacterRuntime slot;
         if (_ownedTurrets.Count < MaximumPartySize)
@@ -1826,16 +1839,8 @@ public class DungeonPage : MonoBehaviour, IPage
     {
         EnsurePlayerCharacterSlots();
         EnsurePartySlotColors();
-        _availableTurrets.Clear();
         IReadOnlyList<CharacterSO> catalog =
             CharacterDefinitionCatalog.GetAll();
-        foreach (CharacterSO definition in catalog)
-        {
-            if (definition != null && !_availableTurrets.Contains(definition))
-                _availableTurrets.Add(definition);
-        }
-
-        bool hasCharacter = _availableTurrets.Count > 0;
         for (int index = 0; index < playerCharacters.Length; index++)
         {
             CharacterRuntime character = playerCharacters[index];
@@ -1867,14 +1872,71 @@ public class DungeonPage : MonoBehaviour, IPage
 
             character.ConfigurePartySlot(index, partySlotColors[index]);
             _slotDefaultDefinitions[index] = definition;
-            if (definition != null && !_availableTurrets.Contains(definition))
-                _availableTurrets.Add(definition);
         }
 
+        RefreshAvailableCharacterDefinitions();
+        bool hasCharacter = _availableTurrets.Count > 0;
         if (!hasCharacter)
-            Debug.LogError("DungeonPage requires at least one player character.", this);
+        {
+            Debug.LogError(
+                "DungeonPage requires at least one owned player character.",
+                this);
+        }
         else
             ClearPlayerParty();
+    }
+
+    private void RefreshAvailableCharacterDefinitions()
+    {
+        _availableTurrets.Clear();
+        AddOwnedCharacterDefinitions(
+            CharacterDefinitionCatalog.GetAll());
+        if (playerCharacters == null)
+            return;
+
+        foreach (CharacterRuntime character in playerCharacters)
+        {
+            CharacterSO definition = character != null
+                ? character.Definition
+                : null;
+            if (IsCharacterOwnedForDungeon(definition) &&
+                !_availableTurrets.Contains(definition))
+            {
+                _availableTurrets.Add(definition);
+            }
+        }
+    }
+
+    private void AddOwnedCharacterDefinitions(
+        IReadOnlyList<CharacterSO> definitions)
+    {
+        if (definitions == null)
+            return;
+
+        foreach (CharacterSO definition in definitions)
+        {
+            if (IsCharacterOwnedForDungeon(definition) &&
+                !_availableTurrets.Contains(definition))
+            {
+                _availableTurrets.Add(definition);
+            }
+        }
+    }
+
+    internal static bool IsCharacterOwnedForDungeon(
+        CharacterSO definition,
+        CharacterCollectionData collection = null)
+    {
+        if (definition == null)
+            return false;
+
+        collection ??= DataManager.Current?.CharacterDatas;
+        if (collection == null)
+            return definition.InitiallyOwned;
+
+        CharacterData data =
+            collection.CreatePreviewData(definition);
+        return data != null && data.IsOwned;
     }
 
     private void ClearPlayerParty()
@@ -1984,7 +2046,8 @@ public class DungeonPage : MonoBehaviour, IPage
     }
 
     private void NavigateToCompletionDestination(
-        EDungeonCompletionDestination destination)
+        EDungeonCompletionDestination destination,
+        GameObject sourcePage = null)
     {
         GameObject targetPage = destination ==
             EDungeonCompletionDestination.StageSelect
@@ -2012,9 +2075,24 @@ public class DungeonPage : MonoBehaviour, IPage
         }
 
         PageControl.PagToPag(
-            gameObject,
+            sourcePage != null ? sourcePage : gameObject,
             targetPage,
             PageOpenMode.Resume);
+    }
+
+    private void ResetCurrentRunForNavigation()
+    {
+        _tutorialController?.StopTutorial();
+        _eventRewardPending = false;
+        _startingCharacterSelectionPending = false;
+        if (_battleManager != null && _battleManager.HasSession)
+            _battleManager.EndBattle(board);
+        board?.ClearAllStacks();
+        ClearPlayerParty();
+        ResetRunResourcesAndItems(includeStartingConsumable: false);
+        _session.Reset();
+        _pendingDefinition = null;
+        battleTab?.Refresh();
     }
 
     private void NotifyRunStarted()

@@ -236,6 +236,25 @@ public sealed class StatusEffectEditorTests
                 BindingFlags.Public | BindingFlags.Static),
             Is.Null);
         Assert.That(
+            typeof(MenuPageSceneBuilder).GetCustomAttributes(
+                typeof(InitializeOnLoadAttribute),
+                false),
+            Is.Empty,
+            "Menu UI must not rebuild automatically on editor load.");
+        foreach (MethodInfo method in typeof(MenuPageSceneBuilder)
+                     .GetMethods(
+                         BindingFlags.Public |
+                         BindingFlags.NonPublic |
+                         BindingFlags.Static))
+        {
+            Assert.That(
+                method.GetCustomAttributes(
+                    typeof(InitializeOnLoadMethodAttribute),
+                    false),
+                Is.Empty,
+                $"{method.Name} must not mutate UI on domain reload.");
+        }
+        Assert.That(
             typeof(FireStatusEffectAssetGenerator).GetMethod(
                 "GenerateFromMenu",
                 BindingFlags.Public | BindingFlags.Static),

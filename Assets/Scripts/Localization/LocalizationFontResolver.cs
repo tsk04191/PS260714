@@ -221,7 +221,6 @@ namespace PS260714.Localization
             TMP_FontAsset font = catalog != null
                 ? catalog.ResolveGlobalDefault()
                 : TMP_Settings.defaultFontAsset;
-            font = EnableDynamicAtlasGrowth(font);
             if (catalog != null)
                 font = catalog.PrepareFallbacks(font);
             font = EnableDynamicAtlasGrowth(font);
@@ -275,8 +274,6 @@ namespace PS260714.Localization
 
         private TMP_FontAsset PrepareResolvedFont(TMP_FontAsset font)
         {
-            font = EnableDynamicAtlasGrowth(font);
-
             if (fontCatalog != null)
                 font = fontCatalog.PrepareFallbacks(font);
 
@@ -300,7 +297,9 @@ namespace PS260714.Localization
             TMP_FontAsset font)
         {
             if (font != null &&
-                font.atlasPopulationMode != AtlasPopulationMode.Static)
+                font.atlasPopulationMode != AtlasPopulationMode.Static &&
+                (font.hideFlags & HideFlags.DontSave) != 0 &&
+                !font.isMultiAtlasTexturesEnabled)
             {
                 // The localization source contains more Hangul glyphs than a
                 // single 1024 atlas can hold. Project font assets are not

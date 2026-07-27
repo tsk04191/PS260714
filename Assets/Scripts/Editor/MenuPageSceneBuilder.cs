@@ -3,44 +3,1154 @@ using UnityEditor;
 using UnityEditor.SceneManagement;
 using UnityEngine;
 using UnityEngine.SceneManagement;
+using UnityEngine.UI;
 
-[InitializeOnLoad]
 public static class MenuPageSceneBuilder
 {
     private const string ClientScenePath = "Assets/Scenes/ClientScene.unity";
-
-    static MenuPageSceneBuilder()
+    private static readonly string[] MainMenuButtonNames =
     {
-        EditorApplication.delayCall += BuildIfMissing;
-        EditorApplication.update += BuildWhenSceneIsReady;
-    }
+        "btnPLAY",
+        "btnCODEX",
+        "btnROSTER",
+        "btnSHOP",
+        "btnQUEST",
+        "btnSTORAGE",
+    };
+    private const string ValidateDesignerUiMenuPath =
+        "PS260714/UI/Validate Designer UI";
+    private const string MigrateRuntimeUiMenuPath =
+        "PS260714/UI/Migrate Runtime UI For Designer";
+    private static readonly bool LegacyBuilderDisabled = true;
 
-    private static void BuildIfMissing()
+    [MenuItem(ValidateDesignerUiMenuPath)]
+    private static void ValidateDesignerUi()
     {
-        if (EditorApplication.isPlayingOrWillChangePlaymode)
-            return;
-
-        BuildClientPages(false);
-    }
-
-    private static void BuildWhenSceneIsReady()
-    {
-        if (EditorApplication.isPlayingOrWillChangePlaymode)
-            return;
-
         Scene scene = SceneManager.GetActiveScene();
         if (!scene.IsValid() || !scene.isLoaded ||
             scene.path != ClientScenePath)
         {
+            Debug.LogWarning(
+                "Open Assets/Scenes/ClientScene.unity before validating UI.");
             return;
         }
 
-        EditorApplication.update -= BuildWhenSceneIsReady;
-        BuildClientPages(false);
+        List<string> issues = CollectDesignerUiIssues(scene);
+        if (issues.Count == 0)
+        {
+            Debug.Log(
+                "Designer UI validation passed. No automatic rebuild was run.");
+            return;
+        }
+
+        Debug.LogWarning(
+            "Designer UI validation found:\n- " +
+            string.Join("\n- ", issues));
+    }
+
+    [MenuItem(MigrateRuntimeUiMenuPath)]
+    private static void MigrateRuntimeUiFromMenu()
+    {
+        Scene scene = SceneManager.GetActiveScene();
+        if (!scene.IsValid() || !scene.isLoaded ||
+            scene.path != ClientScenePath)
+        {
+            EditorUtility.DisplayDialog(
+                "PS260714 UI",
+                "Open ClientScene and run this command again.",
+                "OK");
+            return;
+        }
+
+        if (!EditorUtility.DisplayDialog(
+                "Migrate Runtime UI For Designer",
+                "This one-time migration unlocks menu and codex layout " +
+                "groups and preserves the current scene hierarchy.",
+                "Migrate",
+                "Cancel"))
+        {
+            return;
+        }
+
+        MigrateRuntimeUi(scene);
+    }
+
+    public static void MigrateRuntimeUiForDesignerBatch()
+    {
+        Scene scene = EditorSceneManager.OpenScene(
+            ClientScenePath,
+            OpenSceneMode.Single);
+        MigrateRuntimeUi(scene);
+    }
+
+    internal static void MigrateRuntimeUiForDesigner(Scene scene)
+    {
+        MigrateRuntimeUi(scene);
+    }
+
+    internal static IReadOnlyList<string> ValidateDesignerUiForScene(
+        Scene scene)
+    {
+        return CollectDesignerUiIssues(scene);
+    }
+
+    private static void MigrateRuntimeUi(Scene scene)
+    {
+        GameObject layClient = FindSceneObject(scene, "layClient");
+        if (layClient == null)
+        {
+            Debug.LogError("layClient was not found in ClientScene.");
+            return;
+        }
+
+        int migratedCount = MigrateStaticMenuPages(layClient);
+        string[] pageNames =
+        {
+            "pagEnemyCodex",
+            "pagCharacterCodex",
+            "pagSkillCodex",
+            "pagItemCodex",
+        };
+        foreach (string pageName in pageNames)
+        {
+            GameObject pageObject = FindDirectChild(layClient, pageName);
+            if (pageObject != null &&
+                MigrateCodexPage(
+                    pageObject,
+                    pageName == "pagCharacterCodex"))
+            {
+                migratedCount++;
+            }
+        }
+
+        if (migratedCount > 0)
+        {
+            EditorSceneManager.MarkSceneDirty(scene);
+            EditorSceneManager.SaveScene(scene);
+        }
+
+        if (migratedCount > 0)
+        {
+            Debug.Log(
+                $"Runtime designer UI migration complete. " +
+                $"Migrated pages: {migratedCount}. " +
+                "Existing designer layouts were not rebuilt.");
+        }
+    }
+
+    private static int MigrateStaticMenuPages(GameObject layClient)
+    {
+        string[] pageNames =
+        {
+            "pagTitle",
+            "pagMain",
+            "pagStageSelect",
+            "pagCodex",
+            "pagRoster",
+            "pagShop",
+            "pagQuest",
+            "pagStorage",
+        };
+        int migratedCount = 0;
+        foreach (string pageName in pageNames)
+        {
+            GameObject pageObject = FindDirectChild(layClient, pageName);
+            RuntimeMenuPageBase page = pageObject != null
+                ? pageObject.GetComponent<RuntimeMenuPageBase>()
+                : null;
+            if (page == null)
+                continue;
+
+            if (page.HasDesignerLayout)
+            {
+                if (RepairCollapsedStaticMenuLayout(page))
+                {
+                    migratedCount++;
+                }
+
+                continue;
+            }
+
+            Transform runtimeRoot = pageObject.transform.Find(
+                RuntimeMenuPageBase.RuntimeRootObjectName);
+            Transform panel = runtimeRoot != null
+                ? runtimeRoot.Find("grpMenuPanel")
+                : null;
+            Transform buttonRoot = panel != null
+                ? panel.Find("grpMenuButtons")
+                : null;
+            if (runtimeRoot == null || panel == null || buttonRoot == null)
+            {
+                Debug.LogWarning(
+                    $"{pageName}: generated menu hierarchy is missing.");
+                continue;
+            }
+
+            BakeAndDisableMenuLayout(pageObject, panel, buttonRoot);
+            BindRuntimePageReferences(
+                page,
+                runtimeRoot as RectTransform,
+                panel as RectTransform,
+                buttonRoot as RectTransform);
+            RepairCollapsedStaticMenuLayout(page);
+            migratedCount++;
+        }
+
+        return migratedCount;
+    }
+
+    internal static void RestoreMainMenuDefaultLayout(MainPage page)
+    {
+        if (page == null || Application.isPlaying)
+            return;
+
+        if (!TryGetMainMenuLayout(
+                page,
+                out RectTransform panel,
+                out RectTransform title,
+                out RectTransform description,
+                out RectTransform buttonRoot,
+                out List<RectTransform> buttons))
+        {
+            Debug.LogWarning(
+                "Main menu hierarchy is incomplete. Rebuild its editor " +
+                "preview before restoring the layout.",
+                page);
+            return;
+        }
+
+        ApplyMainMenuDefaultLayout(
+            panel,
+            title,
+            description,
+            buttonRoot,
+            buttons);
+        Scene scene = page.gameObject.scene;
+        if (scene.IsValid() && scene.isLoaded)
+            EditorSceneManager.MarkSceneDirty(scene);
+    }
+
+    internal static void RestoreStaticMenuDefaultLayout(
+        RuntimeMenuPageBase page)
+    {
+        if (page == null || Application.isPlaying)
+            return;
+
+        if (page is MainPage mainPage)
+        {
+            RestoreMainMenuDefaultLayout(mainPage);
+            return;
+        }
+
+        if (!TryGetStaticMenuLayout(
+                page,
+                out RectTransform panel,
+                out RectTransform title,
+                out RectTransform description,
+                out RectTransform buttonRoot,
+                out List<RectTransform> buttons))
+        {
+            Debug.LogWarning(
+                $"{page.name}: menu hierarchy is incomplete. Rebuild its " +
+                "editor preview before restoring the layout.",
+                page);
+            return;
+        }
+
+        ApplyStaticMenuDefaultLayout(
+            panel,
+            title,
+            description,
+            buttonRoot,
+            buttons);
+        Scene scene = page.gameObject.scene;
+        if (scene.IsValid() && scene.isLoaded)
+            EditorSceneManager.MarkSceneDirty(scene);
+    }
+
+    private static bool MigrateCodexPage(
+        GameObject pageObject,
+        bool characterPage)
+    {
+        Transform runtimeRoot = pageObject.transform.Find(
+            RuntimeMenuPageBase.RuntimeRootObjectName);
+        Transform panel = runtimeRoot != null
+            ? runtimeRoot.Find("grpMenuPanel")
+            : null;
+        Transform buttonRoot = panel != null
+            ? panel.Find("grpMenuButtons")
+            : null;
+        Transform browser = buttonRoot != null
+            ? buttonRoot.Find("grpCodexBrowser")
+            : null;
+        if (runtimeRoot == null || panel == null || buttonRoot == null ||
+            browser == null)
+        {
+            Debug.LogWarning(
+                $"{pageObject.name}: generated codex hierarchy is missing.");
+            return false;
+        }
+
+        CodexBrowserDesignerSettings settings =
+            browser.GetComponent<CodexBrowserDesignerSettings>();
+        if (settings != null && settings.HasDesignerLayout)
+            return false;
+
+        Undo.SetCurrentGroupName("Migrate Codex Designer UI");
+        if (settings == null)
+        {
+            settings =
+                Undo.AddComponent<CodexBrowserDesignerSettings>(
+                    browser.gameObject);
+        }
+
+        DisableLayoutGroup(panel);
+        DisableLayoutGroup(buttonRoot);
+        DisableLayoutGroup(browser);
+
+        SetStretch((RectTransform)runtimeRoot, 0f, 0f, 0f, 0f);
+        SetStretch((RectTransform)panel, 0f, 0f, 0f, 0f);
+        SetStretch((RectTransform)buttonRoot, 24f, 24f, 24f, 112f);
+        SetStretch((RectTransform)browser, 0f, 0f, 0f, 0f);
+
+        RectTransform title = panel.Find("txtPageTitle") as RectTransform;
+        if (title != null)
+            SetTopCentered(title, 18f, 780f, 58f);
+        RectTransform description =
+            panel.Find("txtPageDescription") as RectTransform;
+        if (description != null)
+            SetTopCentered(description, 74f, 900f, 34f);
+
+        Transform list = browser.Find("grpCodexList");
+        Transform toolbar = list != null
+            ? list.Find("grpCodexListToolbar")
+            : null;
+        Transform scroll = list != null
+            ? list.Find("scrCodexList")
+            : null;
+        Transform detailHost = browser.Find("grpCodexDetailHost");
+        if (list == null || toolbar == null || scroll == null ||
+            detailHost == null)
+        {
+            Debug.LogWarning(
+                $"{pageObject.name}: codex browser controls are missing.");
+            return false;
+        }
+
+        DisableLayoutGroup(list);
+        DisableLayoutGroup(toolbar);
+        DisableLayoutGroup(detailHost);
+        SetLeftStretch((RectTransform)list, 720f);
+        SetTopStretch((RectTransform)toolbar, 10f, 10f, 10f, 46f);
+        SetStretch((RectTransform)scroll, 10f, 10f, 10f, 66f);
+        SetStretch((RectTransform)detailHost, 738f, 0f, 0f, 0f);
+
+        RectTransform search =
+            toolbar.Find("inpCodexSearch") as RectTransform;
+        RectTransform searchButton =
+            toolbar.Find("btnCodexSearch") as RectTransform;
+        RectTransform filterButton =
+            toolbar.Find("btnCodexFilter") as RectTransform;
+        RectTransform sortButton =
+            toolbar.Find("btnCodexSort") as RectTransform;
+        if (search != null)
+            SetStretch(search, 0f, 0f, 274f, 0f);
+        if (searchButton != null)
+            SetRightStretch(searchButton, 204f, 64f);
+        if (filterButton != null)
+            SetRightStretch(filterButton, 106f, 92f);
+        if (sortButton != null)
+            SetRightStretch(sortButton, 0f, 100f);
+
+        string detailName = characterPage
+            ? "grpCharacterDetail"
+            : pageObject.GetComponent<EnemyCodexPage>() != null
+                ? "grpEnemyDetail"
+                : "grpBattleCardDetail";
+        Transform detail = detailHost.Find(detailName);
+        if (detail != null)
+            SetStretch((RectTransform)detail, 0f, 0f, 0f, 0f);
+
+        if (characterPage && detail != null)
+            MigrateCharacterDetail(detail);
+
+        BindRuntimePageReferences(
+            pageObject.GetComponent<RuntimeMenuPageBase>(),
+            runtimeRoot as RectTransform,
+            panel as RectTransform,
+            buttonRoot as RectTransform);
+        settings.CaptureReferencesFromHierarchy();
+        settings.MarkDesignerLayoutCurrent();
+        EditorUtility.SetDirty(settings);
+        EditorUtility.SetDirty(pageObject);
+        return true;
+    }
+
+    private static void MigrateCharacterDetail(Transform detail)
+    {
+        DisableLayoutGroup(detail);
+        Transform visuals = detail.Find("grpCharacterVisuals");
+        Transform scroll = detail.Find("scrCharacterDetails");
+        if (visuals != null)
+        {
+            DisableLayoutGroup(visuals);
+            SetLeftStretch((RectTransform)visuals, 360f, 18f, 18f);
+            RectTransform standing =
+                visuals.Find("imgCharacterStanding") as RectTransform;
+            if (standing != null)
+                SetStretch(standing, 0f, 0f, 0f, 0f);
+        }
+
+        if (scroll != null)
+            SetStretch((RectTransform)scroll, 396f, 18f, 18f, 18f);
+    }
+
+    private static void BindRuntimePageReferences(
+        RuntimeMenuPageBase page,
+        RectTransform runtimeRoot,
+        RectTransform panel,
+        RectTransform buttonRoot)
+    {
+        if (page == null)
+            return;
+
+        SerializedObject serialized = new(page);
+        serialized.FindProperty("_runtimeRoot").objectReferenceValue =
+            runtimeRoot;
+        serialized.FindProperty("_panel").objectReferenceValue = panel;
+        serialized.FindProperty("_buttonRoot").objectReferenceValue =
+            buttonRoot;
+        serialized.FindProperty("_titleText").objectReferenceValue =
+            panel.Find("txtPageTitle")
+                ?.GetComponent<TMPro.TextMeshProUGUI>();
+        serialized.FindProperty("_descriptionText").objectReferenceValue =
+            panel.Find("txtPageDescription")
+                ?.GetComponent<TMPro.TextMeshProUGUI>();
+        serialized.ApplyModifiedPropertiesWithoutUndo();
+        page.MarkDesignerLayoutCurrent();
+        EditorUtility.SetDirty(page);
+    }
+
+    private static void BakeAndDisableMenuLayout(
+        GameObject pageObject,
+        Transform panel,
+        Transform buttonRoot)
+    {
+        if (panel is not RectTransform panelRect ||
+            buttonRoot is not RectTransform buttonRootRect)
+        {
+            return;
+        }
+
+        List<GameObject> temporarilyActivated = new();
+        for (Transform current = pageObject.transform;
+             current != null;
+             current = current.parent)
+        {
+            if (current.gameObject.activeSelf)
+                continue;
+
+            current.gameObject.SetActive(true);
+            temporarilyActivated.Add(current.gameObject);
+        }
+
+        try
+        {
+            Canvas.ForceUpdateCanvases();
+            LayoutRebuilder.ForceRebuildLayoutImmediate(panelRect);
+            LayoutRebuilder.ForceRebuildLayoutImmediate(buttonRootRect);
+
+            List<RectTransformState> panelChildStates =
+                CaptureChildStates(panel);
+            List<RectTransformState> buttonStates =
+                CaptureChildStates(buttonRoot);
+
+            DisableLayoutGroup(buttonRoot);
+            DisableLayoutGroup(panel);
+            ApplyRectTransformStates(panelChildStates);
+            ApplyRectTransformStates(buttonStates);
+        }
+        finally
+        {
+            for (int index = temporarilyActivated.Count - 1;
+                 index >= 0;
+                 index--)
+            {
+                temporarilyActivated[index].SetActive(false);
+            }
+        }
+    }
+
+    private static List<RectTransformState> CaptureChildStates(
+        Transform target)
+    {
+        List<RectTransformState> states = new();
+        if (target == null)
+            return states;
+
+        for (int index = 0; index < target.childCount; index++)
+        {
+            if (target.GetChild(index) is RectTransform child)
+                states.Add(new RectTransformState(child));
+        }
+
+        return states;
+    }
+
+    private static void ApplyRectTransformStates(
+        List<RectTransformState> states)
+    {
+        foreach (RectTransformState state in states)
+            state.Apply();
+    }
+
+    private static void DisableLayoutGroup(Transform target)
+    {
+        if (target == null)
+            return;
+
+        LayoutGroup layout = target.GetComponent<LayoutGroup>();
+        if (layout == null || !layout.enabled)
+            return;
+
+        Undo.RecordObject(layout, "Disable Generated Layout");
+        layout.enabled = false;
+        EditorUtility.SetDirty(layout);
+    }
+
+    private readonly struct RectTransformState
+    {
+        private readonly RectTransform _target;
+        private readonly Vector2 _anchorMin;
+        private readonly Vector2 _anchorMax;
+        private readonly Vector2 _pivot;
+        private readonly Vector2 _anchoredPosition;
+        private readonly Vector2 _sizeDelta;
+
+        public RectTransformState(RectTransform target)
+        {
+            _target = target;
+            _anchorMin = target.anchorMin;
+            _anchorMax = target.anchorMax;
+            _pivot = target.pivot;
+            _anchoredPosition = target.anchoredPosition;
+            _sizeDelta = target.sizeDelta;
+        }
+
+        public void Apply()
+        {
+            if (_target == null)
+                return;
+
+            Undo.RecordObject(_target, "Bake Generated Layout");
+            _target.anchorMin = _anchorMin;
+            _target.anchorMax = _anchorMax;
+            _target.pivot = _pivot;
+            _target.anchoredPosition = _anchoredPosition;
+            _target.sizeDelta = _sizeDelta;
+            EditorUtility.SetDirty(_target);
+        }
+    }
+
+    private static void SetStretch(
+        RectTransform rect,
+        float left,
+        float bottom,
+        float right,
+        float top)
+    {
+        Undo.RecordObject(rect, "Set Designer Rect");
+        rect.anchorMin = Vector2.zero;
+        rect.anchorMax = Vector2.one;
+        rect.pivot = new Vector2(0.5f, 0.5f);
+        rect.offsetMin = new Vector2(left, bottom);
+        rect.offsetMax = new Vector2(-right, -top);
+    }
+
+    private static void SetLeftStretch(
+        RectTransform rect,
+        float width,
+        float left = 0f,
+        float verticalMargin = 0f)
+    {
+        Undo.RecordObject(rect, "Set Designer Rect");
+        rect.anchorMin = new Vector2(0f, 0f);
+        rect.anchorMax = new Vector2(0f, 1f);
+        rect.pivot = new Vector2(0f, 0.5f);
+        rect.anchoredPosition = new Vector2(left, 0f);
+        rect.sizeDelta = new Vector2(
+            width,
+            -verticalMargin * 2f);
+    }
+
+    private static void SetTopStretch(
+        RectTransform rect,
+        float left,
+        float right,
+        float top,
+        float height)
+    {
+        Undo.RecordObject(rect, "Set Designer Rect");
+        rect.anchorMin = new Vector2(0f, 1f);
+        rect.anchorMax = Vector2.one;
+        rect.pivot = new Vector2(0.5f, 1f);
+        rect.anchoredPosition = new Vector2(0f, -top);
+        rect.sizeDelta = new Vector2(-(left + right), height);
+    }
+
+    private static void SetTopCentered(
+        RectTransform rect,
+        float top,
+        float width,
+        float height)
+    {
+        Undo.RecordObject(rect, "Set Designer Rect");
+        rect.anchorMin = new Vector2(0.5f, 1f);
+        rect.anchorMax = new Vector2(0.5f, 1f);
+        rect.pivot = new Vector2(0.5f, 1f);
+        rect.anchoredPosition = new Vector2(0f, -top);
+        rect.sizeDelta = new Vector2(width, height);
+    }
+
+    private static void SetCentered(
+        RectTransform rect,
+        float x,
+        float y,
+        float width,
+        float height,
+        string undoName)
+    {
+        Undo.RecordObject(rect, undoName);
+        rect.anchorMin = new Vector2(0.5f, 0.5f);
+        rect.anchorMax = new Vector2(0.5f, 0.5f);
+        rect.pivot = new Vector2(0.5f, 0.5f);
+        rect.anchoredPosition = new Vector2(x, y);
+        rect.sizeDelta = new Vector2(width, height);
+        EditorUtility.SetDirty(rect);
+    }
+
+    private static bool RepairCollapsedMainMenuLayout(MainPage page)
+    {
+        if (!TryGetMainMenuLayout(
+                page,
+                out RectTransform panel,
+                out RectTransform title,
+                out RectTransform description,
+                out RectTransform buttonRoot,
+                out List<RectTransform> buttons) ||
+            !IsCollapsedMainMenuLayout(buttonRoot, buttons))
+        {
+            return false;
+        }
+
+        ApplyMainMenuDefaultLayout(
+            panel,
+            title,
+            description,
+            buttonRoot,
+            buttons);
+        return true;
+    }
+
+    private static bool RepairCollapsedStaticMenuLayout(
+        RuntimeMenuPageBase page)
+    {
+        if (page is MainPage mainPage)
+            return RepairCollapsedMainMenuLayout(mainPage);
+
+        if (!TryGetStaticMenuLayout(
+                page,
+                out RectTransform panel,
+                out RectTransform title,
+                out RectTransform description,
+                out RectTransform buttonRoot,
+                out List<RectTransform> buttons) ||
+            !IsCollapsedStaticMenuLayout(buttonRoot, buttons))
+        {
+            return false;
+        }
+
+        ApplyStaticMenuDefaultLayout(
+            panel,
+            title,
+            description,
+            buttonRoot,
+            buttons);
+        return true;
+    }
+
+    private static bool TryGetStaticMenuLayout(
+        RuntimeMenuPageBase page,
+        out RectTransform panel,
+        out RectTransform title,
+        out RectTransform description,
+        out RectTransform buttonRoot,
+        out List<RectTransform> buttons)
+    {
+        panel = null;
+        title = null;
+        description = null;
+        buttonRoot = null;
+        buttons = new List<RectTransform>();
+        if (page == null)
+            return false;
+
+        Transform runtimeRoot = page.transform.Find(
+            RuntimeMenuPageBase.RuntimeRootObjectName);
+        panel = runtimeRoot != null
+            ? runtimeRoot.Find("grpMenuPanel") as RectTransform
+            : null;
+        title = panel != null
+            ? panel.Find("txtPageTitle") as RectTransform
+            : null;
+        description = panel != null
+            ? panel.Find("txtPageDescription") as RectTransform
+            : null;
+        buttonRoot = panel != null
+            ? panel.Find("grpMenuButtons") as RectTransform
+            : null;
+        if (panel == null || title == null || buttonRoot == null)
+            return false;
+
+        for (int index = 0; index < buttonRoot.childCount; index++)
+        {
+            if (buttonRoot.GetChild(index) is not RectTransform button ||
+                !button.gameObject.activeSelf ||
+                button.GetComponent<Button>() == null)
+            {
+                continue;
+            }
+
+            LayoutElement layout = button.GetComponent<LayoutElement>();
+            if (layout == null || !layout.ignoreLayout)
+                buttons.Add(button);
+        }
+
+        return buttons.Count > 0;
+    }
+
+    private static bool IsCollapsedStaticMenuLayout(
+        RectTransform buttonRoot,
+        IReadOnlyList<RectTransform> buttons)
+    {
+        if (buttonRoot == null || buttons == null || buttons.Count == 0)
+            return false;
+
+        Vector2 firstPosition = buttons[0].anchoredPosition;
+        for (int index = 1; index < buttons.Count; index++)
+        {
+            if (Vector2.Distance(
+                    firstPosition,
+                    buttons[index].anchoredPosition) > 0.5f)
+            {
+                return false;
+            }
+        }
+
+        return buttonRoot.rect.width <= 120f ||
+               buttonRoot.rect.height <= 120f;
+    }
+
+    private static void ApplyStaticMenuDefaultLayout(
+        RectTransform panel,
+        RectTransform title,
+        RectTransform description,
+        RectTransform buttonRoot,
+        IReadOnlyList<RectTransform> buttons)
+    {
+        VerticalLayoutGroup panelLayout =
+            panel.GetComponent<VerticalLayoutGroup>();
+        int panelLeft = panelLayout != null
+            ? panelLayout.padding.left
+            : 40;
+        int panelRight = panelLayout != null
+            ? panelLayout.padding.right
+            : 40;
+        int panelTop = panelLayout != null
+            ? panelLayout.padding.top
+            : 40;
+        int panelBottom = panelLayout != null
+            ? panelLayout.padding.bottom
+            : 40;
+        float panelSpacing = panelLayout != null
+            ? panelLayout.spacing
+            : 20f;
+        float panelWidth = GetRectSize(panel, true);
+        float panelHeight = GetRectSize(panel, false);
+        float contentWidth = Mathf.Max(
+            0f,
+            panelWidth - panelLeft - panelRight);
+        float cursor = panelTop;
+
+        float titleHeight = GetPreferredHeight(title, 82f);
+        SetTopLeftAnchored(
+            title,
+            panelLeft + contentWidth * 0.5f,
+            -(cursor + titleHeight * 0.5f),
+            contentWidth,
+            titleHeight,
+            "Restore Menu Title");
+        cursor += titleHeight;
+
+        if (description != null && description.gameObject.activeSelf)
+        {
+            cursor += panelSpacing;
+            float descriptionHeight =
+                GetPreferredHeight(description, 64f);
+            SetTopLeftAnchored(
+                description,
+                panelLeft + contentWidth * 0.5f,
+                -(cursor + descriptionHeight * 0.5f),
+                contentWidth,
+                descriptionHeight,
+                "Restore Menu Description");
+            cursor += descriptionHeight;
+        }
+
+        cursor += panelSpacing;
+        float buttonRootHeight = Mathf.Max(
+            0f,
+            panelHeight - panelBottom - cursor);
+        SetTopLeftAnchored(
+            buttonRoot,
+            panelLeft + contentWidth * 0.5f,
+            -(cursor + buttonRootHeight * 0.5f),
+            contentWidth,
+            buttonRootHeight,
+            "Restore Menu Button Area");
+        ApplyStaticMenuButtonLayout(buttonRoot, buttons);
+
+        DisableLayoutGroup(buttonRoot);
+        DisableLayoutGroup(panel);
+    }
+
+    private static void ApplyStaticMenuButtonLayout(
+        RectTransform buttonRoot,
+        IReadOnlyList<RectTransform> buttons)
+    {
+        VerticalLayoutGroup layout =
+            buttonRoot.GetComponent<VerticalLayoutGroup>();
+        int left = layout != null ? layout.padding.left : 0;
+        int right = layout != null ? layout.padding.right : 0;
+        int top = layout != null ? layout.padding.top : 0;
+        int bottom = layout != null ? layout.padding.bottom : 0;
+        float spacing = layout != null ? layout.spacing : 14f;
+        float rootWidth = GetRectSize(buttonRoot, true);
+        float rootHeight = GetRectSize(buttonRoot, false);
+        float buttonWidth = Mathf.Max(0f, rootWidth - left - right);
+        float usableHeight = Mathf.Max(0f, rootHeight - top - bottom);
+        float totalSpacing = spacing * Mathf.Max(0, buttons.Count - 1);
+        float totalPreferredHeight = 0f;
+        float[] buttonHeights = new float[buttons.Count];
+        for (int index = 0; index < buttons.Count; index++)
+        {
+            buttonHeights[index] =
+                GetPreferredHeight(buttons[index], 72f);
+            totalPreferredHeight += buttonHeights[index];
+        }
+
+        float availableButtonHeight = Mathf.Max(
+            0f,
+            usableHeight - totalSpacing);
+        if (totalPreferredHeight > availableButtonHeight &&
+            totalPreferredHeight > 0f)
+        {
+            float scale = availableButtonHeight /
+                          totalPreferredHeight;
+            for (int index = 0; index < buttonHeights.Length; index++)
+                buttonHeights[index] *= scale;
+            totalPreferredHeight = availableButtonHeight;
+        }
+
+        float occupiedHeight = totalPreferredHeight + totalSpacing;
+        float alignment = GetVerticalAlignment(layout);
+        float cursor = top +
+                       Mathf.Max(0f, usableHeight - occupiedHeight) *
+                       alignment;
+        for (int index = 0; index < buttons.Count; index++)
+        {
+            float height = buttonHeights[index];
+            SetTopLeftAnchored(
+                buttons[index],
+                left + buttonWidth * 0.5f,
+                -(cursor + height * 0.5f),
+                buttonWidth,
+                height,
+                "Restore Menu Button");
+            cursor += height + spacing;
+        }
+    }
+
+    private static float GetRectSize(RectTransform rect, bool horizontal)
+    {
+        float rectSize = horizontal ? rect.rect.width : rect.rect.height;
+        float deltaSize = horizontal
+            ? rect.sizeDelta.x
+            : rect.sizeDelta.y;
+        return rectSize > 0.01f ? rectSize : Mathf.Max(0f, deltaSize);
+    }
+
+    private static float GetPreferredHeight(
+        RectTransform rect,
+        float fallback)
+    {
+        LayoutElement layout = rect.GetComponent<LayoutElement>();
+        if (layout != null && layout.preferredHeight >= 0f)
+            return layout.preferredHeight;
+
+        float height = GetRectSize(rect, false);
+        return height > 0.01f ? height : fallback;
+    }
+
+    private static float GetVerticalAlignment(VerticalLayoutGroup layout)
+    {
+        if (layout == null)
+            return 0.5f;
+
+        int row = (int)layout.childAlignment / 3;
+        return row switch
+        {
+            <= 0 => 0f,
+            1 => 0.5f,
+            _ => 1f,
+        };
+    }
+
+    private static void SetTopLeftAnchored(
+        RectTransform rect,
+        float x,
+        float y,
+        float width,
+        float height,
+        string undoName)
+    {
+        Undo.RecordObject(rect, undoName);
+        rect.anchorMin = new Vector2(0f, 1f);
+        rect.anchorMax = new Vector2(0f, 1f);
+        rect.pivot = new Vector2(0.5f, 0.5f);
+        rect.anchoredPosition = new Vector2(x, y);
+        rect.sizeDelta = new Vector2(width, height);
+        EditorUtility.SetDirty(rect);
+    }
+
+    private static bool TryGetMainMenuLayout(
+        MainPage page,
+        out RectTransform panel,
+        out RectTransform title,
+        out RectTransform description,
+        out RectTransform buttonRoot,
+        out List<RectTransform> buttons)
+    {
+        panel = null;
+        title = null;
+        description = null;
+        buttonRoot = null;
+        buttons = new List<RectTransform>();
+        if (page == null)
+            return false;
+
+        Transform runtimeRoot = page.transform.Find(
+            RuntimeMenuPageBase.RuntimeRootObjectName);
+        panel = runtimeRoot != null
+            ? runtimeRoot.Find("grpMenuPanel") as RectTransform
+            : null;
+        title = panel != null
+            ? panel.Find("txtPageTitle") as RectTransform
+            : null;
+        description = panel != null
+            ? panel.Find("txtPageDescription") as RectTransform
+            : null;
+        buttonRoot = panel != null
+            ? panel.Find("grpMenuButtons") as RectTransform
+            : null;
+        if (panel == null || title == null || description == null ||
+            buttonRoot == null)
+        {
+            return false;
+        }
+
+        foreach (string buttonName in MainMenuButtonNames)
+        {
+            RectTransform button =
+                buttonRoot.Find(buttonName) as RectTransform;
+            if (button == null)
+                return false;
+            buttons.Add(button);
+        }
+
+        return true;
+    }
+
+    private static bool IsCollapsedMainMenuLayout(
+        RectTransform buttonRoot,
+        IReadOnlyList<RectTransform> buttons)
+    {
+        if (buttonRoot == null || buttons == null ||
+            buttons.Count != MainMenuButtonNames.Length)
+        {
+            return false;
+        }
+
+        Vector2 firstPosition = buttons[0].anchoredPosition;
+        for (int index = 1; index < buttons.Count; index++)
+        {
+            if (Vector2.Distance(
+                    firstPosition,
+                    buttons[index].anchoredPosition) > 0.5f)
+            {
+                return false;
+            }
+        }
+
+        return buttonRoot.rect.width <= 120f ||
+               buttonRoot.rect.height <= 120f;
+    }
+
+    private static void ApplyMainMenuDefaultLayout(
+        RectTransform panel,
+        RectTransform title,
+        RectTransform description,
+        RectTransform buttonRoot,
+        IReadOnlyList<RectTransform> buttons)
+    {
+        SetCentered(
+            panel,
+            0f,
+            0f,
+            620f,
+            820f,
+            "Restore Main Menu Panel");
+        SetCentered(
+            title,
+            0f,
+            329f,
+            540f,
+            82f,
+            "Restore Main Menu Title");
+        SetCentered(
+            description,
+            0f,
+            236f,
+            540f,
+            64f,
+            "Restore Main Menu Description");
+        SetCentered(
+            buttonRoot,
+            0f,
+            -93f,
+            540f,
+            554f,
+            "Restore Main Menu Button Area");
+
+        const float firstButtonY = 215f;
+        const float buttonStep = 86f;
+        for (int index = 0; index < buttons.Count; index++)
+        {
+            SetCentered(
+                buttons[index],
+                0f,
+                firstButtonY - index * buttonStep,
+                540f,
+                72f,
+                "Restore Main Menu Button");
+        }
+
+        DisableLayoutGroup(buttonRoot);
+        DisableLayoutGroup(panel);
+    }
+
+    private static void SetRightStretch(
+        RectTransform rect,
+        float right,
+        float width)
+    {
+        Undo.RecordObject(rect, "Set Designer Rect");
+        rect.anchorMin = new Vector2(1f, 0f);
+        rect.anchorMax = Vector2.one;
+        rect.pivot = new Vector2(1f, 0.5f);
+        rect.anchoredPosition = new Vector2(-right, 0f);
+        rect.sizeDelta = new Vector2(width, 0f);
+    }
+
+    private static List<string> CollectDesignerUiIssues(Scene scene)
+    {
+        List<string> issues = new();
+        GameObject layClient = FindSceneObject(scene, "layClient");
+        if (layClient == null)
+        {
+            issues.Add("layClient is missing.");
+            return issues;
+        }
+
+        string[] staticPageNames =
+        {
+            "pagTitle",
+            "pagMain",
+            "pagStageSelect",
+            "pagCodex",
+            "pagRoster",
+            "pagShop",
+            "pagQuest",
+            "pagStorage",
+        };
+        foreach (string pageName in staticPageNames)
+        {
+            RuntimeMenuPageBase page =
+                FindDirectChild(layClient, pageName)
+                    ?.GetComponent<RuntimeMenuPageBase>();
+            if (page == null)
+                issues.Add($"{pageName} is missing.");
+            else if (!page.HasDesignerLayout)
+                issues.Add($"{pageName} has not been migrated.");
+            else if (TryGetStaticMenuLayout(
+                         page,
+                         out _,
+                         out _,
+                         out _,
+                         out RectTransform buttonRoot,
+                         out List<RectTransform> buttons) &&
+                     IsCollapsedStaticMenuLayout(buttonRoot, buttons))
+                issues.Add(
+                    $"{pageName} menu buttons overlap at the same position.");
+        }
+
+        string[] pageNames =
+        {
+            "pagEnemyCodex",
+            "pagCharacterCodex",
+            "pagSkillCodex",
+            "pagItemCodex",
+        };
+        foreach (string pageName in pageNames)
+        {
+            GameObject page = FindDirectChild(layClient, pageName);
+            Transform browser = page != null
+                ? page.transform.Find(
+                    RuntimeMenuPageBase.RuntimeRootObjectName +
+                    "/grpMenuPanel/grpMenuButtons/grpCodexBrowser")
+                : null;
+            CodexBrowserDesignerSettings settings = browser != null
+                ? browser.GetComponent<CodexBrowserDesignerSettings>()
+                : null;
+            if (page == null)
+                issues.Add($"{pageName} is missing.");
+            else if (settings == null || !settings.HasDesignerLayout)
+                issues.Add($"{pageName} has not been migrated.");
+        }
+
+        return issues;
     }
 
     private static void BuildClientPages(bool forceRebuild)
     {
+        if (LegacyBuilderDisabled)
+        {
+            Debug.LogError(
+                "Legacy runtime menu rebuild is disabled. " +
+                "Edit the scene UI or use the non-destructive migration.");
+            return;
+        }
+
         Scene scene = SceneManager.GetActiveScene();
         if (!scene.IsValid() || !scene.isLoaded ||
             scene.path != ClientScenePath)
@@ -150,10 +1260,16 @@ public static class MenuPageSceneBuilder
             HasGeneratedUi(codexObject) && HasGeneratedUi(rosterObject) &&
             HasGeneratedUi(shopObject) && HasGeneratedUi(questObject) &&
             HasGeneratedUi(storageObject) &&
-            HasGeneratedUi(enemyCodexObject) &&
+            HasCurrentCodexBrowserUi(
+                enemyCodexObject,
+                "grpEnemyDetail") &&
             HasCurrentCharacterCodexUi(characterCodexObject) &&
-            HasGeneratedUi(skillCodexObject) &&
-            HasGeneratedUi(itemCodexObject))
+            HasCurrentCodexBrowserUi(
+                skillCodexObject,
+                "grpBattleCardDetail") &&
+            HasCurrentCodexBrowserUi(
+                itemCodexObject,
+                "grpBattleCardDetail"))
         {
             return;
         }
@@ -305,13 +1421,19 @@ public static class MenuPageSceneBuilder
             questPage.RebuildEditorPreview();
         if (forceRebuild || !HasGeneratedUi(storageObject))
             storagePage.RebuildEditorPreview();
-        if (forceRebuild || !HasGeneratedUi(enemyCodexObject))
+        if (forceRebuild || !HasCurrentCodexBrowserUi(
+                enemyCodexObject,
+                "grpEnemyDetail"))
             enemyCodexPage.RebuildEditorPreview();
         if (forceRebuild || !HasCurrentCharacterCodexUi(characterCodexObject))
             characterCodexPage.RebuildEditorPreview();
-        if (forceRebuild || !HasGeneratedUi(skillCodexObject))
+        if (forceRebuild || !HasCurrentCodexBrowserUi(
+                skillCodexObject,
+                "grpBattleCardDetail"))
             skillCodexPage.RebuildEditorPreview();
-        if (forceRebuild || !HasGeneratedUi(itemCodexObject))
+        if (forceRebuild || !HasCurrentCodexBrowserUi(
+                itemCodexObject,
+                "grpBattleCardDetail"))
             itemCodexPage.RebuildEditorPreview();
 
         SetActive(titleObject, true, undoName);
@@ -507,7 +1629,9 @@ public static class MenuPageSceneBuilder
 
     private static bool HasCurrentCharacterCodexUi(GameObject pageObject)
     {
-        if (!HasGeneratedUi(pageObject))
+        if (!HasCurrentCodexBrowserUi(
+                pageObject,
+                "grpCharacterDetail"))
             return false;
 
         Transform runtimeRoot = pageObject.transform.Find(
@@ -518,8 +1642,12 @@ public static class MenuPageSceneBuilder
         Transform buttonRoot = panel != null
             ? panel.Find("grpMenuButtons")
             : null;
-        Transform detail = buttonRoot != null
-            ? buttonRoot.Find("grpCharacterDetail")
+        Transform detailHost = buttonRoot != null
+            ? buttonRoot.Find(
+                "grpCodexBrowser/grpCodexDetailHost")
+            : null;
+        Transform detail = detailHost != null
+            ? detailHost.Find("grpCharacterDetail")
             : null;
         Transform visuals = detail != null
             ? detail.Find("grpCharacterVisuals")
@@ -533,12 +1661,54 @@ public static class MenuPageSceneBuilder
         Transform content = viewport != null
             ? viewport.Find("grpCharacterDetailContent")
             : null;
+        Transform obsoleteIcon = visuals != null
+            ? visuals.Find("imgCharacterIcon")
+            : null;
         return visuals != null &&
                visuals.Find("imgCharacterStanding") != null &&
-               visuals.Find("imgCharacterIcon") != null &&
+               (obsoleteIcon == null ||
+                !obsoleteIcon.gameObject.activeSelf) &&
                content != null &&
                content.Find("txtPassive") != null &&
                content.Find("txtDungeonUpgrade") != null;
+    }
+
+    private static bool HasCurrentCodexBrowserUi(
+        GameObject pageObject,
+        string detailObjectName)
+    {
+        if (!HasGeneratedUi(pageObject))
+            return false;
+
+        Transform runtimeRoot = pageObject.transform.Find(
+            RuntimeMenuPageBase.RuntimeRootObjectName);
+        Transform buttonRoot = runtimeRoot != null
+            ? runtimeRoot.Find("grpMenuPanel/grpMenuButtons")
+            : null;
+        Transform browser = buttonRoot != null
+            ? buttonRoot.Find("grpCodexBrowser")
+            : null;
+        Transform list = browser != null
+            ? browser.Find("grpCodexList")
+            : null;
+        Transform toolbar = list != null
+            ? list.Find("grpCodexListToolbar")
+            : null;
+        Transform scroll = list != null
+            ? list.Find("scrCodexList")
+            : null;
+        Transform detailHost = browser != null
+            ? browser.Find("grpCodexDetailHost")
+            : null;
+        return toolbar != null &&
+               toolbar.Find("inpCodexSearch") != null &&
+               toolbar.Find("btnCodexSearch") != null &&
+               toolbar.Find("btnCodexFilter") != null &&
+               toolbar.Find("btnCodexSort") != null &&
+               scroll != null &&
+               detailHost != null &&
+               runtimeRoot.Find("btnBACKTOCODEX") != null &&
+               detailHost.Find(detailObjectName) != null;
     }
 
     private static GameObject CreatePageObject(

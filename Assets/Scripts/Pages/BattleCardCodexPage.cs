@@ -21,7 +21,8 @@ public sealed class BattleCardCodexPage : RuntimeMenuPageBase
     [SerializeField] private EBattleCardCodexCategory category;
 
     private readonly List<BattleItemDefinition> _entries = new();
-    private readonly List<Button> _tabButtons = new();
+    private readonly List<BattleItemDefinition> _visibleEntries = new();
+    private CodexBrowserView _browser;
     private Image _detailPanelImage;
     private TextMeshProUGUI _detailTitle;
     private TextMeshProUGUI _classificationText;
@@ -30,7 +31,10 @@ public sealed class BattleCardCodexPage : RuntimeMenuPageBase
     private TextMeshProUGUI _effectText;
     private TextMeshProUGUI _usageText;
     private Button _backButton;
-    private int _selectedIndex;
+    private string _selectedEntryId;
+    private string _searchQuery = string.Empty;
+    private int _filterIndex;
+    private int _sortIndex;
 
     protected override string PageTitle => category ==
         EBattleCardCodexCategory.Skills
@@ -45,30 +49,18 @@ public sealed class BattleCardCodexPage : RuntimeMenuPageBase
                 LocalizationKeys.CodexItemDescription);
 
     protected override Vector2 PanelSize => new(1120f, 820f);
+    protected override bool FillAvailableSpace => true;
 
     protected override void BuildButtons()
     {
         RefreshEntries();
-        BuildTabStrip();
-        BuildDetailPanel();
-        _backButton = CreateStyledButton(
-            ButtonRoot,
+        BuildBrowser();
+        BuildDetailPanel(_browser.DetailRoot);
+        _backButton = CreateLocalizedTopLeftOverlayMenuButton(
             "btnBACKTOCODEX",
-            LocalizationService.Get(LocalizationKeys.CodexBattleBack),
-            HandleBackClicked,
-            72f);
-
-        if (_entries.Count > 0)
-        {
-            SelectEntry(Mathf.Clamp(
-                _selectedIndex,
-                0,
-                _entries.Count - 1));
-        }
-        else
-        {
-            ShowEmptyState();
-        }
+            LocalizationKeys.CodexBattleBack,
+            HandleBackClicked);
+        RefreshBrowser();
     }
 
     private void RefreshEntries()
@@ -92,86 +84,36 @@ public sealed class BattleCardCodexPage : RuntimeMenuPageBase
             StringComparison.OrdinalIgnoreCase));
     }
 
-    private void BuildTabStrip()
+    private void BuildBrowser()
     {
-        GameObject tabStripObject = GetOrCreateChild(
-            ButtonRoot,
-            "grpBattleCardTabStrip",
-            typeof(RectTransform),
-            typeof(ScrollRect),
-            typeof(LayoutElement));
-        tabStripObject.GetComponent<LayoutElement>().preferredHeight = 70f;
-
-        GameObject viewportObject = GetOrCreateChild(
-            tabStripObject.transform,
-            "vptBattleCardTabs",
-            typeof(RectTransform),
-            typeof(RectMask2D));
-        StretchToParent((RectTransform)viewportObject.transform);
-
-        GameObject contentObject = GetOrCreateChild(
-            viewportObject.transform,
-            "grpBattleCardTabContent",
-            typeof(RectTransform),
-            typeof(HorizontalLayoutGroup),
-            typeof(ContentSizeFitter));
-        RectTransform contentRect = (RectTransform)contentObject.transform;
-        contentRect.anchorMin = new Vector2(0f, 0f);
-        contentRect.anchorMax = new Vector2(0f, 1f);
-        contentRect.pivot = new Vector2(0f, 0.5f);
-        contentRect.anchoredPosition = Vector2.zero;
-        contentRect.sizeDelta = Vector2.zero;
-
-        HorizontalLayoutGroup layout =
-            contentObject.GetComponent<HorizontalLayoutGroup>();
-        layout.padding = new RectOffset(4, 4, 4, 4);
-        layout.spacing = 8f;
-        layout.childAlignment = TextAnchor.MiddleLeft;
-        layout.childControlWidth = true;
-        layout.childControlHeight = true;
-        layout.childForceExpandWidth = false;
-        layout.childForceExpandHeight = true;
-
-        ContentSizeFitter fitter =
-            contentObject.GetComponent<ContentSizeFitter>();
-        fitter.horizontalFit = ContentSizeFitter.FitMode.PreferredSize;
-        fitter.verticalFit = ContentSizeFitter.FitMode.Unconstrained;
-
-        ScrollRect scrollRect = tabStripObject.GetComponent<ScrollRect>();
-        scrollRect.viewport = (RectTransform)viewportObject.transform;
-        scrollRect.content = contentRect;
-        scrollRect.horizontal = true;
-        scrollRect.vertical = false;
-        scrollRect.inertia = true;
-        scrollRect.scrollSensitivity = 28f;
-
-        _tabButtons.Clear();
-        for (int index = 0; index < _entries.Count; index++)
-        {
-            int selectedIndex = index;
-            Button button = CreateStyledButton(
-                contentObject.transform,
-                $"btnBattleCardTab_{index}",
-                _entries[index].DisplayName,
-                () => SelectEntry(selectedIndex),
-                60f);
-            LayoutElement buttonLayout = button.GetComponent<LayoutElement>();
-            buttonLayout.minWidth = 168f;
-            buttonLayout.preferredWidth = 210f;
-            buttonLayout.flexibleWidth = 0f;
-            _tabButtons.Add(button);
-        }
-
-        SyncIndexedChildren(
-            contentObject.transform,
-            "btnBattleCardTab_",
-            _entries.Count);
+        _browser = CodexBrowserView.Build(ButtonRoot);
+        _browser.HideLegacyList("grpBattleCardTabStrip");
+        _browser.AdoptExistingDetail("grpBattleCardDetail");
+        _browser.SetCallbacks(
+            query =>
+            {
+                _searchQuery = (query ?? string.Empty).Trim();
+                RefreshBrowser();
+            },
+            () =>
+            {
+                _filterIndex = (_filterIndex + 1) % 3;
+                RefreshBrowser();
+            },
+            () =>
+            {
+                _sortIndex = (_sortIndex + 1) % 3;
+                RefreshBrowser();
+            },
+            SelectEntry);
+        RefreshBrowserToolbar();
     }
 
-    private void BuildDetailPanel()
+    private void BuildDetailPanel(Transform parent)
     {
+        bool created = parent.Find("grpBattleCardDetail") == null;
         GameObject detailObject = GetOrCreateChild(
-            ButtonRoot,
+            parent,
             "grpBattleCardDetail",
             typeof(RectTransform),
             typeof(CanvasRenderer),
@@ -179,22 +121,26 @@ public sealed class BattleCardCodexPage : RuntimeMenuPageBase
             typeof(VerticalLayoutGroup),
             typeof(LayoutElement));
         _detailPanelImage = detailObject.GetComponent<Image>();
-        _detailPanelImage.color = PanelColor;
-        _detailPanelImage.raycastTarget = false;
+        if (created)
+        {
+            _detailPanelImage.color = PanelColor;
+            _detailPanelImage.raycastTarget = false;
 
-        LayoutElement detailLayout = detailObject.GetComponent<LayoutElement>();
-        detailLayout.preferredHeight = 390f;
-        detailLayout.flexibleHeight = 1f;
+            LayoutElement detailLayout =
+                detailObject.GetComponent<LayoutElement>();
+            detailLayout.preferredHeight = 390f;
+            detailLayout.flexibleHeight = 1f;
 
-        VerticalLayoutGroup layout =
-            detailObject.GetComponent<VerticalLayoutGroup>();
-        layout.padding = new RectOffset(28, 28, 22, 22);
-        layout.spacing = 9f;
-        layout.childAlignment = TextAnchor.UpperCenter;
-        layout.childControlWidth = true;
-        layout.childControlHeight = true;
-        layout.childForceExpandWidth = true;
-        layout.childForceExpandHeight = false;
+            VerticalLayoutGroup layout =
+                detailObject.GetComponent<VerticalLayoutGroup>();
+            layout.padding = new RectOffset(28, 28, 22, 22);
+            layout.spacing = 9f;
+            layout.childAlignment = TextAnchor.UpperCenter;
+            layout.childControlWidth = true;
+            layout.childControlHeight = true;
+            layout.childForceExpandWidth = true;
+            layout.childForceExpandHeight = false;
+        }
 
         _detailTitle = CreateContentText(
             detailObject.transform,
@@ -238,24 +184,140 @@ public sealed class BattleCardCodexPage : RuntimeMenuPageBase
             62f);
     }
 
-    private void SelectEntry(int index)
+    private void RefreshBrowser()
     {
-        if (index < 0 || index >= _entries.Count)
+        if (_browser == null)
             return;
 
-        _selectedIndex = index;
-        BattleItemDefinition definition = _entries[index];
+        RefreshBrowserToolbar();
+        _visibleEntries.Clear();
+        foreach (BattleItemDefinition entry in _entries)
+        {
+            if (!MatchesSearch(entry) || !MatchesFilter(entry))
+                continue;
+
+            _visibleEntries.Add(entry);
+        }
+
+        _visibleEntries.Sort(CompareEntries);
+        List<CodexBrowserItemModel> items =
+            new(_visibleEntries.Count);
+        foreach (BattleItemDefinition entry in _visibleEntries)
+        {
+            Color accent = entry.IsReusable
+                ? new Color(0.24f, 0.52f, 0.7f, 1f)
+                : new Color(0.72f, 0.4f, 0.18f, 1f);
+            items.Add(new CodexBrowserItemModel(
+                GetEntryId(entry),
+                entry.DisplayName,
+                null,
+                false,
+                accent));
+        }
+
+        bool selectionVisible = _visibleEntries.Exists(entry =>
+            string.Equals(
+                GetEntryId(entry),
+                _selectedEntryId,
+                StringComparison.Ordinal));
+        if (!selectionVisible)
+        {
+            _selectedEntryId = _visibleEntries.Count > 0
+                ? GetEntryId(_visibleEntries[0])
+                : string.Empty;
+        }
+
+        _browser.SetItems(items, _selectedEntryId);
+        if (_visibleEntries.Count > 0)
+            SelectEntry(_selectedEntryId);
+        else
+            ShowEmptyState();
+    }
+
+    private bool MatchesSearch(BattleItemDefinition entry)
+    {
+        if (string.IsNullOrWhiteSpace(_searchQuery))
+            return true;
+
+        return ContainsIgnoreCase(entry.DisplayName, _searchQuery) ||
+               ContainsIgnoreCase(entry.Type.ToString(), _searchQuery) ||
+               ContainsIgnoreCase(entry.Description, _searchQuery);
+    }
+
+    private bool MatchesFilter(BattleItemDefinition entry)
+    {
+        return _filterIndex switch
+        {
+            1 => entry.TargetType == EBattleItemTargetType.Enemy,
+            2 => entry.TargetType != EBattleItemTargetType.Enemy,
+            _ => true
+        };
+    }
+
+    private int CompareEntries(
+        BattleItemDefinition left,
+        BattleItemDefinition right)
+    {
+        int primary;
+        if (_sortIndex == 2)
+        {
+            primary = left.EnergyCost.CompareTo(right.EnergyCost);
+        }
+        else
+        {
+            primary = string.Compare(
+                left.DisplayName,
+                right.DisplayName,
+                StringComparison.OrdinalIgnoreCase);
+            if (_sortIndex == 1)
+                primary = -primary;
+        }
+
+        return primary != 0
+            ? primary
+            : left.Type.CompareTo(right.Type);
+    }
+
+    private void RefreshBrowserToolbar()
+    {
+        if (_browser == null)
+            return;
+
+        string filter = _filterIndex switch
+        {
+            1 => IsKoreanLocale ? "필터: 적" : "FILTER: ENEMY",
+            2 => IsKoreanLocale ? "필터: 기타" : "FILTER: OTHER",
+            _ => IsKoreanLocale ? "필터: 전체" : "FILTER: ALL"
+        };
+        string sort = _sortIndex switch
+        {
+            1 => IsKoreanLocale ? "정렬: 이름↓" : "SORT: NAME↓",
+            2 => IsKoreanLocale ? "정렬: 비용" : "SORT: COST",
+            _ => IsKoreanLocale ? "정렬: 이름↑" : "SORT: NAME↑"
+        };
+        _browser.SetToolbar(
+            _searchQuery,
+            IsKoreanLocale ? "이름 또는 유형" : "NAME OR TYPE",
+            IsKoreanLocale ? "검색" : "SEARCH",
+            filter,
+            sort);
+    }
+
+    private void SelectEntry(string entryId)
+    {
+        int index = _visibleEntries.FindIndex(entry => string.Equals(
+            GetEntryId(entry),
+            entryId,
+            StringComparison.Ordinal));
+        if (index < 0)
+            return;
+
+        _selectedEntryId = entryId;
+        _browser?.SetSelected(entryId);
+        BattleItemDefinition definition = _visibleEntries[index];
         Color accentColor = definition.IsReusable
             ? new Color(0.24f, 0.52f, 0.7f, 1f)
             : new Color(0.72f, 0.4f, 0.18f, 1f);
-        for (int buttonIndex = 0;
-             buttonIndex < _tabButtons.Count;
-             buttonIndex++)
-        {
-            SetButtonColor(
-                _tabButtons[buttonIndex],
-                buttonIndex == index ? accentColor : ButtonColor);
-        }
 
         if (_detailPanelImage != null)
         {
@@ -355,16 +417,7 @@ public sealed class BattleCardCodexPage : RuntimeMenuPageBase
             return;
 
         RefreshEntries();
-        BuildTabStrip();
-        for (int index = 0;
-             index < _tabButtons.Count && index < _entries.Count;
-             index++)
-        {
-            TextMeshProUGUI label = _tabButtons[index]
-                .GetComponentInChildren<TextMeshProUGUI>(true);
-            if (label != null)
-                label.text = _entries[index].DisplayName;
-        }
+        RefreshBrowser();
 
         Transform runtimeRoot = transform.Find(RuntimeRootObjectName);
         Transform panel = runtimeRoot != null
@@ -399,17 +452,6 @@ public sealed class BattleCardCodexPage : RuntimeMenuPageBase
             }
         }
 
-        if (_entries.Count > 0)
-        {
-            SelectEntry(Mathf.Clamp(
-                _selectedIndex,
-                0,
-                _entries.Count - 1));
-        }
-        else
-        {
-            ShowEmptyState();
-        }
     }
 
     private static void ApplyLocalizedFont(
@@ -424,22 +466,23 @@ public sealed class BattleCardCodexPage : RuntimeMenuPageBase
         NavigateTo(codexPage, PageOpenMode.Resume);
     }
 
-    private static void SetButtonColor(Button button, Color color)
+    private static string GetEntryId(BattleItemDefinition entry)
     {
-        if (button == null)
-            return;
-
-        if (button.targetGraphic is Image image)
-            image.color = color;
-
-        ColorBlock colors = button.colors;
-        colors.normalColor = color;
-        colors.highlightedColor = Color.Lerp(color, Color.white, 0.14f);
-        colors.pressedColor = Color.Lerp(color, Color.black, 0.18f);
-        colors.selectedColor = colors.highlightedColor;
-        colors.disabledColor = Color.Lerp(color, Color.black, 0.5f);
-        button.colors = colors;
+        return entry.Type.ToString();
     }
+
+    private static bool ContainsIgnoreCase(string source, string value)
+    {
+        return !string.IsNullOrEmpty(source) &&
+               source.IndexOf(
+                   value,
+                   StringComparison.OrdinalIgnoreCase) >= 0;
+    }
+
+    private static bool IsKoreanLocale =>
+        LocalizationService.CurrentLocale?.StartsWith(
+            "ko",
+            StringComparison.OrdinalIgnoreCase) == true;
 
     private static GameObject GetOrCreateChild(
         Transform parent,

@@ -89,6 +89,7 @@ namespace PS260714.Localization
         private readonly Dictionary<string, TMP_FontAsset> dynamicOsFonts =
             new(StringComparer.OrdinalIgnoreCase);
         private readonly Dictionary<int, TMP_FontAsset> fallbackClones = new();
+        private readonly HashSet<int> detachedDynamicFontIds = new();
 
         public TMP_FontAsset GlobalDefaultFont => globalDefaultFont;
         public IReadOnlyList<LocalizationLocaleFontDefinition> LocaleFonts =>
@@ -231,7 +232,15 @@ namespace PS260714.Localization
 
         public TMP_FontAsset PrepareFallbacks(TMP_FontAsset source)
         {
-            if (source == null || fallbackFonts.Count == 0)
+            if (source == null)
+            {
+                return source;
+            }
+
+            bool needsDetachedDynamicFont =
+                source.atlasPopulationMode != AtlasPopulationMode.Static &&
+                (source.hideFlags & HideFlags.DontSave) == 0;
+            if (!needsDetachedDynamicFont && fallbackFonts.Count == 0)
             {
                 return source;
             }
@@ -245,7 +254,14 @@ namespace PS260714.Localization
                 return cached;
             }
 
-            TMP_FontAsset clone = Instantiate(source);
+            TMP_FontAsset clone = needsDetachedDynamicFont
+                ? CreateDetachedDynamicFont(source)
+                : Instantiate(source);
+            if (clone == null)
+            {
+                return source;
+            }
+
             clone.name = source.name + " (Localization Runtime)";
             clone.hideFlags = HideFlags.DontSave;
             clone.fallbackFontAssetTable = source.fallbackFontAssetTable != null
@@ -276,17 +292,21 @@ namespace PS260714.Localization
                     continue;
                 }
 
-                if (Application.isPlaying)
+                DestroyRuntimeFont(
+                    clone,
+                    detachedDynamicFontIds.Contains(clone.GetInstanceID()));
+            }
+
+            foreach (TMP_FontAsset font in dynamicOsFonts.Values)
+            {
+                if (font != null)
                 {
-                    Destroy(clone);
-                }
-                else
-                {
-                    DestroyImmediate(clone);
+                    DestroyRuntimeFont(font, true);
                 }
             }
 
             fallbackClones.Clear();
+            detachedDynamicFontIds.Clear();
             dynamicOsFonts.Clear();
         }
 
@@ -339,6 +359,85 @@ namespace PS260714.Localization
             string style)
         {
             return font != null ? font : ResolveOsFont(family, style);
+        }
+
+        private TMP_FontAsset CreateDetachedDynamicFont(TMP_FontAsset source)
+        {
+            TMP_FontAsset clone = null;
+            if (source.atlasPopulationMode == AtlasPopulationMode.Dynamic &&
+                source.sourceFontFile != null)
+            {
+                clone = TMP_FontAsset.CreateFontAsset(
+                    source.sourceFontFile,
+                    Mathf.Max(1, Mathf.RoundToInt(source.faceInfo.pointSize)),
+                    source.atlasPadding,
+                    source.atlasRenderMode,
+                    source.atlasWidth,
+                    source.atlasHeight,
+                    AtlasPopulationMode.Dynamic,
+                    true);
+            }
+
+            if (clone == null)
+            {
+                // A detached static copy is safer than returning a dynamic
+                // project asset. It cannot grow, but it also cannot dirty and
+                // reimport the source asset while TMP is rendering.
+                clone = Instantiate(source);
+                clone.atlasPopulationMode = AtlasPopulationMode.Static;
+                return clone;
+            }
+
+            if (source.material != null && clone.material != null)
+            {
+                Texture runtimeAtlas = clone.material.mainTexture;
+                clone.material.CopyPropertiesFromMaterial(source.material);
+                clone.material.mainTexture = runtimeAtlas;
+            }
+
+            clone.isMultiAtlasTexturesEnabled = true;
+            detachedDynamicFontIds.Add(clone.GetInstanceID());
+            return clone;
+        }
+
+        private static void DestroyRuntimeFont(
+            TMP_FontAsset font,
+            bool destroyOwnedResources)
+        {
+            if (destroyOwnedResources)
+            {
+                Material material = font.material;
+                Texture2D[] atlases = font.atlasTextures;
+                if (material != null)
+                {
+                    DestroyRuntimeObject(material);
+                }
+
+                if (atlases != null)
+                {
+                    for (int index = 0; index < atlases.Length; index++)
+                    {
+                        if (atlases[index] != null)
+                        {
+                            DestroyRuntimeObject(atlases[index]);
+                        }
+                    }
+                }
+            }
+
+            DestroyRuntimeObject(font);
+        }
+
+        private static void DestroyRuntimeObject(UnityEngine.Object target)
+        {
+            if (Application.isPlaying)
+            {
+                Destroy(target);
+            }
+            else
+            {
+                DestroyImmediate(target);
+            }
         }
 
         private TMP_FontAsset ResolveOsFont(string family, string style)

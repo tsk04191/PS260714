@@ -1,3 +1,5 @@
+using System;
+using System.Collections.Generic;
 using PS260714.Localization;
 using UnityEngine;
 using UnityEngine.UI;
@@ -22,6 +24,14 @@ public sealed class MainSubPage : RuntimeMenuPageBase
     [SerializeField] private GameObject characterCodexPage;
     [SerializeField] private GameObject skillCodexPage;
     [SerializeField] private GameObject itemCodexPage;
+
+    private readonly List<CharacterData> _rosterEntries = new();
+    private CodexBrowserView _rosterBrowser;
+    private CharacterCollectionData _boundCharacterCollection;
+    private string _rosterSearchQuery = string.Empty;
+    private string _selectedRosterCharacterId = string.Empty;
+    private bool _rosterDescending;
+    private bool _rosterEventsBound;
 
     protected override string PageTitle => pageType switch
     {
@@ -103,10 +113,12 @@ public sealed class MainSubPage : RuntimeMenuPageBase
                     obsoleteEventsButton.gameObject.SetActive(false);
                 break;
             case EMainSubPageType.Roster:
-                CreateLocalizedPlaceholderButton(
-                    "btnOWNEDCHARACTERS-EMPTY",
-                    LocalizationKeys.UiRosterEmpty);
-                break;
+                BuildRosterBrowser();
+                CreateLocalizedTopLeftOverlayMenuButton(
+                    "btnBACKTOMAIN",
+                    LocalizationKeys.UiCommonBack,
+                    HandleBackClicked);
+                return;
             case EMainSubPageType.Shop:
                 CreateLocalizedPlaceholderButton(
                     "btnDUNGEONCURRENCY-0",
@@ -137,6 +149,243 @@ public sealed class MainSubPage : RuntimeMenuPageBase
             "btnBACK",
             LocalizationKeys.UiCommonBack,
             HandleBackClicked);
+    }
+
+    private void OnEnable()
+    {
+        if (pageType != EMainSubPageType.Roster)
+            return;
+
+        BindRosterEvents();
+        RefreshRosterBrowser();
+    }
+
+    private void OnDisable()
+    {
+        UnbindRosterEvents();
+    }
+
+    protected override void OnDestroy()
+    {
+        UnbindRosterEvents();
+        base.OnDestroy();
+    }
+
+    private void BuildRosterBrowser()
+    {
+        SetLegacyRosterControlActive(
+            "btnOWNEDCHARACTERS-EMPTY",
+            false);
+        SetLegacyRosterControlActive("btnBACK", false);
+
+        _rosterBrowser = CodexBrowserView.Build(ButtonRoot);
+        _rosterBrowser.SetListOnlyMode(true, 3);
+        _rosterBrowser.SetCallbacks(
+            query =>
+            {
+                _rosterSearchQuery = (query ?? string.Empty).Trim();
+                RefreshRosterBrowser();
+            },
+            RefreshRosterBrowser,
+            () =>
+            {
+                _rosterDescending = !_rosterDescending;
+                RefreshRosterBrowser();
+            },
+            characterId =>
+            {
+                _selectedRosterCharacterId =
+                    characterId ?? string.Empty;
+                _rosterBrowser.SetSelected(
+                    _selectedRosterCharacterId);
+            });
+        RefreshRosterBrowser();
+    }
+
+    private void SetLegacyRosterControlActive(
+        string objectName,
+        bool active)
+    {
+        Transform control = ButtonRoot != null
+            ? ButtonRoot.Find(objectName)
+            : null;
+        if (control != null)
+            control.gameObject.SetActive(active);
+    }
+
+    private void RefreshRosterBrowser()
+    {
+        if (_rosterBrowser == null)
+            return;
+
+        CharacterCollectionData collection =
+            DataManager.Current?.CharacterDatas;
+        BindCharacterCollection(collection);
+        _rosterEntries.Clear();
+        foreach (CharacterSO definition in
+                 CharacterDefinitionCatalog.GetAll())
+        {
+            CharacterData data = collection != null
+                ? collection.CreatePreviewData(definition)
+                : definition?.CreateData(new CharacterProgressData(
+                    definition.CharacterId,
+                    definition.InitiallyOwned));
+            if (data == null || !data.IsOwned ||
+                !MatchesRosterSearch(data))
+            {
+                continue;
+            }
+
+            _rosterEntries.Add(data);
+        }
+
+        _rosterEntries.Sort(CompareRosterEntries);
+        List<CodexBrowserItemModel> items =
+            new(_rosterEntries.Count);
+        Color accentColor = new(0.22f, 0.48f, 0.68f, 1f);
+        foreach (CharacterData data in _rosterEntries)
+        {
+            items.Add(new CodexBrowserItemModel(
+                data.CharacterId,
+                CharacterLocalization.GetName(data),
+                data.IconSprite,
+                false,
+                accentColor));
+        }
+
+        bool selectionVisible = _rosterEntries.Exists(data =>
+            string.Equals(
+                data.CharacterId,
+                _selectedRosterCharacterId,
+                StringComparison.Ordinal));
+        if (!selectionVisible)
+        {
+            _selectedRosterCharacterId =
+                _rosterEntries.Count > 0
+                    ? _rosterEntries[0].CharacterId
+                    : string.Empty;
+        }
+
+        _rosterBrowser.SetToolbar(
+            _rosterSearchQuery,
+            LocalizationService.Get(
+                LocalizationKeys.UiRosterSearchPlaceholder),
+            LocalizationService.Get(
+                LocalizationKeys.UiRosterSearch),
+            LocalizationService.Get(
+                LocalizationKeys.UiRosterFilterOwned),
+            LocalizationService.Get(
+                _rosterDescending
+                    ? LocalizationKeys.UiRosterSortNameDescending
+                    : LocalizationKeys.UiRosterSortNameAscending));
+        _rosterBrowser.SetItems(
+            items,
+            _selectedRosterCharacterId);
+    }
+
+    private bool MatchesRosterSearch(CharacterData data)
+    {
+        if (string.IsNullOrWhiteSpace(_rosterSearchQuery))
+            return true;
+
+        return ContainsIgnoreCase(
+                   CharacterLocalization.GetName(data),
+                   _rosterSearchQuery) ||
+               ContainsIgnoreCase(
+                   data.Definition != null
+                       ? data.Definition.name
+                       : string.Empty,
+                   _rosterSearchQuery) ||
+               ContainsIgnoreCase(
+                   data.CharacterId,
+                   _rosterSearchQuery);
+    }
+
+    private int CompareRosterEntries(
+        CharacterData left,
+        CharacterData right)
+    {
+        int comparison = string.Compare(
+            CharacterLocalization.GetName(left),
+            CharacterLocalization.GetName(right),
+            StringComparison.OrdinalIgnoreCase);
+        if (_rosterDescending)
+            comparison = -comparison;
+        if (comparison != 0)
+            return comparison;
+        return string.Compare(
+            left.CharacterId,
+            right.CharacterId,
+            StringComparison.Ordinal);
+    }
+
+    private static bool ContainsIgnoreCase(
+        string value,
+        string query)
+    {
+        return !string.IsNullOrEmpty(value) &&
+               value.IndexOf(
+                   query,
+                   StringComparison.OrdinalIgnoreCase) >= 0;
+    }
+
+    private void BindRosterEvents()
+    {
+        if (_rosterEventsBound)
+            return;
+
+        LocalizationService.LocaleChanged +=
+            HandleRosterLocaleChanged;
+        BindCharacterCollection(
+            DataManager.Current?.CharacterDatas);
+        _rosterEventsBound = true;
+    }
+
+    private void UnbindRosterEvents()
+    {
+        if (!_rosterEventsBound)
+            return;
+
+        LocalizationService.LocaleChanged -=
+            HandleRosterLocaleChanged;
+        BindCharacterCollection(null);
+        _rosterEventsBound = false;
+    }
+
+    private void BindCharacterCollection(
+        CharacterCollectionData collection)
+    {
+        if (ReferenceEquals(
+                _boundCharacterCollection,
+                collection))
+        {
+            return;
+        }
+
+        if (_boundCharacterCollection != null)
+        {
+            _boundCharacterCollection.CharacterProgressChanged -=
+                HandleCharacterProgressChanged;
+        }
+
+        _boundCharacterCollection = collection;
+        if (_boundCharacterCollection != null)
+        {
+            _boundCharacterCollection.CharacterProgressChanged +=
+                HandleCharacterProgressChanged;
+        }
+    }
+
+    private void HandleRosterLocaleChanged(string unusedLocale)
+    {
+        RefreshRosterBrowser();
+    }
+
+    private void HandleCharacterProgressChanged(
+        CharacterSO unusedDefinition)
+    {
+        if (isActiveAndEnabled)
+            RefreshRosterBrowser();
     }
 
     private void CreateLocalizedPlaceholderButton(

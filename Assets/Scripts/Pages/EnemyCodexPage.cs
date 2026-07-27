@@ -46,7 +46,8 @@ public sealed class EnemyCodexPage : RuntimeMenuPageBase
         Array.Empty<EnemySO>();
 
     private readonly List<EnemyCodexEntry> _entries = new();
-    private readonly List<Button> _tabButtons = new();
+    private readonly List<EnemyCodexEntry> _visibleEntries = new();
+    private CodexBrowserView _browser;
     private Image _detailPanelImage;
     private TextMeshProUGUI _detailTitle;
     private TextMeshProUGUI _identityText;
@@ -54,51 +55,59 @@ public sealed class EnemyCodexPage : RuntimeMenuPageBase
     private TextMeshProUGUI _abilityTitleText;
     private TextMeshProUGUI _abilityText;
     private Button _backButton;
-    private int _selectedIndex;
+    private string _selectedEnemyId;
+    private string _searchQuery = string.Empty;
+    private int _filterIndex;
+    private int _sortIndex;
 
     protected override string PageTitle => LocalizationService.Get(
         LocalizationKeys.CodexEnemyTitle);
     protected override string PageDescription =>
         LocalizationService.Get(LocalizationKeys.CodexEnemyDescription);
     protected override Vector2 PanelSize => new(1220f, 860f);
+    protected override bool FillAvailableSpace => true;
 
     protected override void BuildButtons()
     {
         RefreshEntries();
-        BuildEnemyTabStrip();
-        BuildDetailPanel();
-        _backButton = CreateStyledButton(
-            ButtonRoot,
+        BuildEnemyBrowser();
+        BuildDetailPanel(_browser.DetailRoot);
+        _backButton = CreateLocalizedTopLeftOverlayMenuButton(
             "btnBACKTOCODEX",
-            LocalizationService.Get(LocalizationKeys.UiCommonBack),
-            HandleBackClicked,
-            72f);
-
-        if (_entries.Count > 0)
-            SelectEnemy(Mathf.Clamp(_selectedIndex, 0, _entries.Count - 1));
-        else
-            ShowEmptyState();
+            LocalizationKeys.UiCommonBack,
+            HandleBackClicked);
+        RefreshBrowser();
     }
 
     private void RefreshEntries()
     {
         _entries.Clear();
-        HashSet<EnemySO> uniqueDefinitions = new();
-        AddDefinitions(enemyDefinitions, uniqueDefinitions);
+        List<EnemySO> uniqueDefinitions = new();
+        HashSet<EnemySO> registeredReferences = new();
+        HashSet<string> registeredIds =
+            new(StringComparer.OrdinalIgnoreCase);
+        HashSet<EEnemyType> registeredTypes = new();
+        AddDefinitions(
+            enemyDefinitions,
+            uniqueDefinitions,
+            registeredReferences,
+            registeredIds,
+            registeredTypes);
 
         if (dungeonPage != null &&
             dungeonPage.TryGetComponent(out DungeonPage dungeon))
         {
             AddDefinitions(
                 dungeon.GetCodexEnemyDefinitions(),
-                uniqueDefinitions);
+                uniqueDefinitions,
+                registeredReferences,
+                registeredIds,
+                registeredTypes);
         }
 
-        HashSet<EEnemyType> registeredTypes = new();
         foreach (EnemySO definition in uniqueDefinitions)
         {
             _entries.Add(new EnemyCodexEntry(definition));
-            registeredTypes.Add(definition.Type);
         }
 
         foreach (EEnemyType type in Enum.GetValues(typeof(EEnemyType)))
@@ -125,103 +134,75 @@ public sealed class EnemyCodexPage : RuntimeMenuPageBase
 
     private static void AddDefinitions(
         IReadOnlyList<EnemySO> definitions,
-        HashSet<EnemySO> uniqueDefinitions)
+        List<EnemySO> uniqueDefinitions,
+        HashSet<EnemySO> registeredReferences,
+        HashSet<string> registeredIds,
+        HashSet<EEnemyType> registeredTypes)
     {
-        if (definitions == null)
+        if (definitions == null || uniqueDefinitions == null ||
+            registeredReferences == null || registeredIds == null ||
+            registeredTypes == null)
+        {
             return;
+        }
 
         foreach (EnemySO definition in definitions)
         {
-            if (definition != null)
-                uniqueDefinitions.Add(definition);
+            if (definition == null ||
+                !registeredReferences.Add(definition))
+            {
+                continue;
+            }
+
+            string enemyId = definition.EnemyId?.Trim();
+            if (!string.IsNullOrWhiteSpace(enemyId) &&
+                registeredIds.Contains(enemyId))
+            {
+                continue;
+            }
+
+            if (registeredTypes.Contains(definition.Type))
+            {
+                continue;
+            }
+
+            if (!string.IsNullOrWhiteSpace(enemyId))
+                registeredIds.Add(enemyId);
+            registeredTypes.Add(definition.Type);
+            uniqueDefinitions.Add(definition);
         }
     }
 
-    private void BuildEnemyTabStrip()
+    private void BuildEnemyBrowser()
     {
-        GameObject tabStripObject = GetOrCreateChild(
-            ButtonRoot,
-            "grpEnemyTabStrip",
-            typeof(RectTransform),
-            typeof(ScrollRect),
-            typeof(LayoutElement));
-        LayoutElement stripLayout =
-            tabStripObject.GetComponent<LayoutElement>();
-        stripLayout.preferredHeight = 70f;
-
-        GameObject viewportObject = GetOrCreateChild(
-            tabStripObject.transform,
-            "vptEnemyTabs",
-            typeof(RectTransform),
-            typeof(RectMask2D));
-        StretchToParent((RectTransform)viewportObject.transform);
-
-        GameObject contentObject = GetOrCreateChild(
-            viewportObject.transform,
-            "grpEnemyTabContent",
-            typeof(RectTransform),
-            typeof(HorizontalLayoutGroup),
-            typeof(ContentSizeFitter));
-        RectTransform contentRect =
-            (RectTransform)contentObject.transform;
-        contentRect.anchorMin = new Vector2(0f, 0f);
-        contentRect.anchorMax = new Vector2(0f, 1f);
-        contentRect.pivot = new Vector2(0f, 0.5f);
-        contentRect.anchoredPosition = Vector2.zero;
-        contentRect.sizeDelta = Vector2.zero;
-
-        HorizontalLayoutGroup layout =
-            contentObject.GetComponent<HorizontalLayoutGroup>();
-        layout.padding = new RectOffset(4, 4, 4, 4);
-        layout.spacing = 8f;
-        layout.childAlignment = TextAnchor.MiddleLeft;
-        layout.childControlWidth = true;
-        layout.childControlHeight = true;
-        layout.childForceExpandWidth = false;
-        layout.childForceExpandHeight = true;
-
-        ContentSizeFitter fitter =
-            contentObject.GetComponent<ContentSizeFitter>();
-        fitter.horizontalFit = ContentSizeFitter.FitMode.PreferredSize;
-        fitter.verticalFit = ContentSizeFitter.FitMode.Unconstrained;
-
-        ScrollRect scrollRect = tabStripObject.GetComponent<ScrollRect>();
-        scrollRect.viewport = (RectTransform)viewportObject.transform;
-        scrollRect.content = contentRect;
-        scrollRect.horizontal = true;
-        scrollRect.vertical = false;
-        scrollRect.inertia = true;
-        scrollRect.scrollSensitivity = 28f;
-
-        _tabButtons.Clear();
-        for (int index = 0; index < _entries.Count; index++)
-        {
-            int selectedIndex = index;
-            EnemyCodexEntry entry = _entries[index];
-            Button button = CreateStyledButton(
-                contentObject.transform,
-                $"btnEnemyTab_{index}",
-                entry.DisplayName,
-                () => SelectEnemy(selectedIndex),
-                60f);
-            LayoutElement buttonLayout =
-                button.GetComponent<LayoutElement>();
-            buttonLayout.minWidth = 132f;
-            buttonLayout.preferredWidth = 156f;
-            buttonLayout.flexibleWidth = 0f;
-            _tabButtons.Add(button);
-        }
-
-        SyncIndexedChildren(
-            contentObject.transform,
-            "btnEnemyTab_",
-            _entries.Count);
+        _browser = CodexBrowserView.Build(ButtonRoot);
+        _browser.HideLegacyList("grpEnemyTabStrip");
+        _browser.AdoptExistingDetail("grpEnemyDetail");
+        _browser.SetCallbacks(
+            query =>
+            {
+                _searchQuery = (query ?? string.Empty).Trim();
+                RefreshBrowser();
+            },
+            () =>
+            {
+                _filterIndex = (_filterIndex + 1) % 5;
+                RefreshBrowser();
+            },
+            () =>
+            {
+                _sortIndex = (_sortIndex + 1) % 3;
+                RefreshBrowser();
+            },
+            SelectEnemy);
+        RefreshBrowserToolbar();
     }
 
-    private void BuildDetailPanel()
+    private void BuildDetailPanel(Transform parent)
     {
+        bool created = parent.Find("grpEnemyDetail") == null;
         GameObject detailObject = GetOrCreateChild(
-            ButtonRoot,
+            parent,
             "grpEnemyDetail",
             typeof(RectTransform),
             typeof(CanvasRenderer),
@@ -229,23 +210,26 @@ public sealed class EnemyCodexPage : RuntimeMenuPageBase
             typeof(VerticalLayoutGroup),
             typeof(LayoutElement));
         _detailPanelImage = detailObject.GetComponent<Image>();
-        _detailPanelImage.color = PanelColor;
-        _detailPanelImage.raycastTarget = false;
+        if (created)
+        {
+            _detailPanelImage.color = PanelColor;
+            _detailPanelImage.raycastTarget = false;
 
-        LayoutElement detailLayout =
-            detailObject.GetComponent<LayoutElement>();
-        detailLayout.preferredHeight = 400f;
-        detailLayout.flexibleHeight = 1f;
+            LayoutElement detailLayout =
+                detailObject.GetComponent<LayoutElement>();
+            detailLayout.preferredHeight = 400f;
+            detailLayout.flexibleHeight = 1f;
 
-        VerticalLayoutGroup layout =
-            detailObject.GetComponent<VerticalLayoutGroup>();
-        layout.padding = new RectOffset(28, 28, 22, 22);
-        layout.spacing = 8f;
-        layout.childAlignment = TextAnchor.UpperCenter;
-        layout.childControlWidth = true;
-        layout.childControlHeight = true;
-        layout.childForceExpandWidth = true;
-        layout.childForceExpandHeight = false;
+            VerticalLayoutGroup layout =
+                detailObject.GetComponent<VerticalLayoutGroup>();
+            layout.padding = new RectOffset(28, 28, 22, 22);
+            layout.spacing = 8f;
+            layout.childAlignment = TextAnchor.UpperCenter;
+            layout.childControlWidth = true;
+            layout.childControlHeight = true;
+            layout.childForceExpandWidth = true;
+            layout.childForceExpandHeight = false;
+        }
 
         _detailTitle = CreateContentText(
             detailObject.transform,
@@ -282,22 +266,143 @@ public sealed class EnemyCodexPage : RuntimeMenuPageBase
             108f);
     }
 
-    private void SelectEnemy(int index)
+    private void RefreshBrowser()
     {
-        if (index < 0 || index >= _entries.Count)
+        if (_browser == null)
             return;
 
-        _selectedIndex = index;
-        EnemyCodexEntry entry = _entries[index];
-        Color accentColor = GetGradeColor(entry.Grade);
-        for (int buttonIndex = 0;
-             buttonIndex < _tabButtons.Count;
-             buttonIndex++)
+        RefreshBrowserToolbar();
+        _visibleEntries.Clear();
+        foreach (EnemyCodexEntry entry in _entries)
         {
-            SetButtonColor(
-                _tabButtons[buttonIndex],
-                buttonIndex == index ? accentColor : ButtonColor);
+            if (!MatchesSearch(entry) || !MatchesFilter(entry))
+                continue;
+
+            _visibleEntries.Add(entry);
         }
+
+        _visibleEntries.Sort(CompareEntries);
+        List<CodexBrowserItemModel> items =
+            new(_visibleEntries.Count);
+        foreach (EnemyCodexEntry entry in _visibleEntries)
+        {
+            items.Add(new CodexBrowserItemModel(
+                entry.EnemyId,
+                entry.DisplayName,
+                null,
+                false,
+                GetGradeColor(entry.Grade)));
+        }
+
+        bool selectionVisible = _visibleEntries.Exists(entry =>
+            string.Equals(
+                entry.EnemyId,
+                _selectedEnemyId,
+                StringComparison.Ordinal));
+        if (!selectionVisible)
+        {
+            _selectedEnemyId = _visibleEntries.Count > 0
+                ? _visibleEntries[0].EnemyId
+                : string.Empty;
+        }
+
+        _browser.SetItems(items, _selectedEnemyId);
+        if (_visibleEntries.Count > 0)
+            SelectEnemy(_selectedEnemyId);
+        else
+            ShowEmptyState();
+    }
+
+    private bool MatchesSearch(EnemyCodexEntry entry)
+    {
+        if (string.IsNullOrWhiteSpace(_searchQuery))
+            return true;
+
+        return ContainsIgnoreCase(entry.DisplayName, _searchQuery) ||
+               ContainsIgnoreCase(entry.EnemyId, _searchQuery) ||
+               ContainsIgnoreCase(entry.CardCode, _searchQuery) ||
+               ContainsIgnoreCase(entry.Type.ToString(), _searchQuery);
+    }
+
+    private bool MatchesFilter(EnemyCodexEntry entry)
+    {
+        return _filterIndex switch
+        {
+            1 => entry.Grade == EEnemyGrade.Normal,
+            2 => entry.Grade == EEnemyGrade.Special,
+            3 => entry.Grade == EEnemyGrade.Elite,
+            4 => entry.Grade == EEnemyGrade.Boss,
+            _ => true
+        };
+    }
+
+    private int CompareEntries(
+        EnemyCodexEntry left,
+        EnemyCodexEntry right)
+    {
+        int primary = _sortIndex switch
+        {
+            1 => string.Compare(
+                left.DisplayName,
+                right.DisplayName,
+                StringComparison.OrdinalIgnoreCase),
+            2 => left.Grade.CompareTo(right.Grade),
+            _ => left.Type.CompareTo(right.Type)
+        };
+        if (primary != 0)
+            return primary;
+        int name = string.Compare(
+            left.DisplayName,
+            right.DisplayName,
+            StringComparison.OrdinalIgnoreCase);
+        return name != 0
+            ? name
+            : string.Compare(
+                left.EnemyId,
+                right.EnemyId,
+                StringComparison.Ordinal);
+    }
+
+    private void RefreshBrowserToolbar()
+    {
+        if (_browser == null)
+            return;
+
+        string filter = _filterIndex switch
+        {
+            1 => IsKoreanLocale ? "필터: 일반" : "FILTER: NORMAL",
+            2 => IsKoreanLocale ? "필터: 특수" : "FILTER: SPECIAL",
+            3 => IsKoreanLocale ? "필터: 정예" : "FILTER: ELITE",
+            4 => IsKoreanLocale ? "필터: 보스" : "FILTER: BOSS",
+            _ => IsKoreanLocale ? "필터: 전체" : "FILTER: ALL"
+        };
+        string sort = _sortIndex switch
+        {
+            1 => IsKoreanLocale ? "정렬: 이름" : "SORT: NAME",
+            2 => IsKoreanLocale ? "정렬: 등급" : "SORT: GRADE",
+            _ => IsKoreanLocale ? "정렬: 유형" : "SORT: TYPE"
+        };
+        _browser.SetToolbar(
+            _searchQuery,
+            IsKoreanLocale ? "이름 또는 ID" : "NAME OR ID",
+            IsKoreanLocale ? "검색" : "SEARCH",
+            filter,
+            sort);
+    }
+
+    private void SelectEnemy(string enemyId)
+    {
+        int index = _visibleEntries.FindIndex(entry => string.Equals(
+            entry.EnemyId,
+            enemyId,
+            StringComparison.Ordinal));
+        if (index < 0)
+            return;
+
+        _selectedEnemyId = enemyId;
+        _browser?.SetSelected(enemyId);
+        EnemyCodexEntry entry = _visibleEntries[index];
+        Color accentColor = GetGradeColor(entry.Grade);
 
         if (_detailPanelImage != null)
         {
@@ -383,19 +488,7 @@ public sealed class EnemyCodexPage : RuntimeMenuPageBase
             return;
 
         RefreshEntries();
-        BuildEnemyTabStrip();
-        for (int index = 0;
-             index < _tabButtons.Count && index < _entries.Count;
-             index++)
-        {
-            TextMeshProUGUI label = _tabButtons[index]
-                .GetComponentInChildren<TextMeshProUGUI>(true);
-            if (label == null)
-                continue;
-
-            label.text = _entries[index].DisplayName;
-            ApplyLocalizedFont(label, "title");
-        }
+        RefreshBrowser();
 
         Transform runtimeRoot = transform.Find(RuntimeRootObjectName);
         Transform panel = runtimeRoot != null
@@ -439,17 +532,6 @@ public sealed class EnemyCodexPage : RuntimeMenuPageBase
             }
         }
 
-        if (_entries.Count > 0)
-        {
-            SelectEnemy(Mathf.Clamp(
-                _selectedIndex,
-                0,
-                _entries.Count - 1));
-        }
-        else
-        {
-            ShowEmptyState();
-        }
     }
 
     private static void ApplyLocalizedFont(
@@ -464,22 +546,18 @@ public sealed class EnemyCodexPage : RuntimeMenuPageBase
         NavigateTo(codexPage, PageOpenMode.Resume);
     }
 
-    private static void SetButtonColor(Button button, Color color)
+    private static bool ContainsIgnoreCase(string source, string value)
     {
-        if (button == null)
-            return;
-
-        if (button.targetGraphic is Image image)
-            image.color = color;
-
-        ColorBlock colors = button.colors;
-        colors.normalColor = color;
-        colors.highlightedColor = Color.Lerp(color, Color.white, 0.14f);
-        colors.pressedColor = Color.Lerp(color, Color.black, 0.18f);
-        colors.selectedColor = colors.highlightedColor;
-        colors.disabledColor = Color.Lerp(color, Color.black, 0.5f);
-        button.colors = colors;
+        return !string.IsNullOrEmpty(source) &&
+               source.IndexOf(
+                   value,
+                   StringComparison.OrdinalIgnoreCase) >= 0;
     }
+
+    private static bool IsKoreanLocale =>
+        LocalizationService.CurrentLocale?.StartsWith(
+            "ko",
+            StringComparison.OrdinalIgnoreCase) == true;
 
     private static Color GetGradeColor(EEnemyGrade grade)
     {

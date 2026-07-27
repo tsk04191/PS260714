@@ -80,6 +80,7 @@ public sealed class SettingPage : MonoBehaviour, IPage
     private readonly List<string> _supportedResolutions = new();
     private readonly List<string> _supportedLocaleIds = new();
     private TextMeshProUGUI _localeLabelText;
+    private bool _openedFromDungeon;
 
     public AudioSource Speaker { get; set; }
 
@@ -97,6 +98,7 @@ public sealed class SettingPage : MonoBehaviour, IPage
         SelectTab(_selectedTabIndex);
         RefreshSettingsControls();
         HideQuitConfirmation();
+        RefreshQuitButtonAvailability();
     }
 
     private void OnDisable()
@@ -126,6 +128,7 @@ public sealed class SettingPage : MonoBehaviour, IPage
         SelectTab(_selectedTabIndex);
         RefreshSettingsControls();
         HideQuitConfirmation();
+        RefreshQuitButtonAvailability();
     }
 
     public void OpenFrom(
@@ -142,6 +145,8 @@ public sealed class SettingPage : MonoBehaviour, IPage
 
         _returnPage = sourcePage;
         _returnMode = returnMode;
+        _openedFromDungeon =
+            sourcePage.TryGetComponent(out DungeonPage _);
         PageControl.PagToPag(sourcePage, gameObject, PageOpenMode.Fresh);
     }
 
@@ -172,6 +177,7 @@ public sealed class SettingPage : MonoBehaviour, IPage
         SelectTab(_selectedTabIndex);
         RefreshSettingsControls();
         HideQuitConfirmation();
+        RefreshQuitButtonAvailability();
 
         if (isActiveAndEnabled)
             BindEvents();
@@ -470,6 +476,14 @@ public sealed class SettingPage : MonoBehaviour, IPage
     {
         if (quitConfirmationPopup != null)
             quitConfirmationPopup.SetActive(false);
+    }
+
+    private void RefreshQuitButtonAvailability()
+    {
+        if (quitButton != null)
+            quitButton.gameObject.SetActive(!_openedFromDungeon);
+        if (_openedFromDungeon)
+            HideQuitConfirmation();
     }
 
     private void SelectTab(int index)

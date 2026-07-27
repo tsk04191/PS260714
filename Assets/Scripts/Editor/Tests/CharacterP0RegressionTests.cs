@@ -2,9 +2,11 @@ using System;
 using System.Collections.Generic;
 using System.Reflection;
 using NUnit.Framework;
+using PS260714.Localization;
 using TMPro;
 using UnityEditor;
 using UnityEngine;
+using UnityEngine.EventSystems;
 using UnityEngine.UI;
 
 public sealed class CharacterP0RegressionTests
@@ -110,6 +112,547 @@ public sealed class CharacterP0RegressionTests
         Assert.That(textureCoordinates.y, Is.EqualTo(0f).Within(0.001f));
         Assert.That(textureCoordinates.width, Is.EqualTo(1f).Within(0.001f));
         Assert.That(textureCoordinates.height, Is.EqualTo(1f).Within(0.001f));
+    }
+
+    [Test]
+    public void DungeonCharacterInfo_UsesOverflowSdAndFullWidthCooldown()
+    {
+        CharacterRuntime character = CreateCharacter(AislingAssetPath);
+
+        RectTransform sdRect = character.transform
+            .Find("imgCharacterSd") as RectTransform;
+        RectTransform cooldownTrack = character.transform
+            .Find("grpCooldown") as RectTransform;
+        RectTransform passiveIcon = character.transform
+            .Find("grpPassiveAbilityIcon") as RectTransform;
+        RectTransform activeIcon = character.transform
+            .Find("grpActiveAbilityIcon") as RectTransform;
+        GameObject nameObject =
+            character.transform.Find("txtName").gameObject;
+        GameObject attackObject =
+            character.transform.Find("txtAttack").gameObject;
+        GameObject cooldownTextObject =
+            character.transform.Find("txtCooldown").gameObject;
+
+        Assert.That(sdRect, Is.Not.Null);
+        Assert.That(sdRect.sizeDelta, Is.EqualTo(new Vector2(168f, 168f)));
+        Assert.That(
+            sdRect.anchoredPosition,
+            Is.EqualTo(new Vector2(-10f, 18f)));
+        Assert.That(cooldownTrack, Is.Not.Null);
+        Assert.That(cooldownTrack.anchorMin, Is.EqualTo(Vector2.zero));
+        Assert.That(
+            cooldownTrack.anchorMax,
+            Is.EqualTo(new Vector2(1f, 0f)));
+        Assert.That(cooldownTrack.offsetMin.x, Is.EqualTo(6f));
+        Assert.That(cooldownTrack.offsetMax.x, Is.EqualTo(-6f));
+
+        Assert.That(passiveIcon, Is.Not.Null);
+        Assert.That(activeIcon, Is.Not.Null);
+        Assert.That(
+            passiveIcon.anchoredPosition,
+            Is.EqualTo(new Vector2(-8f, -6f)));
+        Assert.That(
+            activeIcon.anchoredPosition,
+            Is.EqualTo(new Vector2(-8f, -60f)));
+        Assert.That(
+            sdRect.GetComponent<Image>().raycastTarget,
+            Is.True);
+        Assert.That(nameObject.activeSelf, Is.False);
+        Assert.That(attackObject.activeSelf, Is.False);
+        Assert.That(cooldownTextObject.activeSelf, Is.False);
+    }
+
+    [Test]
+    public void DungeonCharacterInfo_AbilityIconsTooltipAndAvailabilityRefresh()
+    {
+        CharacterRuntime character = CreateCharacter(AislingAssetPath);
+        Transform passiveFrame =
+            character.transform.Find("grpPassiveAbilityIcon");
+        Transform activeFrame =
+            character.transform.Find("grpActiveAbilityIcon");
+        Image passiveImage = passiveFrame
+            .Find("imgPassiveAbilityIcon")
+            .GetComponent<Image>();
+        Image activeImage = activeFrame
+            .Find("imgActiveAbilityIcon")
+            .GetComponent<Image>();
+
+        Assert.That(
+            passiveImage.sprite,
+            Is.SameAs(character.Data.PassiveSdSprite));
+        Assert.That(
+            activeImage.sprite,
+            Is.SameAs(character.Data.SkillSdSprite));
+        Assert.That(activeImage.color.r, Is.EqualTo(0.28f).Within(0.001f));
+
+        FakeActiveSkillResource resource = new(10, 10);
+        character.BindBattle(resource, new FakeBattleBoard
+        {
+            LivingEnemyCountValue = 1,
+        });
+        Assert.That(character.CanActivateActiveSkill(), Is.True);
+        Assert.That(activeImage.color, Is.EqualTo(Color.white));
+
+        EventSystem eventSystem = EventSystem.current;
+        if (eventSystem == null)
+        {
+            GameObject eventSystemObject = new(
+                "CharacterInfoHoverEventSystem",
+                typeof(EventSystem));
+            _createdObjects.Add(eventSystemObject);
+            eventSystem =
+                eventSystemObject.GetComponent<EventSystem>();
+        }
+        PointerEventData pointerEvent = new(eventSystem);
+        ExecuteEvents.Execute(
+            passiveFrame.gameObject,
+            pointerEvent,
+            ExecuteEvents.pointerEnterHandler);
+        Transform tooltip = character.transform.Find("grpSkillTooltip");
+        TextMeshProUGUI tooltipText = tooltip
+            .Find("txtSkillTooltip")
+            .GetComponent<TextMeshProUGUI>();
+        Assert.That(tooltip.gameObject.activeSelf, Is.True);
+        StringAssert.Contains(
+            LocalizationService.Get(
+                LocalizationKeys.CodexCharacterPassive),
+            tooltipText.text);
+
+        ExecuteEvents.Execute(
+            passiveFrame.gameObject,
+            pointerEvent,
+            ExecuteEvents.pointerExitHandler);
+        Transform sdImage =
+            character.transform.Find("imgCharacterSd");
+        ExecuteEvents.Execute(
+            sdImage.gameObject,
+            pointerEvent,
+            ExecuteEvents.pointerEnterHandler);
+        Assert.That(tooltip.gameObject.activeSelf, Is.True);
+        StringAssert.Contains(
+            CharacterLocalization.GetName(character.Data),
+            tooltipText.text);
+        StringAssert.Contains(
+            LocalizationService.Get(
+                LocalizationKeys.CodexCharacterNormalAttack),
+            tooltipText.text);
+        StringAssert.Contains(
+            LocalizationService.Get(
+                LocalizationKeys.CodexCharacterPassive),
+            tooltipText.text);
+        StringAssert.Contains(
+            CharacterLocalization.GetActiveSkillTitle(
+                character.Data.ActiveSkillCost),
+            tooltipText.text);
+
+        Assert.That(resource.TrySpend(9), Is.True);
+        Assert.That(character.CanActivateActiveSkill(), Is.False);
+        Assert.That(activeImage.color.r, Is.EqualTo(0.28f).Within(0.001f));
+    }
+
+    [Test]
+    public void DungeonCharacterInfo_UsesDefinitionAbilityIconSprites()
+    {
+        CharacterSO definition = UnityEngine.Object.Instantiate(
+            LoadAsset<CharacterSO>(AislingAssetPath));
+        definition.hideFlags = HideFlags.HideAndDontSave;
+        _createdObjects.Add(definition);
+        Texture2D passiveTexture =
+            new(8, 8, TextureFormat.RGBA32, false);
+        Texture2D activeTexture =
+            new(8, 8, TextureFormat.RGBA32, false);
+        Sprite passiveIcon = Sprite.Create(
+            passiveTexture,
+            new Rect(0f, 0f, 8f, 8f),
+            new Vector2(0.5f, 0.5f));
+        Sprite activeIcon = Sprite.Create(
+            activeTexture,
+            new Rect(0f, 0f, 8f, 8f),
+            new Vector2(0.5f, 0.5f));
+        _createdObjects.Add(passiveTexture);
+        _createdObjects.Add(activeTexture);
+        _createdObjects.Add(passiveIcon);
+        _createdObjects.Add(activeIcon);
+
+        SerializedObject serialized = new(definition);
+        SerializedProperty passives =
+            serialized.FindProperty("passiveDefinitions");
+        SerializedProperty skills =
+            serialized.FindProperty("skillDefinitions");
+        Assert.That(passives.arraySize, Is.GreaterThan(0));
+        Assert.That(skills.arraySize, Is.GreaterThan(0));
+        passives.GetArrayElementAtIndex(0)
+            .FindPropertyRelative("iconSprite")
+            .objectReferenceValue = passiveIcon;
+        skills.GetArrayElementAtIndex(0)
+            .FindPropertyRelative("iconSprite")
+            .objectReferenceValue = activeIcon;
+        serialized.ApplyModifiedPropertiesWithoutUndo();
+
+        CharacterRuntime character = CreateCharacter(definition);
+        Image passiveImage = character.transform
+            .Find("grpPassiveAbilityIcon/imgPassiveAbilityIcon")
+            .GetComponent<Image>();
+        Image activeImage = character.transform
+            .Find("grpActiveAbilityIcon/imgActiveAbilityIcon")
+            .GetComponent<Image>();
+
+        Assert.That(
+            character.Data.PassiveAbilityIconSprite,
+            Is.SameAs(passiveIcon));
+        Assert.That(
+            character.Data.ActiveAbilityIconSprite,
+            Is.SameAs(activeIcon));
+        Assert.That(passiveImage.sprite, Is.SameAs(passiveIcon));
+        Assert.That(activeImage.sprite, Is.SameAs(activeIcon));
+    }
+
+    [Test]
+    public void DungeonPauseMenu_UsesReadableRequestedButtonOrder()
+    {
+        GameObject root = new(
+            "DungeonPauseMenuTest",
+            typeof(RectTransform));
+        _createdObjects.Add(root);
+        DungeonBattleTab tab =
+            root.AddComponent<DungeonBattleTab>();
+        GameObject overlay = new(
+            "grpPauseOverlay",
+            typeof(RectTransform),
+            typeof(CanvasRenderer),
+            typeof(Image));
+        overlay.transform.SetParent(root.transform, false);
+        GameObject templateObject = new(
+            "btnPauseTemplate",
+            typeof(RectTransform),
+            typeof(CanvasRenderer),
+            typeof(Image),
+            typeof(Button));
+        templateObject.transform.SetParent(root.transform, false);
+        Button template = templateObject.GetComponent<Button>();
+        template.targetGraphic = templateObject.GetComponent<Image>();
+        CreateText(templateObject.transform, "txtPauseTemplate");
+
+        SerializedObject serializedTab = new(tab);
+        serializedTab.FindProperty("pauseButton").objectReferenceValue =
+            template;
+        serializedTab.FindProperty("pauseOverlay").objectReferenceValue =
+            overlay;
+        serializedTab.ApplyModifiedPropertiesWithoutUndo();
+        MethodInfo ensureMenu = typeof(DungeonBattleTab).GetMethod(
+            "EnsurePauseNavigationButtons",
+            BindingFlags.Instance | BindingFlags.NonPublic);
+
+        Assert.That(ensureMenu, Is.Not.Null);
+        ensureMenu.Invoke(tab, null);
+
+        RectTransform panel = overlay.transform.Find(
+            "grpPauseMenuPanel") as RectTransform;
+        Assert.That(panel, Is.Not.Null);
+        Assert.That(panel.GetComponent<Image>().color.a, Is.GreaterThan(0.9f));
+        Assert.That(panel.GetChild(0).name, Is.EqualTo("btnContinue"));
+        Assert.That(panel.GetChild(1).name, Is.EqualTo("btnReturnToStage"));
+        Assert.That(panel.GetChild(2).name, Is.EqualTo("btnQuitGame"));
+        Assert.That(
+            ((RectTransform)panel.GetChild(0)).anchoredPosition.y,
+            Is.GreaterThan(
+                ((RectTransform)panel.GetChild(1)).anchoredPosition.y));
+        Assert.That(
+            ((RectTransform)panel.GetChild(1)).anchoredPosition.y,
+            Is.GreaterThan(
+                ((RectTransform)panel.GetChild(2)).anchoredPosition.y));
+        Assert.That(
+            panel.GetChild(0).GetComponent<Button>().colors.normalColor
+                .grayscale,
+            Is.GreaterThan(0.25f));
+    }
+
+    [Test]
+    public void CodexBrowser_CardShowsIconAndNameAtOneByOnePointFourRatio()
+    {
+        GameObject root = new("CodexBrowserTest", typeof(RectTransform));
+        _createdObjects.Add(root);
+        Texture2D texture = new(8, 8, TextureFormat.RGBA32, false);
+        _createdObjects.Add(texture);
+        Sprite icon = Sprite.Create(
+            texture,
+            new Rect(0f, 0f, 8f, 8f),
+            new Vector2(0.5f, 0.5f));
+        _createdObjects.Add(icon);
+        string selectedId = null;
+
+        CodexBrowserView browser =
+            CodexBrowserView.Build(root.transform);
+        browser.SetCallbacks(
+            _ => { },
+            () => { },
+            () => { },
+            id => selectedId = id);
+        browser.SetToolbar(
+            string.Empty,
+            "Search",
+            "Go",
+            "Filter",
+            "Sort");
+        browser.SetItems(
+            new[]
+            {
+                new CodexBrowserItemModel(
+                    "owned",
+                    "MIRINAE",
+                    icon,
+                    false,
+                    Color.cyan),
+                new CodexBrowserItemModel(
+                    "unowned",
+                    "SUIREN",
+                    icon,
+                    true,
+                    Color.cyan),
+            },
+            "owned");
+
+        Transform toolbar = root.transform.Find(
+            "grpCodexBrowser/grpCodexList/grpCodexListToolbar");
+        Assert.That(toolbar, Is.Not.Null);
+        Assert.That(toolbar.GetChild(0).name, Is.EqualTo("inpCodexSearch"));
+        Assert.That(toolbar.GetChild(1).name, Is.EqualTo("btnCodexSearch"));
+        Assert.That(toolbar.GetChild(2).name, Is.EqualTo("btnCodexFilter"));
+        Assert.That(toolbar.GetChild(3).name, Is.EqualTo("btnCodexSort"));
+        Assert.That(
+            toolbar.GetComponent<LayoutElement>().preferredHeight,
+            Is.EqualTo(46f));
+
+        GridLayoutGroup grid = root.transform.Find(
+                "grpCodexBrowser/grpCodexList/scrCodexList/" +
+                "vptCodexList/grpCodexCardContent")
+            ?.GetComponent<GridLayoutGroup>();
+        Assert.That(grid, Is.Not.Null);
+        Assert.That(
+            grid.cellSize.y / grid.cellSize.x,
+            Is.EqualTo(1.4f).Within(0.0001f));
+        Assert.That(
+            grid.constraint,
+            Is.EqualTo(GridLayoutGroup.Constraint.FixedColumnCount));
+        Assert.That(grid.constraintCount, Is.EqualTo(4));
+
+        Transform firstCard = grid.transform.Find("btnCodexCard_0");
+        Transform secondCard = grid.transform.Find("btnCodexCard_1");
+        Assert.That(
+            firstCard.Find("imgCodexCardIcon")
+                .GetComponent<Image>().sprite,
+            Is.SameAs(icon));
+        Assert.That(
+            firstCard.Find(
+                    "grpCodexCardNamePlate/txtCodexCardName")
+                .GetComponent<TextMeshProUGUI>().text,
+            Is.EqualTo("MIRINAE"));
+        Assert.That(
+            secondCard.GetComponent<Button>().interactable,
+            Is.True,
+            "Unowned cards must remain clickable.");
+        Assert.That(
+            secondCard.Find("imgCodexCardIcon")
+                .GetComponent<Image>().color.grayscale,
+            Is.LessThan(0.5f));
+
+        secondCard.GetComponent<Button>().onClick.Invoke();
+        Assert.That(selectedId, Is.EqualTo("unowned"));
+    }
+
+    [Test]
+    public void CodexBrowser_ExistingDesignerLayoutIsNotOverwritten()
+    {
+        GameObject root = new(
+            "CodexDesignerLayoutTest",
+            typeof(RectTransform));
+        _createdObjects.Add(root);
+
+        CodexBrowserView.Build(root.transform);
+        LayoutElement toolbarLayout = root.transform.Find(
+                "grpCodexBrowser/grpCodexList/grpCodexListToolbar")
+            .GetComponent<LayoutElement>();
+        GridLayoutGroup grid = root.transform.Find(
+                "grpCodexBrowser/grpCodexList/scrCodexList/" +
+                "vptCodexList/grpCodexCardContent")
+            .GetComponent<GridLayoutGroup>();
+        toolbarLayout.preferredHeight = 73f;
+        grid.cellSize = new Vector2(133f, 211f);
+        grid.constraintCount = 3;
+
+        CodexBrowserView.Build(root.transform);
+
+        Assert.That(toolbarLayout.preferredHeight, Is.EqualTo(73f));
+        Assert.That(grid.cellSize, Is.EqualTo(new Vector2(133f, 211f)));
+        Assert.That(grid.constraintCount, Is.EqualTo(3));
+    }
+
+    [Test]
+    public void CodexBrowser_ListOnlyModeUsesFullWidthOwnedCardGrid()
+    {
+        GameObject root = new(
+            "RosterListOnlyTest",
+            typeof(RectTransform));
+        _createdObjects.Add(root);
+
+        CodexBrowserView browser =
+            CodexBrowserView.Build(root.transform);
+        browser.SetListOnlyMode(true, 3);
+
+        RectTransform browserRoot = root.transform.Find(
+            "grpCodexBrowser") as RectTransform;
+        Transform listRoot = browserRoot?.Find("grpCodexList");
+        Transform detailRoot = browserRoot?.Find("grpCodexDetailHost");
+        GridLayoutGroup grid = listRoot?.Find(
+                "scrCodexList/vptCodexList/grpCodexCardContent")
+            ?.GetComponent<GridLayoutGroup>();
+        LayoutElement listLayout =
+            listRoot?.GetComponent<LayoutElement>();
+
+        Assert.That(browserRoot, Is.Not.Null);
+        Assert.That(browserRoot.anchorMin, Is.EqualTo(Vector2.zero));
+        Assert.That(browserRoot.anchorMax, Is.EqualTo(Vector2.one));
+        Assert.That(detailRoot, Is.Not.Null);
+        Assert.That(detailRoot.gameObject.activeSelf, Is.False);
+        Assert.That(listLayout, Is.Not.Null);
+        Assert.That(listLayout.flexibleWidth, Is.EqualTo(1f));
+        Assert.That(grid, Is.Not.Null);
+        Assert.That(grid.constraintCount, Is.EqualTo(3));
+    }
+
+    [Test]
+    public void MainMenuDesignerLayout_RestoresVerticalButtonsWithoutLocking()
+    {
+        GameObject pageObject = new(
+            "MainMenuDesignerLayoutTest",
+            typeof(RectTransform),
+            typeof(MainPage));
+        _createdObjects.Add(pageObject);
+        MainPage page = pageObject.GetComponent<MainPage>();
+        page.RebuildEditorPreview();
+
+        RectTransform panel = pageObject.transform.Find(
+                RuntimeMenuPageBase.RuntimeRootObjectName +
+                "/grpMenuPanel")
+            .GetComponent<RectTransform>();
+        RectTransform buttonRoot = panel.Find("grpMenuButtons")
+            .GetComponent<RectTransform>();
+        buttonRoot.sizeDelta = new Vector2(100f, 100f);
+        foreach (RectTransform child in buttonRoot)
+        {
+            child.anchoredPosition = Vector2.zero;
+            child.sizeDelta = new Vector2(100f, 100f);
+        }
+
+        MenuPageSceneBuilder.RestoreMainMenuDefaultLayout(page);
+
+        string[] buttonNames =
+        {
+            "btnPLAY",
+            "btnCODEX",
+            "btnROSTER",
+            "btnSHOP",
+            "btnQUEST",
+            "btnSTORAGE",
+        };
+        for (int index = 0; index < buttonNames.Length; index++)
+        {
+            RectTransform button = buttonRoot.Find(buttonNames[index])
+                .GetComponent<RectTransform>();
+            Assert.That(
+                button.anchoredPosition,
+                Is.EqualTo(new Vector2(0f, 215f - index * 86f)));
+            Assert.That(
+                button.sizeDelta,
+                Is.EqualTo(new Vector2(540f, 72f)));
+        }
+
+        Assert.That(
+            buttonRoot.sizeDelta,
+            Is.EqualTo(new Vector2(540f, 554f)));
+        Assert.That(
+            buttonRoot.GetComponent<VerticalLayoutGroup>().enabled,
+            Is.False,
+            "The restored layout must remain directly editable.");
+        Assert.That(
+            panel.GetComponent<VerticalLayoutGroup>().enabled,
+            Is.False,
+            "The panel layout must remain directly editable.");
+    }
+
+    [Test]
+    public void StaticMenuDesignerLayout_RestoresInactivePageButtonPlacement()
+    {
+        GameObject pageObject = new(
+            "StaticMenuDesignerLayoutTest",
+            typeof(RectTransform),
+            typeof(StageSelectPage));
+        _createdObjects.Add(pageObject);
+        pageObject.GetComponent<RectTransform>().sizeDelta =
+            new Vector2(1920f, 1080f);
+        StageSelectPage page = pageObject.GetComponent<StageSelectPage>();
+        page.RebuildEditorPreview();
+
+        RectTransform panel = pageObject.transform.Find(
+                RuntimeMenuPageBase.RuntimeRootObjectName +
+                "/grpMenuPanel")
+            .GetComponent<RectTransform>();
+        RectTransform title = panel.Find("txtPageTitle")
+            .GetComponent<RectTransform>();
+        RectTransform description = panel.Find("txtPageDescription")
+            .GetComponent<RectTransform>();
+        RectTransform buttonRoot = panel.Find("grpMenuButtons")
+            .GetComponent<RectTransform>();
+        buttonRoot.sizeDelta = new Vector2(100f, 100f);
+        foreach (RectTransform child in buttonRoot)
+        {
+            child.anchoredPosition = Vector2.zero;
+            child.sizeDelta = new Vector2(100f, 100f);
+        }
+        pageObject.SetActive(false);
+
+        MenuPageSceneBuilder.RestoreStaticMenuDefaultLayout(page);
+
+        Assert.That(
+            title.anchoredPosition,
+            Is.EqualTo(new Vector2(310f, -81f)));
+        Assert.That(
+            description.anchoredPosition,
+            Is.EqualTo(new Vector2(310f, -174f)));
+        Assert.That(
+            buttonRoot.anchoredPosition,
+            Is.EqualTo(new Vector2(310f, -373f)));
+        Assert.That(
+            buttonRoot.sizeDelta,
+            Is.EqualTo(new Vector2(540f, 294f)));
+
+        string[] buttonNames =
+        {
+            "btnSTAGE0TESTFIELD",
+            "btnFREEBATTLE",
+            "btnBACK",
+        };
+        for (int index = 0; index < buttonNames.Length; index++)
+        {
+            RectTransform button = buttonRoot.Find(buttonNames[index])
+                .GetComponent<RectTransform>();
+            Assert.That(
+                button.anchoredPosition,
+                Is.EqualTo(new Vector2(
+                    270f,
+                    -61f - index * 86f)));
+            Assert.That(
+                button.sizeDelta,
+                Is.EqualTo(new Vector2(540f, 72f)));
+        }
+
+        Assert.That(
+            buttonRoot.GetComponent<VerticalLayoutGroup>().enabled,
+            Is.False);
+        Assert.That(
+            panel.GetComponent<VerticalLayoutGroup>().enabled,
+            Is.False);
     }
 
     [Test]
@@ -872,7 +1415,7 @@ public sealed class CharacterP0RegressionTests
     }
 
     [Test]
-    public void ActualExplicitEffects_DefaultToInheritActionTarget()
+    public void ActualExplicitEffects_PreserveDefaultOrUseSourceStatusOverride()
     {
         string[] characterGuids = AssetDatabase.FindAssets(
             "t:CharacterSO",
@@ -897,7 +1440,7 @@ public sealed class CharacterP0RegressionTests
                     attack,
                     Is.Not.Null,
                     $"{assetPath} contains a null attack definition.");
-                AssertEffectsInheritActionTarget(
+                AssertEffectsPreserveTargetDefault(
                     attack.Effects,
                     $"{assetPath}.attack",
                     ref explicitEffectCount);
@@ -910,7 +1453,7 @@ public sealed class CharacterP0RegressionTests
                     passive,
                     Is.Not.Null,
                     $"{assetPath} contains a null passive definition.");
-                AssertEffectsInheritActionTarget(
+                AssertEffectsPreserveTargetDefault(
                     passive.Effects,
                     $"{assetPath}.passive",
                     ref explicitEffectCount);
@@ -923,7 +1466,7 @@ public sealed class CharacterP0RegressionTests
                     skill,
                     Is.Not.Null,
                     $"{assetPath} contains a null skill definition.");
-                AssertEffectsInheritActionTarget(
+                AssertEffectsPreserveTargetDefault(
                     skill.Effects,
                     $"{assetPath}.skill",
                     ref explicitEffectCount);
@@ -934,7 +1477,7 @@ public sealed class CharacterP0RegressionTests
             explicitEffectCount,
             Is.GreaterThan(0),
             "At least one actual explicit effect must protect the " +
-            "serialized InheritAction default.");
+            "serialized target defaults.");
     }
 
     [Test]
@@ -2973,6 +3516,43 @@ public sealed class CharacterP0RegressionTests
 
         Assert.That(standalone.IsOwned, Is.True);
         Assert.That(saved.IsOwned, Is.True);
+    }
+
+    [Test]
+    public void DungeonCharacterAvailability_TracksCollectionOwnership()
+    {
+        CharacterSO definition = CreateCumulativeUpgradeCharacter();
+        SetCharacterInitiallyOwned(definition, false);
+        CharacterCollectionData collection = new();
+        MethodInfo ownershipCheck = typeof(DungeonPage).GetMethod(
+            "IsCharacterOwnedForDungeon",
+            BindingFlags.Static | BindingFlags.NonPublic);
+
+        Assert.That(ownershipCheck, Is.Not.Null);
+        Assert.That(
+            (bool)ownershipCheck.Invoke(
+                null,
+                new object[] { definition, collection }),
+            Is.False);
+        Assert.That(
+            collection.TrySetOwned(
+                definition,
+                true,
+                save: false),
+            Is.True);
+        Assert.That(
+            (bool)ownershipCheck.Invoke(
+                null,
+                new object[] { definition, collection }),
+            Is.True);
+
+        SetCharacterInitiallyOwned(definition, true);
+        CharacterCollectionData freshCollection = new();
+        Assert.That(
+            (bool)ownershipCheck.Invoke(
+                null,
+                new object[] { definition, freshCollection }),
+            Is.True);
     }
 
     [Test]
@@ -5612,7 +6192,7 @@ public sealed class CharacterP0RegressionTests
         }
     }
 
-    private static void AssertEffectsInheritActionTarget(
+    private static void AssertEffectsPreserveTargetDefault(
         IReadOnlyList<CharacterEffectDefinition> effects,
         string actionPath,
         ref int explicitEffectCount)
@@ -5627,11 +6207,18 @@ public sealed class CharacterP0RegressionTests
                 effect,
                 Is.Not.Null,
                 $"{actionPath}.effects[{index}] is null.");
+            bool isIntentionalSourceStatusEffect =
+                effect.TargetMode == CharacterEffectTargetMode.Source &&
+                (effect.Type == CharacterEffectType.ApplyStatus ||
+                 effect.Type == CharacterEffectType.RemoveStatus) &&
+                effect.StatusEffect != null;
             Assert.That(
-                effect.TargetMode,
-                Is.EqualTo(CharacterEffectTargetMode.InheritAction),
+                effect.TargetMode == CharacterEffectTargetMode.InheritAction ||
+                isIntentionalSourceStatusEffect,
+                Is.True,
                 $"{actionPath}.effects[{index}] changed the legacy " +
-                "serialized target default.");
+                "serialized target default without a supported explicit " +
+                "source-status override.");
             explicitEffectCount++;
         }
     }

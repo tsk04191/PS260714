@@ -39,6 +39,7 @@ namespace PS260714.Localization
         public const string CodexCharacterEmptyTitle = "codex.character.empty_title";
         public const string CodexCharacterIdentity = "codex.character.identity";
         public const string CodexCharacterNormalAttack = "codex.character.normal_attack";
+        public const string CodexCharacterPassive = "codex.character.passive";
         public const string CodexCharacterTitle = "codex.character.title";
         public const string CodexEnemyAbility = "codex.enemy.ability";
         public const string CodexEnemyAbilityAssault = "codex.enemy.ability.assault";
@@ -153,6 +154,7 @@ namespace PS260714.Localization
         public const string UiDungeonResultReturnMain = "ui.dungeon.result.return_main";
         public const string UiDungeonResultStartNewRun = "ui.dungeon.result.start_new_run";
         public const string UiDungeonResume = "ui.dungeon.resume";
+        public const string UiDungeonReturnToStage = "ui.dungeon.return_to_stage";
         public const string UiDungeonRewardCategoryEnergy = "ui.dungeon.reward.category.energy";
         public const string UiDungeonRewardCategoryItem = "ui.dungeon.reward.category.item";
         public const string UiDungeonRewardCategoryNewTurret = "ui.dungeon.reward.category.new_turret";
@@ -196,6 +198,11 @@ namespace PS260714.Localization
         public const string UiQuestTitle = "ui.quest.title";
         public const string UiRosterDescription = "ui.roster.description";
         public const string UiRosterEmpty = "ui.roster.empty";
+        public const string UiRosterFilterOwned = "ui.roster.filter_owned";
+        public const string UiRosterSearch = "ui.roster.search";
+        public const string UiRosterSearchPlaceholder = "ui.roster.search_placeholder";
+        public const string UiRosterSortNameAscending = "ui.roster.sort_name_ascending";
+        public const string UiRosterSortNameDescending = "ui.roster.sort_name_descending";
         public const string UiRosterTitle = "ui.roster.title";
         public const string UiSettingsBrightness = "ui.settings.brightness";
         public const string UiSettingsDisplayMode = "ui.settings.display_mode";

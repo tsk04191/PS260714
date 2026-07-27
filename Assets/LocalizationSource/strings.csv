@@ -83,6 +83,11 @@ ui.codex.description,도감 허브 설명,body,,적 | 캐릭터 | 기술 | 아�
 ui.roster.title,목록 페이지 제목,title,,목록,ROSTER
 ui.roster.description,목록 페이지 설명,body,,보유 캐릭터,OWNED CHARACTERS
 ui.roster.empty,목록 빈 상태,body,,보유 캐릭터 없음,OWNED CHARACTERS - EMPTY
+ui.roster.search_placeholder,목록 검색 입력,body,,이름 또는 ID,NAME OR ID
+ui.roster.search,목록 검색 버튼,body,,검색,SEARCH
+ui.roster.filter_owned,목록 보유 필터,body,,보유만,OWNED
+ui.roster.sort_name_ascending,목록 이름 정렬,body,,이름 오름차순,NAME A-Z
+ui.roster.sort_name_descending,목록 이름 정렬,body,,이름 내림차순,NAME Z-A
 ui.shop.title,상점 페이지 제목,title,,상점,SHOP
 ui.shop.description,상점 페이지 설명,body,,던전 클리어 재화 상점,DUNGEON CLEAR CURRENCY SHOP
 ui.shop.currency,상점 재화 표시,number,,던전 재화 - 0,DUNGEON CURRENCY - 0
@@ -125,6 +130,7 @@ ui.dungeon.party_info,던전 HUD 제목,title,,파티 정보,PARTY INFO
 ui.dungeon.enemy_queue,던전 HUD 제목,title,,적 대기열,ENEMY QUEUE
 ui.dungeon.pause,던전 상태,body,,일시정지,PAUSE
 ui.dungeon.resume,던전 상태,body,,계속,RESUME
+ui.dungeon.return_to_stage,던전 일시정지 버튼,body,,스테이지로 돌아가기,RETURN TO STAGE
 ui.dungeon.defeat,던전 상태,title,,패배,DEFEAT
 ui.dungeon.energy_full,에너지 상태,number,,가득 참,FULL
 ui.dungeon.energy_recharge,에너지 상태,number,,+1까지 {seconds:0.0}초,+1 IN {seconds:0.0}s
@@ -147,13 +153,14 @@ ui.character.compact_summary,캐릭터 요약,number,,공격력 {attack:0.##} | 
 codex.character.title,캐릭터 도감 제목,title,,캐릭터 도감,CHARACTER CODEX
 codex.character.description,캐릭터 도감 설명,body,,캐릭터 탭을 선택해 정보를 확인하세요,SELECT A CHARACTER TAB TO VIEW ITS INFORMATION
 codex.character.normal_attack,캐릭터 도감 섹션,title,,일반 공격,NORMAL ATTACK
+codex.character.passive,캐릭터 도감 섹션,title,,패시브,PASSIVE
 codex.character.active_skill,캐릭터 도감 섹션,title,,액티브 기술,ACTIVE SKILL
 codex.character.active_skill_cost,캐릭터 도감 섹션,number,,액티브 기술 · 코스트 {cost},ACTIVE SKILL · COST {cost}
 codex.character.identity,캐릭터 도감 식별 정보,body,,에셋 {asset},ASSET {asset}
 codex.character.empty_title,캐릭터 도감 빈 상태,title,,캐릭터 데이터 없음,NO CHARACTER DATA
 codex.character.empty_body,캐릭터 도감 빈 상태,body,,사용 가능한 캐릭터 정의가 없습니다.,NO CHARACTER DEFINITIONS ARE AVAILABLE.
 ui.turret.skill_header,터렛 기술 툴팁,number,,액티브 기술 · C{cost} · {status},ACTIVE SKILL · C{cost} · {status}
-ui.turret.click_activate,터렛 기술 툴팁,body,,터렛을 클릭해 발동,CLICK TURRET TO ACTIVATE
+ui.turret.click_activate,터렛 기술 툴팁,body,,액티브 아이콘을 클릭해 발동,CLICK THE ACTIVE ICON TO ACTIVATE
 ui.turret.status.active,터렛 상태,body,,발동 중,ACTIVE
 ui.turret.status.ready,터렛 상태,body,,사용 가능,READY
 ui.turret.status.not_enough_energy,터렛 상태,body,,에너지 부족,NOT ENOUGH ENERGY

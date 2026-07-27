@@ -15,6 +15,13 @@ public sealed class DungeonBattleTab : MonoBehaviour
     [SerializeField] private Button pauseButton;
     [SerializeField] private TextMeshProUGUI pauseText;
     [SerializeField] private GameObject pauseOverlay;
+    private RectTransform _pauseMenuPanel;
+    private Button _continueButton;
+    private TextMeshProUGUI _continueText;
+    private Button _returnToStageButton;
+    private TextMeshProUGUI _returnToStageText;
+    private Button _quitGameButton;
+    private TextMeshProUGUI _quitGameText;
 
     [Header("Battle Time")]
     [SerializeField] private TextMeshProUGUI battleTimeText;
@@ -170,12 +177,18 @@ public sealed class DungeonBattleTab : MonoBehaviour
                 localizedText.SetKey(LocalizationKeys.UiCommonSettings);
             }
         }
+        EnsurePauseNavigationButtons();
 
         if (speedButton == null || speedText == null || pauseButton == null ||
             pauseText == null || pauseOverlay == null ||
             _pauseOverlayText == null || battleTimeText == null ||
             activeSkillResourceText == null ||
             spawnQueueView == null ||
+            _pauseMenuPanel == null ||
+            _continueButton == null || _continueText == null ||
+            _returnToStageButton == null ||
+            _returnToStageText == null ||
+            _quitGameButton == null || _quitGameText == null ||
             settingsButton == null || dungeonPage == null ||
             settingPage == null)
         {
@@ -194,6 +207,10 @@ public sealed class DungeonBattleTab : MonoBehaviour
         speedButton.onClick.AddListener(HandleSpeedClicked);
         pauseButton.onClick.AddListener(HandlePauseClicked);
         settingsButton.onClick.AddListener(HandleSettingsClicked);
+        _continueButton.onClick.AddListener(HandleContinueClicked);
+        _returnToStageButton.onClick.AddListener(
+            HandleReturnToStageClicked);
+        _quitGameButton.onClick.AddListener(HandleQuitGameClicked);
         _controlEventsBound = true;
     }
 
@@ -208,6 +225,21 @@ public sealed class DungeonBattleTab : MonoBehaviour
             pauseButton.onClick.RemoveListener(HandlePauseClicked);
         if (settingsButton != null)
             settingsButton.onClick.RemoveListener(HandleSettingsClicked);
+        if (_continueButton != null)
+        {
+            _continueButton.onClick.RemoveListener(
+                HandleContinueClicked);
+        }
+        if (_returnToStageButton != null)
+        {
+            _returnToStageButton.onClick.RemoveListener(
+                HandleReturnToStageClicked);
+        }
+        if (_quitGameButton != null)
+        {
+            _quitGameButton.onClick.RemoveListener(
+                HandleQuitGameClicked);
+        }
         _controlEventsBound = false;
     }
 
@@ -306,6 +338,25 @@ public sealed class DungeonBattleTab : MonoBehaviour
         PageControl.PagToPag(dungeonPage, settingPage, PageOpenMode.Fresh);
     }
 
+    private void HandleContinueClicked()
+    {
+        HandlePauseClicked();
+    }
+
+    private void HandleReturnToStageClicked()
+    {
+        _page?.ReturnToStageSelect();
+    }
+
+    private static void HandleQuitGameClicked()
+    {
+#if UNITY_EDITOR
+        UnityEditor.EditorApplication.isPlaying = false;
+#else
+        Application.Quit();
+#endif
+    }
+
     private void HandleBattleStateChanged(EBattleState _)
     {
         RefreshTimeControls();
@@ -370,8 +421,238 @@ public sealed class DungeonBattleTab : MonoBehaviour
                     ? LocalizationKeys.UiDungeonDefeat
                     : LocalizationKeys.UiDungeonPause);
         }
+        if (_continueText != null)
+        {
+            _continueText.text = LocalizationService.Get(
+                LocalizationKeys.UiDungeonResume);
+        }
+        if (_returnToStageText != null)
+        {
+            _returnToStageText.text = LocalizationService.Get(
+                LocalizationKeys.UiDungeonReturnToStage);
+        }
+        if (_quitGameText != null)
+        {
+            _quitGameText.text = LocalizationService.Get(
+                LocalizationKeys.UiSettingsQuitGame);
+        }
+        if (_continueButton != null)
+            _continueButton.interactable = isPaused && !isDefeated;
         if (pauseOverlay != null)
             pauseOverlay.SetActive(isPaused || isDefeated);
+    }
+
+    private void EnsurePauseNavigationButtons()
+    {
+        if (pauseOverlay == null || pauseButton == null)
+            return;
+
+        _pauseMenuPanel = EnsurePauseMenuPanel();
+        if (_pauseMenuPanel == null)
+            return;
+
+        if (_pauseOverlayText != null &&
+            _pauseOverlayText.transform.parent != _pauseMenuPanel)
+        {
+            _pauseOverlayText.transform.SetParent(
+                _pauseMenuPanel,
+                false);
+        }
+
+        _continueButton = ResolveOrClonePauseButton(
+            _continueButton,
+            "btnContinue",
+            "txtContinue",
+            LocalizationKeys.UiDungeonResume,
+            new Vector2(0f, 55f),
+            out _continueText);
+        _returnToStageButton = ResolveOrClonePauseButton(
+            _returnToStageButton,
+            "btnReturnToStage",
+            "txtReturnToStage",
+            LocalizationKeys.UiDungeonReturnToStage,
+            new Vector2(0f, -25f),
+            out _returnToStageText);
+        _quitGameButton = ResolveOrClonePauseButton(
+            _quitGameButton,
+            "btnQuitGame",
+            "txtQuitGame",
+            LocalizationKeys.UiSettingsQuitGame,
+            new Vector2(0f, -105f),
+            out _quitGameText);
+
+        if (_pauseOverlayText != null)
+        {
+            RectTransform titleRect =
+                _pauseOverlayText.rectTransform;
+            titleRect.anchorMin = new Vector2(0.5f, 0.5f);
+            titleRect.anchorMax = new Vector2(0.5f, 0.5f);
+            titleRect.pivot = new Vector2(0.5f, 0.5f);
+            titleRect.anchoredPosition = new Vector2(0f, 145f);
+            titleRect.sizeDelta = new Vector2(380f, 72f);
+            _pauseOverlayText.fontSize = 46f;
+            _pauseOverlayText.color =
+                new Color(0.98f, 0.94f, 0.78f, 1f);
+            _pauseOverlayText.alignment =
+                TextAlignmentOptions.Center;
+            _pauseOverlayText.raycastTarget = false;
+            titleRect.SetAsLastSibling();
+        }
+
+        Button[] overlayButtons =
+            pauseOverlay.GetComponentsInChildren<Button>(true);
+        foreach (Button button in overlayButtons)
+        {
+            if (button == null ||
+                button == _continueButton ||
+                button == _returnToStageButton ||
+                button == _quitGameButton)
+            {
+                continue;
+            }
+
+            button.gameObject.SetActive(false);
+        }
+    }
+
+    private RectTransform EnsurePauseMenuPanel()
+    {
+        if (_pauseMenuPanel == null)
+        {
+            Transform existing =
+                pauseOverlay.transform.Find("grpPauseMenuPanel");
+            _pauseMenuPanel = existing as RectTransform;
+        }
+
+        if (_pauseMenuPanel == null)
+        {
+            GameObject panelObject = new(
+                "grpPauseMenuPanel",
+                typeof(RectTransform),
+                typeof(CanvasRenderer),
+                typeof(Image),
+                typeof(Outline));
+            panelObject.transform.SetParent(
+                pauseOverlay.transform,
+                false);
+            _pauseMenuPanel =
+                panelObject.GetComponent<RectTransform>();
+        }
+
+        _pauseMenuPanel.anchorMin = new Vector2(0.5f, 0.5f);
+        _pauseMenuPanel.anchorMax = new Vector2(0.5f, 0.5f);
+        _pauseMenuPanel.pivot = new Vector2(0.5f, 0.5f);
+        _pauseMenuPanel.anchoredPosition = Vector2.zero;
+        _pauseMenuPanel.sizeDelta = new Vector2(440f, 430f);
+        _pauseMenuPanel.localScale = Vector3.one;
+        _pauseMenuPanel.SetAsFirstSibling();
+
+        Image background =
+            _pauseMenuPanel.GetComponent<Image>();
+        background.color = new Color(
+            0.055f,
+            0.075f,
+            0.065f,
+            0.98f);
+        background.raycastTarget = true;
+
+        Outline outline =
+            _pauseMenuPanel.GetComponent<Outline>();
+        outline.effectColor =
+            new Color(0.52f, 0.68f, 0.52f, 0.9f);
+        outline.effectDistance = new Vector2(3f, -3f);
+        outline.useGraphicAlpha = true;
+        return _pauseMenuPanel;
+    }
+
+    private Button ResolveOrClonePauseButton(
+        Button current,
+        string objectName,
+        string labelName,
+        string localizationKey,
+        Vector2 anchoredPosition,
+        out TextMeshProUGUI label)
+    {
+        Button button = current;
+        if (button == null)
+        {
+            Transform existing =
+                _pauseMenuPanel.Find(objectName);
+            button = existing != null
+                ? existing.GetComponent<Button>()
+                : null;
+        }
+
+        if (button == null)
+        {
+            button = Instantiate(
+                pauseButton,
+                _pauseMenuPanel,
+                false);
+            button.name = objectName;
+        }
+        else if (button.transform.parent != _pauseMenuPanel)
+        {
+            button.transform.SetParent(_pauseMenuPanel, false);
+        }
+
+        button.onClick = new Button.ButtonClickedEvent();
+        RectTransform rect = button.transform as RectTransform;
+        if (rect != null)
+        {
+            rect.anchorMin = new Vector2(0.5f, 0.5f);
+            rect.anchorMax = new Vector2(0.5f, 0.5f);
+            rect.pivot = new Vector2(0.5f, 0.5f);
+            rect.anchoredPosition = anchoredPosition;
+            rect.sizeDelta = new Vector2(340f, 64f);
+            rect.localScale = Vector3.one;
+        }
+
+        Image buttonImage = button.targetGraphic as Image ??
+                            button.GetComponent<Image>();
+        if (buttonImage != null)
+        {
+            button.targetGraphic = buttonImage;
+            buttonImage.color =
+                new Color(0.2f, 0.38f, 0.3f, 1f);
+            buttonImage.raycastTarget = true;
+        }
+
+        ColorBlock colors = button.colors;
+        colors.normalColor =
+            new Color(0.2f, 0.38f, 0.3f, 1f);
+        colors.highlightedColor =
+            new Color(0.3f, 0.55f, 0.42f, 1f);
+        colors.pressedColor =
+            new Color(0.12f, 0.26f, 0.2f, 1f);
+        colors.selectedColor =
+            new Color(0.26f, 0.48f, 0.36f, 1f);
+        colors.disabledColor =
+            new Color(0.12f, 0.15f, 0.13f, 0.75f);
+        colors.colorMultiplier = 1f;
+        button.colors = colors;
+
+        label = button.GetComponentInChildren<TextMeshProUGUI>(true);
+        if (label != null)
+        {
+            label.name = labelName;
+            LocalizedText localizedText =
+                label.GetComponent<LocalizedText>();
+            if (localizedText == null)
+                localizedText =
+                    label.gameObject.AddComponent<LocalizedText>();
+            localizedText.SetKey(localizationKey);
+            LocalizationFontResolver.ApplyGameDefault(label);
+            label.fontSize = 28f;
+            label.fontStyle = FontStyles.Bold;
+            label.color = Color.white;
+            label.alignment = TextAlignmentOptions.Center;
+            label.raycastTarget = false;
+        }
+
+        button.gameObject.SetActive(true);
+        button.transform.SetAsLastSibling();
+        return button;
     }
 
     private void RefreshBattleTime()

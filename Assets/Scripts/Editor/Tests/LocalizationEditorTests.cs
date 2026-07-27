@@ -2,12 +2,16 @@ using System.Collections.Generic;
 using NUnit.Framework;
 using PS260714.Localization;
 using PS260714.Localization.Editor;
+using TMPro;
 using UnityEditor;
+using UnityEngine;
 
 public sealed class LocalizationEditorTests
 {
     private const string MarkupCatalogPath =
         "Assets/Resources/Localization/LocalizationMarkupCatalog.asset";
+    private const string FontCatalogPath =
+        "Assets/Resources/Localization/LocalizationFontCatalog.asset";
 
     [Test]
     public void ApplyStyle_WrapsSelectionAndKeepsContentSelected()
@@ -176,6 +180,47 @@ public sealed class LocalizationEditorTests
             catalog);
 
         Assert.That(rendered, Is.EqualTo("[MISSING_ICON]"));
+    }
+
+    [Test]
+    public void FontCatalog_DetachesDynamicProjectFontBeforeRendering()
+    {
+        LocalizationFontCatalog sourceCatalog =
+            AssetDatabase.LoadAssetAtPath<LocalizationFontCatalog>(
+                FontCatalogPath);
+        Assert.That(sourceCatalog, Is.Not.Null);
+        Assert.That(sourceCatalog.GlobalDefaultFont, Is.Not.Null);
+        Assert.That(
+            sourceCatalog.GlobalDefaultFont.atlasPopulationMode,
+            Is.Not.EqualTo(AtlasPopulationMode.Static));
+
+        LocalizationFontCatalog runtimeCatalog =
+            Object.Instantiate(sourceCatalog);
+        try
+        {
+            TMP_FontAsset sourceFont = sourceCatalog.GlobalDefaultFont;
+            TMP_FontAsset runtimeFont =
+                runtimeCatalog.PrepareFallbacks(sourceFont);
+
+            Assert.That(runtimeFont, Is.Not.Null);
+            Assert.That(runtimeFont, Is.Not.SameAs(sourceFont));
+            Assert.That(
+                runtimeFont.hideFlags & HideFlags.DontSave,
+                Is.Not.EqualTo(HideFlags.None));
+            Assert.That(
+                runtimeFont.atlasPopulationMode,
+                Is.EqualTo(AtlasPopulationMode.Dynamic));
+            Assert.That(
+                runtimeFont.atlasTextures[0],
+                Is.Not.SameAs(sourceFont.atlasTextures[0]));
+            Assert.That(
+                runtimeFont.material,
+                Is.Not.SameAs(sourceFont.material));
+        }
+        finally
+        {
+            Object.DestroyImmediate(runtimeCatalog);
+        }
     }
 
     private static LocalizationCsvDocument CreateLocalesDocument()

@@ -5,6 +5,78 @@ using UnityEngine;
 using UnityEngine.EventSystems;
 using UnityEngine.UI;
 
+internal enum CharacterAbilityIconKind
+{
+    Details,
+    Passive,
+    Active,
+}
+
+[DisallowMultipleComponent]
+internal sealed class CharacterAbilityIconView : MonoBehaviour,
+    IPointerEnterHandler,
+    IPointerExitHandler,
+    IPointerClickHandler
+{
+    private CharacterRuntime _owner;
+    private CharacterAbilityIconKind _kind;
+
+    public void Configure(
+        CharacterRuntime owner,
+        CharacterAbilityIconKind kind)
+    {
+        _owner = owner;
+        _kind = kind;
+    }
+
+    public void OnPointerEnter(PointerEventData eventData)
+    {
+        _owner?.ShowAbilityTooltip(_kind);
+    }
+
+    public void OnPointerExit(PointerEventData eventData)
+    {
+        _owner?.HideAbilityTooltip(_kind);
+    }
+
+    public void OnPointerClick(PointerEventData eventData)
+    {
+        if (_kind != CharacterAbilityIconKind.Active ||
+            eventData == null ||
+            eventData.button != PointerEventData.InputButton.Left)
+        {
+            return;
+        }
+
+        _owner?.HandleAbilityIconClick(_kind);
+    }
+}
+
+[DisallowMultipleComponent]
+internal sealed class CharacterInfoHoverView : MonoBehaviour,
+    IPointerEnterHandler,
+    IPointerExitHandler
+{
+    private CharacterRuntime _owner;
+
+    public void Configure(CharacterRuntime owner)
+    {
+        _owner = owner;
+    }
+
+    public void OnPointerEnter(PointerEventData eventData)
+    {
+        _owner?.ShowAbilityTooltip(
+            CharacterAbilityIconKind.Details);
+    }
+
+    public void OnPointerExit(PointerEventData eventData)
+    {
+        _owner?.HideAbilityTooltip(
+            CharacterAbilityIconKind.Details);
+    }
+}
+
 [DisallowMultipleComponent]
 [RequireComponent(typeof(AudioSource))]
 public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
@@ -16,6 +88,11 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
     private const float PassiveSdDisplayDuration = 0.7f;
     private const float SkillSdDisplayDuration = 0.9f;
     private const int MaximumStatusChangesPerDispatch = 128;
+    private const float AbilityIconSize = 48f;
+    private static readonly Color AbilityIconFrameColor =
+        new(0.055f, 0.07f, 0.062f, 0.98f);
+    private static readonly Color UnavailableAbilityIconColor =
+        new(0.28f, 0.28f, 0.28f, 1f);
 
     private struct RectLayout
     {
@@ -261,6 +338,12 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
     private System.Func<CharacterRuntime, bool> _itemTargetHandler;
     private GameObject _skillTooltip;
     private TextMeshProUGUI _skillTooltipText;
+    private CharacterAbilityIconKind _skillTooltipKind =
+        CharacterAbilityIconKind.Active;
+    private Image _passiveIconFrame;
+    private Image _passiveIconImage;
+    private Image _activeSkillIconFrame;
+    private Image _activeSkillIconImage;
     private bool _infoLayoutCached;
     private bool _sdLayoutEnabled;
     private RectTransform _cooldownTrack;
@@ -513,6 +596,7 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
 
         _initialized = true;
         EnsureSdInfoView();
+        EnsureAbilityIconView();
         EnsureSkillTooltip();
         RefreshUi();
         return true;
@@ -1367,15 +1451,52 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
         if ((!_initialized && !Initialize()) || Data == null)
             return;
 
-        EnsureSkillTooltip();
-        PositionSkillTooltip();
-        RefreshSkillTooltip();
-        _skillTooltip?.SetActive(true);
+        ShowAbilityTooltip(CharacterAbilityIconKind.Details);
     }
 
     public void OnPointerExit(PointerEventData eventData)
     {
         _skillTooltip?.SetActive(false);
+    }
+
+    internal void ShowAbilityTooltip(CharacterAbilityIconKind kind)
+    {
+        if ((!_initialized && !Initialize()) || Data == null)
+            return;
+
+        _skillTooltipKind = kind;
+        EnsureSkillTooltip();
+        RefreshSkillTooltip();
+        PositionSkillTooltip();
+        _skillTooltip?.SetActive(true);
+    }
+
+    internal void HideAbilityTooltip(CharacterAbilityIconKind kind)
+    {
+        if (_skillTooltipKind == kind)
+            _skillTooltip?.SetActive(false);
+    }
+
+    internal void HandleAbilityIconClick(CharacterAbilityIconKind kind)
+    {
+        if (kind != CharacterAbilityIconKind.Active)
+            return;
+
+        if (_itemTargetHandler != null && _itemTargetHandler(this))
+            return;
+
+        TryActivateActiveSkill();
+    }
+
+    public bool CanActivateActiveSkill()
+    {
+        return (_initialized || Initialize()) &&
+               _activeSkillResource != null &&
+               _board != null &&
+               Data != null &&
+               Data.HasCustomSkillDefinitions &&
+               !IsActiveSkillBlocked &&
+               _activeSkillResource.CanSpend(Data.ActiveSkillCost);
     }
 
     public bool TryActivateActiveSkill()
@@ -3529,7 +3650,7 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
 
         RectTransform tooltipRect =
             (RectTransform)_skillTooltip.transform;
-        tooltipRect.sizeDelta = new Vector2(410f, 172f);
+        tooltipRect.sizeDelta = new Vector2(420f, 220f);
         tooltipRect.localScale = Vector3.one;
 
         Canvas tooltipCanvas = _skillTooltip.GetComponent<Canvas>();
@@ -3564,6 +3685,9 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
         textRect.offsetMin = new Vector2(16f, 12f);
         textRect.offsetMax = new Vector2(-16f, -12f);
         _skillTooltipText.fontSize = 17f;
+        _skillTooltipText.enableAutoSizing = true;
+        _skillTooltipText.fontSizeMin = 12f;
+        _skillTooltipText.fontSizeMax = 17f;
         _skillTooltipText.fontStyle = FontStyles.Bold;
         _skillTooltipText.color = new Color(0.94f, 0.91f, 0.78f, 1f);
         _skillTooltipText.alignment = TextAlignmentOptions.MidlineLeft;
@@ -3578,6 +3702,7 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
             return;
 
         bool openToLeft = true;
+        float verticalOffset = 0f;
         Canvas rootCanvas = GetComponentInParent<Canvas>()?.rootCanvas;
         RectTransform canvasRect = rootCanvas != null
             ? rootCanvas.transform as RectTransform
@@ -3590,6 +3715,22 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
             Vector3 canvasLocalCenter = canvasRect.InverseTransformPoint(
                 worldCenter);
             openToLeft = canvasLocalCenter.x > canvasRect.rect.center.x;
+
+            RectTransform measuredTooltipRect =
+                (RectTransform)_skillTooltip.transform;
+            float halfHeight =
+                measuredTooltipRect.rect.height * 0.5f;
+            float minimumCenter = canvasRect.rect.yMin + halfHeight + 12f;
+            float maximumCenter = canvasRect.rect.yMax - halfHeight - 12f;
+            if (minimumCenter <= maximumCenter)
+            {
+                float clampedCenter = Mathf.Clamp(
+                    canvasLocalCenter.y,
+                    minimumCenter,
+                    maximumCenter);
+                verticalOffset =
+                    clampedCenter - canvasLocalCenter.y;
+            }
         }
 
         RectTransform tooltipRect =
@@ -3600,7 +3741,7 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
         tooltipRect.pivot = new Vector2(openToLeft ? 1f : 0f, 0.5f);
         tooltipRect.anchoredPosition = new Vector2(
             openToLeft ? -12f : 12f,
-            0f);
+            verticalOffset);
         tooltipRect.SetAsLastSibling();
     }
 
@@ -3608,6 +3749,24 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
     {
         if (_skillTooltipText == null || Data == null)
             return;
+
+        if (_skillTooltipKind == CharacterAbilityIconKind.Details)
+        {
+            ResizeSkillTooltip(new Vector2(520f, 430f));
+            _skillTooltipText.text = BuildCharacterDetailTooltip();
+            return;
+        }
+
+        ResizeSkillTooltip(new Vector2(420f, 220f));
+        if (_skillTooltipKind == CharacterAbilityIconKind.Passive)
+        {
+            string passiveTitle = LocalizationService.Get(
+                LocalizationKeys.CodexCharacterPassive);
+            _skillTooltipText.text =
+                $"<b>{passiveTitle}</b>\n" +
+                CharacterLocalization.GetPassiveDescription(Data);
+            return;
+        }
 
         bool hasEnoughEnergy = _activeSkillResource != null &&
                                _activeSkillResource.Current >=
@@ -3623,6 +3782,63 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
             CharacterLocalization.GetTurretClickActivate();
     }
 
+    private void ResizeSkillTooltip(Vector2 size)
+    {
+        if (_skillTooltip != null)
+            ((RectTransform)_skillTooltip.transform).sizeDelta = size;
+    }
+
+    private string BuildCharacterDetailTooltip()
+    {
+        System.Text.StringBuilder builder = new();
+        builder.Append("<size=22><b>");
+        builder.Append(CharacterLocalization.GetName(Data));
+        builder.Append("</b></size>\n");
+        builder.Append(CharacterLocalization.GetCompactSummary(Data));
+        builder.Append("  |  ");
+        builder.Append(GetCurrentCooldownStatusText());
+
+        string characterDescription =
+            CharacterLocalization.GetDescription(Data);
+        if (!string.IsNullOrWhiteSpace(characterDescription))
+        {
+            builder.Append("\n\n");
+            builder.Append(characterDescription);
+        }
+
+        if (Data.HasCustomAttackDefinitions)
+        {
+            builder.Append("\n\n<b>");
+            builder.Append(LocalizationService.Get(
+                LocalizationKeys.CodexCharacterNormalAttack));
+            builder.Append("</b>\n");
+            builder.Append(
+                CharacterLocalization.GetNormalAttackDescription(Data));
+        }
+
+        if (Data.HasCustomPassiveDefinitions)
+        {
+            builder.Append("\n\n<b>");
+            builder.Append(LocalizationService.Get(
+                LocalizationKeys.CodexCharacterPassive));
+            builder.Append("</b>\n");
+            builder.Append(
+                CharacterLocalization.GetPassiveDescription(Data));
+        }
+
+        if (Data.HasCustomSkillDefinitions)
+        {
+            builder.Append("\n\n<b>");
+            builder.Append(CharacterLocalization.GetActiveSkillTitle(
+                Data.ActiveSkillCost));
+            builder.Append("</b>\n");
+            builder.Append(
+                CharacterLocalization.GetActiveSkillDescription(Data));
+        }
+
+        return builder.ToString();
+    }
+
     private void EnsureSdInfoView()
     {
         CacheInfoLayout();
@@ -3632,13 +3848,14 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
              Data.AttackSdSprite != null ||
              Data.DamagedSdSprite != null ||
              Data.SkillSdSprite != null ||
-             Data.PassiveSdSprite != null);
+             Data.PassiveSdSprite != null ||
+             Data.IconSprite != null);
 
         if (!hasSdSprite)
         {
             if (sdImage != null)
                 sdImage.gameObject.SetActive(false);
-            ApplySdInfoLayout(false);
+            ApplySdInfoLayout(true);
             return;
         }
 
@@ -3661,15 +3878,19 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
         }
 
         RectTransform imageRect = sdImage.rectTransform;
-        imageRect.anchorMin = new Vector2(0f, 0.5f);
-        imageRect.anchorMax = new Vector2(0f, 0.5f);
-        imageRect.pivot = new Vector2(0f, 0.5f);
-        imageRect.anchoredPosition = new Vector2(4f, 0f);
-        imageRect.sizeDelta = new Vector2(104f, 104f);
+        imageRect.anchorMin = Vector2.zero;
+        imageRect.anchorMax = Vector2.zero;
+        imageRect.pivot = Vector2.zero;
+        imageRect.anchoredPosition = new Vector2(-10f, 18f);
+        imageRect.sizeDelta = new Vector2(168f, 168f);
         imageRect.localScale = Vector3.one;
         sdImage.preserveAspect = true;
-        sdImage.raycastTarget = false;
+        sdImage.raycastTarget = true;
         sdImage.type = Image.Type.Simple;
+        CharacterInfoHoverView interaction =
+            sdImage.GetComponent<CharacterInfoHoverView>() ??
+            sdImage.gameObject.AddComponent<CharacterInfoHoverView>();
+        interaction.Configure(this);
         sdImage.gameObject.SetActive(true);
         imageRect.SetAsFirstSibling();
 
@@ -3705,6 +3926,9 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
 
         if (!enabled)
         {
+            nameText.gameObject.SetActive(true);
+            attackText.gameObject.SetActive(true);
+            cooldownText.gameObject.SetActive(true);
             _nameLayout.Apply(nameText.rectTransform);
             _attackLayout.Apply(attackText.rectTransform);
             _cooldownLayout.Apply(cooldownText.rectTransform);
@@ -3713,34 +3937,167 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
             return;
         }
 
-        SetAnchoredRect(
-            nameText.rectTransform,
-            new Vector2(0f, 1f),
-            new Vector2(0f, 1f),
-            new Vector2(0f, 1f),
-            new Vector2(116f, -4f),
-            new Vector2(172f, 38f));
-        SetAnchoredRect(
-            attackText.rectTransform,
-            Vector2.zero,
-            Vector2.zero,
-            Vector2.zero,
-            new Vector2(116f, 27f),
-            new Vector2(80f, 36f));
-        SetAnchoredRect(
-            cooldownText.rectTransform,
-            new Vector2(1f, 0f),
-            new Vector2(1f, 0f),
-            new Vector2(1f, 0f),
-            new Vector2(-8f, 27f),
-            new Vector2(84f, 36f));
+        nameText.gameObject.SetActive(false);
+        attackText.gameObject.SetActive(false);
+        cooldownText.gameObject.SetActive(false);
 
         _cooldownTrack.anchorMin = Vector2.zero;
         _cooldownTrack.anchorMax = new Vector2(1f, 0f);
         _cooldownTrack.pivot = new Vector2(0.5f, 0.5f);
-        _cooldownTrack.offsetMin = new Vector2(116f, 7f);
-        _cooldownTrack.offsetMax = new Vector2(-8f, 17f);
+        _cooldownTrack.offsetMin = new Vector2(6f, 4f);
+        _cooldownTrack.offsetMax = new Vector2(-6f, 14f);
         _sdLayoutEnabled = true;
+    }
+
+    private void EnsureAbilityIconView()
+    {
+        _passiveIconImage = EnsureAbilityIcon(
+            "grpPassiveAbilityIcon",
+            "imgPassiveAbilityIcon",
+            new Vector2(-8f, -6f),
+            CharacterAbilityIconKind.Passive,
+            out _passiveIconFrame);
+        _activeSkillIconImage = EnsureAbilityIcon(
+            "grpActiveAbilityIcon",
+            "imgActiveAbilityIcon",
+            new Vector2(-8f, -60f),
+            CharacterAbilityIconKind.Active,
+            out _activeSkillIconFrame);
+        RefreshAbilityIcons();
+    }
+
+    private Image EnsureAbilityIcon(
+        string frameName,
+        string imageName,
+        Vector2 anchoredPosition,
+        CharacterAbilityIconKind kind,
+        out Image frameImage)
+    {
+        Transform existingFrame = transform.Find(frameName);
+        GameObject frameObject = existingFrame != null
+            ? existingFrame.gameObject
+            : new GameObject(
+                frameName,
+                typeof(RectTransform),
+                typeof(CanvasRenderer),
+                typeof(Image),
+                typeof(Outline),
+                typeof(CharacterAbilityIconView));
+        if (existingFrame == null)
+            frameObject.transform.SetParent(transform, false);
+        frameObject.layer = gameObject.layer;
+
+        RectTransform frameRect =
+            (RectTransform)frameObject.transform;
+        frameRect.anchorMin = Vector2.one;
+        frameRect.anchorMax = Vector2.one;
+        frameRect.pivot = Vector2.one;
+        frameRect.anchoredPosition = anchoredPosition;
+        frameRect.sizeDelta = new Vector2(
+            AbilityIconSize,
+            AbilityIconSize);
+        frameRect.localScale = Vector3.one;
+
+        frameImage = frameObject.GetComponent<Image>() ??
+                     frameObject.AddComponent<Image>();
+        frameImage.color = AbilityIconFrameColor;
+        frameImage.raycastTarget = true;
+
+        Outline outline = frameObject.GetComponent<Outline>() ??
+                          frameObject.AddComponent<Outline>();
+        outline.effectColor = new Color(
+            EffectColor.r,
+            EffectColor.g,
+            EffectColor.b,
+            0.9f);
+        outline.effectDistance = new Vector2(2f, -2f);
+        outline.useGraphicAlpha = true;
+
+        CharacterAbilityIconView interaction =
+            frameObject.GetComponent<CharacterAbilityIconView>() ??
+            frameObject.AddComponent<CharacterAbilityIconView>();
+        interaction.Configure(this, kind);
+
+        Transform existingImage = frameRect.Find(imageName);
+        GameObject imageObject = existingImage != null
+            ? existingImage.gameObject
+            : new GameObject(
+                imageName,
+                typeof(RectTransform),
+                typeof(CanvasRenderer),
+                typeof(Image));
+        if (existingImage == null)
+            imageObject.transform.SetParent(frameRect, false);
+        imageObject.layer = gameObject.layer;
+
+        Image iconImage = imageObject.GetComponent<Image>() ??
+                          imageObject.AddComponent<Image>();
+        RectTransform iconRect = iconImage.rectTransform;
+        iconRect.anchorMin = Vector2.zero;
+        iconRect.anchorMax = Vector2.one;
+        iconRect.offsetMin = new Vector2(4f, 4f);
+        iconRect.offsetMax = new Vector2(-4f, -4f);
+        iconRect.localScale = Vector3.one;
+        iconImage.type = Image.Type.Simple;
+        iconImage.preserveAspect = true;
+        iconImage.raycastTarget = false;
+        frameRect.SetAsLastSibling();
+        return iconImage;
+    }
+
+    private void RefreshAbilityIcons()
+    {
+        if (Data == null)
+            return;
+
+        bool hasPassive = Data.HasCustomPassiveDefinitions;
+        if (_passiveIconFrame != null)
+            _passiveIconFrame.gameObject.SetActive(hasPassive);
+        if (_passiveIconImage != null)
+        {
+            _passiveIconImage.sprite =
+                Data.PassiveAbilityIconSprite;
+            _passiveIconImage.enabled =
+                _passiveIconImage.sprite != null;
+            _passiveIconImage.color = Color.white;
+        }
+
+        bool hasActiveSkill = Data.HasCustomSkillDefinitions;
+        if (_activeSkillIconFrame != null)
+            _activeSkillIconFrame.gameObject.SetActive(hasActiveSkill);
+        if (_activeSkillIconImage != null)
+        {
+            _activeSkillIconImage.sprite =
+                Data.ActiveAbilityIconSprite;
+            _activeSkillIconImage.enabled =
+                _activeSkillIconImage.sprite != null;
+            _activeSkillIconImage.color = CanActivateActiveSkill()
+                ? Color.white
+                : UnavailableAbilityIconColor;
+        }
+
+        if (_passiveIconFrame != null)
+        {
+            Outline passiveOutline =
+                _passiveIconFrame.GetComponent<Outline>();
+            if (passiveOutline != null)
+                passiveOutline.effectColor = EffectColor;
+        }
+        if (_activeSkillIconFrame != null)
+        {
+            bool available = CanActivateActiveSkill();
+            _activeSkillIconFrame.color = available
+                ? Color.Lerp(AbilityIconFrameColor, EffectColor, 0.2f)
+                : AbilityIconFrameColor;
+            Outline activeOutline =
+                _activeSkillIconFrame.GetComponent<Outline>();
+            if (activeOutline != null)
+            {
+                activeOutline.effectColor = available
+                    ? EffectColor
+                    : new Color(0.18f, 0.18f, 0.18f, 1f);
+            }
+        }
     }
 
     private static void SetAnchoredRect(
@@ -3777,6 +4134,8 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
             sprite = Data.DamagedSdSprite;
         if (sprite == null)
             sprite = Data.WaitingSdSprite;
+        if (sprite == null)
+            sprite = Data.IconSprite;
 
         sdImage.sprite = sprite;
         sdImage.enabled = sprite != null;
@@ -3795,28 +4154,7 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
         nameText.text = slotLabel + CharacterLocalization.GetTurretName(Data);
         nameText.color = EffectColor;
         attackText.text = CharacterLocalization.GetTurretAttack(Data);
-        float disabledTimeRemaining = GetDisabledDuration();
-        if (disabledTimeRemaining > 0f)
-        {
-            cooldownText.text =
-                CharacterLocalization.GetCooldownStop(
-                    DisabledTimeRemaining);
-        }
-        else if (_attackRecoveryRemaining > 0f)
-        {
-            float displayedRecovery =
-                TimePrecision.FloorToTenth(_attackRecoveryRemaining);
-            cooldownText.text =
-                CharacterLocalization.GetCooldownRecovery(displayedRecovery);
-        }
-        else
-        {
-            float displayedCooldown =
-                TimePrecision.FloorToTenth(_remainingCooldown);
-            cooldownText.text = _remainingCooldown > 0f
-                ? CharacterLocalization.GetCooldownWait(displayedCooldown)
-                : CharacterLocalization.GetReadyStatus();
-        }
+        cooldownText.text = GetCurrentCooldownStatusText();
         float effectiveAttackCooldown = GetEffectiveAttackCooldown();
         cooldownFill.fillAmount = _attackRecoveryRemaining > 0f
             ? 0f
@@ -3827,16 +4165,35 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
         cooldownFill.color = EffectColor;
 
         if (_panelImage != null)
-        {
-            bool canAfford = _activeSkillResource != null &&
-                             _activeSkillResource.Current >=
-                             Data.ActiveSkillCost;
-            _panelImage.color = canAfford
-                ? _defaultPanelColor
-                : Color.Lerp(_defaultPanelColor, Color.black, 0.35f);
-        }
+            _panelImage.color = _defaultPanelColor;
+
+        RefreshAbilityIcons();
 
         if (_skillTooltip != null && _skillTooltip.activeSelf)
             RefreshSkillTooltip();
+    }
+
+    private string GetCurrentCooldownStatusText()
+    {
+        float disabledTimeRemaining = GetDisabledDuration();
+        if (disabledTimeRemaining > 0f)
+        {
+            return CharacterLocalization.GetCooldownStop(
+                DisabledTimeRemaining);
+        }
+
+        if (_attackRecoveryRemaining > 0f)
+        {
+            float displayedRecovery =
+                TimePrecision.FloorToTenth(_attackRecoveryRemaining);
+            return CharacterLocalization.GetCooldownRecovery(
+                displayedRecovery);
+        }
+
+        float displayedCooldown =
+            TimePrecision.FloorToTenth(_remainingCooldown);
+        return _remainingCooldown > 0f
+            ? CharacterLocalization.GetCooldownWait(displayedCooldown)
+            : CharacterLocalization.GetReadyStatus();
     }
 }
