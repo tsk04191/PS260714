@@ -5235,6 +5235,177 @@ public sealed class CharacterP0RegressionTests
     }
 
     [Test]
+    public void AlliedStatus_ExplicitSelectionRemovesEveryChosenStatus()
+    {
+        StatusEffectSO firstStatus = CreateRuntimeStatus(
+            "test_multi_removal_a",
+            false,
+            true,
+            StatusEffectStackMode.AddAndRefreshDuration,
+            0);
+        StatusEffectSO secondStatus = CreateRuntimeStatus(
+            "test_multi_removal_b",
+            false,
+            true,
+            StatusEffectStackMode.AddAndRefreshDuration,
+            0);
+        StatusEffectSO untouchedStatus = CreateRuntimeStatus(
+            "test_multi_removal_untouched",
+            false,
+            true,
+            StatusEffectStackMode.AddAndRefreshDuration,
+            0);
+        CharacterRuntime character = CreateCharacter(SuirenAssetPath);
+        character.ApplyStatusEffect(firstStatus, 5f, 2);
+        character.ApplyStatusEffect(secondStatus, 5f, 3);
+        character.ApplyStatusEffect(untouchedStatus, 5f, 4);
+
+        CharacterStatusRemovalSelection selection = new(
+            CharacterStatusRemovalTarget.Single,
+            null,
+            new[] { firstStatus, secondStatus, firstStatus });
+        int removed = character.RemoveStatusEffects(
+            selection,
+            CharacterStatusRemovalAmount.Fixed(0));
+
+        Assert.That(removed, Is.EqualTo(5));
+        Assert.That(character.GetStatusStackCount(firstStatus), Is.Zero);
+        Assert.That(character.GetStatusStackCount(secondStatus), Is.Zero);
+        Assert.That(
+            character.GetStatusStackCount(untouchedStatus),
+            Is.EqualTo(4));
+    }
+
+    [Test]
+    public void AlliedStatus_AlignmentRemovalRespectsProtectedStatuses()
+    {
+        StatusEffectSO buff = CreateRuntimeStatus(
+            "test_group_removal_buff",
+            false,
+            true,
+            StatusEffectStackMode.AddAndRefreshDuration,
+            0);
+        StatusEffectSO protectedBuff = CreateRuntimeStatus(
+            "test_group_removal_protected_buff",
+            false,
+            true,
+            StatusEffectStackMode.AddAndRefreshDuration,
+            0);
+        StatusEffectSO debuff = CreateRuntimeStatus(
+            "test_group_removal_debuff",
+            false,
+            true,
+            StatusEffectStackMode.AddAndRefreshDuration,
+            0);
+        StatusEffectSO neutral = CreateRuntimeStatus(
+            "test_group_removal_neutral",
+            false,
+            true,
+            StatusEffectStackMode.AddAndRefreshDuration,
+            0);
+        ConfigureStatusRemovalMetadata(
+            buff,
+            StatusEffectAlignment.Buff,
+            true);
+        ConfigureStatusRemovalMetadata(
+            protectedBuff,
+            StatusEffectAlignment.Buff,
+            false);
+        ConfigureStatusRemovalMetadata(
+            debuff,
+            StatusEffectAlignment.Debuff,
+            true);
+        ConfigureStatusRemovalMetadata(
+            neutral,
+            StatusEffectAlignment.Neutral,
+            true);
+        CharacterRuntime character = CreateCharacter(SuirenAssetPath);
+        character.ApplyStatusEffect(buff, 5f, 1);
+        character.ApplyStatusEffect(protectedBuff, 5f, 1);
+        character.ApplyStatusEffect(debuff, 5f, 1);
+        character.ApplyStatusEffect(neutral, 5f, 1);
+
+        Assert.That(
+            character.RemoveStatusEffects(
+                new CharacterStatusRemovalSelection(
+                    CharacterStatusRemovalTarget.Buff,
+                    null),
+                CharacterStatusRemovalAmount.Fixed(0)),
+            Is.EqualTo(1));
+        Assert.That(character.GetStatusStackCount(buff), Is.Zero);
+        Assert.That(
+            character.GetStatusStackCount(protectedBuff),
+            Is.EqualTo(1));
+        Assert.That(character.GetStatusStackCount(debuff), Is.EqualTo(1));
+        Assert.That(character.GetStatusStackCount(neutral), Is.EqualTo(1));
+
+        Assert.That(
+            character.RemoveStatusEffects(
+                new CharacterStatusRemovalSelection(
+                    CharacterStatusRemovalTarget.Debuff,
+                    null),
+                CharacterStatusRemovalAmount.Fixed(0)),
+            Is.EqualTo(1));
+        Assert.That(character.GetStatusStackCount(debuff), Is.Zero);
+
+        Assert.That(
+            character.RemoveStatusEffects(
+                new CharacterStatusRemovalSelection(
+                    CharacterStatusRemovalTarget.All,
+                    null),
+                CharacterStatusRemovalAmount.Fixed(0)),
+            Is.EqualTo(1));
+        Assert.That(character.GetStatusStackCount(neutral), Is.Zero);
+        Assert.That(
+            character.GetStatusStackCount(protectedBuff),
+            Is.EqualTo(1));
+    }
+
+    [Test]
+    public void EnemyStatus_DebuffRemovalKeepsBuffs()
+    {
+        StatusEffectSO buff = CreateRuntimeStatus(
+            "test_enemy_group_removal_buff",
+            true,
+            false,
+            StatusEffectStackMode.AddAndRefreshDuration,
+            0);
+        StatusEffectSO debuff = CreateRuntimeStatus(
+            "test_enemy_group_removal_debuff",
+            true,
+            false,
+            StatusEffectStackMode.AddAndRefreshDuration,
+            0);
+        ConfigureStatusRemovalMetadata(
+            buff,
+            StatusEffectAlignment.Buff,
+            true);
+        ConfigureStatusRemovalMetadata(
+            debuff,
+            StatusEffectAlignment.Debuff,
+            true);
+        EnemyRuntime enemy = CreateEnemyRuntime();
+        CharacterRuntime source = CreateCharacter(SuirenAssetPath);
+        Assert.That(
+            ApplyEnemyStatus(enemy, buff, 5f, 2, source, 1f),
+            Is.True);
+        Assert.That(
+            ApplyEnemyStatus(enemy, debuff, 5f, 3, source, 1f),
+            Is.True);
+
+        int removed = RemoveEnemyStatuses(
+            enemy,
+            new CharacterStatusRemovalSelection(
+                CharacterStatusRemovalTarget.Debuff,
+                null),
+            CharacterStatusRemovalAmount.Fixed(0));
+
+        Assert.That(removed, Is.EqualTo(3));
+        Assert.That(GetEnemyStatusStacks(enemy, debuff), Is.Zero);
+        Assert.That(GetEnemyStatusStacks(enemy, buff), Is.EqualTo(2));
+    }
+
+    [Test]
     public void AlliedStatus_ActualBoardPreservesApplyingSource()
     {
         StatusEffectSO status = CreateRuntimeStatus(
@@ -5547,6 +5718,19 @@ public sealed class CharacterP0RegressionTests
             Mathf.Max(0, operationCount);
         serialized.ApplyModifiedPropertiesWithoutUndo();
         return status;
+    }
+
+    private static void ConfigureStatusRemovalMetadata(
+        StatusEffectSO status,
+        StatusEffectAlignment alignment,
+        bool includedInAllRemoval)
+    {
+        SerializedObject serialized = new(status);
+        serialized.FindProperty("alignment").enumValueIndex =
+            (int)alignment;
+        serialized.FindProperty("includedInAllRemoval").boolValue =
+            includedInAllRemoval;
+        serialized.ApplyModifiedPropertiesWithoutUndo();
     }
 
     private static void ConfigureRuntimeStatusOperation(
@@ -5874,6 +6058,25 @@ public sealed class CharacterP0RegressionTests
             status,
             removalCount,
             applyDamage);
+    }
+
+    private static int RemoveEnemyStatuses(
+        EnemyRuntime enemy,
+        CharacterStatusRemovalSelection removalSelection,
+        CharacterStatusRemovalAmount removalAmount)
+    {
+        return (int)InvokeEnemyRuntime(
+            enemy,
+            "RemoveStatusEffects",
+            new[]
+            {
+                typeof(CharacterStatusRemovalSelection),
+                typeof(CharacterStatusRemovalAmount),
+                typeof(Func<int, IBattleCharacter, bool>),
+            },
+            removalSelection,
+            removalAmount,
+            null);
     }
 
     private static void ApplyFire(
@@ -7866,8 +8069,7 @@ public sealed class CharacterP0RegressionTests
         public bool TryRemoveCharacterStatus(
             IBattleCharacter source,
             IReadOnlyList<EnemyRuntime> targets,
-            CharacterStatusRemovalTarget removalTarget,
-            StatusEffectSO statusEffect,
+            CharacterStatusRemovalSelection removalSelection,
             CharacterStatusRemovalAmount removalAmount,
             bool showAttackRange)
         {
@@ -7877,8 +8079,7 @@ public sealed class CharacterP0RegressionTests
         public bool TryRemoveAlliedCharacterStatus(
             IBattleCharacter source,
             IReadOnlyList<IBattleCharacter> targets,
-            CharacterStatusRemovalTarget removalTarget,
-            StatusEffectSO statusEffect,
+            CharacterStatusRemovalSelection removalSelection,
             CharacterStatusRemovalAmount removalAmount)
         {
             AlliedStatusRemovalCallCount++;
@@ -7895,8 +8096,7 @@ public sealed class CharacterP0RegressionTests
                 if (target != null)
                 {
                     removed |= target.RemoveStatusEffects(
-                        removalTarget,
-                        statusEffect,
+                        removalSelection,
                         removalAmount) > 0;
                 }
             }

@@ -2049,39 +2049,80 @@ public static class CharacterDefinitionValidator
             "effect",
             result);
 
+        if (!Enum.IsDefined(
+                typeof(CharacterStatusRemovalTarget),
+                effect.StatusRemovalTarget))
+        {
+            AddError(
+                result,
+                "effect.removal_target_invalid",
+                $"{effectPath}.statusRemovalTarget",
+                $"Unsupported status removal target " +
+                $"'{effect.StatusRemovalTarget}'.");
+            return;
+        }
+
         if (effect.StatusRemovalTarget !=
             CharacterStatusRemovalTarget.Single)
         {
             return;
         }
 
-        StatusEffectSO status = effect.StatusEffect;
-        if (status == null)
+        CharacterStatusRemovalSelection selection =
+            effect.StatusRemovalSelection;
+        if (!selection.HasExplicitStatus)
         {
             AddError(
                 result,
                 "effect.removal_status_required",
-                $"{effectPath}.statusEffect",
-                "Single RemoveStatus effect requires an explicit " +
+                $"{effectPath}.statusRemovalEffects",
+                "Explicit RemoveStatus effect requires at least one " +
                 "StatusEffectSO.");
+            return;
         }
-        else if (!status.Removable)
+
+        HashSet<StatusEffectSO> visited = new();
+        for (int index = 0;
+             index < selection.ExplicitStatusCount;
+             index++)
         {
-            AddError(
-                result,
-                "effect.removal_status_not_removable",
-                $"{effectPath}.statusEffect",
-                $"Status '{status.name}' is not removable.");
-        }
-        else if (targetFaction.HasValue &&
-                 !CanTargetFaction(status, targetFaction.Value))
-        {
-            AddError(
-                result,
-                "effect.removal_status_faction_mismatch",
-                $"{effectPath}.statusEffect",
-                $"Status '{status.name}' cannot exist on " +
-                $"{targetFaction} targets.");
+            StatusEffectSO status = selection.GetExplicitStatus(index);
+            string statusPath =
+                $"{effectPath}.statusRemovalEffects[{index}]";
+            if (status == null)
+            {
+                AddError(
+                    result,
+                    "effect.removal_status_null",
+                    statusPath,
+                    "Status removal selection cannot contain null.");
+            }
+            else if (!visited.Add(status))
+            {
+                AddError(
+                    result,
+                    "effect.removal_status_duplicate",
+                    statusPath,
+                    $"Status '{status.name}' is selected more than once.");
+            }
+            else if (!status.Removable)
+            {
+                AddError(
+                    result,
+                    "effect.removal_status_not_removable",
+                    statusPath,
+                    $"Status '{status.name}' is not removable.");
+            }
+            else if (targetFaction.HasValue &&
+                     !CanTargetFaction(status, targetFaction.Value))
+            {
+                AddError(
+                    result,
+                    "effect.removal_status_faction_mismatch",
+                    statusPath,
+                    $"Status '{status.name}' cannot exist on " +
+                    $"{targetFaction} targets.");
+            }
         }
     }
 
@@ -2184,6 +2225,18 @@ public static class CharacterDefinitionValidator
                     actionPath,
                     "ability",
                     result);
+                if (!Enum.IsDefined(
+                        typeof(CharacterStatusRemovalTarget),
+                        removalTarget))
+                {
+                    AddError(
+                        result,
+                        "ability.removal_target_invalid",
+                        $"{actionPath}.statusRemovalTarget",
+                        $"Unsupported status removal target " +
+                        $"'{removalTarget}'.");
+                    break;
+                }
                 if (removalTarget == CharacterStatusRemovalTarget.Single)
                 {
                     if (removalStatus == null)
@@ -3213,7 +3266,9 @@ public static class StatusEffectDefinitionValidator
             }
             if (definition.CanTargetEnemy &&
                 control.ControlType !=
-                    StatusEffectControlType.DisableAllActions)
+                    StatusEffectControlType.DisableAllActions &&
+                control.ControlType !=
+                    StatusEffectControlType.ForceTargeting)
             {
                 AddWarning(
                     result,
@@ -3278,8 +3333,18 @@ public static class StatusEffectDefinitionValidator
                 $"{path}.value",
                 "Multiplicative ratio cannot be less than -1.");
         }
+        if (modifier.StatType == StatusEffectStatType.TargetPriority &&
+            modifier.Mode != StatusEffectStatModifierMode.Flat)
+        {
+            AddError(
+                result,
+                "status.target_priority_mode_invalid",
+                $"{path}.mode",
+                "Target priority only supports flat adjustments.");
+        }
         bool supportsEnemy =
-            modifier.StatType == StatusEffectStatType.IncomingDamage;
+            modifier.StatType == StatusEffectStatType.IncomingDamage ||
+            modifier.StatType == StatusEffectStatType.TargetPriority;
         if (!definition.CanTargetAlly && !supportsEnemy)
         {
             AddWarning(

@@ -68,7 +68,8 @@ public enum StatusEffectStatType
 {
     AttackPower = 0,
     AttackSpeed = 1,
-    IncomingDamage = 2
+    IncomingDamage = 2,
+    TargetPriority = 3
 }
 
 public enum StatusEffectStatModifierMode
@@ -83,7 +84,8 @@ public enum StatusEffectControlType
     DisableAllActions = 0,
     DisableBasicAttack = 1,
     DisableActiveSkill = 2,
-    PausePassiveCooldowns = 3
+    PausePassiveCooldowns = 3,
+    ForceTargeting = 4
 }
 
 public static class StatusEffectIds
@@ -115,6 +117,8 @@ public sealed class StatusEffectStatModifierDefinition
     {
         if (float.IsNaN(value) || float.IsInfinity(value))
             value = 0f;
+        if (statType == StatusEffectStatType.TargetPriority)
+            mode = StatusEffectStatModifierMode.Flat;
         if (mode == StatusEffectStatModifierMode.MultiplicativeRatio)
             value = Mathf.Max(-1f, value);
     }
@@ -211,6 +215,68 @@ public struct StatusEffectStatAccumulator
 
         _initialized = true;
         _multiplicativeFactor = 1f;
+    }
+}
+
+public readonly struct StatusEffectTargetPriority
+{
+    public bool IsForced { get; }
+    public float Adjustment { get; }
+
+    public StatusEffectTargetPriority(bool isForced, float adjustment)
+    {
+        IsForced = isForced;
+        Adjustment =
+            float.IsNaN(adjustment) || float.IsInfinity(adjustment)
+                ? 0f
+                : adjustment;
+    }
+}
+
+public static class StatusEffectTargetPriorityResolver
+{
+    public static StatusEffectTargetPriority Resolve(
+        IReadOnlyList<BattleStatusSnapshot> statuses)
+    {
+        if (statuses == null || statuses.Count == 0)
+            return default;
+
+        bool forced = false;
+        StatusEffectStatAccumulator accumulator = default;
+        foreach (BattleStatusSnapshot status in statuses)
+        {
+            if (!status.IsValid || status.Definition == null)
+                continue;
+
+            StatusEffectSO definition = status.Definition;
+            if (definition.HasControl(
+                    StatusEffectControlType.ForceTargeting))
+            {
+                forced = true;
+            }
+
+            IReadOnlyList<StatusEffectStatModifierDefinition> modifiers =
+                definition.StatModifiers;
+            if (modifiers == null)
+                continue;
+
+            foreach (StatusEffectStatModifierDefinition modifier in
+                     modifiers)
+            {
+                if (modifier != null &&
+                    modifier.StatType ==
+                        StatusEffectStatType.TargetPriority)
+                {
+                    accumulator.Add(
+                        modifier,
+                        Mathf.Max(1, status.StackCount));
+                }
+            }
+        }
+
+        return new StatusEffectTargetPriority(
+            forced,
+            accumulator.Evaluate(0f));
     }
 }
 

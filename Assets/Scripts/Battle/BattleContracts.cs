@@ -404,7 +404,7 @@ public static class BattleEffectExecutor
                 if (effectContext.Board == null ||
                     (effect.StatusRemovalTarget ==
                          CharacterStatusRemovalTarget.Single &&
-                     effect.StatusEffect == null))
+                     !effect.StatusRemovalSelection.HasExplicitStatus))
                 {
                     return default;
                 }
@@ -416,14 +416,12 @@ public static class BattleEffectExecutor
                     ? effectContext.Board.TryRemoveAlliedCharacterStatus(
                         effectContext.Source,
                         effectContext.AllyTargets,
-                        effect.StatusRemovalTarget,
-                        effect.StatusEffect,
+                        effect.StatusRemovalSelection,
                         removalAmount)
                     : effectContext.Board.TryRemoveCharacterStatus(
                         effectContext.Source,
                         effectContext.EnemyTargets,
-                        effect.StatusRemovalTarget,
-                        effect.StatusEffect,
+                        effect.StatusRemovalSelection,
                         removalAmount,
                         showAttackRange);
                 result = new BattleEffectResult(true, changed);
@@ -1409,15 +1407,13 @@ public interface IBattleBoard
     bool TryRemoveCharacterStatus(
         IBattleCharacter source,
         IReadOnlyList<EnemyRuntime> targets,
-        CharacterStatusRemovalTarget removalTarget,
-        StatusEffectSO statusEffect,
+        CharacterStatusRemovalSelection removalSelection,
         CharacterStatusRemovalAmount removalAmount,
         bool showAttackRange);
     bool TryRemoveAlliedCharacterStatus(
         IBattleCharacter source,
         IReadOnlyList<IBattleCharacter> targets,
-        CharacterStatusRemovalTarget removalTarget,
-        StatusEffectSO statusEffect,
+        CharacterStatusRemovalSelection removalSelection,
         CharacterStatusRemovalAmount removalAmount);
 }
 
@@ -1460,7 +1456,6 @@ public interface IBattleCharacter
         int stacks,
         IBattleCharacter source);
     int RemoveStatusEffects(
-        CharacterStatusRemovalTarget removalTarget,
-        StatusEffectSO statusEffect,
+        CharacterStatusRemovalSelection removalSelection,
         CharacterStatusRemovalAmount removalAmount);
 }

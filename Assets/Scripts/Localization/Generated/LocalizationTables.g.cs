@@ -9,7 +9,7 @@ namespace PS260714.Localization
 {
     public static class GeneratedLocalizationTables
     {
-        public const string SourceHash = "a9d705c36e95bb0e29d9293af127f47ff7c86abb0a430c4e217713a6e3105675";
+        public const string SourceHash = "60653e335a6bd2ac82965d57d76765f010ee5b036596c5ce579b462f7be8a622";
         public const string ReferenceLocale = "en-US";
 
         private static readonly LocalizationLocaleInfo[] LocaleData =
@@ -295,6 +295,10 @@ namespace PS260714.Localization
                 { "status.blood.description", new LocalizationEntry("\uB9E4 \uD2F1\uB9C8\uB2E4 \uC2A4\uD0DD \uC218\uB9CC\uD07C \uD53C\uD574\uB97C \uBC1B\uC2B5\uB2C8\uB2E4.", "tooltip") },
                 { "status.poison.name", new LocalizationEntry("\uC911\uB3C5", "title") },
                 { "status.poison.description", new LocalizationEntry("\uB9E4 \uD2F1\uB9C8\uB2E4 \uC2A4\uD0DD \uC218\uB9CC\uD07C \uD53C\uD574\uB97C \uBC1B\uC2B5\uB2C8\uB2E4.", "tooltip") },
+                { "character.calista.name", new LocalizationEntry("\uCE7C\uB9AC\uC2A4\uD0C0", "title") },
+                { "character.calista.description", new LocalizationEntry("\uC544\uCE74\uB370\uBBF8 \uAE30\uC0AC\uB2E8 \uAD50\uD658\uD559\uC0DD", "body") },
+                { "status.focus.name", new LocalizationEntry("\uC9D1\uC911", "title") },
+                { "status.focus.description", new LocalizationEntry("\uB300\uC0C1\uC744 \uCD5C\uC6B0\uC120 \uBAA9\uD45C\uB85C \uC124\uC815\uD569\uB2C8\uB2E4.", "tooltip") },
             };
 
         private static readonly Dictionary<string, LocalizationEntry>
@@ -556,7 +560,7 @@ namespace PS260714.Localization
                 { "character.isolde.name", new LocalizationEntry("Isolde", "title") },
                 { "character.isolde.description", new LocalizationEntry("Astronomy of Academy", "body") },
                 { "character.mirinae.name", new LocalizationEntry("Mirinae", "title") },
-                { "character.mirinae.description", new LocalizationEntry(" Director of the Astronomy of Academy", "body") },
+                { "character.mirinae.description", new LocalizationEntry("Director of the Astronomy of Academy", "body") },
                 { "status.starpowder.name", new LocalizationEntry("Star Dust", "title") },
                 { "status.starpowder.description", new LocalizationEntry("A permanent status that only stores stacks.", "tooltip") },
                 { "status.combo.name", new LocalizationEntry("Combo", "title") },
@@ -571,6 +575,10 @@ namespace PS260714.Localization
                 { "status.blood.description", new LocalizationEntry("Takes damage equal to its stacks each tick.", "tooltip") },
                 { "status.poison.name", new LocalizationEntry("Poison", "title") },
                 { "status.poison.description", new LocalizationEntry("Takes damage equal to its stacks each tick.", "tooltip") },
+                { "character.calista.name", new LocalizationEntry("Calista", "title") },
+                { "character.calista.description", new LocalizationEntry("exchange student of Order", "body") },
+                { "status.focus.name", new LocalizationEntry("Focus", "title") },
+                { "status.focus.description", new LocalizationEntry("Pick first target", "tooltip") },
             };
 
         private static readonly IReadOnlyDictionary<string, LocalizationEntry>

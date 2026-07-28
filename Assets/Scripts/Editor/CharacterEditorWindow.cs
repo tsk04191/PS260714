@@ -92,6 +92,8 @@ public sealed class CharacterEditorWindow : EditorWindow
     private const string StatusEffectPropertyName = "statusEffect";
     private const string StatusRemovalEffectPropertyName =
         "statusRemovalEffect";
+    private const string StatusRemovalEffectsPropertyName =
+        "statusRemovalEffects";
     private const string StatusRemovalTargetPropertyName =
         "statusRemovalTarget";
     private const string StatusRemovalAmountModePropertyName =
@@ -442,9 +444,20 @@ public sealed class CharacterEditorWindow : EditorWindow
 
     private static readonly string[] StatusRemovalTargetOptions =
     {
-        "단일",
-        "랜덤",
-        "전체"
+        "지정 상태",
+        "랜덤 상태",
+        "모든 버프",
+        "모든 디버프",
+        "모든 상태"
+    };
+
+    private static readonly int[] StatusRemovalTargetValues =
+    {
+        (int)CharacterStatusRemovalTarget.Single,
+        (int)CharacterStatusRemovalTarget.Random,
+        (int)CharacterStatusRemovalTarget.Buff,
+        (int)CharacterStatusRemovalTarget.Debuff,
+        (int)CharacterStatusRemovalTarget.All
     };
 
     private static readonly string[] StatusRemovalAmountModeOptions =
@@ -3142,6 +3155,25 @@ public sealed class CharacterEditorWindow : EditorWindow
             options);
     }
 
+    private static void DrawStatusRemovalTargetPopup(
+        SerializedProperty property,
+        string label)
+    {
+        if (property == null)
+        {
+            EditorGUILayout.HelpBox(
+                $"{label} 속성을 찾을 수 없습니다.",
+                MessageType.Error);
+            return;
+        }
+
+        property.enumValueIndex = EditorGUILayout.IntPopup(
+            label,
+            property.enumValueIndex,
+            StatusRemovalTargetOptions,
+            StatusRemovalTargetValues);
+    }
+
     private static void DrawActionAudioClip(SerializedProperty definition)
     {
         SerializedProperty audioClip = definition?.FindPropertyRelative(
@@ -3736,6 +3768,8 @@ public sealed class CharacterEditorWindow : EditorWindow
             effect,
             StatusRemovalTargetPropertyName,
             (int)CharacterStatusRemovalTarget.Single);
+        effect.FindPropertyRelative(
+            StatusRemovalEffectsPropertyName)?.ClearArray();
         SetEnumValue(
             effect,
             StatusRemovalAmountModePropertyName,
@@ -4281,6 +4315,8 @@ public sealed class CharacterEditorWindow : EditorWindow
             StatusRemovalRatioPropertyName);
         SerializedProperty removalEffect = definition.FindPropertyRelative(
             statusEffectPropertyName);
+        SerializedProperty removalEffects = definition.FindPropertyRelative(
+            StatusRemovalEffectsPropertyName);
         if (removalTarget == null || removalAmountMode == null ||
             removalCount == null || removalRatio == null ||
             removalEffect == null)
@@ -4291,23 +4327,35 @@ public sealed class CharacterEditorWindow : EditorWindow
             return;
         }
 
-        DrawAttackEnumPopup(
-            removalTarget,
-            "제거 대상",
-            StatusRemovalTargetOptions);
+        DrawStatusRemovalTargetPopup(removalTarget, "제거 대상");
         if (removalTarget.enumValueIndex ==
             (int)CharacterStatusRemovalTarget.Single)
         {
-            EditorGUILayout.PropertyField(
-                removalEffect,
-                new GUIContent(
-                    "제거 상태",
-                    "프로젝트에 생성된 모든 StatusEffectSO를 선택할 수 있습니다."));
-            if (removalEffect.objectReferenceValue == null)
+            if (removalEffects != null)
             {
+                PS260714StatusEffectSelection.Draw(
+                    removalEffects,
+                    removalEffect,
+                    new GUIContent(
+                        "제거 상태",
+                        "여러 상태를 선택할 수 있으며 분류와 검색으로 목록을 필터링합니다."));
+            }
+            else
+            {
+                EditorGUILayout.PropertyField(
+                    removalEffect,
+                    new GUIContent(
+                        "제거 상태",
+                        "프로젝트에 생성된 모든 StatusEffectSO를 선택할 수 있습니다."));
+                if (removalEffect.objectReferenceValue == null)
+                {
+                    EditorGUILayout.HelpBox(
+                        "지정 상태 제거에 사용할 StatusEffectSO를 선택하세요.",
+                        MessageType.Error);
+                }
                 EditorGUILayout.HelpBox(
-                    "단일 제거에 사용할 StatusEffectSO를 선택하세요.",
-                    MessageType.Error);
+                    "복수 상태 선택은 효과 목록으로 전환한 뒤 사용할 수 있습니다.",
+                    MessageType.Info);
             }
         }
 
@@ -5247,7 +5295,9 @@ public sealed class CharacterEditorWindow : EditorWindow
                    StringComparison.OrdinalIgnoreCase) >= 0;
     }
 
-    private void SelectCharacter(CharacterSO character)
+    private void SelectCharacter(
+        CharacterSO character,
+        bool resetEditorScroll = true)
     {
         if (character == null)
             return;
@@ -5260,7 +5310,8 @@ public sealed class CharacterEditorWindow : EditorWindow
 
         _selectedCharacter = character;
         _serializedCharacter = new SerializedObject(character);
-        _editorScroll = Vector2.zero;
+        if (resetEditorScroll)
+            _editorScroll = Vector2.zero;
 
     }
 

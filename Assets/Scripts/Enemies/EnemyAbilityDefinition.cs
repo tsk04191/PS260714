@@ -24,6 +24,13 @@ public enum EnemyAbilityOperationType
     ModifyTargetPriority = 6
 }
 
+public enum EnemyTargetPriorityMode
+{
+    Exclude = 0,
+    Adjust = 1,
+    ForceFocus = 2
+}
+
 public enum EnemyAbilityCooldownResetPolicy
 {
     OnSuccessfulActivation = 0,
@@ -232,6 +239,10 @@ public sealed class EnemyAbilityOperationDefinition
     private bool includeDiagonals;
     [SerializeField]
     private bool enabled = true;
+    [SerializeField]
+    private EnemyTargetPriorityMode targetPriorityMode;
+    [SerializeField]
+    private int targetPriorityAdjustment;
 
     public EnemyAbilityOperationType Type => type;
     public IReadOnlyList<CharacterEffectDefinition> Effects =>
@@ -244,6 +255,9 @@ public sealed class EnemyAbilityOperationDefinition
     public int Range => range;
     public bool IncludeDiagonals => includeDiagonals;
     public bool Enabled => enabled;
+    public EnemyTargetPriorityMode TargetPriorityMode =>
+        targetPriorityMode;
+    public int TargetPriorityAdjustment => targetPriorityAdjustment;
 
     internal static EnemyAbilityOperationDefinition CreateRuntimePreset(
         EnemyAbilityOperationType operationType,
@@ -252,7 +266,10 @@ public sealed class EnemyAbilityOperationDefinition
         int fixedAmount = 0,
         int additionalCount = 1,
         int operationRange = 1,
-        bool diagonals = false)
+        bool diagonals = false,
+        EnemyTargetPriorityMode priorityMode =
+            EnemyTargetPriorityMode.Exclude,
+        int priorityAdjustment = 0)
     {
         List<CharacterEffectDefinition> copiedEffects = new();
         if (effectDefinitions != null)
@@ -274,6 +291,8 @@ public sealed class EnemyAbilityOperationDefinition
             range = Mathf.Max(1, operationRange),
             includeDiagonals = diagonals,
             enabled = true,
+            targetPriorityMode = priorityMode,
+            targetPriorityAdjustment = priorityAdjustment,
         };
     }
 
@@ -292,6 +311,12 @@ public sealed class EnemyAbilityOperationDefinition
             range,
             1,
             DungeonBoardView.MaximumGridSize - 1);
+        if (!Enum.IsDefined(
+                typeof(EnemyTargetPriorityMode),
+                targetPriorityMode))
+        {
+            targetPriorityMode = EnemyTargetPriorityMode.Exclude;
+        }
     }
 }
 

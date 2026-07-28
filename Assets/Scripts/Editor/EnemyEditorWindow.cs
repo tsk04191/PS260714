@@ -771,6 +771,48 @@ public sealed class EnemyEditorWindow : EditorWindow
                             "includeDiagonals",
                             "Include Diagonals");
                         break;
+                    case EnemyAbilityOperationType.ModifyTargetPriority:
+                        DrawRelative(
+                            operation,
+                            "targetPriorityMode",
+                            "Priority Mode");
+                        EnemyTargetPriorityMode priorityMode =
+                            (EnemyTargetPriorityMode)operation
+                                .FindPropertyRelative(
+                                    "targetPriorityMode")
+                                .enumValueIndex;
+                        if (priorityMode ==
+                            EnemyTargetPriorityMode.Adjust)
+                        {
+                            DrawRelative(
+                                operation,
+                                "targetPriorityAdjustment",
+                                "Priority Adjustment");
+                            EditorGUILayout.HelpBox(
+                                "Higher values are selected before the " +
+                                "configured subject rule. Positive values " +
+                                "can be used for taunt; negative values " +
+                                "lower the target priority.",
+                                MessageType.Info);
+                        }
+                        else if (priorityMode ==
+                                 EnemyTargetPriorityMode.ForceFocus)
+                        {
+                            EditorGUILayout.HelpBox(
+                                "Forces this enemy ahead of every adjusted " +
+                                "priority target. If several enemies force " +
+                                "focus, the configured subject rule breaks " +
+                                "the tie.",
+                                MessageType.Info);
+                        }
+                        else
+                        {
+                            EditorGUILayout.HelpBox(
+                                "Excludes this enemy while another valid " +
+                                "target is available.",
+                                MessageType.Info);
+                        }
+                        break;
                 }
             }
         }
@@ -946,6 +988,11 @@ public sealed class EnemyEditorWindow : EditorWindow
         SetInt(operation, "range", 1);
         SetBool(operation, "includeDiagonals", true);
         SetBool(operation, "enabled", true);
+        SetEnum(
+            operation,
+            "targetPriorityMode",
+            (int)EnemyTargetPriorityMode.Exclude);
+        SetInt(operation, "targetPriorityAdjustment", 0);
         SerializedProperty effects =
             operation.FindPropertyRelative("effects");
         effects.ClearArray();

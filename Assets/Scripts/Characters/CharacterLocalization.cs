@@ -844,7 +844,8 @@ public static class CharacterLocalization
         int statusRemovalCount,
         float statusRemovalRatio,
         int finalDamage,
-        bool includeFinalDamage = true)
+        bool includeFinalDamage = true,
+        IReadOnlyList<StatusEffectSO> statusRemovalEffects = null)
     {
         string typeName = damageType switch
         {
@@ -879,9 +880,15 @@ public static class CharacterLocalization
             {
                 CharacterStatusRemovalTarget.Random =>
                     UsesKoreanLocale ? "랜덤 상태" : "Random status",
+                CharacterStatusRemovalTarget.Buff =>
+                    UsesKoreanLocale ? "모든 버프" : "All buffs",
+                CharacterStatusRemovalTarget.Debuff =>
+                    UsesKoreanLocale ? "모든 디버프" : "All debuffs",
                 CharacterStatusRemovalTarget.All =>
                     UsesKoreanLocale ? "전체 상태" : "All statuses",
-                _ => GetStatusEffectName(statusRemovalEffect)
+                _ => FormatStatusRemovalNames(
+                    statusRemovalEffect,
+                    statusRemovalEffects)
             };
             string countName;
             if (statusRemovalAmountMode ==
@@ -918,6 +925,26 @@ public static class CharacterLocalization
         return UsesKoreanLocale
             ? $"{typeName} / {amountText} (피해 {finalDamage})"
             : $"{typeName} / {amountText} (Damage {finalDamage})";
+    }
+
+    private static string FormatStatusRemovalNames(
+        StatusEffectSO legacyStatus,
+        IReadOnlyList<StatusEffectSO> statuses)
+    {
+        if (statuses == null || statuses.Count == 0)
+            return GetStatusEffectName(legacyStatus);
+
+        List<string> names = new();
+        HashSet<StatusEffectSO> visited = new();
+        foreach (StatusEffectSO status in statuses)
+        {
+            if (status != null && visited.Add(status))
+                names.Add(GetStatusEffectName(status));
+        }
+
+        return names.Count > 0
+            ? string.Join(", ", names)
+            : GetStatusEffectName(legacyStatus);
     }
 
     private static string FormatEffects(
@@ -988,7 +1015,9 @@ public static class CharacterLocalization
                         effect.StatusRemovalAmountMode,
                         effect.StatusRemovalCount,
                         effect.StatusRemovalRatio,
-                        finalDamage));
+                        finalDamage,
+                        statusRemovalEffects:
+                            effect.StatusRemovalEffects));
                     break;
                 case CharacterEffectType.GainResource:
                     builder.Append(FormatResourceGain(effect));

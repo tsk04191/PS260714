@@ -115,7 +115,9 @@ public static class EnemyLocalization
             if (TryGetEnabledOperation(
                     ability,
                     EnemyAbilityOperationType.ModifyTargetPriority,
-                    out _))
+                    out EnemyAbilityOperationDefinition operation) &&
+                operation.TargetPriorityMode ==
+                    EnemyTargetPriorityMode.Exclude)
             {
                 return true;
             }
@@ -260,7 +262,9 @@ public static class EnemyLocalization
                 if (!TryGetEnabledOperation(
                         ability,
                         EnemyAbilityOperationType.ModifyTargetPriority,
-                        out _))
+                        out EnemyAbilityOperationDefinition priority) ||
+                    priority.TargetPriorityMode !=
+                        EnemyTargetPriorityMode.Exclude)
                 {
                     return false;
                 }

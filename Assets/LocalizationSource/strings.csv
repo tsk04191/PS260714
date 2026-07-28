@@ -254,7 +254,7 @@ character.byeolha.description,캐릭터 설명,body,,아카데미 천문학부,A
 character.isolde.name,캐릭터 이름,title,,이졸데,Isolde
 character.isolde.description,캐릭터 설명,body,,아카데미 천문학부,Astronomy of Academy
 character.mirinae.name,캐릭터 이름,title,,미리내,Mirinae
-character.mirinae.description,캐릭터 설명,body,,아카데미 천문학부 부장," Director of the Astronomy of Academy"
+character.mirinae.description,캐릭터 설명,body,,아카데미 천문학부 부장,Director of the Astronomy of Academy
 status.starpowder.name,상태 이름,title,,별가루,Star Dust
 status.starpowder.description,상태 설명,tooltip,,효과 없이 스택만 누적되는 영구 상태입니다.,A permanent status that only stores stacks.
 status.combo.name,상태 이름,title,,연격,Combo
@@ -269,3 +269,7 @@ status.blood.name,상태 이름,title,,출혈,Blood
 status.blood.description,상태 설명,tooltip,,매 틱마다 스택 수만큼 피해를 받습니다.,Takes damage equal to its stacks each tick.
 status.poison.name,상태 이름,title,,중독,Poison
 status.poison.description,상태 설명,tooltip,,매 틱마다 스택 수만큼 피해를 받습니다.,Takes damage equal to its stacks each tick.
+character.calista.name,캐릭터 이름,title,,칼리스타,Calista
+character.calista.description,캐릭터 설명,body,,아카데미 기사단 교환학생,exchange student of Order
+status.focus.name,상태 이름,title,,집중,Focus
+status.focus.description,상태 설명,tooltip,,대상을 최우선 목표로 설정합니다.,Pick first target

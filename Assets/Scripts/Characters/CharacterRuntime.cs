@@ -946,8 +946,9 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
             return 0;
 
         return RemoveStatusEffects(
-            removalTarget,
-            statusEffect,
+            new CharacterStatusRemovalSelection(
+                removalTarget,
+                statusEffect),
             CharacterStatusRemovalAmount.Fixed(removalCount));
     }
 
@@ -956,15 +957,40 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
         StatusEffectSO statusEffect,
         CharacterStatusRemovalAmount removalAmount)
     {
+        return RemoveStatusEffects(
+            new CharacterStatusRemovalSelection(
+                removalTarget,
+                statusEffect),
+            removalAmount);
+    }
+
+    public int RemoveStatusEffects(
+        CharacterStatusRemovalSelection removalSelection,
+        CharacterStatusRemovalAmount removalAmount)
+    {
         float previousAttackSpeed = GetEffectiveAttackSpeed();
-        int removed = removalTarget switch
+        int removed = removalSelection.Target switch
         {
             CharacterStatusRemovalTarget.Single =>
-                RemoveSingleStatusEffect(statusEffect, removalAmount),
+                RemoveSelectedStatusEffects(
+                    removalSelection,
+                    removalAmount),
             CharacterStatusRemovalTarget.Random =>
-                RemoveRandomStatusEffect(removalAmount),
+                RemoveRandomStatusEffect(
+                    removalSelection,
+                    removalAmount),
             CharacterStatusRemovalTarget.All =>
-                RemoveAllStatusEffects(removalAmount),
+                RemoveMatchingStatusEffects(
+                    removalSelection,
+                    removalAmount),
+            CharacterStatusRemovalTarget.Buff =>
+                RemoveMatchingStatusEffects(
+                    removalSelection,
+                    removalAmount),
+            CharacterStatusRemovalTarget.Debuff =>
+                RemoveMatchingStatusEffects(
+                    removalSelection,
+                    removalAmount),
             _ => 0
         };
         if (removed > 0)
@@ -974,6 +1000,29 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
                 GetEffectiveAttackSpeed());
             RefreshUi();
         }
+        return removed;
+    }
+
+    private int RemoveSelectedStatusEffects(
+        CharacterStatusRemovalSelection removalSelection,
+        CharacterStatusRemovalAmount removalAmount)
+    {
+        int removed = 0;
+        HashSet<StatusEffectSO> visited = new();
+        for (int index = 0;
+             index < removalSelection.ExplicitStatusCount;
+             index++)
+        {
+            StatusEffectSO definition =
+                removalSelection.GetExplicitStatus(index);
+            if (definition == null || !visited.Add(definition))
+                continue;
+
+            removed += RemoveSingleStatusEffect(
+                definition,
+                removalAmount);
+        }
+
         return removed;
     }
 
@@ -992,13 +1041,14 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
     }
 
     private int RemoveRandomStatusEffect(
+        CharacterStatusRemovalSelection removalSelection,
         CharacterStatusRemovalAmount removalAmount)
     {
         List<StatusEffectSO> candidates = new();
         foreach (StatusEffectRuntimeState state in _statusEffects.Values)
         {
             if (state.Definition != null &&
-                state.Definition.IncludedInRandomRemoval)
+                removalSelection.MatchesStatus(state.Definition))
             {
                 candidates.Add(state.Definition);
             }
@@ -1011,7 +1061,8 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
                 removalAmount);
     }
 
-    private int RemoveAllStatusEffects(
+    private int RemoveMatchingStatusEffects(
+        CharacterStatusRemovalSelection removalSelection,
         CharacterStatusRemovalAmount removalAmount)
     {
         int removed = 0;
@@ -1022,7 +1073,7 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
                     statusId,
                     out StatusEffectRuntimeState state) &&
                 state.Definition != null &&
-                state.Definition.IncludedInAllRemoval)
+                removalSelection.MatchesStatus(state.Definition))
             {
                 int removalCount = removalAmount.Resolve(state.StackCount);
                 if (removalCount > 0)
@@ -2959,18 +3010,19 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
 
         if (damageType == CharacterAttackDamageType.StatusRemoval)
         {
+            CharacterStatusRemovalSelection removalSelection = new(
+                statusRemovalTarget,
+                statusRemovalEffect);
             return targets.Faction == CharacterTargetFaction.Ally
                 ? board.TryRemoveAlliedCharacterStatus(
                     this,
                     targets.AllyTargets,
-                    statusRemovalTarget,
-                    statusRemovalEffect,
+                    removalSelection,
                     statusRemovalAmount)
                 : board.TryRemoveCharacterStatus(
                     this,
                     targets.EnemyTargets,
-                    statusRemovalTarget,
-                    statusRemovalEffect,
+                    removalSelection,
                     statusRemovalAmount,
                     !targets.RangeAlreadyShown);
         }
@@ -3576,12 +3628,31 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
                             CharacterEffectTargetMode.Source ||
                         effect.StatusEffect.CanTargetAlly);
             case CharacterEffectType.RemoveStatus:
-                return effect.StatusRemovalTarget !=
-                           CharacterStatusRemovalTarget.Single ||
-                       (effect.StatusEffect != null &&
-                        (effect.TargetMode !=
-                             CharacterEffectTargetMode.Source ||
-                         effect.StatusEffect.CanTargetAlly));
+                if (effect.StatusRemovalTarget !=
+                    CharacterStatusRemovalTarget.Single)
+                {
+                    return true;
+                }
+
+                CharacterStatusRemovalSelection removalSelection =
+                    effect.StatusRemovalSelection;
+                if (!removalSelection.HasExplicitStatus)
+                    return false;
+
+                if (effect.TargetMode != CharacterEffectTargetMode.Source)
+                    return true;
+
+                for (int index = 0;
+                     index < removalSelection.ExplicitStatusCount;
+                     index++)
+                {
+                    StatusEffectSO status =
+                        removalSelection.GetExplicitStatus(index);
+                    if (status != null && !status.CanTargetAlly)
+                        return false;
+                }
+
+                return true;
             case CharacterEffectType.GainResource:
                 return effect.AmountScaling.IsFinite &&
                        effect.AmountScaling.HasNonZeroTerm;

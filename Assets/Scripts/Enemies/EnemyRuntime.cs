@@ -55,7 +55,9 @@ public sealed class EnemyRuntime
                 {
                     if (operation != null && operation.Enabled &&
                         operation.Type ==
-                            EnemyAbilityOperationType.ModifyTargetPriority)
+                            EnemyAbilityOperationType.ModifyTargetPriority &&
+                        operation.TargetPriorityMode ==
+                            EnemyTargetPriorityMode.Exclude)
                     {
                         return true;
                     }
@@ -515,8 +517,9 @@ public sealed class EnemyRuntime
             return 0;
 
         return RemoveStatusEffects(
-            removalTarget,
-            statusEffect,
+            new CharacterStatusRemovalSelection(
+                removalTarget,
+                statusEffect),
             CharacterStatusRemovalAmount.Fixed(removalCount),
             null);
     }
@@ -531,8 +534,9 @@ public sealed class EnemyRuntime
             return 0;
 
         return RemoveStatusEffects(
-            removalTarget,
-            statusEffect,
+            new CharacterStatusRemovalSelection(
+                removalTarget,
+                statusEffect),
             CharacterStatusRemovalAmount.Fixed(removalCount),
             applyDamage);
     }
@@ -543,12 +547,24 @@ public sealed class EnemyRuntime
         CharacterStatusRemovalAmount removalAmount,
         Func<int, IBattleCharacter, bool> applyDamage)
     {
+        return RemoveStatusEffects(
+            new CharacterStatusRemovalSelection(
+                removalTarget,
+                statusEffect),
+            removalAmount,
+            applyDamage);
+    }
+
+    internal int RemoveStatusEffects(
+        CharacterStatusRemovalSelection removalSelection,
+        CharacterStatusRemovalAmount removalAmount,
+        Func<int, IBattleCharacter, bool> applyDamage)
+    {
         BeginStatusMutation();
         try
         {
             return RemoveStatusEffectsCore(
-                removalTarget,
-                statusEffect,
+                removalSelection,
                 removalAmount,
                 applyDamage);
         }
@@ -593,29 +609,67 @@ public sealed class EnemyRuntime
     }
 
     private int RemoveStatusEffectsCore(
-        CharacterStatusRemovalTarget removalTarget,
-        StatusEffectSO statusEffect,
+        CharacterStatusRemovalSelection removalSelection,
         CharacterStatusRemovalAmount removalAmount,
         Func<int, IBattleCharacter, bool> applyDamage)
     {
-        return removalTarget switch
+        return removalSelection.Target switch
         {
             CharacterStatusRemovalTarget.Single =>
-                RemoveStatusEffect(
-                    statusEffect,
+                RemoveSelectedStatusEffects(
+                    removalSelection,
                     removalAmount,
-                    applyDamage,
-                    out _),
+                    applyDamage),
             CharacterStatusRemovalTarget.Random =>
                 RemoveRandomStatusEffect(
+                    removalSelection,
                     removalAmount,
                     applyDamage),
             CharacterStatusRemovalTarget.All =>
-                RemoveAllStatusEffects(
+                RemoveMatchingStatusEffects(
+                    removalSelection,
+                    removalAmount,
+                    applyDamage),
+            CharacterStatusRemovalTarget.Buff =>
+                RemoveMatchingStatusEffects(
+                    removalSelection,
+                    removalAmount,
+                    applyDamage),
+            CharacterStatusRemovalTarget.Debuff =>
+                RemoveMatchingStatusEffects(
+                    removalSelection,
                     removalAmount,
                     applyDamage),
             _ => 0
         };
+    }
+
+    private int RemoveSelectedStatusEffects(
+        CharacterStatusRemovalSelection removalSelection,
+        CharacterStatusRemovalAmount removalAmount,
+        Func<int, IBattleCharacter, bool> applyDamage)
+    {
+        int removed = 0;
+        HashSet<StatusEffectSO> visited = new();
+        for (int index = 0;
+             index < removalSelection.ExplicitStatusCount;
+             index++)
+        {
+            StatusEffectSO statusEffect =
+                removalSelection.GetExplicitStatus(index);
+            if (statusEffect == null || !visited.Add(statusEffect))
+                continue;
+
+            removed += RemoveStatusEffect(
+                statusEffect,
+                removalAmount,
+                applyDamage,
+                out bool continueExecution);
+            if (!continueExecution)
+                break;
+        }
+
+        return removed;
     }
 
     private int RemoveStatusEffect(
@@ -640,6 +694,7 @@ public sealed class EnemyRuntime
     }
 
     private int RemoveRandomStatusEffect(
+        CharacterStatusRemovalSelection removalSelection,
         CharacterStatusRemovalAmount removalAmount,
         Func<int, IBattleCharacter, bool> applyDamage)
     {
@@ -647,7 +702,7 @@ public sealed class EnemyRuntime
         foreach (StatusEffectRuntimeState state in _statusEffects.Values)
         {
             if (state.Definition != null &&
-                state.Definition.IncludedInRandomRemoval)
+                removalSelection.MatchesStatus(state.Definition))
             {
                 candidates.Add(state.Definition);
             }
@@ -663,7 +718,8 @@ public sealed class EnemyRuntime
             out _);
     }
 
-    private int RemoveAllStatusEffects(
+    private int RemoveMatchingStatusEffects(
+        CharacterStatusRemovalSelection removalSelection,
         CharacterStatusRemovalAmount removalAmount,
         Func<int, IBattleCharacter, bool> applyDamage)
     {
@@ -677,7 +733,7 @@ public sealed class EnemyRuntime
                     statusId,
                     out StatusEffectRuntimeState state) &&
                 state.Definition != null &&
-                state.Definition.IncludedInAllRemoval)
+                removalSelection.MatchesStatus(state.Definition))
             {
                 int removalCount = removalAmount.Resolve(state.StackCount);
                 bool continueExecution = true;

@@ -10,6 +10,8 @@ public sealed class CharacterDefinitionValidationTests
 {
     private const string FireStatusPath =
         "Assets/Resources/StatusEffects/Fire.asset";
+    private const string PoisonStatusPath =
+        "Assets/Resources/StatusEffects/Poison.asset";
 
     private readonly List<UnityEngine.Object> _createdObjects = new();
 
@@ -456,6 +458,102 @@ public sealed class CharacterDefinitionValidationTests
 
         Assert.That(
             HasDiagnostic(result, "ability.removal_ratio_invalid"),
+            Is.True);
+    }
+
+    [Test]
+    public void Validate_ExplicitMultipleStatusRemoval_AcceptsUniqueStatuses()
+    {
+        StatusEffectSO fire =
+            AssetDatabase.LoadAssetAtPath<StatusEffectSO>(FireStatusPath);
+        StatusEffectSO poison =
+            AssetDatabase.LoadAssetAtPath<StatusEffectSO>(PoisonStatusPath);
+        Assert.That(fire, Is.Not.Null);
+        Assert.That(poison, Is.Not.Null);
+
+        CharacterSO definition = CreateDefinition();
+        SerializedObject serialized = new(definition);
+        SerializedProperty attacks =
+            serialized.FindProperty("attackDefinitions");
+        attacks.arraySize = 1;
+        SerializedProperty attack = attacks.GetArrayElementAtIndex(0);
+        SetSections(
+            attack.FindPropertyRelative("sections"),
+            (int)CharacterAttackSectionType.Subject,
+            (int)CharacterAttackSectionType.Ability);
+        attack.FindPropertyRelative("targetFaction").enumValueIndex =
+            (int)CharacterTargetFaction.Enemy;
+        attack.FindPropertyRelative("subject").enumValueIndex =
+            (int)CharacterAttackSubject.Random;
+
+        SerializedProperty effects =
+            attack.FindPropertyRelative("effects");
+        effects.arraySize = 1;
+        SerializedProperty effect = effects.GetArrayElementAtIndex(0);
+        effect.FindPropertyRelative("type").enumValueIndex =
+            (int)CharacterEffectType.RemoveStatus;
+        effect.FindPropertyRelative("statusRemovalTarget").enumValueIndex =
+            (int)CharacterStatusRemovalTarget.Single;
+        SerializedProperty statuses =
+            effect.FindPropertyRelative("statusRemovalEffects");
+        statuses.arraySize = 2;
+        statuses.GetArrayElementAtIndex(0).objectReferenceValue = fire;
+        statuses.GetArrayElementAtIndex(1).objectReferenceValue = poison;
+        serialized.ApplyModifiedPropertiesWithoutUndo();
+
+        CharacterDefinitionValidationResult result =
+            CharacterDefinitionValidator.Validate(definition);
+
+        Assert.That(
+            HasDiagnostic(result, "effect.removal_status_required"),
+            Is.False);
+        Assert.That(
+            HasDiagnostic(result, "effect.removal_status_duplicate"),
+            Is.False);
+    }
+
+    [Test]
+    public void Validate_ExplicitMultipleStatusRemoval_RejectsDuplicates()
+    {
+        StatusEffectSO fire =
+            AssetDatabase.LoadAssetAtPath<StatusEffectSO>(FireStatusPath);
+        Assert.That(fire, Is.Not.Null);
+
+        CharacterSO definition = CreateDefinition();
+        SerializedObject serialized = new(definition);
+        SerializedProperty attacks =
+            serialized.FindProperty("attackDefinitions");
+        attacks.arraySize = 1;
+        SerializedProperty attack = attacks.GetArrayElementAtIndex(0);
+        SetSections(
+            attack.FindPropertyRelative("sections"),
+            (int)CharacterAttackSectionType.Subject,
+            (int)CharacterAttackSectionType.Ability);
+        attack.FindPropertyRelative("targetFaction").enumValueIndex =
+            (int)CharacterTargetFaction.Enemy;
+        attack.FindPropertyRelative("subject").enumValueIndex =
+            (int)CharacterAttackSubject.Random;
+
+        SerializedProperty effects =
+            attack.FindPropertyRelative("effects");
+        effects.arraySize = 1;
+        SerializedProperty effect = effects.GetArrayElementAtIndex(0);
+        effect.FindPropertyRelative("type").enumValueIndex =
+            (int)CharacterEffectType.RemoveStatus;
+        effect.FindPropertyRelative("statusRemovalTarget").enumValueIndex =
+            (int)CharacterStatusRemovalTarget.Single;
+        SerializedProperty statuses =
+            effect.FindPropertyRelative("statusRemovalEffects");
+        statuses.arraySize = 2;
+        statuses.GetArrayElementAtIndex(0).objectReferenceValue = fire;
+        statuses.GetArrayElementAtIndex(1).objectReferenceValue = fire;
+        serialized.ApplyModifiedPropertiesWithoutUndo();
+
+        CharacterDefinitionValidationResult result =
+            CharacterDefinitionValidator.Validate(definition);
+
+        Assert.That(
+            HasDiagnostic(result, "effect.removal_status_duplicate"),
             Is.True);
     }
 

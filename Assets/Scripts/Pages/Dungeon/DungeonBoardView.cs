@@ -719,7 +719,8 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
             subject = CharacterAttackSubject.All;
 
         targetCount = Mathf.Max(1, targetCount);
-        List<DungeonTileView> candidates = CollectPriorityTargetTiles();
+        List<DungeonTileView> candidates = CollectPriorityTargetTiles(
+            out bool hasAlternateTarget);
         candidates.RemoveAll(tile => !MatchesCharacterConditions(
             source,
             tile,
@@ -742,12 +743,20 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
         else if (subject == CharacterAttackSubject.Random)
         {
             for (int index = 0;
-                 index < candidates.Count && selected.Count < targetCount;
+                 index < candidates.Count;
                  index++)
             {
                 int randomIndex = Random.Range(index, candidates.Count);
                 (candidates[index], candidates[randomIndex]) =
                     (candidates[randomIndex], candidates[index]);
+            }
+            StableSortByTargetPriority(
+                candidates,
+                hasAlternateTarget);
+            for (int index = 0;
+                 index < candidates.Count && selected.Count < targetCount;
+                 index++)
+            {
                 selected.Add(candidates[index]);
             }
         }
@@ -756,6 +765,13 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
             bool descending = subject == CharacterAttackSubject.HighestValue;
             candidates.Sort((left, right) =>
             {
+                int priorityComparison = CompareTargetPriority(
+                    left,
+                    right,
+                    hasAlternateTarget);
+                if (priorityComparison != 0)
+                    return priorityComparison;
+
                 int leftValue = metric == CharacterAttackSubjectMetric.Health
                     ? left.TopEnemyHealth
                     : metric == CharacterAttackSubjectMetric.Shield
@@ -1346,8 +1362,7 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
     public bool TryRemoveCharacterStatus(
         IBattleCharacter source,
         IReadOnlyList<EnemyRuntime> targets,
-        CharacterStatusRemovalTarget removalTarget,
-        StatusEffectSO statusEffect,
+        CharacterStatusRemovalSelection removalSelection,
         CharacterStatusRemovalAmount removalAmount,
         bool showAttackRange)
     {
@@ -1365,8 +1380,7 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
             }
 
             int removed = tile.TryRemoveStatusFromTop(
-                removalTarget,
-                statusEffect,
+                removalSelection,
                 removalAmount,
                 TryDamageTile);
             if (removed <= 0)
@@ -1384,8 +1398,7 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
     public bool TryRemoveAlliedCharacterStatus(
         IBattleCharacter source,
         IReadOnlyList<IBattleCharacter> targets,
-        CharacterStatusRemovalTarget removalTarget,
-        StatusEffectSO statusEffect,
+        CharacterStatusRemovalSelection removalSelection,
         CharacterStatusRemovalAmount removalAmount)
     {
         if (targets == null)
@@ -1399,8 +1412,7 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
                 continue;
 
             removedAny |= target.RemoveStatusEffects(
-                removalTarget,
-                statusEffect,
+                removalSelection,
                 removalAmount) > 0;
         }
 
@@ -1890,7 +1902,8 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
                 target.Subject,
                 target.Metric,
                 target.TargetCount,
-                GetPlayerAbilityTargetMetric);
+                GetPlayerAbilityTargetMetric,
+                GetPlayerTargetPriority);
             playerTargets = candidates;
             return candidates.Count > 0;
         }
@@ -1913,7 +1926,8 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
             target.Subject,
             target.Metric,
             target.TargetCount,
-            GetEnemyAbilityTargetMetric);
+            GetEnemyAbilityTargetMetric,
+            GetEnemyAllyTargetPriority);
         enemyTargets = enemyCandidates;
         return enemyCandidates.Count > 0;
     }
@@ -1982,7 +1996,8 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
         EnemyAbilityTargetSubject subject,
         EnemyAbilityTargetMetric metric,
         int targetCount,
-        Func<T, EnemyAbilityTargetMetric, float> getMetric)
+        Func<T, EnemyAbilityTargetMetric, float> getMetric,
+        Func<T, StatusEffectTargetPriority> getPriority)
     {
         if (candidates == null || candidates.Count == 0 ||
             subject == EnemyAbilityTargetSubject.All ||
@@ -1994,12 +2009,15 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
         targetCount = Mathf.Clamp(targetCount, 1, candidates.Count);
         if (subject == EnemyAbilityTargetSubject.Random)
         {
-            for (int index = 0; index < targetCount; index++)
+            for (int index = 0; index < candidates.Count; index++)
             {
                 int randomIndex = Random.Range(index, candidates.Count);
                 (candidates[index], candidates[randomIndex]) =
                     (candidates[randomIndex], candidates[index]);
             }
+            StableSortEnemyAbilityTargetsByPriority(
+                candidates,
+                getPriority);
         }
         else
         {
@@ -2009,15 +2027,24 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
             {
                 T candidate = candidates[index];
                 float candidateValue = getMetric(candidate, metric);
+                StatusEffectTargetPriority candidatePriority =
+                    getPriority(candidate);
                 int insertionIndex = index - 1;
                 while (insertionIndex >= 0)
                 {
+                    StatusEffectTargetPriority previousPriority =
+                        getPriority(candidates[insertionIndex]);
+                    int priorityComparison = CompareTargetPriority(
+                        candidatePriority,
+                        previousPriority);
                     float previousValue = getMetric(
                         candidates[insertionIndex],
                         metric);
-                    bool shouldMove = descending
-                        ? previousValue < candidateValue
-                        : previousValue > candidateValue;
+                    bool shouldMove = priorityComparison < 0 ||
+                                      (priorityComparison == 0 &&
+                                       (descending
+                                           ? previousValue < candidateValue
+                                           : previousValue > candidateValue));
                     if (!shouldMove)
                         break;
 
@@ -2032,6 +2059,54 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
 
         if (candidates.Count > targetCount)
             candidates.RemoveRange(targetCount, candidates.Count - targetCount);
+    }
+
+    private static void StableSortEnemyAbilityTargetsByPriority<T>(
+        List<T> candidates,
+        Func<T, StatusEffectTargetPriority> getPriority)
+    {
+        for (int index = 1; index < candidates.Count; index++)
+        {
+            T candidate = candidates[index];
+            StatusEffectTargetPriority candidatePriority =
+                getPriority(candidate);
+            int insertionIndex = index - 1;
+            while (insertionIndex >= 0 &&
+                   CompareTargetPriority(
+                       candidatePriority,
+                       getPriority(candidates[insertionIndex])) < 0)
+            {
+                candidates[insertionIndex + 1] =
+                    candidates[insertionIndex];
+                insertionIndex--;
+            }
+
+            candidates[insertionIndex + 1] = candidate;
+        }
+    }
+
+    private static int CompareTargetPriority(
+        StatusEffectTargetPriority left,
+        StatusEffectTargetPriority right)
+    {
+        if (left.IsForced != right.IsForced)
+            return left.IsForced ? -1 : 1;
+
+        return right.Adjustment.CompareTo(left.Adjustment);
+    }
+
+    private static StatusEffectTargetPriority GetPlayerTargetPriority(
+        IBattleCharacter target)
+    {
+        return StatusEffectTargetPriorityResolver.Resolve(
+            target?.GetActiveStatusEffects());
+    }
+
+    private static StatusEffectTargetPriority GetEnemyAllyTargetPriority(
+        EnemyRuntime target)
+    {
+        return StatusEffectTargetPriorityResolver.Resolve(
+            target?.GetActiveStatusEffects());
     }
 
     private float GetEnemyAbilityTargetMetric(
@@ -2453,16 +2528,45 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
         return result;
     }
 
-    private List<DungeonTileView> CollectPriorityTargetTiles()
+    private readonly struct EnemyTargetPriorityEvaluation
+    {
+        public bool IsExcluded { get; }
+        public bool IsForced { get; }
+        public float Adjustment { get; }
+
+        public EnemyTargetPriorityEvaluation(
+            bool isExcluded,
+            bool isForced,
+            float adjustment)
+        {
+            IsExcluded = isExcluded;
+            IsForced = isForced;
+            Adjustment =
+                float.IsNaN(adjustment) || float.IsInfinity(adjustment)
+                    ? 0f
+                    : adjustment;
+        }
+    }
+
+    private List<DungeonTileView> CollectPriorityTargetTiles(
+        out bool hasAlternateTarget)
     {
         List<DungeonTileView> occupiedTiles = CollectOccupiedTiles();
+        hasAlternateTarget = occupiedTiles.Count > 1;
         List<DungeonTileView> priorityTargets = new();
         foreach (DungeonTileView tile in occupiedTiles)
         {
-            if (tile.TopEnemy != null &&
-                !IsTargetPriorityExcluded(
-                    tile.TopEnemy,
-                    occupiedTiles.Count > 1))
+            EnemyRuntime enemy = tile.TopEnemy;
+            if (enemy == null)
+                continue;
+
+            EnemyTargetPriorityEvaluation evaluation =
+                EvaluateTargetPriority(enemy, hasAlternateTarget);
+            bool itemForced =
+                _forcedPriorityRemaining > 0f &&
+                ReferenceEquals(enemy, _forcedPriorityTarget);
+            if (itemForced || evaluation.IsForced ||
+                !evaluation.IsExcluded)
             {
                 priorityTargets.Add(tile);
             }
@@ -2473,13 +2577,19 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
             : occupiedTiles;
     }
 
-    private static bool IsTargetPriorityExcluded(
+    private static EnemyTargetPriorityEvaluation EvaluateTargetPriority(
         EnemyRuntime source,
         bool hasAlternateTarget)
     {
         if (source == null)
-            return false;
+            return default;
 
+        StatusEffectTargetPriority statusPriority =
+            StatusEffectTargetPriorityResolver.Resolve(
+                source.GetActiveStatusEffects());
+        bool excluded = false;
+        bool forced = statusPriority.IsForced;
+        double adjustment = statusPriority.Adjustment;
         foreach (EnemyAbilityRuntimeState state in source.AbilityStates)
         {
             EnemyAbilityDefinition ability = state.Definition;
@@ -2501,12 +2611,71 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
                     operation.Type ==
                         EnemyAbilityOperationType.ModifyTargetPriority)
                 {
-                    return true;
+                    switch (operation.TargetPriorityMode)
+                    {
+                        case EnemyTargetPriorityMode.Exclude:
+                            excluded = true;
+                            break;
+                        case EnemyTargetPriorityMode.Adjust:
+                            adjustment +=
+                                operation.TargetPriorityAdjustment;
+                            break;
+                        case EnemyTargetPriorityMode.ForceFocus:
+                            forced = true;
+                            break;
+                    }
                 }
             }
         }
 
-        return false;
+        float clampedAdjustment = adjustment > float.MaxValue
+            ? float.MaxValue
+            : adjustment < -float.MaxValue
+                ? -float.MaxValue
+                : (float)adjustment;
+        return new EnemyTargetPriorityEvaluation(
+            excluded,
+            forced,
+            clampedAdjustment);
+    }
+
+    private static int CompareTargetPriority(
+        DungeonTileView left,
+        DungeonTileView right,
+        bool hasAlternateTarget)
+    {
+        EnemyTargetPriorityEvaluation leftPriority =
+            EvaluateTargetPriority(left?.TopEnemy, hasAlternateTarget);
+        EnemyTargetPriorityEvaluation rightPriority =
+            EvaluateTargetPriority(right?.TopEnemy, hasAlternateTarget);
+        if (leftPriority.IsForced != rightPriority.IsForced)
+            return leftPriority.IsForced ? -1 : 1;
+
+        return rightPriority.Adjustment.CompareTo(
+            leftPriority.Adjustment);
+    }
+
+    private static void StableSortByTargetPriority(
+        List<DungeonTileView> candidates,
+        bool hasAlternateTarget)
+    {
+        for (int index = 1; index < candidates.Count; index++)
+        {
+            DungeonTileView candidate = candidates[index];
+            int insertionIndex = index - 1;
+            while (insertionIndex >= 0 &&
+                   CompareTargetPriority(
+                       candidate,
+                       candidates[insertionIndex],
+                       hasAlternateTarget) < 0)
+            {
+                candidates[insertionIndex + 1] =
+                    candidates[insertionIndex];
+                insertionIndex--;
+            }
+
+            candidates[insertionIndex + 1] = candidate;
+        }
     }
 
     private bool TryFindEnemyTile(

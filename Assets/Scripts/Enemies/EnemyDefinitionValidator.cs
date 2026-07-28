@@ -605,6 +605,31 @@ public static class EnemyDefinitionValidator
                         "Redirect range must be at least one.");
                 }
                 break;
+
+            case EnemyAbilityOperationType.ModifyTargetPriority:
+                if (!Enum.IsDefined(
+                        typeof(EnemyTargetPriorityMode),
+                        operation.TargetPriorityMode))
+                {
+                    AddError(
+                        result,
+                        "ability.target_priority_mode_invalid",
+                        $"{path}.targetPriorityMode",
+                        $"Target priority mode " +
+                        $"'{operation.TargetPriorityMode}' is unsupported.");
+                }
+                else if (operation.TargetPriorityMode ==
+                             EnemyTargetPriorityMode.Adjust &&
+                         operation.TargetPriorityAdjustment == 0)
+                {
+                    AddError(
+                        result,
+                        "ability.target_priority_adjustment_missing",
+                        $"{path}.targetPriorityAdjustment",
+                        "Adjust target priority requires a non-zero " +
+                        "priority adjustment.");
+                }
+                break;
         }
     }
 

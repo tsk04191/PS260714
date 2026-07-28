@@ -249,8 +249,9 @@ public sealed class DungeonTileView : MonoBehaviour, IPointerClickHandler
             return 0;
 
         return TryRemoveStatusFromTop(
-            removalTarget,
-            statusEffect,
+            new CharacterStatusRemovalSelection(
+                removalTarget,
+                statusEffect),
             CharacterStatusRemovalAmount.Fixed(removalCount),
             null);
     }
@@ -265,8 +266,9 @@ public sealed class DungeonTileView : MonoBehaviour, IPointerClickHandler
             return 0;
 
         return TryRemoveStatusFromTop(
-            removalTarget,
-            statusEffect,
+            new CharacterStatusRemovalSelection(
+                removalTarget,
+                statusEffect),
             CharacterStatusRemovalAmount.Fixed(removalCount),
             applyDamage);
     }
@@ -277,13 +279,25 @@ public sealed class DungeonTileView : MonoBehaviour, IPointerClickHandler
         CharacterStatusRemovalAmount removalAmount,
         Func<DungeonTileView, int, IBattleCharacter, int> applyDamage)
     {
+        return TryRemoveStatusFromTop(
+            new CharacterStatusRemovalSelection(
+                removalTarget,
+                statusEffect),
+            removalAmount,
+            applyDamage);
+    }
+
+    internal int TryRemoveStatusFromTop(
+        CharacterStatusRemovalSelection removalSelection,
+        CharacterStatusRemovalAmount removalAmount,
+        Func<DungeonTileView, int, IBattleCharacter, int> applyDamage)
+    {
         if (_enemies.Count == 0)
             return 0;
 
         EnemyRuntime target = TopEnemy;
         int removed = target.RemoveStatusEffects(
-            removalTarget,
-            statusEffect,
+            removalSelection,
             removalAmount,
             CreateStatusDamageCallback(target, applyDamage));
         if (removed <= 0)

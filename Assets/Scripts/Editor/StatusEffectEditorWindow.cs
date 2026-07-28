@@ -122,7 +122,18 @@ public sealed class StatusEffectEditorWindow : EditorWindow
     {
         "지정 상태",
         "무작위 상태",
+        "모든 버프",
+        "모든 디버프",
         "모든 상태"
+    };
+
+    private static readonly int[] StatusRemovalTargetValues =
+    {
+        (int)CharacterStatusRemovalTarget.Single,
+        (int)CharacterStatusRemovalTarget.Random,
+        (int)CharacterStatusRemovalTarget.Buff,
+        (int)CharacterStatusRemovalTarget.Debuff,
+        (int)CharacterStatusRemovalTarget.All
     };
 
     private static readonly string[] StatusRemovalAmountModeOptions =
@@ -135,7 +146,8 @@ public sealed class StatusEffectEditorWindow : EditorWindow
     {
         "공격력",
         "공격 속도",
-        "받는 피해"
+        "받는 피해",
+        "대상 우선순위"
     };
 
     private static readonly string[] StatModifierModeOptions =
@@ -150,7 +162,8 @@ public sealed class StatusEffectEditorWindow : EditorWindow
         "전체 행동 불가",
         "기본 공격 금지",
         "액티브 스킬 금지",
-        "패시브 쿨다운 정지"
+        "패시브 쿨다운 정지",
+        "강제 포커싱"
     };
 
     private readonly List<StatusEffectSO> _definitions = new();
@@ -872,17 +885,24 @@ public sealed class StatusEffectEditorWindow : EditorWindow
     {
         SerializedProperty removalTarget =
             effect.FindPropertyRelative("statusRemovalTarget");
-        DrawEnumProperty(
-            removalTarget,
-            "제거 범위",
-            StatusRemovalTargetOptions);
+        if (removalTarget != null)
+        {
+            removalTarget.enumValueIndex = EditorGUILayout.IntPopup(
+                "제거 범위",
+                removalTarget.enumValueIndex,
+                StatusRemovalTargetOptions,
+                StatusRemovalTargetValues);
+        }
         if (removalTarget != null &&
             removalTarget.enumValueIndex ==
                 (int)CharacterStatusRemovalTarget.Single)
         {
-            EditorGUILayout.PropertyField(
+            PS260714StatusEffectSelection.Draw(
+                effect.FindPropertyRelative("statusRemovalEffects"),
                 effect.FindPropertyRelative("statusEffect"),
-                new GUIContent("제거 상태"));
+                new GUIContent(
+                    "제거 상태",
+                    "여러 상태를 선택할 수 있으며 분류와 검색으로 목록을 필터링합니다."));
         }
 
         SerializedProperty count =
@@ -1020,20 +1040,31 @@ public sealed class StatusEffectEditorWindow : EditorWindow
             }
             EditorGUILayout.EndHorizontal();
 
+            SerializedProperty statType =
+                modifier.FindPropertyRelative("statType");
             DrawEnumProperty(
-                modifier.FindPropertyRelative("statType"),
+                statType,
                 "능력치",
                 StatTypeOptions);
+            bool isTargetPriority = statType != null &&
+                                    statType.enumValueIndex ==
+                                    (int)StatusEffectStatType.TargetPriority;
             SerializedProperty mode = modifier.FindPropertyRelative("mode");
-            DrawEnumProperty(
-                mode,
-                "연산",
-                StatModifierModeOptions);
+            if (isTargetPriority && mode != null)
+                mode.enumValueIndex =
+                    (int)StatusEffectStatModifierMode.Flat;
+            using (new EditorGUI.DisabledScope(isTargetPriority))
+            {
+                DrawEnumProperty(
+                    mode,
+                    "연산",
+                    StatModifierModeOptions);
+            }
             SerializedProperty value = modifier.FindPropertyRelative("value");
             if (value != null)
             {
                 value.floatValue = EditorGUILayout.FloatField(
-                    "수치",
+                    isTargetPriority ? "우선순위 가감" : "수치",
                     value.floatValue);
                 if (mode != null &&
                     mode.enumValueIndex ==
@@ -1045,6 +1076,14 @@ public sealed class StatusEffectEditorWindow : EditorWindow
             EditorGUILayout.PropertyField(
                 modifier.FindPropertyRelative("scaleWithStacks"),
                 new GUIContent("스택 수 적용"));
+            if (isTargetPriority)
+            {
+                EditorGUILayout.HelpBox(
+                    "양수는 도발처럼 먼저 선택되며, 음수는 선택 " +
+                    "우선순위를 낮춥니다. 기존 체력·보호막·무작위 " +
+                    "대상 규칙보다 먼저 비교합니다.",
+                    MessageType.Info);
+            }
             EditorGUILayout.EndVertical();
 
             if (removeIndex >= 0 || moveFrom >= 0)
@@ -1095,8 +1134,10 @@ public sealed class StatusEffectEditorWindow : EditorWindow
             SerializedProperty control =
                 controls.GetArrayElementAtIndex(index);
             EditorGUILayout.BeginHorizontal(EditorStyles.helpBox);
+            SerializedProperty controlType =
+                control.FindPropertyRelative("controlType");
             DrawEnumProperty(
-                control.FindPropertyRelative("controlType"),
+                controlType,
                 $"제어 {index + 1}",
                 ControlTypeOptions);
             DrawMoveButtons(
@@ -1112,6 +1153,16 @@ public sealed class StatusEffectEditorWindow : EditorWindow
                 removeIndex = index;
             }
             EditorGUILayout.EndHorizontal();
+            if (controlType != null &&
+                controlType.enumValueIndex ==
+                (int)StatusEffectControlType.ForceTargeting)
+            {
+                EditorGUILayout.HelpBox(
+                    "이 상태의 대상은 모든 우선순위 가감보다 먼저 " +
+                    "선택됩니다. 여러 강제 대상이 있으면 원래 대상 " +
+                    "선택 규칙으로 순서를 결정합니다.",
+                    MessageType.Info);
+            }
 
             if (removeIndex >= 0 || moveFrom >= 0)
                 break;
@@ -1455,6 +1506,7 @@ public sealed class StatusEffectEditorWindow : EditorWindow
         SetFloatRelative(effect, "statusDuration", 1f);
         SetFloatRelative(effect, "statusStacks", 1f);
         SetObjectRelative(effect, "statusEffect", null);
+        effect.FindPropertyRelative("statusRemovalEffects")?.ClearArray();
         SetEnumRelative(
             effect,
             "statusRemovalTarget",

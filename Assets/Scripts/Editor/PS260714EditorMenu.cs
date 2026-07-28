@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using UnityEditor;
 using UnityEngine;
 
@@ -220,5 +221,405 @@ internal static class PS260714AssetEditorList
             clipping = TextClipping.Clip,
             wordWrap = false
         };
+    }
+}
+
+internal static class PS260714StatusEffectSelection
+{
+    internal static void Draw(
+        SerializedProperty statusEffects,
+        SerializedProperty legacyStatusEffect,
+        GUIContent label)
+    {
+        if (statusEffects == null)
+        {
+            if (legacyStatusEffect != null)
+                EditorGUILayout.PropertyField(legacyStatusEffect, label);
+            return;
+        }
+
+        int selectedCount = GetSelectedCount(
+            statusEffects,
+            legacyStatusEffect);
+        EditorGUILayout.BeginHorizontal();
+        EditorGUILayout.PrefixLabel(label);
+        if (GUILayout.Button(
+                selectedCount == 0
+                    ? "상태 선택"
+                    : $"{selectedCount}개 선택",
+                EditorStyles.popup))
+        {
+            Rect buttonRect = GUILayoutUtility.GetLastRect();
+            PopupWindow.Show(
+                buttonRect,
+                new StatusEffectMultiSelectPopup(
+                    statusEffects.serializedObject.targetObject,
+                    statusEffects.propertyPath,
+                    legacyStatusEffect?.propertyPath));
+        }
+        EditorGUILayout.EndHorizontal();
+
+        DrawSelectedRows(statusEffects, legacyStatusEffect);
+    }
+
+    private static int GetSelectedCount(
+        SerializedProperty statusEffects,
+        SerializedProperty legacyStatusEffect)
+    {
+        if (statusEffects.arraySize > 0)
+        {
+            int count = 0;
+            for (int index = 0; index < statusEffects.arraySize; index++)
+            {
+                if (statusEffects.GetArrayElementAtIndex(index)
+                        .objectReferenceValue is StatusEffectSO)
+                {
+                    count++;
+                }
+            }
+
+            return count;
+        }
+
+        return legacyStatusEffect?.objectReferenceValue is StatusEffectSO
+            ? 1
+            : 0;
+    }
+
+    private static void DrawSelectedRows(
+        SerializedProperty statusEffects,
+        SerializedProperty legacyStatusEffect)
+    {
+        if (statusEffects.arraySize == 0)
+        {
+            if (legacyStatusEffect?.objectReferenceValue is
+                StatusEffectSO legacy)
+            {
+                DrawSelectedRow(
+                    legacy,
+                    () =>
+                    {
+                        legacyStatusEffect.objectReferenceValue = null;
+                        legacyStatusEffect.serializedObject
+                            .ApplyModifiedProperties();
+                    });
+            }
+            else
+            {
+                EditorGUILayout.HelpBox(
+                    "제거할 상태를 하나 이상 선택하세요.",
+                    MessageType.Error);
+            }
+
+            return;
+        }
+
+        int removeIndex = -1;
+        for (int index = 0; index < statusEffects.arraySize; index++)
+        {
+            SerializedProperty item =
+                statusEffects.GetArrayElementAtIndex(index);
+            StatusEffectSO definition =
+                item.objectReferenceValue as StatusEffectSO;
+            int capturedIndex = index;
+            DrawSelectedRow(
+                definition,
+                () => removeIndex = capturedIndex);
+        }
+
+        if (removeIndex < 0)
+            return;
+
+        DeleteArrayElement(statusEffects, removeIndex);
+        if (statusEffects.arraySize == 0 &&
+            legacyStatusEffect != null)
+        {
+            legacyStatusEffect.objectReferenceValue = null;
+        }
+        statusEffects.serializedObject.ApplyModifiedProperties();
+    }
+
+    private static void DrawSelectedRow(
+        StatusEffectSO definition,
+        Action remove)
+    {
+        EditorGUILayout.BeginHorizontal();
+        using (new EditorGUI.DisabledScope(true))
+        {
+            EditorGUILayout.ObjectField(
+                definition,
+                typeof(StatusEffectSO),
+                false);
+        }
+        if (GUILayout.Button("×", EditorStyles.miniButton, GUILayout.Width(24f)))
+            remove?.Invoke();
+        EditorGUILayout.EndHorizontal();
+    }
+
+    private static void DeleteArrayElement(
+        SerializedProperty array,
+        int index)
+    {
+        int previousSize = array.arraySize;
+        array.DeleteArrayElementAtIndex(index);
+        if (array.arraySize == previousSize)
+            array.DeleteArrayElementAtIndex(index);
+    }
+
+    private sealed class StatusEffectMultiSelectPopup : PopupWindowContent
+    {
+        private enum AlignmentFilter
+        {
+            All = 0,
+            Buff = 1,
+            Debuff = 2,
+            Neutral = 3
+        }
+
+        private static readonly string[] FilterLabels =
+        {
+            "전체",
+            "버프",
+            "디버프",
+            "중립"
+        };
+
+        private readonly UnityEngine.Object _target;
+        private readonly string _statusEffectsPath;
+        private readonly string _legacyStatusEffectPath;
+        private readonly List<StatusEffectSO> _definitions = new();
+
+        private Vector2 _scroll;
+        private string _searchText = string.Empty;
+        private AlignmentFilter _filter;
+
+        public StatusEffectMultiSelectPopup(
+            UnityEngine.Object target,
+            string statusEffectsPath,
+            string legacyStatusEffectPath)
+        {
+            _target = target;
+            _statusEffectsPath = statusEffectsPath;
+            _legacyStatusEffectPath = legacyStatusEffectPath;
+            LoadDefinitions();
+        }
+
+        public override Vector2 GetWindowSize()
+        {
+            return new Vector2(380f, 430f);
+        }
+
+        public override void OnGUI(Rect rect)
+        {
+            if (_target == null)
+            {
+                editorWindow.Close();
+                return;
+            }
+
+            _filter = (AlignmentFilter)GUILayout.Toolbar(
+                (int)_filter,
+                FilterLabels);
+            _searchText = EditorGUILayout.TextField(
+                _searchText,
+                EditorStyles.toolbarSearchField);
+
+            SerializedObject serialized = new(_target);
+            serialized.UpdateIfRequiredOrScript();
+            SerializedProperty statusEffects =
+                serialized.FindProperty(_statusEffectsPath);
+            SerializedProperty legacyStatusEffect =
+                string.IsNullOrEmpty(_legacyStatusEffectPath)
+                    ? null
+                    : serialized.FindProperty(_legacyStatusEffectPath);
+            if (statusEffects == null)
+            {
+                EditorGUILayout.HelpBox(
+                    "상태 선택 목록을 찾을 수 없습니다.",
+                    MessageType.Error);
+                return;
+            }
+
+            EditorGUILayout.LabelField(
+                $"{GetSelectedCount(statusEffects, legacyStatusEffect)}개 선택",
+                EditorStyles.miniLabel);
+            using (EditorGUILayout.ScrollViewScope scroll =
+                   new(_scroll))
+            {
+                _scroll = scroll.scrollPosition;
+                int visibleCount = 0;
+                foreach (StatusEffectSO definition in _definitions)
+                {
+                    if (!MatchesFilter(definition))
+                        continue;
+
+                    visibleCount++;
+                    bool selected = Contains(
+                        statusEffects,
+                        legacyStatusEffect,
+                        definition);
+                    bool toggled = EditorGUILayout.ToggleLeft(
+                        new GUIContent(
+                            definition.name,
+                            PS260714AssetEditorList.GetAssetPreview(
+                                definition.Icon),
+                            definition.StatusId),
+                        selected,
+                        GUILayout.Height(24f));
+                    if (toggled != selected)
+                    {
+                        Toggle(
+                            serialized,
+                            statusEffects,
+                            legacyStatusEffect,
+                            definition,
+                            toggled);
+                    }
+                }
+
+                if (visibleCount == 0)
+                {
+                    EditorGUILayout.HelpBox(
+                        "조건에 맞는 상태가 없습니다.",
+                        MessageType.Info);
+                }
+            }
+        }
+
+        private void LoadDefinitions()
+        {
+            foreach (string guid in AssetDatabase.FindAssets(
+                         "t:StatusEffectSO"))
+            {
+                string path = AssetDatabase.GUIDToAssetPath(guid);
+                StatusEffectSO definition =
+                    AssetDatabase.LoadAssetAtPath<StatusEffectSO>(path);
+                if (definition != null)
+                    _definitions.Add(definition);
+            }
+
+            _definitions.Sort((left, right) => string.Compare(
+                left.name,
+                right.name,
+                StringComparison.OrdinalIgnoreCase));
+        }
+
+        private bool MatchesFilter(StatusEffectSO definition)
+        {
+            if (definition == null)
+                return false;
+
+            string search = (_searchText ?? string.Empty).Trim();
+            if (!string.IsNullOrEmpty(search) &&
+                definition.name.IndexOf(
+                    search,
+                    StringComparison.OrdinalIgnoreCase) < 0 &&
+                (definition.NameLocalizationKey ?? string.Empty).IndexOf(
+                    search,
+                    StringComparison.OrdinalIgnoreCase) < 0)
+            {
+                return false;
+            }
+
+            return _filter switch
+            {
+                AlignmentFilter.Buff =>
+                    definition.Alignment == StatusEffectAlignment.Buff,
+                AlignmentFilter.Debuff =>
+                    definition.Alignment == StatusEffectAlignment.Debuff,
+                AlignmentFilter.Neutral =>
+                    definition.Alignment == StatusEffectAlignment.Neutral,
+                _ => true
+            };
+        }
+
+        private static bool Contains(
+            SerializedProperty statusEffects,
+            SerializedProperty legacyStatusEffect,
+            StatusEffectSO definition)
+        {
+            if (statusEffects.arraySize == 0)
+            {
+                return ReferenceEquals(
+                    legacyStatusEffect?.objectReferenceValue,
+                    definition);
+            }
+
+            for (int index = 0; index < statusEffects.arraySize; index++)
+            {
+                if (ReferenceEquals(
+                        statusEffects.GetArrayElementAtIndex(index)
+                            .objectReferenceValue,
+                        definition))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private void Toggle(
+            SerializedObject serialized,
+            SerializedProperty statusEffects,
+            SerializedProperty legacyStatusEffect,
+            StatusEffectSO definition,
+            bool selected)
+        {
+            Undo.RecordObject(_target, "Change Status Removal Selection");
+            MaterializeLegacySelection(
+                statusEffects,
+                legacyStatusEffect);
+            if (selected)
+            {
+                if (!Contains(statusEffects, null, definition))
+                {
+                    int index = statusEffects.arraySize;
+                    statusEffects.InsertArrayElementAtIndex(index);
+                    statusEffects.GetArrayElementAtIndex(index)
+                        .objectReferenceValue = definition;
+                }
+            }
+            else
+            {
+                for (int index = statusEffects.arraySize - 1;
+                     index >= 0;
+                     index--)
+                {
+                    if (!ReferenceEquals(
+                            statusEffects.GetArrayElementAtIndex(index)
+                                .objectReferenceValue,
+                            definition))
+                    {
+                        continue;
+                    }
+
+                    DeleteArrayElement(statusEffects, index);
+                }
+            }
+
+            if (statusEffects.arraySize == 0 &&
+                legacyStatusEffect != null)
+            {
+                legacyStatusEffect.objectReferenceValue = null;
+            }
+            serialized.ApplyModifiedProperties();
+        }
+
+        private static void MaterializeLegacySelection(
+            SerializedProperty statusEffects,
+            SerializedProperty legacyStatusEffect)
+        {
+            if (statusEffects.arraySize > 0 ||
+                legacyStatusEffect?.objectReferenceValue is not
+                    StatusEffectSO legacy)
+            {
+                return;
+            }
+
+            statusEffects.InsertArrayElementAtIndex(0);
+            statusEffects.GetArrayElementAtIndex(0)
+                .objectReferenceValue = legacy;
+        }
     }
 }

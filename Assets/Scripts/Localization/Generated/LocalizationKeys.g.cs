@@ -10,6 +10,8 @@ namespace PS260714.Localization
         public const string CharacterAislingName = "character.aisling.name";
         public const string CharacterByeolhaDescription = "character.byeolha.description";
         public const string CharacterByeolhaName = "character.byeolha.name";
+        public const string CharacterCalistaDescription = "character.calista.description";
+        public const string CharacterCalistaName = "character.calista.name";
         public const string CharacterIsoldeDescription = "character.isolde.description";
         public const string CharacterIsoldeName = "character.isolde.name";
         public const string CharacterMirinaeDescription = "character.mirinae.description";
@@ -97,6 +99,8 @@ namespace PS260714.Localization
         public const string StatusEmergencyKitName = "status.emergency_kit.name";
         public const string StatusFireDescription = "status.fire.description";
         public const string StatusFireName = "status.fire.name";
+        public const string StatusFocusDescription = "status.focus.description";
+        public const string StatusFocusName = "status.focus.name";
         public const string StatusOpeningDescription = "status.opening.description";
         public const string StatusOpeningName = "status.opening.name";
         public const string StatusPoisonDescription = "status.poison.description";

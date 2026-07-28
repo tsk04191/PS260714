@@ -155,9 +155,124 @@ public enum CharacterDamageAmountMode
 
 public enum CharacterStatusRemovalTarget
 {
-    Single,
-    Random,
-    All
+    Single = 0,
+    Random = 1,
+    All = 2,
+    Buff = 3,
+    Debuff = 4
+}
+
+public readonly struct CharacterStatusRemovalSelection
+{
+    private readonly IReadOnlyList<StatusEffectSO> _statusEffects;
+
+    public CharacterStatusRemovalTarget Target { get; }
+    public StatusEffectSO LegacyStatusEffect { get; }
+    public IReadOnlyList<StatusEffectSO> StatusEffects =>
+        _statusEffects ?? Array.Empty<StatusEffectSO>();
+    public bool UsesStatusList =>
+        _statusEffects != null && _statusEffects.Count > 0;
+
+    public CharacterStatusRemovalSelection(
+        CharacterStatusRemovalTarget target,
+        StatusEffectSO legacyStatusEffect,
+        IReadOnlyList<StatusEffectSO> statusEffects = null)
+    {
+        Target = target;
+        LegacyStatusEffect = legacyStatusEffect;
+        _statusEffects = statusEffects;
+    }
+
+    public int ExplicitStatusCount =>
+        UsesStatusList
+            ? _statusEffects.Count
+            : LegacyStatusEffect != null
+                ? 1
+                : 0;
+
+    public StatusEffectSO GetExplicitStatus(int index)
+    {
+        if (UsesStatusList)
+        {
+            return index >= 0 && index < _statusEffects.Count
+                ? _statusEffects[index]
+                : null;
+        }
+
+        return index == 0 ? LegacyStatusEffect : null;
+    }
+
+    public bool HasExplicitStatus
+    {
+        get
+        {
+            for (int index = 0; index < ExplicitStatusCount; index++)
+            {
+                if (GetExplicitStatus(index) != null)
+                    return true;
+            }
+
+            return false;
+        }
+    }
+
+    public bool MatchesStatus(StatusEffectSO definition)
+    {
+        if (definition == null)
+            return false;
+
+        switch (Target)
+        {
+            case CharacterStatusRemovalTarget.Single:
+                if (!definition.Removable)
+                    return false;
+
+                for (int index = 0; index < ExplicitStatusCount; index++)
+                {
+                    if (IsSameStatus(
+                            GetExplicitStatus(index),
+                            definition))
+                    {
+                        return true;
+                    }
+                }
+
+                return false;
+
+            case CharacterStatusRemovalTarget.Random:
+                return definition.IncludedInRandomRemoval;
+
+            case CharacterStatusRemovalTarget.All:
+                return definition.IncludedInAllRemoval;
+
+            case CharacterStatusRemovalTarget.Buff:
+                return definition.Alignment == StatusEffectAlignment.Buff &&
+                       definition.IncludedInAllRemoval;
+
+            case CharacterStatusRemovalTarget.Debuff:
+                return definition.Alignment == StatusEffectAlignment.Debuff &&
+                       definition.IncludedInAllRemoval;
+
+            default:
+                return false;
+        }
+    }
+
+    private static bool IsSameStatus(
+        StatusEffectSO left,
+        StatusEffectSO right)
+    {
+        if (ReferenceEquals(left, right))
+            return true;
+        if (left == null || right == null)
+            return false;
+
+        return !string.IsNullOrWhiteSpace(left.StatusId) &&
+               string.Equals(
+                   left.StatusId,
+                   right.StatusId,
+                   StringComparison.Ordinal);
+    }
 }
 
 public enum CharacterStatusRemovalAmountMode
@@ -731,6 +846,8 @@ public sealed class CharacterEffectDefinition :
     [SerializeField]
     private StatusEffectSO statusEffect;
     [SerializeField]
+    private List<StatusEffectSO> statusRemovalEffects = new();
+    [SerializeField]
     private CharacterStatusRemovalTarget statusRemovalTarget;
     [SerializeField]
     private CharacterStatusRemovalAmountMode statusRemovalAmountMode;
@@ -820,8 +937,15 @@ public sealed class CharacterEffectDefinition :
     public float StatusDuration => statusDuration;
     public float StatusStacks => statusStacks;
     public StatusEffectSO StatusEffect => statusEffect;
+    public IReadOnlyList<StatusEffectSO> StatusRemovalEffects =>
+        statusRemovalEffects;
     public CharacterStatusRemovalTarget StatusRemovalTarget =>
         statusRemovalTarget;
+    public CharacterStatusRemovalSelection StatusRemovalSelection =>
+        new(
+            statusRemovalTarget,
+            statusEffect,
+            statusRemovalEffects);
     public CharacterStatusRemovalAmountMode StatusRemovalAmountMode =>
         statusRemovalAmountMode;
     public int StatusRemovalCount => statusRemovalCount;
@@ -838,6 +962,7 @@ public sealed class CharacterEffectDefinition :
     public void Validate()
     {
         targetSelector ??= new CharacterEffectTargetSelector();
+        statusRemovalEffects ??= new List<StatusEffectSO>();
         targetSelector.Validate();
         if (float.IsNaN(damageAmount) || float.IsInfinity(damageAmount))
             damageAmount = 0f;

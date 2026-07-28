@@ -1114,6 +1114,191 @@ public sealed class EnemyP0RegressionTests
         Assert.That(loneTargets, Is.EqualTo(new[] { lone }));
     }
 
+    [Test]
+    public void ModularTargetPriority_AdjustmentPrecedesSubjectMetric()
+    {
+        EnemyRuntime lowestHealth = LoadEnemy("Basic").CreateRuntime();
+        SetEnemyHealth(lowestHealth, 1);
+        EnemyRuntime taunting = CreateModularTriggeredEnemy(
+            "priority_taunt",
+            EnemyAbilityTrigger.OnTargetPriorityEvaluation,
+            EnemyAbilityTargetFaction.None,
+            EnemyAbilityTargetSubject.None,
+            EnemyAbilityTargetMetric.None,
+            EnemyAbilityOperationType.ModifyTargetPriority,
+            targetPriorityMode: EnemyTargetPriorityMode.Adjust,
+            targetPriorityAdjustment: 10);
+        FakeBattleCharacter source = new(1);
+        DungeonBoardView board = CreateBoard(
+            (1, 1, lowestHealth),
+            (1, 2, taunting));
+
+        IReadOnlyList<EnemyRuntime> targets =
+            board.SelectCharacterTargets(
+                source,
+                CharacterAttackSubject.LowestValue,
+                CharacterAttackSubjectMetric.Health,
+                1,
+                CharacterConditionMatchMode.All,
+                Array.Empty<CharacterNumericCondition>());
+
+        Assert.That(targets, Is.EqualTo(new[] { taunting }));
+    }
+
+    [Test]
+    public void ModularTargetPriority_ForceFocusPrecedesAdjustments()
+    {
+        EnemyRuntime adjusted = CreateModularTriggeredEnemy(
+            "priority_adjusted",
+            EnemyAbilityTrigger.OnTargetPriorityEvaluation,
+            EnemyAbilityTargetFaction.None,
+            EnemyAbilityTargetSubject.None,
+            EnemyAbilityTargetMetric.None,
+            EnemyAbilityOperationType.ModifyTargetPriority,
+            targetPriorityMode: EnemyTargetPriorityMode.Adjust,
+            targetPriorityAdjustment: 100);
+        EnemyRuntime forced = CreateModularTriggeredEnemy(
+            "priority_forced",
+            EnemyAbilityTrigger.OnTargetPriorityEvaluation,
+            EnemyAbilityTargetFaction.None,
+            EnemyAbilityTargetSubject.None,
+            EnemyAbilityTargetMetric.None,
+            EnemyAbilityOperationType.ModifyTargetPriority,
+            targetPriorityMode: EnemyTargetPriorityMode.ForceFocus);
+        FakeBattleCharacter source = new(1);
+        DungeonBoardView board = CreateBoard(
+            (1, 1, adjusted),
+            (1, 2, forced));
+
+        IReadOnlyList<EnemyRuntime> targets =
+            board.SelectCharacterTargets(
+                source,
+                CharacterAttackSubject.LowestValue,
+                CharacterAttackSubjectMetric.Health,
+                1,
+                CharacterConditionMatchMode.All,
+                Array.Empty<CharacterNumericCondition>());
+
+        Assert.That(targets, Is.EqualTo(new[] { forced }));
+    }
+
+    [Test]
+    public void BattleItemFocus_OverridesTargetPriorityExclusion()
+    {
+        EnemyRuntime ordinary = LoadEnemy("Basic").CreateRuntime();
+        EnemyRuntime excluded = CreateModularTriggeredEnemy(
+            "priority_excluded",
+            EnemyAbilityTrigger.OnTargetPriorityEvaluation,
+            EnemyAbilityTargetFaction.None,
+            EnemyAbilityTargetSubject.None,
+            EnemyAbilityTargetMetric.None,
+            EnemyAbilityOperationType.ModifyTargetPriority,
+            requireAlternateTarget: true);
+        FakeBattleCharacter source = new(1);
+        DungeonBoardView board = CreateBoard(
+            (1, 1, ordinary),
+            (1, 2, excluded));
+
+        Assert.That(
+            board.TryForcePriorityTarget(excluded, 5f),
+            Is.True);
+        IReadOnlyList<EnemyRuntime> targets =
+            board.SelectCharacterTargets(
+                source,
+                CharacterAttackSubject.Random,
+                CharacterAttackSubjectMetric.Health,
+                1,
+                CharacterConditionMatchMode.All,
+                Array.Empty<CharacterNumericCondition>());
+
+        Assert.That(targets, Is.EqualTo(new[] { excluded }));
+    }
+
+    [Test]
+    public void AbilityAppliedPriorityStatus_ForcesCharacterFocus()
+    {
+        StatusEffectSO priorityStatus =
+            CreateTargetPriorityStatus(
+                adjustment: 20f,
+                forceTargeting: false,
+                canTargetEnemy: true,
+                canTargetAlly: false);
+        EnemyRuntime lowestHealth = LoadEnemy("Basic").CreateRuntime();
+        SetEnemyHealth(lowestHealth, 1);
+        EnemyRuntime focused = LoadEnemy("Basic").CreateRuntime();
+        FakeBattleCharacter source = new(1);
+        DungeonBoardView board = CreateBoard(
+            (1, 1, lowestHealth),
+            (1, 2, focused));
+        CharacterEffectDefinition applyPriority = CreateEffect(
+            CharacterEffectType.ApplyStatus,
+            CharacterEffectTargetMode.InheritAction,
+            1f);
+        SetPrivateField(
+            applyPriority,
+            "statusEffect",
+            priorityStatus);
+        SetPrivateField(applyPriority, "statusDuration", 5f);
+        SetPrivateField(applyPriority, "statusStacks", 1f);
+        BattleEffectContext context =
+            BattleEffectContext.ForEnemyAbility(
+                focused,
+                board,
+                CharacterTargetFaction.Enemy,
+                new[] { focused },
+                null);
+
+        BattleEffectResult applied =
+            BattleEffectExecutor.ExecuteSequence(
+                context,
+                new IBattleEffectDefinition[] { applyPriority });
+        IReadOnlyList<EnemyRuntime> targets =
+            board.SelectCharacterTargets(
+                source,
+                CharacterAttackSubject.LowestValue,
+                CharacterAttackSubjectMetric.Health,
+                1,
+                CharacterConditionMatchMode.All,
+                Array.Empty<CharacterNumericCondition>());
+
+        Assert.That(applied.Succeeded, Is.True);
+        Assert.That(targets, Is.EqualTo(new[] { focused }));
+    }
+
+    [Test]
+    public void TargetPriorityStatus_TauntsEnemyAbilityFromLowerHealthAlly()
+    {
+        StatusEffectSO tauntStatus =
+            CreateTargetPriorityStatus(
+                adjustment: 10f,
+                forceTargeting: false,
+                canTargetEnemy: false,
+                canTargetAlly: true);
+        CharacterEffectDefinition damage = CreateEffect(
+            CharacterEffectType.Damage,
+            CharacterEffectTargetMode.InheritAction,
+            7f);
+        EnemyRuntime source = CreateModularCooldownEnemy(
+            "target_priority_taunt_test",
+            2f,
+            EnemyAbilityTargetFaction.PlayerCharacters,
+            EnemyAbilityTargetSubject.LowestValue,
+            EnemyAbilityTargetMetric.Health,
+            damage);
+        FakeBattleCharacter lowestHealth = new(0, 20);
+        lowestHealth.TakeDamage(10);
+        FakeBattleCharacter taunting = new(0, 20);
+        taunting.AddActiveStatus(tauntStatus, 1);
+        DungeonBoardView board = CreateBoard((1, 1, source));
+
+        board.TickEnemyAbilities(
+            2f,
+            new IBattleCharacter[] { lowestHealth, taunting });
+
+        Assert.That(lowestHealth.CurrentHealth, Is.EqualTo(10));
+        Assert.That(taunting.CurrentHealth, Is.EqualTo(13));
+    }
+
     private EnemyRuntime CreateInjuredBasic()
     {
         EnemyRuntime enemy = LoadEnemy("Basic").CreateRuntime();
@@ -1204,7 +1389,10 @@ public sealed class EnemyP0RegressionTests
         int range = 1,
         bool includeDiagonals = false,
         CharacterAttackDamageType? incomingDamageType = null,
-        bool requireAlternateTarget = false)
+        bool requireAlternateTarget = false,
+        EnemyTargetPriorityMode targetPriorityMode =
+            EnemyTargetPriorityMode.Exclude,
+        int targetPriorityAdjustment = 0)
     {
         EnemySO definition = ScriptableObject.CreateInstance<EnemySO>();
         definition.hideFlags = HideFlags.HideAndDontSave;
@@ -1233,6 +1421,14 @@ public sealed class EnemyP0RegressionTests
             "includeDiagonals",
             includeDiagonals);
         SetPrivateField(operation, "enabled", true);
+        SetPrivateField(
+            operation,
+            "targetPriorityMode",
+            targetPriorityMode);
+        SetPrivateField(
+            operation,
+            "targetPriorityAdjustment",
+            targetPriorityAdjustment);
         if (effect != null)
         {
             SetPrivateField(
@@ -1282,6 +1478,57 @@ public sealed class EnemyP0RegressionTests
             "abilities",
             new List<EnemyAbilityDefinition> { ability });
         return definition.CreateRuntime();
+    }
+
+    private StatusEffectSO CreateTargetPriorityStatus(
+        float adjustment,
+        bool forceTargeting,
+        bool canTargetEnemy,
+        bool canTargetAlly)
+    {
+        StatusEffectSO status =
+            ScriptableObject.CreateInstance<StatusEffectSO>();
+        status.hideFlags = HideFlags.HideAndDontSave;
+        _createdObjects.Add(status);
+        SetPrivateField(status, "canTargetEnemy", canTargetEnemy);
+        SetPrivateField(status, "canTargetAlly", canTargetAlly);
+        SetPrivateField(
+            status,
+            "durationMode",
+            StatusEffectDurationMode.Timed);
+        SetPrivateField(status, "defaultDuration", 5f);
+
+        List<StatusEffectStatModifierDefinition> modifiers = new();
+        if (!Mathf.Approximately(adjustment, 0f))
+        {
+            StatusEffectStatModifierDefinition modifier = new();
+            SetPrivateField(
+                modifier,
+                "statType",
+                StatusEffectStatType.TargetPriority);
+            SetPrivateField(
+                modifier,
+                "mode",
+                StatusEffectStatModifierMode.Flat);
+            SetPrivateField(modifier, "value", adjustment);
+            SetPrivateField(modifier, "scaleWithStacks", true);
+            modifiers.Add(modifier);
+        }
+        SetPrivateField(status, "statModifiers", modifiers);
+
+        List<StatusEffectControlDefinition> controls = new();
+        if (forceTargeting)
+        {
+            StatusEffectControlDefinition control = new();
+            SetPrivateField(
+                control,
+                "controlType",
+                StatusEffectControlType.ForceTargeting);
+            controls.Add(control);
+        }
+        SetPrivateField(status, "controlEffects", controls);
+        status.ValidateDefinition();
+        return status;
     }
 
     private EnemySO LoadEnemy(string assetName)
@@ -1715,8 +1962,7 @@ public sealed class EnemyP0RegressionTests
         public bool TryRemoveCharacterStatus(
             IBattleCharacter source,
             IReadOnlyList<EnemyRuntime> targets,
-            CharacterStatusRemovalTarget removalTarget,
-            StatusEffectSO statusEffect,
+            CharacterStatusRemovalSelection removalSelection,
             CharacterStatusRemovalAmount removalAmount,
             bool showAttackRange)
         {
@@ -1726,8 +1972,7 @@ public sealed class EnemyP0RegressionTests
         public bool TryRemoveAlliedCharacterStatus(
             IBattleCharacter source,
             IReadOnlyList<IBattleCharacter> targets,
-            CharacterStatusRemovalTarget removalTarget,
-            StatusEffectSO statusEffect,
+            CharacterStatusRemovalSelection removalSelection,
             CharacterStatusRemovalAmount removalAmount)
         {
             return false;
@@ -1737,6 +1982,7 @@ public sealed class EnemyP0RegressionTests
     private sealed class FakeBattleCharacter : IBattleCharacter
     {
         private int _currentHealth;
+        private readonly List<BattleStatusSnapshot> _activeStatuses = new();
 
         public int PartySlotIndex => 0;
         public int TotalDamageDealt { get; }
@@ -1768,17 +2014,40 @@ public sealed class EnemyP0RegressionTests
 
         public bool HasStatusEffect(StatusEffectSO statusEffect)
         {
+            foreach (BattleStatusSnapshot status in _activeStatuses)
+            {
+                if (ReferenceEquals(status.Definition, statusEffect))
+                    return true;
+            }
+
             return false;
         }
 
         public int GetStatusStackCount(StatusEffectSO statusEffect)
         {
+            foreach (BattleStatusSnapshot status in _activeStatuses)
+            {
+                if (ReferenceEquals(status.Definition, statusEffect))
+                    return status.StackCount;
+            }
+
             return 0;
         }
 
         public IReadOnlyList<BattleStatusSnapshot> GetActiveStatusEffects()
         {
-            return Array.Empty<BattleStatusSnapshot>();
+            return _activeStatuses;
+        }
+
+        public void AddActiveStatus(
+            StatusEffectSO statusEffect,
+            int stacks)
+        {
+            _activeStatuses.Add(
+                new BattleStatusSnapshot(
+                    statusEffect,
+                    stacks,
+                    5f));
         }
 
         public bool TryConsumeStatusStacks(
@@ -1873,8 +2142,7 @@ public sealed class EnemyP0RegressionTests
         }
 
         public int RemoveStatusEffects(
-            CharacterStatusRemovalTarget removalTarget,
-            StatusEffectSO statusEffect,
+            CharacterStatusRemovalSelection removalSelection,
             CharacterStatusRemovalAmount removalAmount)
         {
             return 0;

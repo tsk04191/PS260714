@@ -98,6 +98,8 @@ public sealed class StatusEffectEditorTests
             "StatusRemovalTargetOptions",
             "지정 상태",
             "무작위 상태",
+            "모든 버프",
+            "모든 디버프",
             "모든 상태");
         AssertOptions(
             "StatusRemovalAmountModeOptions",
@@ -107,7 +109,8 @@ public sealed class StatusEffectEditorTests
             "StatTypeOptions",
             "공격력",
             "공격 속도",
-            "받는 피해");
+            "받는 피해",
+            "대상 우선순위");
         AssertOptions(
             "StatModifierModeOptions",
             "고정 가산",
@@ -118,7 +121,8 @@ public sealed class StatusEffectEditorTests
             "전체 행동 불가",
             "기본 공격 금지",
             "액티브 스킬 금지",
-            "패시브 쿨다운 정지");
+            "패시브 쿨다운 정지",
+            "강제 포커싱");
     }
 
     [Test]
@@ -332,6 +336,44 @@ public sealed class StatusEffectEditorTests
         Assert.That(
             _definition.ControlEffects[0].ControlType,
             Is.EqualTo(StatusEffectControlType.DisableAllActions));
+    }
+
+    [Test]
+    public void TargetPriorityModules_ResolveStackedAdjustmentAndForce()
+    {
+        SerializedObject serialized = new(_definition);
+        SerializedProperty modifiers =
+            serialized.FindProperty("statModifiers");
+        modifiers.arraySize = 1;
+        SerializedProperty modifier =
+            modifiers.GetArrayElementAtIndex(0);
+        modifier.FindPropertyRelative("statType").enumValueIndex =
+            (int)StatusEffectStatType.TargetPriority;
+        modifier.FindPropertyRelative("mode").enumValueIndex =
+            (int)StatusEffectStatModifierMode.Flat;
+        modifier.FindPropertyRelative("value").floatValue = 5f;
+        modifier.FindPropertyRelative("scaleWithStacks").boolValue = true;
+        SerializedProperty controls =
+            serialized.FindProperty("controlEffects");
+        controls.arraySize = 1;
+        controls.GetArrayElementAtIndex(0)
+            .FindPropertyRelative("controlType")
+            .enumValueIndex =
+            (int)StatusEffectControlType.ForceTargeting;
+        serialized.ApplyModifiedPropertiesWithoutUndo();
+
+        StatusEffectTargetPriority priority =
+            StatusEffectTargetPriorityResolver.Resolve(
+                new[]
+                {
+                    new BattleStatusSnapshot(
+                        _definition,
+                        2,
+                        1f)
+                });
+
+        Assert.That(priority.IsForced, Is.True);
+        Assert.That(priority.Adjustment, Is.EqualTo(10f));
     }
 
     private static void AssertOptions(
@@ -800,8 +842,7 @@ public sealed class BattleEffectCoreTests
         }
 
         public int RemoveStatusEffects(
-            CharacterStatusRemovalTarget removalTarget,
-            StatusEffectSO statusEffect,
+            CharacterStatusRemovalSelection removalSelection,
             CharacterStatusRemovalAmount removalAmount)
         {
             return 0;
