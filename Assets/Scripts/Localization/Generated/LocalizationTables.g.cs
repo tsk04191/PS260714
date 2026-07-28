@@ -9,7 +9,7 @@ namespace PS260714.Localization
 {
     public static class GeneratedLocalizationTables
     {
-        public const string SourceHash = "f423d30654052212e6a182917dcf6844f174a6a80b69847cd3de67acfa2df63a";
+        public const string SourceHash = "a9d705c36e95bb0e29d9293af127f47ff7c86abb0a430c4e217713a6e3105675";
         public const string ReferenceLocale = "en-US";
 
         private static readonly LocalizationLocaleInfo[] LocaleData =
@@ -287,6 +287,14 @@ namespace PS260714.Localization
                 { "status.combo.description", new LocalizationEntry("\uD6A8\uACFC \uC5C6\uC774 \uC2A4\uD0DD\uB9CC \uB204\uC801\uB418\uB294 \uC601\uAD6C \uC0C1\uD0DC\uC785\uB2C8\uB2E4.", "tooltip") },
                 { "status.speed.name", new LocalizationEntry("\uC18D\uB3C4", "title") },
                 { "status.speed.description", new LocalizationEntry("\uACF5\uACA9 \uC18D\uB3C4 \uC0C1\uC2B9", "tooltip") },
+                { "status.power.name", new LocalizationEntry("\uC704\uB825", "title") },
+                { "status.power.description", new LocalizationEntry("\uACF5\uACA9\uB825 \uC0C1\uC2B9", "tooltip") },
+                { "status.ready.name", new LocalizationEntry("\uC900\uBE44", "title") },
+                { "status.ready.description", new LocalizationEntry("\uD6A8\uACFC \uC5C6\uC774 \uC2A4\uD0DD\uB9CC \uB204\uC801\uB418\uB294 \uC601\uAD6C \uC0C1\uD0DC\uC785\uB2C8\uB2E4.", "tooltip") },
+                { "status.blood.name", new LocalizationEntry("\uCD9C\uD608", "title") },
+                { "status.blood.description", new LocalizationEntry("\uB9E4 \uD2F1\uB9C8\uB2E4 \uC2A4\uD0DD \uC218\uB9CC\uD07C \uD53C\uD574\uB97C \uBC1B\uC2B5\uB2C8\uB2E4.", "tooltip") },
+                { "status.poison.name", new LocalizationEntry("\uC911\uB3C5", "title") },
+                { "status.poison.description", new LocalizationEntry("\uB9E4 \uD2F1\uB9C8\uB2E4 \uC2A4\uD0DD \uC218\uB9CC\uD07C \uD53C\uD574\uB97C \uBC1B\uC2B5\uB2C8\uB2E4.", "tooltip") },
             };
 
         private static readonly Dictionary<string, LocalizationEntry>
@@ -555,6 +563,14 @@ namespace PS260714.Localization
                 { "status.combo.description", new LocalizationEntry("A permanent status that only stores stacks.", "tooltip") },
                 { "status.speed.name", new LocalizationEntry("Speed", "title") },
                 { "status.speed.description", new LocalizationEntry("Attack speed glow", "tooltip") },
+                { "status.power.name", new LocalizationEntry("Power", "title") },
+                { "status.power.description", new LocalizationEntry("Damage glow", "tooltip") },
+                { "status.ready.name", new LocalizationEntry("Ready", "title") },
+                { "status.ready.description", new LocalizationEntry("A permanent status that only stores stacks.", "tooltip") },
+                { "status.blood.name", new LocalizationEntry("Blood", "title") },
+                { "status.blood.description", new LocalizationEntry("Takes damage equal to its stacks each tick.", "tooltip") },
+                { "status.poison.name", new LocalizationEntry("Poison", "title") },
+                { "status.poison.description", new LocalizationEntry("Takes damage equal to its stacks each tick.", "tooltip") },
             };
 
         private static readonly IReadOnlyDictionary<string, LocalizationEntry>

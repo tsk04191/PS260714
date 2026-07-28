@@ -261,3 +261,11 @@ status.combo.name,상태 이름,title,,연격,Combo
 status.combo.description,상태 설명,tooltip,,효과 없이 스택만 누적되는 영구 상태입니다.,A permanent status that only stores stacks.
 status.speed.name,상태 이름,title,,속도,Speed
 status.speed.description,상태 설명,tooltip,,공격 속도 상승,Attack speed glow
+status.power.name,상태 이름,title,,위력,Power
+status.power.description,상태 설명,tooltip,,공격력 상승,Damage glow
+status.ready.name,상태 이름,title,,준비,Ready
+status.ready.description,상태 설명,tooltip,,효과 없이 스택만 누적되는 영구 상태입니다.,A permanent status that only stores stacks.
+status.blood.name,상태 이름,title,,출혈,Blood
+status.blood.description,상태 설명,tooltip,,매 틱마다 스택 수만큼 피해를 받습니다.,Takes damage equal to its stacks each tick.
+status.poison.name,상태 이름,title,,중독,Poison
+status.poison.description,상태 설명,tooltip,,매 틱마다 스택 수만큼 피해를 받습니다.,Takes damage equal to its stacks each tick.

@@ -110,8 +110,6 @@ public sealed class CharacterEditorWindow : EditorWindow
     private const string ActionIconSpritePropertyName = "iconSprite";
     private const string ActionAudioClipPropertyName = "audioClip";
     private const string RenameControlName = "CharacterAssetRenameField";
-    private const float ListWidth = 230f;
-
     private static readonly CharacterPassiveSectionType[] PassiveSectionOrder =
     {
         CharacterPassiveSectionType.Linkage,
@@ -513,9 +511,9 @@ public sealed class CharacterEditorWindow : EditorWindow
         RefreshCharacterList();
 
         if (Selection.activeObject is CharacterSO selected)
-            SelectCharacter(selected, false);
+            SelectCharacter(selected);
         else if (_selectedCharacter == null && _characters.Count > 0)
-            SelectCharacter(_characters[0], false);
+            SelectCharacter(_characters[0]);
     }
 
     private void OnProjectChange()
@@ -531,7 +529,7 @@ public sealed class CharacterEditorWindow : EditorWindow
         if (Selection.activeObject is not CharacterSO selected)
             return;
 
-        SelectCharacter(selected, false);
+        SelectCharacter(selected);
         Repaint();
     }
 
@@ -578,6 +576,7 @@ public sealed class CharacterEditorWindow : EditorWindow
                 DeleteSelectedCharacter();
                 GUIUtility.ExitGUI();
             },
+            () => PS260714AssetEditorList.Ping(_selectedCharacter),
             () =>
             {
                 RefreshLocalizationKeys();
@@ -637,12 +636,11 @@ public sealed class CharacterEditorWindow : EditorWindow
 
     private void DrawCharacterList()
     {
-        EditorGUILayout.BeginVertical(GUILayout.Width(ListWidth));
-        EditorGUILayout.Space(4f);
-        _searchText = EditorGUILayout.TextField(
-            _searchText,
-            EditorStyles.toolbarSearchField);
-        EditorGUILayout.Space(4f);
+        EditorGUILayout.BeginVertical(
+            GUILayout.Width(PS260714AssetEditorList.Width),
+            GUILayout.ExpandHeight(true));
+        _searchText =
+            PS260714AssetEditorList.DrawSearchField(_searchText);
 
         _listScroll = EditorGUILayout.BeginScrollView(_listScroll);
         bool hasVisibleCharacter = false;
@@ -674,13 +672,15 @@ public sealed class CharacterEditorWindow : EditorWindow
                        $"A{character.AttackDefinitions.Count} / " +
                        $"P{character.PassiveDefinitions.Count} / " +
                        $"S{character.SkillDefinitions.Count}";
-        bool clicked = GUILayout.Toggle(
+        bool clicked = PS260714AssetEditorList.DrawRow(
             selected,
-            label,
-            "Button",
-            GUILayout.Height(42f));
-        if (clicked && !selected)
-            SelectCharacter(character, false);
+            new GUIContent(
+                label,
+                PS260714AssetEditorList.GetAssetPreview(
+                    character.IconSprite),
+                character.CharacterId));
+        if (clicked)
+            SelectCharacter(character);
     }
 
     private static void DrawSeparator()
@@ -746,12 +746,6 @@ public sealed class CharacterEditorWindow : EditorWindow
             AssetDatabase.GetAssetPath(_selectedCharacter),
             EditorStyles.miniLabel);
         EditorGUILayout.EndVertical();
-
-        if (GUILayout.Button("Select in Project", GUILayout.Width(112f)))
-        {
-            Selection.activeObject = _selectedCharacter;
-            EditorGUIUtility.PingObject(_selectedCharacter);
-        }
         EditorGUILayout.EndHorizontal();
     }
 
@@ -5253,7 +5247,7 @@ public sealed class CharacterEditorWindow : EditorWindow
                    StringComparison.OrdinalIgnoreCase) >= 0;
     }
 
-    private void SelectCharacter(CharacterSO character, bool selectInProject)
+    private void SelectCharacter(CharacterSO character)
     {
         if (character == null)
             return;
@@ -5268,8 +5262,6 @@ public sealed class CharacterEditorWindow : EditorWindow
         _serializedCharacter = new SerializedObject(character);
         _editorScroll = Vector2.zero;
 
-        if (selectInProject)
-            Selection.activeObject = character;
     }
 
     private void RequestEditingFocusClear()
@@ -5398,11 +5390,11 @@ public sealed class CharacterEditorWindow : EditorWindow
             CharacterSO restored = AssetDatabase.LoadAssetAtPath<CharacterSO>(
                 selectedPath);
             if (restored != null)
-                SelectCharacter(restored, false);
+                SelectCharacter(restored);
         }
         else if (_selectedCharacter == null && _characters.Count > 0)
         {
-            SelectCharacter(_characters[0], false);
+            SelectCharacter(_characters[0]);
         }
     }
 
@@ -5424,7 +5416,7 @@ public sealed class CharacterEditorWindow : EditorWindow
         AssetDatabase.SaveAssetIfDirty(character);
         CharacterDefinitionCatalog.Invalidate();
         RefreshCharacterList();
-        SelectCharacter(character, true);
+        SelectCharacter(character);
         EditorGUIUtility.PingObject(character);
     }
 
@@ -5502,8 +5494,6 @@ public sealed class CharacterEditorWindow : EditorWindow
         _selectedCharacter = null;
         _serializedCharacter = null;
         RefreshCharacterList();
-        if (_selectedCharacter != null)
-            Selection.activeObject = _selectedCharacter;
 
         ShowNotification(new GUIContent($"Deleted {assetName}.asset"));
         Repaint();
@@ -5611,7 +5601,7 @@ public sealed class CharacterEditorWindow : EditorWindow
         CharacterDefinitionCatalog.Invalidate();
         AssetDatabase.SaveAssets();
         RefreshCharacterList();
-        SelectCharacter(character, false);
+        SelectCharacter(character);
         EditorGUIUtility.PingObject(character);
         Repaint();
     }
@@ -5690,7 +5680,7 @@ public sealed class CharacterEditorWindow : EditorWindow
         RefreshCharacterList();
         if (duplicate != null)
         {
-            SelectCharacter(duplicate, true);
+            SelectCharacter(duplicate);
             EditorGUIUtility.PingObject(duplicate);
         }
     }

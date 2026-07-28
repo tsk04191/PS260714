@@ -12,7 +12,6 @@ public sealed class BattleVfxEditorWindow : EditorWindow
 
     private const string AssetFolder = "Assets/Resources/BattleVfx";
     private const string RenameControlName = "BattleVfxRenameField";
-    private const float ListWidth = 240f;
     private const float GridPreviewSize = 220f;
     private const int VfxGridDimension = 10;
 
@@ -163,6 +162,7 @@ public sealed class BattleVfxEditorWindow : EditorWindow
                 DeleteSelected();
                 GUIUtility.ExitGUI();
             },
+            () => PS260714AssetEditorList.Ping(_selected),
             RefreshList);
     }
 
@@ -214,13 +214,11 @@ public sealed class BattleVfxEditorWindow : EditorWindow
     private void DrawAssetList()
     {
         using (new EditorGUILayout.VerticalScope(
-                   EditorStyles.helpBox,
-                   GUILayout.Width(ListWidth),
+                   GUILayout.Width(PS260714AssetEditorList.Width),
                    GUILayout.ExpandHeight(true)))
         {
-            _searchText = EditorGUILayout.TextField(
-                _searchText,
-                EditorStyles.toolbarSearchField);
+            _searchText =
+                PS260714AssetEditorList.DrawSearchField(_searchText);
 
             int visibleCount = 0;
             using (EditorGUILayout.ScrollViewScope scroll =
@@ -234,17 +232,13 @@ public sealed class BattleVfxEditorWindow : EditorWindow
 
                     visibleCount++;
                     bool selected = ReferenceEquals(cue, _selected);
-                    GUIStyle style = selected
-                        ? EditorStyles.miniButtonMid
-                        : EditorStyles.miniButton;
                     GUIContent content = new(
                         cue.name,
                         GetPreviewTexture(cue),
                         cue.CueId);
-                    if (GUILayout.Button(
-                            content,
-                            style,
-                            GUILayout.Height(30f)))
+                    if (PS260714AssetEditorList.DrawRow(
+                            selected,
+                            content))
                     {
                         SelectCue(cue);
                     }
@@ -994,7 +988,8 @@ public sealed class BattleVfxEditorWindow : EditorWindow
     {
         if (cue == null || cue.Prefab == null)
             return null;
-        return AssetPreview.GetMiniThumbnail(cue.Prefab);
+        return PS260714AssetEditorList.GetAssetPreview(
+            cue.Prefab);
     }
 
     private void SelectCue(BattleVfxCueSO cue)

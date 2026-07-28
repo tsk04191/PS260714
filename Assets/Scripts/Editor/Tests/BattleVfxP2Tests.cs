@@ -144,8 +144,11 @@ public sealed class BattleVfxP2Tests
                 "Duplicate",
                 "Rename",
                 "Delete",
+                "Ping",
                 "Refresh"
             }));
+        Assert.That(PS260714AssetEditorList.Width, Is.EqualTo(230f));
+        Assert.That(PS260714AssetEditorList.RowHeight, Is.EqualTo(42f));
     }
 
     private BattleVfxCueSO CreateCue(string objectName)

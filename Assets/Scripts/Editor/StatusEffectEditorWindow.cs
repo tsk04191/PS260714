@@ -12,8 +12,6 @@ public sealed class StatusEffectEditorWindow : EditorWindow
     private const string AssetFolder = "Assets/Resources/StatusEffects";
     private const string LocalizationPrefix = "status.";
     private const string RenameControlName = "StatusEffectRenameField";
-    private const float ListWidth = 230f;
-
     private static readonly string[] AlignmentOptions =
     {
         "버프",
@@ -259,6 +257,7 @@ public sealed class StatusEffectEditorWindow : EditorWindow
                 DeleteSelected();
                 GUIUtility.ExitGUI();
             },
+            () => PS260714AssetEditorList.Ping(_selected),
             () =>
             {
                 RefreshLocalizationKeys();
@@ -313,13 +312,11 @@ public sealed class StatusEffectEditorWindow : EditorWindow
     private void DrawAssetList()
     {
         using (new EditorGUILayout.VerticalScope(
-                   EditorStyles.helpBox,
-                   GUILayout.Width(ListWidth),
+                   GUILayout.Width(PS260714AssetEditorList.Width),
                    GUILayout.ExpandHeight(true)))
         {
-        _searchText = EditorGUILayout.TextField(
-            _searchText,
-            EditorStyles.toolbarSearchField);
+        _searchText =
+            PS260714AssetEditorList.DrawSearchField(_searchText);
         int visibleCount = 0;
         using (EditorGUILayout.ScrollViewScope scrollView =
                new(_listScroll))
@@ -333,17 +330,15 @@ public sealed class StatusEffectEditorWindow : EditorWindow
 
             visibleCount++;
             bool selected = ReferenceEquals(definition, _selected);
-            GUIStyle style = selected
-                ? EditorStyles.miniButtonMid
-                : EditorStyles.miniButton;
-            if (GUILayout.Button(
+            if (PS260714AssetEditorList.DrawRow(
+                    selected,
                     new GUIContent(
                         definition.name,
-                        GetIconTexture(definition)),
-                    style,
-                    GUILayout.Height(26f)))
+                        GetIconTexture(definition),
+                        definition.StatusId),
+                    TextAnchor.MiddleCenter))
             {
-                SelectDefinition(definition, true);
+                SelectDefinition(definition);
             }
         }
 
@@ -368,8 +363,8 @@ public sealed class StatusEffectEditorWindow : EditorWindow
         if (definition == null)
             return null;
 
-        Sprite icon = definition.Icon;
-        return icon != null ? icon.texture : null;
+        return PS260714AssetEditorList.GetAssetPreview(
+            definition.Icon);
     }
 
     private void DrawEditor()
@@ -1780,11 +1775,11 @@ public sealed class StatusEffectEditorWindow : EditorWindow
     private void HandleSelectionChanged()
     {
         if (Selection.activeObject is StatusEffectSO definition)
-            SelectDefinition(definition, false);
+            SelectDefinition(definition);
         Repaint();
     }
 
-    private void SelectDefinition(StatusEffectSO definition, bool pingProject)
+    private void SelectDefinition(StatusEffectSO definition)
     {
         if (definition == null)
             return;
@@ -1794,8 +1789,6 @@ public sealed class StatusEffectEditorWindow : EditorWindow
         _selected = definition;
         _serialized = new SerializedObject(definition);
         _editorScroll = Vector2.zero;
-        if (pingProject)
-            Selection.activeObject = definition;
     }
 
     private void RefreshList()
@@ -1824,11 +1817,11 @@ public sealed class StatusEffectEditorWindow : EditorWindow
             StatusEffectSO restored =
                 AssetDatabase.LoadAssetAtPath<StatusEffectSO>(selectedPath);
             if (restored != null)
-                SelectDefinition(restored, false);
+                SelectDefinition(restored);
         }
         else if (_selected == null && _definitions.Count > 0)
         {
-            SelectDefinition(_definitions[0], false);
+            SelectDefinition(_definitions[0]);
         }
     }
 
@@ -1916,7 +1909,7 @@ public sealed class StatusEffectEditorWindow : EditorWindow
         AssetDatabase.CreateAsset(definition, path);
         AssetDatabase.SaveAssetIfDirty(definition);
         RefreshList();
-        SelectDefinition(definition, true);
+        SelectDefinition(definition);
         EditorGUIUtility.PingObject(definition);
     }
 
@@ -1957,7 +1950,7 @@ public sealed class StatusEffectEditorWindow : EditorWindow
         }
         RefreshList();
         if (duplicate != null)
-            SelectDefinition(duplicate, true);
+            SelectDefinition(duplicate);
     }
 
     private void DeleteSelected()

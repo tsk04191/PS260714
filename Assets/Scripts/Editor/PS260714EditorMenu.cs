@@ -33,6 +33,7 @@ internal static class PS260714AssetEditorToolbar
         "Duplicate",
         "Rename",
         "Delete",
+        "Ping",
         "Refresh"
     };
 
@@ -44,6 +45,7 @@ internal static class PS260714AssetEditorToolbar
         Action duplicate,
         Action rename,
         Action delete,
+        Action ping,
         Action refresh)
     {
         using (new EditorGUILayout.HorizontalScope(EditorStyles.toolbar))
@@ -101,13 +103,122 @@ internal static class PS260714AssetEditorToolbar
                 }
             }
 
+            using (new EditorGUI.DisabledScope(!hasSelection))
+            {
+                if (GUILayout.Button(
+                        ButtonOrder[5],
+                        EditorStyles.toolbarButton,
+                        GUILayout.Width(52f)))
+                {
+                    ping?.Invoke();
+                }
+            }
+
             if (GUILayout.Button(
-                    ButtonOrder[5],
+                    ButtonOrder[6],
                     EditorStyles.toolbarButton,
                     GUILayout.Width(64f)))
             {
                 refresh?.Invoke();
             }
         }
+    }
+}
+
+internal static class PS260714AssetEditorList
+{
+    internal const float Width = 230f;
+    internal const float RowHeight = 42f;
+    private const float IconSize = 34f;
+    private const float ContentPadding = 5f;
+
+    private static GUIStyle _leftLabelStyle;
+    private static GUIStyle _centeredLabelStyle;
+
+    internal static string DrawSearchField(string searchText)
+    {
+        EditorGUILayout.Space(4f);
+        string result = EditorGUILayout.TextField(
+            searchText,
+            EditorStyles.toolbarSearchField);
+        EditorGUILayout.Space(4f);
+        return result;
+    }
+
+    internal static bool DrawRow(
+        bool selected,
+        GUIContent content,
+        TextAnchor alignment = TextAnchor.MiddleLeft)
+    {
+        Rect rowRect = GUILayoutUtility.GetRect(
+            1f,
+            RowHeight,
+            GUILayout.ExpandWidth(true));
+        bool toggled = GUI.Toggle(
+            rowRect,
+            selected,
+            GUIContent.none,
+            GUI.skin.button);
+
+        Rect labelRect = new(
+            rowRect.x + ContentPadding,
+            rowRect.y,
+            rowRect.width - ContentPadding * 2f,
+            rowRect.height);
+        if (content.image != null)
+        {
+            Rect iconRect = new(
+                labelRect.x,
+                rowRect.y + (rowRect.height - IconSize) * 0.5f,
+                IconSize,
+                IconSize);
+            GUI.DrawTexture(
+                iconRect,
+                content.image,
+                ScaleMode.ScaleToFit,
+                true);
+            labelRect.xMin = iconRect.xMax + ContentPadding;
+        }
+
+        GUIStyle labelStyle = alignment == TextAnchor.MiddleCenter
+            ? CenteredLabelStyle
+            : LeftLabelStyle;
+        GUI.Label(
+            labelRect,
+            new GUIContent(content.text, content.tooltip),
+            labelStyle);
+        EditorGUIUtility.AddCursorRect(rowRect, MouseCursor.Link);
+        return toggled && !selected;
+    }
+
+    internal static Texture GetAssetPreview(UnityEngine.Object asset)
+    {
+        if (asset == null)
+            return null;
+
+        return AssetPreview.GetAssetPreview(asset) ??
+               AssetPreview.GetMiniThumbnail(asset);
+    }
+
+    internal static void Ping(UnityEngine.Object asset)
+    {
+        if (asset != null)
+            EditorGUIUtility.PingObject(asset);
+    }
+
+    private static GUIStyle LeftLabelStyle =>
+        _leftLabelStyle ??= CreateLabelStyle(TextAnchor.MiddleLeft);
+
+    private static GUIStyle CenteredLabelStyle =>
+        _centeredLabelStyle ??= CreateLabelStyle(TextAnchor.MiddleCenter);
+
+    private static GUIStyle CreateLabelStyle(TextAnchor alignment)
+    {
+        return new GUIStyle(EditorStyles.label)
+        {
+            alignment = alignment,
+            clipping = TextClipping.Clip,
+            wordWrap = false
+        };
     }
 }

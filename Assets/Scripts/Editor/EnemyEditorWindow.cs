@@ -9,8 +9,6 @@ public sealed class EnemyEditorWindow : EditorWindow
 
     private const string AssetFolder = "Assets/Data/Enemies";
     private const string RenameControlName = "EnemyAssetRenameField";
-    private const float ListWidth = 230f;
-
     private readonly List<EnemySO> _definitions = new();
 
     private EnemySO _selected;
@@ -50,9 +48,9 @@ public sealed class EnemyEditorWindow : EditorWindow
         RefreshList();
 
         if (Selection.activeObject is EnemySO selected)
-            SelectDefinition(selected, false);
+            SelectDefinition(selected);
         else if (_selected == null && _definitions.Count > 0)
-            SelectDefinition(_definitions[0], false);
+            SelectDefinition(_definitions[0]);
     }
 
     private void OnProjectChange()
@@ -66,7 +64,7 @@ public sealed class EnemyEditorWindow : EditorWindow
     {
         if (Selection.activeObject is EnemySO selected)
         {
-            SelectDefinition(selected, false);
+            SelectDefinition(selected);
             Repaint();
         }
     }
@@ -116,6 +114,7 @@ public sealed class EnemyEditorWindow : EditorWindow
                 DeleteSelected();
                 GUIUtility.ExitGUI();
             },
+            () => PS260714AssetEditorList.Ping(_selected),
             RefreshList);
     }
 
@@ -171,14 +170,11 @@ public sealed class EnemyEditorWindow : EditorWindow
     private void DrawAssetList()
     {
         using (new EditorGUILayout.VerticalScope(
-                   GUILayout.Width(ListWidth),
+                   GUILayout.Width(PS260714AssetEditorList.Width),
                    GUILayout.ExpandHeight(true)))
         {
-            EditorGUILayout.Space(4f);
-            _searchText = EditorGUILayout.TextField(
-                _searchText,
-                EditorStyles.toolbarSearchField);
-            EditorGUILayout.Space(4f);
+            _searchText =
+                PS260714AssetEditorList.DrawSearchField(_searchText);
 
             using (EditorGUILayout.ScrollViewScope scroll =
                    new(_listScroll))
@@ -200,14 +196,14 @@ public sealed class EnemyEditorWindow : EditorWindow
                         $"{definition.name}\n" +
                         $"{definition.Type} / " +
                         $"A{definition.Abilities.Count}";
-                    if (GUILayout.Toggle(
+                    if (PS260714AssetEditorList.DrawRow(
                             selected,
-                            label,
-                            "Button",
-                            GUILayout.Height(42f)) &&
-                        !selected)
+                            new GUIContent(
+                                label,
+                                null,
+                                definition.EnemyId)))
                     {
-                        SelectDefinition(definition, true);
+                        SelectDefinition(definition);
                     }
                 }
 
@@ -289,14 +285,6 @@ public sealed class EnemyEditorWindow : EditorWindow
                 EditorGUILayout.LabelField(
                     AssetDatabase.GetAssetPath(_selected),
                     EditorStyles.miniLabel);
-            }
-
-            if (GUILayout.Button(
-                    "Select in Project",
-                    GUILayout.Width(112f)))
-            {
-                Selection.activeObject = _selected;
-                EditorGUIUtility.PingObject(_selected);
             }
         }
     }
@@ -1230,7 +1218,7 @@ public sealed class EnemyEditorWindow : EditorWindow
                    StringComparison.OrdinalIgnoreCase) >= 0;
     }
 
-    private void SelectDefinition(EnemySO definition, bool pingProject)
+    private void SelectDefinition(EnemySO definition)
     {
         if (definition == null)
             return;
@@ -1239,11 +1227,6 @@ public sealed class EnemyEditorWindow : EditorWindow
         _selected = definition;
         _serialized = new SerializedObject(definition);
         _editorScroll = Vector2.zero;
-        if (pingProject)
-        {
-            Selection.activeObject = definition;
-            EditorGUIUtility.PingObject(definition);
-        }
     }
 
     private void RefreshList()
@@ -1274,11 +1257,11 @@ public sealed class EnemyEditorWindow : EditorWindow
             EnemySO restored =
                 AssetDatabase.LoadAssetAtPath<EnemySO>(selectedPath);
             if (restored != null)
-                SelectDefinition(restored, false);
+                SelectDefinition(restored);
         }
         else if (_selected == null && _definitions.Count > 0)
         {
-            SelectDefinition(_definitions[0], false);
+            SelectDefinition(_definitions[0]);
         }
     }
 
@@ -1294,7 +1277,7 @@ public sealed class EnemyEditorWindow : EditorWindow
         AssetDatabase.SaveAssets();
         AssetDatabase.Refresh();
         RefreshList();
-        SelectDefinition(definition, true);
+        SelectDefinition(definition);
     }
 
     private void DuplicateSelected()
@@ -1325,7 +1308,7 @@ public sealed class EnemyEditorWindow : EditorWindow
         }
         AssetDatabase.SaveAssets();
         RefreshList();
-        SelectDefinition(duplicate, true);
+        SelectDefinition(duplicate);
     }
 
     private void SaveSelected()
