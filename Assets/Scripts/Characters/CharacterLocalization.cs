@@ -330,18 +330,31 @@ public static class CharacterLocalization
                 CharacterPassiveSectionType.Subject)
                 ? definition.Subject
                 : CharacterAttackSubject.Random;
-            string subjectDescription =
+            string subjectDescription;
+            if (subject == CharacterAttackSubject.None &&
                 definition.Trigger ==
-                CharacterPassiveTrigger.OnStatusAcquired &&
-                subject == CharacterAttackSubject.None
-                    ? (UsesKoreanLocale
-                        ? "상태가 적용된 대상"
-                        : "Target of the status event")
-                    : FormatSubject(
-                        definition.TargetFaction,
-                        subject,
-                        definition.SubjectMetric,
-                        definition.SubjectCount);
+                CharacterPassiveTrigger.OnStatusAcquired)
+            {
+                subjectDescription = UsesKoreanLocale
+                    ? "상태가 적용된 대상"
+                    : "Target of the status event";
+            }
+            else if (subject == CharacterAttackSubject.None &&
+                     definition.Trigger ==
+                     CharacterPassiveTrigger.OnAttackTargetSelected)
+            {
+                subjectDescription = UsesKoreanLocale
+                    ? "이번에 선택된 공격 대상"
+                    : "The selected attack target";
+            }
+            else
+            {
+                subjectDescription = FormatSubject(
+                    definition.TargetFaction,
+                    subject,
+                    definition.SubjectMetric,
+                    definition.SubjectCount);
+            }
             string abilityDescription = definition.HasExplicitEffects
                 ? FormatEffects(
                     definition.Effects,
@@ -558,6 +571,10 @@ public static class CharacterLocalization
                     ? $"{targetName}에게 {statusName} 적용 시, "
                     : $"When {targetName} gains {statusName}, ";
             }
+            case CharacterPassiveTrigger.OnAttackTargetSelected:
+                return UsesKoreanLocale
+                    ? "공격 대상 선택 시, "
+                    : "When an attack target is selected, ";
             default:
                 return UsesKoreanLocale ? "공격 시, " : "On attack, ";
         }
@@ -567,7 +584,9 @@ public static class CharacterLocalization
         CharacterPassiveDefinition definition)
     {
         if (definition == null ||
-            definition.Trigger != CharacterPassiveTrigger.OnAttack ||
+            (definition.Trigger != CharacterPassiveTrigger.OnAttack &&
+             definition.Trigger !=
+             CharacterPassiveTrigger.OnAttackTargetSelected) ||
             !definition.HasAttackTargetRelationCondition)
         {
             return string.Empty;

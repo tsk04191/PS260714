@@ -1958,9 +1958,6 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
                 continue;
             }
 
-            int abilityDamage = Data.CalculateAttackDamage(
-                definition,
-                GetEffectivePowerMultiplier());
             AbilityTargetSelection selectedTargets =
                 SelectAttackDefinitionTargets(
                     board,
@@ -1970,17 +1967,29 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
                     previousTargets);
             AbilityTargetSelection targets = selectedTargets;
             BattleEffectResult effectResult;
-            if (definition.HasExplicitEffects)
+            if (!CharacterConditionEvaluator.AllowsAction(
+                    this,
+                    actionCondition.MatchMode,
+                    actionCondition.NumericConditions,
+                    targets.Count > 0))
             {
-                if (!CharacterConditionEvaluator.AllowsAction(
-                        this,
-                        actionCondition.MatchMode,
-                        actionCondition.NumericConditions,
-                        targets.Count > 0))
+                effectResult = default;
+            }
+            else
+            {
+                if (selectedTargets.Count > 0)
                 {
-                    effectResult = default;
+                    CharacterPassiveAttackTargetRelation
+                        attackTargetRelation = ResolveAttackTargetRelation(
+                            _previousAttackAttemptTargets,
+                            selectedTargets);
+                    ExecuteAttackTargetSelectedPassives(
+                        board,
+                        selectedTargets,
+                        attackTargetRelation);
                 }
-                else
+
+                if (definition.HasExplicitEffects)
                 {
                     targets = ExpandCustomAbilityArea(
                         board,
@@ -2004,19 +2013,11 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
                             effects)
                         : default;
                 }
-            }
-            else
-            {
-                if (!CharacterConditionEvaluator.AllowsAction(
-                        this,
-                        actionCondition.MatchMode,
-                        actionCondition.NumericConditions,
-                        targets.Count > 0))
-                {
-                    effectResult = default;
-                }
                 else
                 {
+                    int abilityDamage = Data.CalculateAttackDamage(
+                        definition,
+                        GetEffectivePowerMultiplier());
                     targets = ExpandCustomAbilityArea(
                         board,
                         targets,
@@ -2161,6 +2162,52 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
         }
 
         return selectedTargets;
+    }
+
+    private void ExecuteAttackTargetSelectedPassives(
+        IBattleBoard board,
+        AbilityTargetSelection selectedTargets,
+        CharacterPassiveAttackTargetRelation attackTargetRelation)
+    {
+        if (!Data.HasCustomPassiveDefinitions ||
+            selectedTargets.Count == 0)
+        {
+            return;
+        }
+
+        bool anyPassiveSucceeded = false;
+        int totalDamage = 0;
+        foreach (CharacterPassiveDefinition definition in
+                 Data.PassiveDefinitions)
+        {
+            if (definition == null ||
+                definition.IsEmptyPlaceholder ||
+                definition.Trigger !=
+                CharacterPassiveTrigger.OnAttackTargetSelected ||
+                !definition.HasSection(
+                    CharacterPassiveSectionType.Ability) ||
+                !MatchesAttackTargetRelation(
+                    definition,
+                    attackTargetRelation))
+            {
+                continue;
+            }
+
+            CharacterActionConditionData actionCondition =
+                Data.GetActionConditionData(definition);
+            bool succeeded = TryExecutePassiveAbility(
+                board,
+                definition,
+                actionCondition,
+                selectedTargets,
+                out int damageDealt);
+            totalDamage += damageDealt;
+            anyPassiveSucceeded |= succeeded;
+        }
+
+        RecordDamageDealt(totalDamage);
+        if (anyPassiveSucceeded)
+            NotifyPassiveActivated();
     }
 
     private void ExecuteCustomPassives(

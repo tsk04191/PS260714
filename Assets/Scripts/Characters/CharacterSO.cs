@@ -272,10 +272,11 @@ public enum CharacterPassiveSectionType
 
 public enum CharacterPassiveTrigger
 {
-    OnAttack,
-    OnStatusAcquired,
-    OnCooldown,
-    OnKill
+    OnAttack = 0,
+    OnStatusAcquired = 1,
+    OnCooldown = 2,
+    OnKill = 3,
+    OnAttackTargetSelected = 4
 }
 
 public enum CharacterPassiveKillSource

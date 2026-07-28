@@ -769,13 +769,15 @@ public static class CharacterDefinitionValidator
                 "Condition section is absent.");
         }
 
-        if (definition.Trigger != CharacterPassiveTrigger.OnAttack)
+        if (definition.Trigger != CharacterPassiveTrigger.OnAttack &&
+            definition.Trigger !=
+            CharacterPassiveTrigger.OnAttackTargetSelected)
         {
             AddWarning(
                 result,
                 "passive.attack_target_relation_trigger_ignored",
                 $"{path}.attackTargetRelation",
-                "The attack target relation is evaluated only by OnAttack " +
+                "The attack target relation is evaluated only by attack " +
                 "passives.");
         }
     }
@@ -788,8 +790,12 @@ public static class CharacterDefinitionValidator
         if (definition == null)
             return null;
 
-        if (definition.Trigger == CharacterPassiveTrigger.OnAttack)
+        if (definition.Trigger == CharacterPassiveTrigger.OnAttack ||
+            definition.Trigger ==
+            CharacterPassiveTrigger.OnAttackTargetSelected)
+        {
             return attackTargetFaction;
+        }
         if (definition.Trigger == CharacterPassiveTrigger.OnCooldown ||
             definition.Trigger == CharacterPassiveTrigger.OnKill)
             return null;

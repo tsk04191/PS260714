@@ -1033,6 +1033,68 @@ public sealed class CharacterP0RegressionTests
     }
 
     [Test]
+    public void AttackTargetSelectedPassive_ReusesSelectionAndRunsBeforeAttack()
+    {
+        CharacterSO definition = CreateBaseCharacterFixture(
+            "AttackTargetSelectedPassiveFixture");
+        SerializedObject serialized = new(definition);
+        SerializedProperty passive = serialized
+            .FindProperty("passiveDefinitions")
+            .GetArrayElementAtIndex(0);
+        SetSections(
+            passive.FindPropertyRelative("sections"),
+            (int)CharacterPassiveSectionType.Linkage,
+            (int)CharacterPassiveSectionType.Subject,
+            (int)CharacterPassiveSectionType.Ability);
+        passive.FindPropertyRelative("trigger").enumValueIndex =
+            (int)CharacterPassiveTrigger.OnAttackTargetSelected;
+        passive.FindPropertyRelative("linkage").enumValueIndex =
+            (int)CharacterActionLinkage.None;
+        passive.FindPropertyRelative("targetFaction").enumValueIndex =
+            (int)CharacterTargetFaction.Enemy;
+        passive.FindPropertyRelative("subject").enumValueIndex =
+            (int)CharacterAttackSubject.None;
+        SerializedProperty passiveEffects =
+            passive.FindPropertyRelative("effects");
+        passiveEffects.arraySize = 1;
+        ConfigureFixedDamageEffect(
+            passiveEffects.GetArrayElementAtIndex(0),
+            CharacterEffectTargetMode.InheritAction,
+            2f);
+        serialized.ApplyModifiedPropertiesWithoutUndo();
+
+        CharacterDefinitionValidationResult validation =
+            CharacterDefinitionValidator.Validate(definition);
+        Assert.That(
+            validation.IsValid,
+            Is.True,
+            string.Join("\n", validation.Diagnostics));
+
+        EnemyRuntime target = CreateEnemyRuntime();
+        FakeBattleBoard board = new()
+        {
+            LivingEnemyCountValue = 1,
+            SelectedEnemyTargets = new[] { target },
+        };
+        CharacterRuntime character = CreateCharacter(definition);
+        character.BindBattle(null, board);
+
+        character.TickBattle(character.Data.AttackCooldown, board);
+
+        Assert.That(
+            board.CharacterTargetSelectionCallCount,
+            Is.EqualTo(1),
+            "The passive must inherit the selected attack target.");
+        Assert.That(
+            board.DamageAmounts,
+            Is.EqualTo(new[] { 2, 1 }),
+            "The target-selection passive must execute before the attack.");
+        Assert.That(board.DamageTargetSnapshots, Has.Count.EqualTo(2));
+        Assert.That(board.DamageTargetSnapshots[0], Does.Contain(target));
+        Assert.That(board.DamageTargetSnapshots[1], Does.Contain(target));
+    }
+
+    [Test]
     public void AttackTargetRelationPassives_DistinguishSameAndDifferentTargets()
     {
         StatusEffectSO sameTargetReward = CreateRuntimeStatus(

@@ -126,7 +126,8 @@ public sealed class CharacterEditorWindow : EditorWindow
         "공격 시",
         "상태 획득 시",
         "쿨다운마다",
-        "킬 마다"
+        "킬 마다",
+        "공격 대상 선택 시"
     };
 
     private static readonly string[] PassiveKillSourceOptions =
@@ -1502,6 +1503,19 @@ public sealed class CharacterEditorWindow : EditorWindow
                         "선택한 아군 캐릭터가 적을 처치할 때마다 " +
                         "패시브 발동을 시도합니다. 킬러 정보가 없는 " +
                         "아이템 및 환경 처치는 제외됩니다.",
+                        MessageType.Info);
+                }
+                else if (trigger ==
+                         CharacterPassiveTrigger.OnAttackTargetSelected)
+                {
+                    SetEnumValue(
+                        definition,
+                        ActionLinkagePropertyName,
+                        (int)CharacterActionLinkage.None);
+                    EditorGUILayout.HelpBox(
+                        "기본 공격 대상이 확정된 직후, 공격 효과가 실행되기 " +
+                        "전에 패시브 발동을 시도합니다. 대상 설정의 " +
+                        "'없음'은 이번에 선택된 공격 대상을 재사용합니다.",
                         MessageType.Info);
                 }
                 else
@@ -2946,9 +2960,14 @@ public sealed class CharacterEditorWindow : EditorWindow
     {
         SerializedProperty trigger = definition.FindPropertyRelative(
             PassiveTriggerPropertyName);
-        if (trigger == null ||
-            trigger.enumValueIndex !=
-            (int)CharacterPassiveTrigger.OnAttack)
+        if (trigger == null)
+            return;
+
+        CharacterPassiveTrigger triggerType =
+            (CharacterPassiveTrigger)trigger.enumValueIndex;
+        if (triggerType != CharacterPassiveTrigger.OnAttack &&
+            triggerType !=
+            CharacterPassiveTrigger.OnAttackTargetSelected)
         {
             return;
         }
