@@ -127,6 +127,12 @@ public sealed class StatusEffectEditorWindow : EditorWindow
         "모든 상태"
     };
 
+    private static readonly string[] StatusRemovalAmountModeOptions =
+    {
+        "고정 스택",
+        "현재 스택 비율"
+    };
+
     private static readonly string[] StatTypeOptions =
     {
         "공격력",
@@ -886,7 +892,46 @@ public sealed class StatusEffectEditorWindow : EditorWindow
 
         SerializedProperty count =
             effect.FindPropertyRelative("statusRemovalCount");
-        if (count != null)
+        SerializedProperty amountMode =
+            effect.FindPropertyRelative("statusRemovalAmountMode");
+        SerializedProperty ratio =
+            effect.FindPropertyRelative("statusRemovalRatio");
+        DrawEnumProperty(
+            amountMode,
+            "제거량 방식",
+            StatusRemovalAmountModeOptions);
+        if (amountMode != null &&
+            amountMode.enumValueIndex ==
+                (int)CharacterStatusRemovalAmountMode.CurrentStacksRatio)
+        {
+            if (ratio == null)
+                return;
+
+            float percentage = EditorGUILayout.Slider(
+                new GUIContent(
+                    "현재 스택 비율 (%)",
+                    "현재 보유 스택을 기준으로 계산하며 소수점은 올림합니다."),
+                ratio.floatValue * 100f,
+                1f,
+                100f);
+            ratio.floatValue = percentage * 0.01f;
+
+            EditorGUILayout.BeginHorizontal();
+            GUILayout.Label("빠른 선택", GUILayout.Width(75f));
+            if (GUILayout.Button("1/4", EditorStyles.miniButton))
+                ratio.floatValue = 0.25f;
+            if (GUILayout.Button("1/2", EditorStyles.miniButton))
+                ratio.floatValue = 0.5f;
+            if (GUILayout.Button("3/4", EditorStyles.miniButton))
+                ratio.floatValue = 0.75f;
+            if (GUILayout.Button("전체", EditorStyles.miniButton))
+                ratio.floatValue = 1f;
+            EditorGUILayout.EndHorizontal();
+            EditorGUILayout.HelpBox(
+                "소수점은 올림합니다. 전체 범위는 상태 종류마다 각각 계산합니다.",
+                MessageType.Info);
+        }
+        else if (count != null)
         {
             count.intValue = Mathf.Max(
                 0,
@@ -1419,7 +1464,12 @@ public sealed class StatusEffectEditorWindow : EditorWindow
             effect,
             "statusRemovalTarget",
             (int)CharacterStatusRemovalTarget.Single);
+        SetEnumRelative(
+            effect,
+            "statusRemovalAmountMode",
+            (int)CharacterStatusRemovalAmountMode.FixedStacks);
         SetIntRelative(effect, "statusRemovalCount", 0);
+        SetFloatRelative(effect, "statusRemovalRatio", 0.5f);
     }
 
     private static void AddStatModifier(SerializedProperty modifiers)

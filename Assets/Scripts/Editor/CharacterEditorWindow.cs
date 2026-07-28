@@ -20,6 +20,8 @@ public sealed class CharacterEditorWindow : EditorWindow
     private const string PassiveTriggerStatusEffectPropertyName =
         "triggerStatusEffect";
     private const string PassiveCooldownPropertyName = "cooldown";
+    private const string PassiveAttackTargetRelationPropertyName =
+        "attackTargetRelation";
     private const string PassiveSelfStatusCostPropertyName = "selfStatusCost";
     private const string StatusCostEffectPropertyName = "statusEffect";
     private const string StatusCostRequiredStacksPropertyName =
@@ -57,6 +59,8 @@ public sealed class CharacterEditorWindow : EditorWindow
     private const string NumericThresholdPropertyName = "threshold";
     private const string TargetFactionPropertyName = "targetFaction";
     private const string AttackSubjectPropertyName = "subject";
+    private const string AttackTargetRetentionModePropertyName =
+        "targetRetentionMode";
     private const string AttackSubjectCountPropertyName = "subjectCount";
     private const string AttackSubjectMetricPropertyName = "subjectMetric";
     private const string EffectsPropertyName = "effects";
@@ -90,8 +94,12 @@ public sealed class CharacterEditorWindow : EditorWindow
         "statusRemovalEffect";
     private const string StatusRemovalTargetPropertyName =
         "statusRemovalTarget";
+    private const string StatusRemovalAmountModePropertyName =
+        "statusRemovalAmountMode";
     private const string StatusRemovalCountPropertyName =
         "statusRemovalCount";
+    private const string StatusRemovalRatioPropertyName =
+        "statusRemovalRatio";
     private const string CastVfxCuePropertyName = "castVfxCue";
     private const string ProjectileVfxCuePropertyName =
         "projectileVfxCue";
@@ -134,6 +142,13 @@ public sealed class CharacterEditorWindow : EditorWindow
         "적",
         "아군",
         "전체"
+    };
+
+    private static readonly string[] PassiveAttackTargetRelationOptions =
+    {
+        "제한 없음",
+        "직전 공격과 동일",
+        "직전 공격과 다름"
     };
 
     private static readonly CharacterAttackSectionType[] AttackSectionOrder =
@@ -189,6 +204,12 @@ public sealed class CharacterEditorWindow : EditorWindow
         "앞선 공격이 성공할 경우",
         "앞선 공격과 동시에",
         "없음"
+    };
+
+    private static readonly string[] AttackTargetRetentionModeOptions =
+    {
+        "매 공격마다 다시 선정",
+        "대상이 유효한 동안 고정"
     };
 
     private static readonly string[] ConditionMatchModeOptions =
@@ -427,6 +448,12 @@ public sealed class CharacterEditorWindow : EditorWindow
         "전체"
     };
 
+    private static readonly string[] StatusRemovalAmountModeOptions =
+    {
+        "고정 스택",
+        "현재 스택 비율"
+    };
+
     private readonly List<CharacterSO> _characters = new();
     private readonly List<LocalizationKeyOption> _nameKeyOptions = new();
     private readonly List<LocalizationKeyOption> _descriptionKeyOptions = new();
@@ -440,6 +467,7 @@ public sealed class CharacterEditorWindow : EditorWindow
     private string _renameAssetName = string.Empty;
     private bool _isRenamingSelectedCharacter;
     private bool _focusRenameField;
+    private bool _clearEditingFocusRequested;
     private bool _passiveExpanded;
     private bool _attackExpanded;
     private bool _skillExpanded;
@@ -513,6 +541,7 @@ public sealed class CharacterEditorWindow : EditorWindow
 
     private void OnGUI()
     {
+        ApplyPendingEditingFocusClear();
         DrawTopToolbar();
 
         EditorGUILayout.BeginHorizontal();
@@ -1489,6 +1518,7 @@ public sealed class CharacterEditorWindow : EditorWindow
                 break;
 
             case CharacterPassiveSectionType.Condition:
+                DrawPassiveAttackTargetRelationCondition(definition);
                 DrawNumericConditions(definition);
                 break;
 
@@ -1523,16 +1553,7 @@ public sealed class CharacterEditorWindow : EditorWindow
             definitions.GetArrayElementAtIndex(newIndex);
         SerializedProperty sections = definition.FindPropertyRelative(
             PassiveSectionsPropertyName);
-        if (sections != null)
-        {
-            sections.arraySize = 3;
-            sections.GetArrayElementAtIndex(0).enumValueIndex =
-                (int)CharacterPassiveSectionType.Linkage;
-            sections.GetArrayElementAtIndex(1).enumValueIndex =
-                (int)CharacterPassiveSectionType.Subject;
-            sections.GetArrayElementAtIndex(2).enumValueIndex =
-                (int)CharacterPassiveSectionType.Ability;
-        }
+        sections?.ClearArray();
         ResetPassiveDefinitionValues(definition);
         definition.isExpanded = true;
 
@@ -1605,6 +1626,10 @@ public sealed class CharacterEditorWindow : EditorWindow
                 break;
 
             case CharacterPassiveSectionType.Condition:
+                SetEnumValue(
+                    definition,
+                    PassiveAttackTargetRelationPropertyName,
+                    (int)CharacterPassiveAttackTargetRelation.Any);
                 ClearNumericConditions(definition);
                 break;
 
@@ -2625,6 +2650,52 @@ public sealed class CharacterEditorWindow : EditorWindow
                 EnemySubjectMetricValues);
         }
 
+        SerializedProperty targetRetentionMode =
+            definition.FindPropertyRelative(
+                AttackTargetRetentionModePropertyName);
+        if (targetRetentionMode != null)
+        {
+            int targetCount = subjectCount != null
+                ? Mathf.Max(1, subjectCount.intValue)
+                : 1;
+            CharacterAttackSubject selectedSubject = subject != null
+                ? (CharacterAttackSubject)subject.enumValueIndex
+                : CharacterAttackSubject.None;
+            bool supportsRetention =
+                CharacterAttackDefinition.SupportsTargetRetention(
+                    selectedSubject,
+                    targetCount);
+            if (!supportsRetention)
+            {
+                targetRetentionMode.enumValueIndex =
+                    (int)CharacterAttackTargetRetentionMode
+                        .ReselectEachAttack;
+            }
+
+            using (new EditorGUI.DisabledScope(!supportsRetention))
+            {
+                DrawAttackEnumPopup(
+                    targetRetentionMode,
+                    "대상 유지 방식",
+                    AttackTargetRetentionModeOptions);
+            }
+
+            if (targetRetentionMode.enumValueIndex ==
+                (int)CharacterAttackTargetRetentionMode.LockUntilInvalid)
+            {
+                EditorGUILayout.HelpBox(
+                    "처음 선정한 대상을 계속 사용합니다. 대상이 사망·퇴장하거나 " +
+                    "현재 조건을 만족하지 않으면 새 대상을 선정합니다.",
+                    MessageType.Info);
+            }
+            else if (!supportsRetention)
+            {
+                EditorGUILayout.HelpBox(
+                    "대상 고정은 직접 선정하는 단일 대상에만 사용할 수 있습니다.",
+                    MessageType.Info);
+            }
+        }
+
         DrawTargetAreaEditor(
             definition,
             reusesPreviousTargets
@@ -2867,6 +2938,44 @@ public sealed class CharacterEditorWindow : EditorWindow
                     ? CharacterNumericConditionMetric.AttackPower
                     : CharacterNumericConditionMetric.Health);
             GUI.changed = true;
+        }
+    }
+
+    private static void DrawPassiveAttackTargetRelationCondition(
+        SerializedProperty definition)
+    {
+        SerializedProperty trigger = definition.FindPropertyRelative(
+            PassiveTriggerPropertyName);
+        if (trigger == null ||
+            trigger.enumValueIndex !=
+            (int)CharacterPassiveTrigger.OnAttack)
+        {
+            return;
+        }
+
+        SerializedProperty relation = definition.FindPropertyRelative(
+            PassiveAttackTargetRelationPropertyName);
+        if (relation == null)
+        {
+            EditorGUILayout.HelpBox(
+                "공격 대상 관계 조건 속성을 찾을 수 없습니다.",
+                MessageType.Error);
+            return;
+        }
+
+        DrawAttackEnumPopup(
+            relation,
+            "공격 대상 관계",
+            PassiveAttackTargetRelationOptions);
+        if (relation.enumValueIndex !=
+            (int)CharacterPassiveAttackTargetRelation.Any)
+        {
+            EditorGUILayout.HelpBox(
+                "첫 공격 시도는 비교 기준만 저장합니다. 이후 공격부터 " +
+                "이번 공격의 최초 선택 대상과 직전 공격 시도의 최초 " +
+                "선택 대상을 비교합니다. 수치 조건도 있으면 대상 관계와 " +
+                "수치 조건을 모두 만족해야 합니다.",
+                MessageType.Info);
         }
     }
 
@@ -3459,10 +3568,18 @@ public sealed class CharacterEditorWindow : EditorWindow
                     definition,
                     effect,
                     StatusRemovalTargetPropertyName);
+                CopyEnumProperty(
+                    definition,
+                    effect,
+                    StatusRemovalAmountModePropertyName);
                 CopyIntProperty(
                     definition,
                     effect,
                     StatusRemovalCountPropertyName);
+                CopyFloatProperty(
+                    definition,
+                    effect,
+                    StatusRemovalRatioPropertyName);
                 CopyObjectReferenceProperty(
                     definition,
                     StatusRemovalEffectPropertyName,
@@ -3606,10 +3723,18 @@ public sealed class CharacterEditorWindow : EditorWindow
             effect,
             StatusRemovalTargetPropertyName,
             (int)CharacterStatusRemovalTarget.Single);
+        SetEnumValue(
+            effect,
+            StatusRemovalAmountModePropertyName,
+            (int)CharacterStatusRemovalAmountMode.FixedStacks);
         SerializedProperty removalCount = effect.FindPropertyRelative(
             StatusRemovalCountPropertyName);
         if (removalCount != null)
             removalCount.intValue = 0;
+        SetFloatValue(
+            effect,
+            StatusRemovalRatioPropertyName,
+            0.5f);
         SetObjectReferenceValue(
             effect,
             CastVfxCuePropertyName,
@@ -4099,6 +4224,10 @@ public sealed class CharacterEditorWindow : EditorWindow
             definition,
             StatusRemovalTargetPropertyName,
             (int)CharacterStatusRemovalTarget.Single);
+        SetEnumValue(
+            definition,
+            StatusRemovalAmountModePropertyName,
+            (int)CharacterStatusRemovalAmountMode.FixedStacks);
         SerializedProperty removalEffect = definition?.FindPropertyRelative(
             StatusRemovalEffectPropertyName);
         if (removalEffect != null)
@@ -4110,6 +4239,10 @@ public sealed class CharacterEditorWindow : EditorWindow
             StatusRemovalCountPropertyName);
         if (removalCount != null)
             removalCount.intValue = 0;
+        SetFloatValue(
+            definition,
+            StatusRemovalRatioPropertyName,
+            0.5f);
     }
 
     private static void DrawStatusRemovalSettings(
@@ -4126,11 +4259,17 @@ public sealed class CharacterEditorWindow : EditorWindow
     {
         SerializedProperty removalTarget = definition.FindPropertyRelative(
             StatusRemovalTargetPropertyName);
+        SerializedProperty removalAmountMode =
+            definition.FindPropertyRelative(
+                StatusRemovalAmountModePropertyName);
         SerializedProperty removalCount = definition.FindPropertyRelative(
             StatusRemovalCountPropertyName);
+        SerializedProperty removalRatio = definition.FindPropertyRelative(
+            StatusRemovalRatioPropertyName);
         SerializedProperty removalEffect = definition.FindPropertyRelative(
             statusEffectPropertyName);
-        if (removalTarget == null || removalCount == null ||
+        if (removalTarget == null || removalAmountMode == null ||
+            removalCount == null || removalRatio == null ||
             removalEffect == null)
         {
             EditorGUILayout.HelpBox(
@@ -4159,17 +4298,53 @@ public sealed class CharacterEditorWindow : EditorWindow
             }
         }
 
-        removalCount.intValue = Mathf.Max(
-            0,
-            EditorGUILayout.IntField(
+        DrawAttackEnumPopup(
+            removalAmountMode,
+            "제거량 방식",
+            StatusRemovalAmountModeOptions);
+        if (removalAmountMode.enumValueIndex ==
+            (int)CharacterStatusRemovalAmountMode.CurrentStacksRatio)
+        {
+            float percentage = EditorGUILayout.Slider(
                 new GUIContent(
-                    "제거 카운트",
-                    "0이면 대상 상태를 전부 제거하고, 1 이상이면 입력한 수만큼 상태 스택을 제거합니다."),
-                removalCount.intValue));
-        EditorGUILayout.HelpBox(
-            "카운트 0: 해당 범위의 상태 전부 제거\n" +
-            "카운트 1 이상: 입력한 수만큼 상태 스택 제거",
-            MessageType.Info);
+                    "현재 스택 비율 (%)",
+                    "대상이 현재 보유한 스택을 기준으로 계산하며 소수점은 올림합니다."),
+                removalRatio.floatValue * 100f,
+                1f,
+                100f);
+            removalRatio.floatValue = percentage * 0.01f;
+
+            EditorGUILayout.BeginHorizontal();
+            GUILayout.Label("빠른 선택", GUILayout.Width(75f));
+            if (GUILayout.Button("1/4", EditorStyles.miniButton))
+                removalRatio.floatValue = 0.25f;
+            if (GUILayout.Button("1/2", EditorStyles.miniButton))
+                removalRatio.floatValue = 0.5f;
+            if (GUILayout.Button("3/4", EditorStyles.miniButton))
+                removalRatio.floatValue = 0.75f;
+            if (GUILayout.Button("전체", EditorStyles.miniButton))
+                removalRatio.floatValue = 1f;
+            EditorGUILayout.EndHorizontal();
+
+            EditorGUILayout.HelpBox(
+                "현재 스택 × 비율의 소수점은 올림합니다. " +
+                "예: 3스택의 1/2은 2스택 제거. 전체 범위는 상태 종류마다 각각 계산합니다.",
+                MessageType.Info);
+        }
+        else
+        {
+            removalCount.intValue = Mathf.Max(
+                0,
+                EditorGUILayout.IntField(
+                    new GUIContent(
+                        "제거 스택",
+                        "0이면 대상 상태를 전부 제거하고, 1 이상이면 입력한 수만큼 제거합니다."),
+                    removalCount.intValue));
+            EditorGUILayout.HelpBox(
+                "고정 스택 0: 해당 범위의 상태 전부 제거\n" +
+                "고정 스택 1 이상: 입력한 수만큼 상태 스택 제거",
+                MessageType.Info);
+        }
     }
 
     private void AddAttackDefinition()
@@ -4245,6 +4420,11 @@ public sealed class CharacterEditorWindow : EditorWindow
                     definition,
                     AttackSubjectPropertyName,
                     (int)CharacterAttackSubject.Random);
+                SetEnumValue(
+                    definition,
+                    AttackTargetRetentionModePropertyName,
+                    (int)CharacterAttackTargetRetentionMode
+                        .ReselectEachAttack);
                 SerializedProperty subjectCount =
                     definition.FindPropertyRelative(
                         AttackSubjectCountPropertyName);
@@ -5060,7 +5240,10 @@ public sealed class CharacterEditorWindow : EditorWindow
             return;
 
         if (_selectedCharacter != character)
+        {
+            RequestEditingFocusClear();
             CancelRenameSelectedCharacter();
+        }
 
         _selectedCharacter = character;
         _serializedCharacter = new SerializedObject(character);
@@ -5068,6 +5251,26 @@ public sealed class CharacterEditorWindow : EditorWindow
 
         if (selectInProject)
             Selection.activeObject = character;
+    }
+
+    private void RequestEditingFocusClear()
+    {
+        _clearEditingFocusRequested = true;
+        GUIUtility.keyboardControl = 0;
+        EditorGUIUtility.editingTextField = false;
+        if (Event.current != null)
+            ApplyPendingEditingFocusClear();
+    }
+
+    private void ApplyPendingEditingFocusClear()
+    {
+        if (!_clearEditingFocusRequested)
+            return;
+
+        GUI.FocusControl(null);
+        GUIUtility.keyboardControl = 0;
+        EditorGUIUtility.editingTextField = false;
+        _clearEditingFocusRequested = false;
     }
 
     private void RefreshLocalizationKeys()

@@ -1014,7 +1014,12 @@ public sealed class EnemyEditorWindow : EditorWindow
             effect,
             "statusRemovalTarget",
             (int)CharacterStatusRemovalTarget.Single);
+        SetEnum(
+            effect,
+            "statusRemovalAmountMode",
+            (int)CharacterStatusRemovalAmountMode.FixedStacks);
         SetInt(effect, "statusRemovalCount", 0);
+        SetFloat(effect, "statusRemovalRatio", 0.5f);
         SetObject(effect, "castVfxCue", null);
         SetObject(effect, "projectileVfxCue", null);
         SetObject(effect, "impactVfxCue", null);

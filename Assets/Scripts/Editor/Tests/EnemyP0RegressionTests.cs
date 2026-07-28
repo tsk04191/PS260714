@@ -910,6 +910,50 @@ public sealed class EnemyP0RegressionTests
     }
 
     [Test]
+    public void LethalStatusTick_ClearsStatusBeforePresentationUnbind()
+    {
+        EnemyRuntime enemy = LoadEnemy("Basic").CreateRuntime();
+        DungeonBoardView board = CreateBoard((1, 1, enemy));
+        MethodInfo synchronizePresentation =
+            typeof(DungeonBoardView).GetMethod(
+                "SynchronizeEnemyPresentationBindings",
+                InstanceNonPublic);
+        Assert.That(synchronizePresentation, Is.Not.Null);
+        synchronizePresentation.Invoke(board, null);
+        StatusEffectSO fire =
+            AssetDatabase.LoadAssetAtPath<StatusEffectSO>(FireStatusPath);
+        int fireRemovalCount = 0;
+        board.StatusLifecycle += eventData =>
+        {
+            if (eventData.Definition == fire &&
+                eventData.Trigger ==
+                StatusEffectLifecycleTrigger.OnRemove)
+            {
+                fireRemovalCount++;
+            }
+        };
+
+        Assert.That(
+            board.TryApplyCharacterStatus(
+                null,
+                new[] { enemy },
+                fire,
+                3f,
+                enemy.MaxHealth,
+                1f,
+                false),
+            Is.True);
+        Assert.That(enemy.HasFire, Is.True);
+
+        board.TickStatusEffects(1f);
+
+        Assert.That(enemy.Health, Is.Zero);
+        Assert.That(enemy.HasFire, Is.False);
+        Assert.That(enemy.GetActiveStatusEffects(), Is.Empty);
+        Assert.That(fireRemovalCount, Is.EqualTo(1));
+    }
+
+    [Test]
     public void ChainedEnemyDefeats_AreDispatchedInQueueOrder()
     {
         EnemyRuntime firstEnemy = LoadEnemy("Basic").CreateRuntime();
@@ -1673,7 +1717,7 @@ public sealed class EnemyP0RegressionTests
             IReadOnlyList<EnemyRuntime> targets,
             CharacterStatusRemovalTarget removalTarget,
             StatusEffectSO statusEffect,
-            int removalCount,
+            CharacterStatusRemovalAmount removalAmount,
             bool showAttackRange)
         {
             return false;
@@ -1684,7 +1728,7 @@ public sealed class EnemyP0RegressionTests
             IReadOnlyList<IBattleCharacter> targets,
             CharacterStatusRemovalTarget removalTarget,
             StatusEffectSO statusEffect,
-            int removalCount)
+            CharacterStatusRemovalAmount removalAmount)
         {
             return false;
         }
@@ -1831,9 +1875,45 @@ public sealed class EnemyP0RegressionTests
         public int RemoveStatusEffects(
             CharacterStatusRemovalTarget removalTarget,
             StatusEffectSO statusEffect,
-            int removalCount)
+            CharacterStatusRemovalAmount removalAmount)
         {
             return 0;
         }
+    }
+}
+
+public sealed class DungeonDefinitionRegressionTests
+{
+    private const string FreeBattlePath =
+        "Assets/Resources/Dungeons/FreeBattle.asset";
+    private const string TestFieldPath =
+        "Assets/Resources/Dungeons/TestField.asset";
+
+    [Test]
+    public void FreeBattle_DoesNotUseTutorialBattleSetup()
+    {
+        DungeonDefinition definition =
+            AssetDatabase.LoadAssetAtPath<DungeonDefinition>(
+                FreeBattlePath);
+
+        Assert.That(definition, Is.Not.Null);
+        Assert.That(definition.HasTutorial, Is.False);
+        Assert.That(definition.UseIntroBattleBalance, Is.False);
+        Assert.That(definition.UsesTutorialBattleSetup, Is.False);
+        Assert.That(definition.TryValidate(out string error), Is.True, error);
+    }
+
+    [Test]
+    public void TestField_UsesTutorialBattleSetup()
+    {
+        DungeonDefinition definition =
+            AssetDatabase.LoadAssetAtPath<DungeonDefinition>(
+                TestFieldPath);
+
+        Assert.That(definition, Is.Not.Null);
+        Assert.That(definition.HasTutorial, Is.True);
+        Assert.That(definition.UseIntroBattleBalance, Is.True);
+        Assert.That(definition.UsesTutorialBattleSetup, Is.True);
+        Assert.That(definition.TryValidate(out string error), Is.True, error);
     }
 }

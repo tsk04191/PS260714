@@ -62,7 +62,10 @@ public interface IBattleEffectDefinition
     float StatusStacks { get; }
     StatusEffectSO StatusEffect { get; }
     CharacterStatusRemovalTarget StatusRemovalTarget { get; }
+    CharacterStatusRemovalAmountMode StatusRemovalAmountMode { get; }
     int StatusRemovalCount { get; }
+    float StatusRemovalRatio { get; }
+    CharacterStatusRemovalAmount StatusRemovalAmount { get; }
 }
 
 public enum CharacterActionKind

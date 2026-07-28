@@ -12,24 +12,10 @@ public sealed class DungeonTileView : MonoBehaviour, IPointerClickHandler
     private const byte AttackRangeMinimumAlpha = 100;
     private const byte AttackRangeAlphaStep = 50;
     private const byte AttackRangeMaximumAlpha = 250;
-    private const string FireStatusLoopStateName = "FireStatusLoop";
-    private const string FireStatusHiddenStateName = "FireStatusHidden";
-
-    private static readonly float[] FireStatusAnimationOffsets =
-    {
-        0f,
-        0.15f,
-        0.3f,
-    };
 
     [SerializeField] private Image slotSurface;
     [SerializeField] private RectTransform stackRoot;
     [SerializeField] private EnemyCard enemyCardPrefab;
-
-    [Header("Fire Status Effect")]
-    [SerializeField] private Sprite fireStatusSprite;
-    [SerializeField] private Image[] fireStatusImages = new Image[3];
-    [SerializeField] private Animator[] fireStatusAnimators = new Animator[3];
 
     private readonly List<EnemyRuntime> _enemies = new();
     private readonly List<EnemyCard> _cards = new();
@@ -37,7 +23,6 @@ public sealed class DungeonTileView : MonoBehaviour, IPointerClickHandler
     private Image _attackRangeOverlay;
     private int _maximumStackSize;
     private float _currentCellSize;
-    private EnemyRuntime _displayedFireEnemy;
 
     public int Row { get; private set; }
     public int Column { get; private set; }
@@ -70,7 +55,6 @@ public sealed class DungeonTileView : MonoBehaviour, IPointerClickHandler
 
         EnsureAttackRangeOverlay();
         ClearAttackRangeIndicator();
-        InitializeFireStatusEffects();
     }
 
     private void Update()
@@ -110,7 +94,6 @@ public sealed class DungeonTileView : MonoBehaviour, IPointerClickHandler
         _cards.Add(card);
 
         RefreshCardPositions();
-        RefreshFireStatusEffect();
         return true;
     }
 
@@ -142,7 +125,10 @@ public sealed class DungeonTileView : MonoBehaviour, IPointerClickHandler
             return 0;
 
         if (topEnemy.Health <= 0)
+        {
+            topEnemy.ClearStatusEffectsOnDefeat();
             TryRemoveTop();
+        }
         else
             _cards[^1]?.RefreshHealth();
 
@@ -250,14 +236,7 @@ public sealed class DungeonTileView : MonoBehaviour, IPointerClickHandler
             tickInterval,
             CreateStatusDamageCallback(target, applyDamage));
         if (applied && ReferenceEquals(TopEnemy, target))
-        {
             _cards[^1]?.RefreshStatus();
-            RefreshFireStatusEffect();
-        }
-        else if (applied)
-        {
-            RefreshFireStatusEffect();
-        }
         return applied;
     }
 
@@ -266,10 +245,13 @@ public sealed class DungeonTileView : MonoBehaviour, IPointerClickHandler
         StatusEffectSO statusEffect,
         int removalCount)
     {
+        if (removalCount < 0)
+            return 0;
+
         return TryRemoveStatusFromTop(
             removalTarget,
             statusEffect,
-            removalCount,
+            CharacterStatusRemovalAmount.Fixed(removalCount),
             null);
     }
 
@@ -279,6 +261,22 @@ public sealed class DungeonTileView : MonoBehaviour, IPointerClickHandler
         int removalCount,
         Func<DungeonTileView, int, IBattleCharacter, int> applyDamage)
     {
+        if (removalCount < 0)
+            return 0;
+
+        return TryRemoveStatusFromTop(
+            removalTarget,
+            statusEffect,
+            CharacterStatusRemovalAmount.Fixed(removalCount),
+            applyDamage);
+    }
+
+    internal int TryRemoveStatusFromTop(
+        CharacterStatusRemovalTarget removalTarget,
+        StatusEffectSO statusEffect,
+        CharacterStatusRemovalAmount removalAmount,
+        Func<DungeonTileView, int, IBattleCharacter, int> applyDamage)
+    {
         if (_enemies.Count == 0)
             return 0;
 
@@ -286,14 +284,13 @@ public sealed class DungeonTileView : MonoBehaviour, IPointerClickHandler
         int removed = target.RemoveStatusEffects(
             removalTarget,
             statusEffect,
-            removalCount,
+            removalAmount,
             CreateStatusDamageCallback(target, applyDamage));
         if (removed <= 0)
             return 0;
 
         if (ReferenceEquals(TopEnemy, target))
             _cards[^1]?.RefreshStatus();
-        RefreshFireStatusEffect();
         return removed;
     }
 
@@ -323,16 +320,12 @@ public sealed class DungeonTileView : MonoBehaviour, IPointerClickHandler
             CreateStatusDamageCallback(statusEnemy, applyDamage));
 
         if (!ReferenceEquals(TopEnemy, statusEnemy))
-        {
-            RefreshFireStatusEffect();
             return;
-        }
 
         if (statusChanged)
             _cards[^1]?.RefreshStatus();
         if (hadFire != statusEnemy.HasFire)
             _cards[^1]?.RefreshHealth();
-        RefreshFireStatusEffect();
     }
 
     private Func<int, IBattleCharacter, bool> CreateStatusDamageCallback(
@@ -371,7 +364,6 @@ public sealed class DungeonTileView : MonoBehaviour, IPointerClickHandler
         }
 
         RefreshCardPositions();
-        RefreshFireStatusEffect();
         return true;
     }
 
@@ -389,7 +381,6 @@ public sealed class DungeonTileView : MonoBehaviour, IPointerClickHandler
         _enemies.Clear();
         _cards.Clear();
         ClearAttackRangeIndicator();
-        HideFireStatusEffect();
     }
 
     internal List<EnemyRuntime> CopyEnemyRuntimes()
@@ -409,6 +400,7 @@ public sealed class DungeonTileView : MonoBehaviour, IPointerClickHandler
 
         return BattleVfxUiAnchorUtility.TryCreateScreenAnchor(
             _cards[index].transform as RectTransform,
+            transform as RectTransform,
             anchorType,
             out snapshot);
     }
@@ -525,109 +517,6 @@ public sealed class DungeonTileView : MonoBehaviour, IPointerClickHandler
             root.anchoredPosition = new Vector2(0f, baseHeight + stackStep * index);
             card.ApplyLayout(edge, sideDepth);
         }
-    }
-
-    private void InitializeFireStatusEffects()
-    {
-        int effectCount = Mathf.Min(
-            fireStatusImages?.Length ?? 0,
-            fireStatusAnimators?.Length ?? 0);
-        for (int index = 0; index < effectCount; index++)
-        {
-            Image image = fireStatusImages[index];
-            Animator animator = fireStatusAnimators[index];
-            if (image != null)
-            {
-                image.raycastTarget = false;
-                if (fireStatusSprite != null)
-                    image.sprite = fireStatusSprite;
-                image.color = BattleStatusColors.Fire;
-            }
-
-            if (animator == null || animator.runtimeAnimatorController == null)
-                continue;
-
-            if (animator.isActiveAndEnabled)
-                animator.Play(FireStatusHiddenStateName, 0, 0f);
-            else
-                SetAnimatorCanvasAlpha(animator, 0f);
-        }
-
-        _displayedFireEnemy = null;
-        RefreshFireStatusEffect();
-    }
-
-    private void RefreshFireStatusEffect()
-    {
-        EnemyRuntime fireEnemy = TopEnemy != null && TopEnemy.HasFire
-            ? TopEnemy
-            : null;
-        if (fireEnemy == null)
-        {
-            if (_displayedFireEnemy != null)
-                HideFireStatusEffect();
-            return;
-        }
-
-        bool shouldRestart = !ReferenceEquals(_displayedFireEnemy, fireEnemy);
-        _displayedFireEnemy = fireEnemy;
-        int effectCount = Mathf.Min(
-            fireStatusImages?.Length ?? 0,
-            fireStatusAnimators?.Length ?? 0);
-        for (int index = 0; index < effectCount; index++)
-        {
-            Image image = fireStatusImages[index];
-            Animator animator = fireStatusAnimators[index];
-            if (image != null)
-            {
-                Sprite displaySprite = fireStatusSprite != null
-                    ? fireStatusSprite
-                    : fireEnemy.FireStatusSprite;
-                if (displaySprite != null)
-                    image.sprite = displaySprite;
-                image.color = BattleStatusColors.Fire;
-                image.enabled = true;
-            }
-
-            if (!shouldRestart || animator == null ||
-                animator.runtimeAnimatorController == null ||
-                !animator.isActiveAndEnabled)
-            {
-                continue;
-            }
-
-            float offset = index < FireStatusAnimationOffsets.Length
-                ? FireStatusAnimationOffsets[index]
-                : 0f;
-            animator.Play(FireStatusLoopStateName, 0, offset);
-        }
-    }
-
-    private void HideFireStatusEffect()
-    {
-        _displayedFireEnemy = null;
-        if (fireStatusAnimators == null)
-            return;
-
-        foreach (Animator animator in fireStatusAnimators)
-        {
-            if (animator == null || animator.runtimeAnimatorController == null)
-                continue;
-
-            if (animator.isActiveAndEnabled)
-                animator.Play(FireStatusHiddenStateName, 0, 0f);
-            else
-                SetAnimatorCanvasAlpha(animator, 0f);
-        }
-    }
-
-    private static void SetAnimatorCanvasAlpha(Animator animator, float alpha)
-    {
-        CanvasGroup canvasGroup = animator != null
-            ? animator.GetComponent<CanvasGroup>()
-            : null;
-        if (canvasGroup != null)
-            canvasGroup.alpha = alpha;
     }
 
 }

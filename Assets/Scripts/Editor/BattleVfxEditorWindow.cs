@@ -13,6 +13,8 @@ public sealed class BattleVfxEditorWindow : EditorWindow
     private const string AssetFolder = "Assets/Resources/BattleVfx";
     private const string RenameControlName = "BattleVfxRenameField";
     private const float ListWidth = 240f;
+    private const float GridPreviewSize = 220f;
+    private const int VfxGridDimension = 10;
 
     private readonly List<BattleVfxCueSO> _cues = new();
 
@@ -25,10 +27,12 @@ public sealed class BattleVfxEditorWindow : EditorWindow
     private bool _isRenaming;
     private bool _focusRenameField;
     private bool _identityExpanded = true;
+    private bool _timelineExpanded = true;
     private bool _anchorExpanded = true;
     private bool _motionExpanded = true;
     private bool _lifetimeExpanded = true;
     private bool _poolExpanded = true;
+    private int _selectedClipIndex = -1;
 
     [MenuItem(MenuPath)]
     public static void Open()
@@ -282,9 +286,13 @@ public sealed class BattleVfxEditorWindow : EditorWindow
                 _editorScroll = scroll.scrollPosition;
                 DrawValidation();
                 DrawIdentity();
-                DrawAnchor();
-                DrawMotion();
-                DrawLifetime();
+                DrawTimeline();
+                if (!HasTimelineClips())
+                {
+                    DrawAnchor();
+                    DrawMotion();
+                    DrawLifetime();
+                }
                 DrawPoolAndQuality();
                 EditorGUILayout.Space(12f);
             }
@@ -352,21 +360,466 @@ public sealed class BattleVfxEditorWindow : EditorWindow
         }
 
         EditorGUILayout.PropertyField(
-            Find("prefab"),
-            new GUIContent(
-                "3D 프리팹",
-                "월드 공간에 풀링되어 재생되는 3D 프리팹입니다."));
-        EditorGUILayout.PropertyField(
             Find("audioClip"),
             new GUIContent(
                 "오디오 클립",
                 "Cue 재생 시 함께 출력합니다. 프리팹 없이 오디오 전용 Cue도 가능합니다."));
+        if (!HasTimelineClips())
+        {
+            EditorGUILayout.PropertyField(
+                Find("prefab"),
+                new GUIContent(
+                    "기존 단일 3D 프리팹",
+                    "기존 Cue 호환용입니다. 새 Cue는 아래 타임라인 클립을 사용하세요."));
+            if (Find("prefab").objectReferenceValue != null &&
+                GUILayout.Button("단일 프리팹을 타임라인 클립으로 변환"))
+            {
+                _serialized.ApplyModifiedProperties();
+                Undo.RecordObject(
+                    _selected,
+                    "Migrate Battle VFX Cue To Timeline");
+                if (_selected.MigrateLegacyPrefabToTimeline())
+                {
+                    EditorUtility.SetDirty(_selected);
+                    _serialized.Update();
+                    _selectedClipIndex = 0;
+                }
+                GUIUtility.ExitGUI();
+            }
+        }
         EndFoldout();
+    }
+
+    private void DrawTimeline()
+    {
+        if (!BeginFoldout(
+                ref _timelineExpanded,
+                "2. 다중 프리팹 · 10×10 타일 타임라인"))
+        {
+            return;
+        }
+
+        SerializedProperty clips = Find("clips");
+        using (new EditorGUILayout.HorizontalScope())
+        {
+            EditorGUILayout.LabelField(
+                $"클립 {clips.arraySize}개",
+                EditorStyles.boldLabel);
+            GUILayout.FlexibleSpace();
+            if (GUILayout.Button("클립 추가", GUILayout.Width(80f)))
+            {
+                AddTimelineClip(clips);
+                GUIUtility.ExitGUI();
+            }
+        }
+
+        EditorGUILayout.HelpBox(
+            "시전자와 대상 모두 10×10이며 전체 사각형은 현재 던전 타일 한 칸입니다. " +
+            "Tile Relative 배율은 그리드 크기와 해상도에 따라 자동으로 바뀝니다.",
+            MessageType.Info);
+
+        if (clips.arraySize == 0)
+        {
+            EditorGUILayout.HelpBox(
+                "클립을 추가하면 다중 프리팹 타임라인 방식으로 전환됩니다. " +
+                "기존 단일 프리팹 Cue는 그대로 호환됩니다.",
+                MessageType.None);
+            EndFoldout();
+            return;
+        }
+
+        _selectedClipIndex = Mathf.Clamp(
+            _selectedClipIndex < 0 ? 0 : _selectedClipIndex,
+            0,
+            clips.arraySize - 1);
+        DrawTimelineOverview(clips);
+        DrawClipList(clips);
+
+        SerializedProperty selectedClip =
+            clips.GetArrayElementAtIndex(_selectedClipIndex);
+        EditorGUILayout.Space(6f);
+        EditorGUILayout.LabelField(
+            $"선택 클립 {_selectedClipIndex + 1}",
+            EditorStyles.boldLabel);
+        DrawPlacementGrids(selectedClip);
+        DrawSelectedClipInspector(selectedClip);
+        EndFoldout();
+    }
+
+    private void DrawTimelineOverview(SerializedProperty clips)
+    {
+        float timelineLength = 0.1f;
+        for (int index = 0; index < clips.arraySize; index++)
+        {
+            SerializedProperty clip = clips.GetArrayElementAtIndex(index);
+            float start = clip.FindPropertyRelative("startTime").floatValue;
+            float duration = clip.FindPropertyRelative("duration").floatValue;
+            timelineLength = Mathf.Max(
+                timelineLength,
+                start + Mathf.Max(0.01f, duration));
+        }
+
+        Rect headerRect = GUILayoutUtility.GetRect(
+            100f,
+            18f,
+            GUILayout.ExpandWidth(true));
+        EditorGUI.DrawRect(headerRect, new Color(0.12f, 0.12f, 0.12f));
+        GUI.Label(
+            headerRect,
+            $"0.00초                              {timelineLength:0.00}초",
+            EditorStyles.centeredGreyMiniLabel);
+
+        for (int index = 0; index < clips.arraySize; index++)
+        {
+            SerializedProperty clip = clips.GetArrayElementAtIndex(index);
+            float start = Mathf.Max(
+                0f,
+                clip.FindPropertyRelative("startTime").floatValue);
+            float duration = Mathf.Max(
+                0.01f,
+                clip.FindPropertyRelative("duration").floatValue);
+            Rect rowRect = GUILayoutUtility.GetRect(
+                100f,
+                22f,
+                GUILayout.ExpandWidth(true));
+            EditorGUI.DrawRect(
+                rowRect,
+                index == _selectedClipIndex
+                    ? new Color(0.18f, 0.22f, 0.28f)
+                    : new Color(0.15f, 0.15f, 0.15f));
+            Rect barRect = new(
+                rowRect.x + rowRect.width * start / timelineLength,
+                rowRect.y + 3f,
+                Mathf.Max(
+                    4f,
+                    rowRect.width * duration / timelineLength),
+                rowRect.height - 6f);
+            EditorGUI.DrawRect(
+                barRect,
+                index == _selectedClipIndex
+                    ? new Color(0.25f, 0.65f, 1f)
+                    : new Color(0.25f, 0.45f, 0.7f));
+            GUI.Label(
+                rowRect,
+                $"{index + 1}",
+                EditorStyles.miniLabel);
+            if (Event.current.type == EventType.MouseDown &&
+                rowRect.Contains(Event.current.mousePosition))
+            {
+                _selectedClipIndex = index;
+                Event.current.Use();
+                Repaint();
+            }
+        }
+    }
+
+    private void DrawClipList(SerializedProperty clips)
+    {
+        for (int index = 0; index < clips.arraySize; index++)
+        {
+            SerializedProperty clip = clips.GetArrayElementAtIndex(index);
+            using (new EditorGUILayout.HorizontalScope(
+                       index == _selectedClipIndex
+                           ? EditorStyles.helpBox
+                           : GUIStyle.none))
+            {
+                if (GUILayout.Toggle(
+                        index == _selectedClipIndex,
+                        $"{index + 1}",
+                        "Button",
+                        GUILayout.Width(28f)))
+                {
+                    _selectedClipIndex = index;
+                }
+                EditorGUILayout.PropertyField(
+                    clip.FindPropertyRelative("prefab"),
+                    GUIContent.none);
+                EditorGUILayout.PropertyField(
+                    clip.FindPropertyRelative("startTime"),
+                    GUIContent.none,
+                    GUILayout.Width(55f));
+                EditorGUILayout.LabelField("초", GUILayout.Width(14f));
+                EditorGUILayout.PropertyField(
+                    clip.FindPropertyRelative("duration"),
+                    GUIContent.none,
+                    GUILayout.Width(55f));
+                if (GUILayout.Button("삭제", GUILayout.Width(42f)))
+                {
+                    clips.DeleteArrayElementAtIndex(index);
+                    _selectedClipIndex = Mathf.Clamp(
+                        _selectedClipIndex,
+                        0,
+                        clips.arraySize - 1);
+                    GUIUtility.ExitGUI();
+                }
+            }
+        }
+    }
+
+    private void DrawPlacementGrids(SerializedProperty clip)
+    {
+        BattleVfxMotionMode motionMode =
+            (BattleVfxMotionMode)clip
+                .FindPropertyRelative("motionMode")
+                .enumValueIndex;
+        using (new EditorGUILayout.HorizontalScope())
+        {
+            DrawPlacementGrid(
+                clip,
+                "시전자 10×10",
+                BattleVfxPlacementArea.Caster,
+                motionMode != BattleVfxMotionMode.Stationary
+                    ? "motionSourceGridPosition"
+                    : "gridPosition");
+            DrawPlacementGrid(
+                clip,
+                "대상 10×10",
+                BattleVfxPlacementArea.Target,
+                "gridPosition");
+        }
+    }
+
+    private void DrawPlacementGrid(
+        SerializedProperty clip,
+        string label,
+        BattleVfxPlacementArea area,
+        string positionPropertyName)
+    {
+        using (new EditorGUILayout.VerticalScope(
+                   GUILayout.Width(GridPreviewSize + 8f)))
+        {
+            EditorGUILayout.LabelField(
+                label,
+                EditorStyles.centeredGreyMiniLabel);
+            Rect rect = GUILayoutUtility.GetRect(
+                GridPreviewSize,
+                GridPreviewSize,
+                GUILayout.Width(GridPreviewSize),
+                GUILayout.Height(GridPreviewSize));
+            EditorGUI.DrawRect(rect, new Color(0.09f, 0.1f, 0.12f));
+            float cellSize = rect.width / VfxGridDimension;
+            Handles.BeginGUI();
+            Color previousColor = Handles.color;
+            Handles.color = new Color(0.35f, 0.38f, 0.42f, 0.75f);
+            for (int index = 0; index <= VfxGridDimension; index++)
+            {
+                float x = rect.x + cellSize * index;
+                float y = rect.y + cellSize * index;
+                Handles.DrawLine(
+                    new Vector3(x, rect.y),
+                    new Vector3(x, rect.yMax));
+                Handles.DrawLine(
+                    new Vector3(rect.x, y),
+                    new Vector3(rect.xMax, y));
+            }
+            Handles.color = previousColor;
+            Handles.EndGUI();
+
+            SerializedProperty position =
+                clip.FindPropertyRelative(positionPropertyName);
+            Vector2 value = position.vector2Value;
+            float markerX = rect.x +
+                            Mathf.Clamp01(value.x / VfxGridDimension) *
+                            rect.width;
+            float markerY = rect.yMax -
+                            Mathf.Clamp01(value.y / VfxGridDimension) *
+                            rect.height;
+            Rect marker = new(markerX - 5f, markerY - 5f, 10f, 10f);
+            EditorGUI.DrawRect(marker, new Color(0.2f, 0.75f, 1f));
+
+            Event current = Event.current;
+            if (current.type == EventType.MouseDown &&
+                current.button == 0 &&
+                rect.Contains(current.mousePosition))
+            {
+                int column = Mathf.Clamp(
+                    Mathf.FloorToInt(
+                        (current.mousePosition.x - rect.x) / cellSize),
+                    0,
+                    VfxGridDimension - 1);
+                int visualRow = Mathf.Clamp(
+                    Mathf.FloorToInt(
+                        (current.mousePosition.y - rect.y) / cellSize),
+                    0,
+                    VfxGridDimension - 1);
+                int row = VfxGridDimension - 1 - visualRow;
+                position.vector2Value = new Vector2(
+                    column + 0.5f,
+                    row + 0.5f);
+                if (positionPropertyName == "gridPosition" &&
+                    (BattleVfxMotionMode)clip
+                        .FindPropertyRelative("motionMode")
+                        .enumValueIndex ==
+                    BattleVfxMotionMode.Stationary)
+                {
+                    clip.FindPropertyRelative("placementArea")
+                        .enumValueIndex = (int)area;
+                }
+                current.Use();
+                Repaint();
+            }
+        }
+    }
+
+    private static void DrawSelectedClipInspector(
+        SerializedProperty clip)
+    {
+        EditorGUILayout.PropertyField(
+            clip.FindPropertyRelative("prefab"),
+            new GUIContent("3D 프리팹"));
+        EditorGUILayout.PropertyField(
+            clip.FindPropertyRelative("audioClip"),
+            new GUIContent("클립 오디오"));
+        EditorGUILayout.PropertyField(
+            clip.FindPropertyRelative("required"),
+            new GUIContent("필수 출력"));
+
+        using (new EditorGUILayout.HorizontalScope())
+        {
+            EditorGUILayout.PropertyField(
+                clip.FindPropertyRelative("startTime"),
+                new GUIContent("시작 시간"));
+            EditorGUILayout.PropertyField(
+                clip.FindPropertyRelative("duration"),
+                new GUIContent("재생 길이"));
+        }
+        EditorGUILayout.PropertyField(
+            clip.FindPropertyRelative("playbackFit"),
+            new GUIContent("길이 맞춤"));
+
+        BattleVfxMotionMode motionMode =
+            (BattleVfxMotionMode)clip.FindPropertyRelative("motionMode")
+                .enumValueIndex;
+        if (motionMode == BattleVfxMotionMode.Stationary)
+        {
+            EditorGUILayout.PropertyField(
+                clip.FindPropertyRelative("placementArea"),
+                new GUIContent("배치 영역"));
+        }
+        EditorGUILayout.PropertyField(
+            clip.FindPropertyRelative("anchorType"),
+            new GUIContent("앵커"));
+        EditorGUILayout.PropertyField(
+            clip.FindPropertyRelative("attachMode"),
+            new GUIContent("부착 방식"));
+        EditorGUILayout.PropertyField(
+            clip.FindPropertyRelative("gridPosition"),
+            new GUIContent("10×10 위치"));
+        EditorGUILayout.PropertyField(
+            clip.FindPropertyRelative("localPosition"),
+            new GUIContent("세부 위치"));
+        EditorGUILayout.PropertyField(
+            clip.FindPropertyRelative("localEulerAngles"),
+            new GUIContent("회전"));
+
+        EditorGUILayout.PropertyField(
+            clip.FindPropertyRelative("scaleMode"),
+            new GUIContent("스케일 방식"));
+        EditorGUILayout.PropertyField(
+            clip.FindPropertyRelative("uniformScale"),
+            new GUIContent("전체 배율"));
+        EditorGUILayout.PropertyField(
+            clip.FindPropertyRelative("localScale"),
+            new GUIContent("축별 배율"));
+
+        EditorGUILayout.PropertyField(
+            clip.FindPropertyRelative("motionMode"),
+            new GUIContent("이동 방식"));
+        motionMode =
+            (BattleVfxMotionMode)clip.FindPropertyRelative("motionMode")
+                .enumValueIndex;
+        if (motionMode != BattleVfxMotionMode.Stationary)
+        {
+            EditorGUILayout.PropertyField(
+                clip.FindPropertyRelative("motionSourceGridPosition"),
+                new GUIContent("시전자 출발 위치"));
+            EditorGUILayout.PropertyField(
+                clip.FindPropertyRelative("travelDuration"),
+                new GUIContent("이동 시간"));
+            if (motionMode == BattleVfxMotionMode.Arc)
+            {
+                EditorGUILayout.PropertyField(
+                    clip.FindPropertyRelative("arcHeight"),
+                    new GUIContent("포물선 높이"));
+            }
+            EditorGUILayout.PropertyField(
+                clip.FindPropertyRelative("faceMotionDirection"),
+                new GUIContent("진행 방향 바라보기"));
+        }
+
+        EditorGUILayout.PropertyField(
+            clip.FindPropertyRelative("lifetimeMode"),
+            new GUIContent("수명 방식"));
+        EditorGUILayout.PropertyField(
+            clip.FindPropertyRelative("stopMode"),
+            new GUIContent("종료 방식"));
+        EditorGUILayout.PropertyField(
+            clip.FindPropertyRelative("useBattleTime"),
+            new GUIContent("전투 시간 사용"));
+    }
+
+    private void AddTimelineClip(SerializedProperty clips)
+    {
+        _serialized.ApplyModifiedProperties();
+        Undo.RecordObject(_selected, "Add Battle VFX Timeline Clip");
+        clips = Find("clips");
+        int index = clips.arraySize;
+        clips.InsertArrayElementAtIndex(index);
+        SerializedProperty clip = clips.GetArrayElementAtIndex(index);
+        clip.FindPropertyRelative("clipId").stringValue =
+            Guid.NewGuid().ToString("N");
+        clip.FindPropertyRelative("prefab").objectReferenceValue = null;
+        clip.FindPropertyRelative("audioClip").objectReferenceValue = null;
+        clip.FindPropertyRelative("required").boolValue = true;
+        clip.FindPropertyRelative("startTime").floatValue = 0f;
+        clip.FindPropertyRelative("duration").floatValue = 1f;
+        clip.FindPropertyRelative("playbackFit").enumValueIndex =
+            (int)BattleVfxPlaybackFit.Natural;
+        clip.FindPropertyRelative("placementArea").enumValueIndex =
+            (int)BattleVfxPlacementArea.Target;
+        clip.FindPropertyRelative("anchorType").enumValueIndex =
+            (int)BattleVfxAnchorType.Center;
+        clip.FindPropertyRelative("attachMode").enumValueIndex =
+            (int)BattleVfxAttachMode.SpawnAtAnchor;
+        clip.FindPropertyRelative("gridPosition").vector2Value =
+            new Vector2(5f, 5f);
+        clip.FindPropertyRelative("localPosition").vector3Value =
+            Vector3.zero;
+        clip.FindPropertyRelative("localEulerAngles").vector3Value =
+            Vector3.zero;
+        clip.FindPropertyRelative("scaleMode").enumValueIndex =
+            (int)BattleVfxScaleMode.TileRelative;
+        clip.FindPropertyRelative("uniformScale").floatValue = 1f;
+        clip.FindPropertyRelative("localScale").vector3Value =
+            Vector3.one;
+        clip.FindPropertyRelative("motionMode").enumValueIndex =
+            (int)BattleVfxMotionMode.Stationary;
+        clip.FindPropertyRelative("motionSourceGridPosition")
+            .vector2Value = new Vector2(5f, 5f);
+        clip.FindPropertyRelative("travelDuration").floatValue = 0.25f;
+        clip.FindPropertyRelative("arcHeight").floatValue = 0.5f;
+        clip.FindPropertyRelative("faceMotionDirection").boolValue = true;
+        clip.FindPropertyRelative("lifetimeMode").enumValueIndex =
+            (int)BattleVfxLifetimeMode.Timed;
+        clip.FindPropertyRelative("stopMode").enumValueIndex =
+            (int)BattleVfxStopMode.StopEmission;
+        clip.FindPropertyRelative("useBattleTime").boolValue = true;
+        _serialized.ApplyModifiedProperties();
+        _selected.ValidateDefinition();
+        EditorUtility.SetDirty(_selected);
+        _serialized.Update();
+        _selectedClipIndex = index;
+    }
+
+    private bool HasTimelineClips()
+    {
+        SerializedProperty clips = Find("clips");
+        return clips != null && clips.arraySize > 0;
     }
 
     private void DrawAnchor()
     {
-        if (!BeginFoldout(ref _anchorExpanded, "2. 대상 앵커 및 변환"))
+        if (!BeginFoldout(ref _anchorExpanded, "3. 기존 대상 앵커 및 변환"))
             return;
 
         EditorGUILayout.PropertyField(
@@ -391,7 +844,7 @@ public sealed class BattleVfxEditorWindow : EditorWindow
 
     private void DrawLifetime()
     {
-        if (!BeginFoldout(ref _lifetimeExpanded, "4. 수명 및 종료"))
+        if (!BeginFoldout(ref _lifetimeExpanded, "5. 기존 수명 및 종료"))
             return;
 
         SerializedProperty lifetimeMode = Find("lifetimeMode");
@@ -434,7 +887,7 @@ public sealed class BattleVfxEditorWindow : EditorWindow
 
     private void DrawPoolAndQuality()
     {
-        if (!BeginFoldout(ref _poolExpanded, "5. 풀 및 품질"))
+        if (!BeginFoldout(ref _poolExpanded, "6. 풀 및 품질"))
             return;
 
         EditorGUILayout.PropertyField(
@@ -453,7 +906,7 @@ public sealed class BattleVfxEditorWindow : EditorWindow
 
     private void DrawMotion()
     {
-        if (!BeginFoldout(ref _motionExpanded, "3. 투사체 이동"))
+        if (!BeginFoldout(ref _motionExpanded, "4. 기존 투사체 이동"))
             return;
 
         SerializedProperty motionMode = Find("motionMode");
@@ -553,6 +1006,7 @@ public sealed class BattleVfxEditorWindow : EditorWindow
             CancelRename();
         _selected = cue;
         _serialized = new SerializedObject(cue);
+        _selectedClipIndex = -1;
         _editorScroll = Vector2.zero;
         Repaint();
     }

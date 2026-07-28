@@ -21,6 +21,8 @@ public sealed class CharacterP0RegressionTests
         "Assets/Resources/StatusEffects/Fire.asset";
     private const string OpeningAssetPath =
         "Assets/Resources/StatusEffects/Opening.asset";
+    private const string ComboAssetPath =
+        "Assets/Resources/StatusEffects/Combo.asset";
     private const string StarPowderAssetPath =
         "Assets/Resources/StatusEffects/StarPowder.asset";
     private const string StunAssetPath =
@@ -111,6 +113,120 @@ public sealed class CharacterP0RegressionTests
     }
 
     [Test]
+    public void CharacterEditor_AddPassiveCreatesPersistedEmptyDraft()
+    {
+        CharacterSO definition = CreateBaseCharacterFixture(
+            "EmptyPassiveDraftFixture");
+        SerializedObject serialized = new(definition);
+        serialized.FindProperty("passiveDefinitions").ClearArray();
+        serialized.ApplyModifiedPropertiesWithoutUndo();
+
+        CharacterEditorWindow window =
+            ScriptableObject.CreateInstance<CharacterEditorWindow>();
+        window.hideFlags = HideFlags.HideAndDontSave;
+        _createdObjects.Add(window);
+        FieldInfo selectedCharacterField =
+            typeof(CharacterEditorWindow).GetField(
+                "_selectedCharacter",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+        FieldInfo serializedCharacterField =
+            typeof(CharacterEditorWindow).GetField(
+                "_serializedCharacter",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+        MethodInfo addPassive =
+            typeof(CharacterEditorWindow).GetMethod(
+                "AddPassiveDefinition",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+        Assert.That(selectedCharacterField, Is.Not.Null);
+        Assert.That(serializedCharacterField, Is.Not.Null);
+        Assert.That(addPassive, Is.Not.Null);
+        selectedCharacterField.SetValue(window, definition);
+        serializedCharacterField.SetValue(
+            window,
+            new SerializedObject(definition));
+
+        addPassive.Invoke(window, null);
+
+        Assert.That(definition.PassiveDefinitions, Has.Count.EqualTo(1));
+        Assert.That(
+            definition.PassiveDefinitions[0].IsEmptyPlaceholder,
+            Is.True);
+
+        MethodInfo onValidate = typeof(CharacterSO).GetMethod(
+            "OnValidate",
+            BindingFlags.Instance | BindingFlags.NonPublic);
+        Assert.That(onValidate, Is.Not.Null);
+        onValidate.Invoke(definition, null);
+
+        Assert.That(definition.PassiveDefinitions, Has.Count.EqualTo(1));
+        Assert.That(definition.PassiveDefinitions[0].Sections, Is.Empty);
+
+        CharacterData data = definition.CreateData();
+        Assert.That(data.ConfiguredPassiveDefinitionCount, Is.Zero);
+        Assert.That(data.HasCustomPassiveDefinitions, Is.False);
+        Assert.That(
+            CharacterLocalization.GetPassiveDescription(data),
+            Is.Empty);
+
+        CharacterDefinitionValidationResult validation =
+            CharacterDefinitionValidator.Validate(definition);
+        Assert.That(validation.IsValid, Is.True);
+        Assert.That(
+            HasDiagnostic(validation, "passive.empty_placeholder"),
+            Is.True,
+            string.Join("\n", validation.Diagnostics));
+    }
+
+    [Test]
+    public void CharacterEditor_ChangingCharacterClearsTextEditingFocus()
+    {
+        CharacterSO first = CreateBaseCharacterFixture(
+            "FocusReleaseFirstFixture");
+        CharacterSO second = CreateBaseCharacterFixture(
+            "FocusReleaseSecondFixture");
+        CharacterEditorWindow window =
+            ScriptableObject.CreateInstance<CharacterEditorWindow>();
+        window.hideFlags = HideFlags.HideAndDontSave;
+        _createdObjects.Add(window);
+        FieldInfo selectedCharacterField =
+            typeof(CharacterEditorWindow).GetField(
+                "_selectedCharacter",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+        FieldInfo serializedCharacterField =
+            typeof(CharacterEditorWindow).GetField(
+                "_serializedCharacter",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+        MethodInfo selectCharacter =
+            typeof(CharacterEditorWindow).GetMethod(
+                "SelectCharacter",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+        Assert.That(selectedCharacterField, Is.Not.Null);
+        Assert.That(serializedCharacterField, Is.Not.Null);
+        Assert.That(selectCharacter, Is.Not.Null);
+        selectedCharacterField.SetValue(window, first);
+        serializedCharacterField.SetValue(
+            window,
+            new SerializedObject(first));
+
+        try
+        {
+            EditorGUIUtility.editingTextField = true;
+            selectCharacter.Invoke(window, new object[] { second, false });
+
+            Assert.That(
+                EditorGUIUtility.editingTextField,
+                Is.False);
+            Assert.That(
+                selectedCharacterField.GetValue(window),
+                Is.SameAs(second));
+        }
+        finally
+        {
+            EditorGUIUtility.editingTextField = false;
+        }
+    }
+
+    [Test]
     public void DungeonCharacterInfo_UsesOverflowSdAndFullWidthCooldown()
     {
         CharacterRuntime character = CreateCharacter(
@@ -148,10 +264,16 @@ public sealed class CharacterP0RegressionTests
         Assert.That(activeIcon, Is.Not.Null);
         Assert.That(
             passiveIcon.anchoredPosition,
-            Is.EqualTo(new Vector2(-8f, -6f)));
+            Is.EqualTo(new Vector2(-62f, -6f)));
         Assert.That(
             activeIcon.anchoredPosition,
-            Is.EqualTo(new Vector2(-8f, -60f)));
+            Is.EqualTo(new Vector2(-8f, -6f)));
+        Assert.That(
+            passiveIcon.anchoredPosition.y,
+            Is.EqualTo(activeIcon.anchoredPosition.y));
+        Assert.That(
+            passiveIcon.anchoredPosition.x,
+            Is.LessThan(activeIcon.anchoredPosition.x));
         Assert.That(
             sdRect.GetComponent<Image>().raycastTarget,
             Is.True);
@@ -805,6 +927,212 @@ public sealed class CharacterP0RegressionTests
         Assert.That(
             mirinae.GetStatusStackCount(starPowder),
             Is.EqualTo(1));
+    }
+
+    [Test]
+    public void LockedAttackTarget_IsReusedUntilInvalid_AndGainsComboPerAttack()
+    {
+        StatusEffectSO combo = LoadAsset<StatusEffectSO>(ComboAssetPath);
+        CharacterSO definition = CreateBaseCharacterFixture(
+            "LockedAttackTargetFixture");
+        SerializedObject serialized = new(definition);
+        SerializedProperty attack = serialized
+            .FindProperty("attackDefinitions")
+            .GetArrayElementAtIndex(0);
+        attack.FindPropertyRelative("targetRetentionMode").enumValueIndex =
+            (int)CharacterAttackTargetRetentionMode.LockUntilInvalid;
+
+        SerializedProperty passive = serialized
+            .FindProperty("passiveDefinitions")
+            .GetArrayElementAtIndex(0);
+        passive.FindPropertyRelative("trigger").enumValueIndex =
+            (int)CharacterPassiveTrigger.OnAttack;
+        passive.FindPropertyRelative("linkage").enumValueIndex =
+            (int)CharacterActionLinkage.PreviousAttackSucceeded;
+        passive.FindPropertyRelative("targetFaction").enumValueIndex =
+            (int)CharacterTargetFaction.Ally;
+        passive.FindPropertyRelative("subject").enumValueIndex =
+            (int)CharacterAttackSubject.Self;
+        SerializedProperty passiveEffects =
+            passive.FindPropertyRelative("effects");
+        passiveEffects.arraySize = 1;
+        ConfigureApplyStatusEffect(
+            passiveEffects.GetArrayElementAtIndex(0),
+            CharacterEffectTargetMode.Source,
+            combo,
+            1f,
+            1f);
+        serialized.ApplyModifiedPropertiesWithoutUndo();
+
+        CharacterDefinitionValidationResult validation =
+            CharacterDefinitionValidator.Validate(definition);
+        Assert.That(
+            validation.IsValid,
+            Is.True,
+            string.Join("\n", validation.Diagnostics));
+
+        EnemyRuntime firstTarget = CreateEnemyRuntime();
+        EnemyRuntime secondTarget = CreateEnemyRuntime();
+        FakeBattleBoard board = new()
+        {
+            LivingEnemyCountValue = 2,
+        };
+        board.PlannedEnemySelections.Enqueue(new[] { firstTarget });
+        board.PlannedEnemySelections.Enqueue(new[] { secondTarget });
+        CharacterRuntime byeolha = CreateCharacter(definition);
+        byeolha.BindBattle(null, board);
+
+        byeolha.TickBattle(byeolha.Data.AttackCooldown, board);
+        byeolha.TickBattle(byeolha.Data.AttackCooldown, board);
+
+        Assert.That(board.CharacterTargetSelectionCallCount, Is.EqualTo(1));
+        Assert.That(board.DamageTargetSnapshots, Has.Count.EqualTo(2));
+        Assert.That(board.DamageTargetSnapshots[0], Does.Contain(firstTarget));
+        Assert.That(board.DamageTargetSnapshots[1], Does.Contain(firstTarget));
+        Assert.That(byeolha.GetStatusStackCount(combo), Is.EqualTo(2));
+
+        board.InvalidEnemyTargets.Add(firstTarget);
+        byeolha.TickBattle(byeolha.Data.AttackCooldown, board);
+
+        Assert.That(board.CharacterTargetSelectionCallCount, Is.EqualTo(2));
+        Assert.That(board.DamageTargetSnapshots, Has.Count.EqualTo(3));
+        Assert.That(board.DamageTargetSnapshots[2], Does.Contain(secondTarget));
+        Assert.That(byeolha.GetStatusStackCount(combo), Is.EqualTo(3));
+
+        EnemyRuntime resetTarget = CreateEnemyRuntime();
+        board.PlannedEnemySelections.Enqueue(new[] { resetTarget });
+        byeolha.ResetRuntime();
+        byeolha.TickBattle(byeolha.Data.AttackCooldown, board);
+
+        Assert.That(board.CharacterTargetSelectionCallCount, Is.EqualTo(3));
+        Assert.That(board.DamageTargetSnapshots[3], Does.Contain(resetTarget));
+        Assert.That(byeolha.GetStatusStackCount(combo), Is.EqualTo(1));
+    }
+
+    [Test]
+    public void DefaultAttackTarget_IsReselectedEveryAttack()
+    {
+        CharacterRuntime character = CreateCharacter(
+            CreateBaseCharacterFixture("ReselectAttackTargetFixture"));
+        EnemyRuntime firstTarget = CreateEnemyRuntime();
+        EnemyRuntime secondTarget = CreateEnemyRuntime();
+        FakeBattleBoard board = new()
+        {
+            LivingEnemyCountValue = 2,
+        };
+        board.PlannedEnemySelections.Enqueue(new[] { firstTarget });
+        board.PlannedEnemySelections.Enqueue(new[] { secondTarget });
+        character.BindBattle(null, board);
+
+        character.TickBattle(character.Data.AttackCooldown, board);
+        character.TickBattle(character.Data.AttackCooldown, board);
+
+        Assert.That(board.CharacterTargetSelectionCallCount, Is.EqualTo(2));
+        Assert.That(board.DamageTargetSnapshots[0], Does.Contain(firstTarget));
+        Assert.That(board.DamageTargetSnapshots[1], Does.Contain(secondTarget));
+    }
+
+    [Test]
+    public void AttackTargetRelationPassives_DistinguishSameAndDifferentTargets()
+    {
+        StatusEffectSO sameTargetReward = CreateRuntimeStatus(
+            "same-target-reward",
+            false,
+            true,
+            StatusEffectStackMode.AddAndRefreshDuration,
+            0);
+        StatusEffectSO differentTargetReward = CreateRuntimeStatus(
+            "different-target-reward",
+            false,
+            true,
+            StatusEffectStackMode.AddAndRefreshDuration,
+            0);
+        CharacterSO definition = CreateBaseCharacterFixture(
+            "AttackTargetRelationFixture");
+        SerializedObject serialized = new(definition);
+        SerializedProperty passives =
+            serialized.FindProperty("passiveDefinitions");
+        passives.arraySize = 2;
+        ConfigureAttackTargetRelationPassive(
+            passives.GetArrayElementAtIndex(0),
+            CharacterPassiveAttackTargetRelation.SameAsPreviousAttack,
+            sameTargetReward);
+        ConfigureAttackTargetRelationPassive(
+            passives.GetArrayElementAtIndex(1),
+            CharacterPassiveAttackTargetRelation.DifferentFromPreviousAttack,
+            differentTargetReward);
+        serialized.ApplyModifiedPropertiesWithoutUndo();
+
+        CharacterDefinitionValidationResult validation =
+            CharacterDefinitionValidator.Validate(definition);
+        Assert.That(
+            validation.IsValid,
+            Is.True,
+            string.Join("\n", validation.Diagnostics));
+
+        EnemyRuntime firstTarget = CreateEnemyRuntime();
+        EnemyRuntime secondTarget = CreateEnemyRuntime();
+        FakeBattleBoard board = new()
+        {
+            LivingEnemyCountValue = 2,
+        };
+        board.PlannedEnemySelections.Enqueue(new[] { firstTarget });
+        board.PlannedEnemySelections.Enqueue(new[] { firstTarget });
+        board.PlannedEnemySelections.Enqueue(new[] { secondTarget });
+        board.PlannedEnemySelections.Enqueue(new[] { secondTarget });
+        CharacterRuntime character = CreateCharacter(definition);
+        character.BindBattle(null, board);
+
+        for (int attackIndex = 0; attackIndex < 4; attackIndex++)
+            character.TickBattle(character.Data.AttackCooldown, board);
+
+        Assert.That(
+            character.GetStatusStackCount(sameTargetReward),
+            Is.EqualTo(2),
+            "The second and fourth attempts repeat their previous target.");
+        Assert.That(
+            character.GetStatusStackCount(differentTargetReward),
+            Is.EqualTo(1),
+            "Only the third attempt changes away from the previous target.");
+
+        board.PlannedEnemySelections.Enqueue(new[] { secondTarget });
+        character.ResetRuntime();
+        character.TickBattle(character.Data.AttackCooldown, board);
+
+        Assert.That(
+            character.GetStatusStackCount(sameTargetReward),
+            Is.Zero,
+            "The first attempt after reset must only establish a baseline.");
+        Assert.That(
+            character.GetStatusStackCount(differentTargetReward),
+            Is.Zero,
+            "The first attempt after reset has no previous target.");
+    }
+
+    [Test]
+    public void LockedAttackTarget_RejectsMultipleTargetSelectors()
+    {
+        CharacterSO definition = CreateBaseCharacterFixture(
+            "InvalidLockedAttackTargetFixture");
+        SerializedObject serialized = new(definition);
+        SerializedProperty attack = serialized
+            .FindProperty("attackDefinitions")
+            .GetArrayElementAtIndex(0);
+        attack.FindPropertyRelative("targetRetentionMode").enumValueIndex =
+            (int)CharacterAttackTargetRetentionMode.LockUntilInvalid;
+        attack.FindPropertyRelative("subjectCount").intValue = 2;
+        serialized.ApplyModifiedPropertiesWithoutUndo();
+
+        CharacterDefinitionValidationResult validation =
+            CharacterDefinitionValidator.Validate(definition);
+
+        Assert.That(validation.IsValid, Is.False);
+        Assert.That(
+            HasDiagnostic(
+                validation,
+                "attack.target_retention_unsupported"),
+            Is.True,
+            string.Join("\n", validation.Diagnostics));
     }
 
     [Test]
@@ -3583,6 +3911,76 @@ public sealed class CharacterP0RegressionTests
     }
 
     [Test]
+    public void DungeonCharacterRewards_ExcludeEveryCharacterAcquiredThisRun()
+    {
+        List<CharacterSO> definitions = new();
+        CharacterRuntime[] slots =
+            new CharacterRuntime[DungeonPage.MaximumPartySize];
+        for (int index = 0; index < DungeonPage.MaximumPartySize + 1;
+             index++)
+        {
+            CharacterSO definition = CreateCumulativeUpgradeCharacter();
+            definition.name = $"RewardCharacter_{index + 1}";
+            SetCharacterInitiallyOwned(definition, true);
+            definitions.Add(definition);
+            if (index < slots.Length)
+                slots[index] = CreateCharacter(definition);
+        }
+
+        GameObject pageObject = new(
+            "DungeonCharacterRewardTest",
+            typeof(RectTransform));
+        pageObject.SetActive(false);
+        _createdObjects.Add(pageObject);
+        DungeonPage page = pageObject.AddComponent<DungeonPage>();
+        FieldInfo playerCharactersField = typeof(DungeonPage).GetField(
+            "playerCharacters",
+            BindingFlags.Instance | BindingFlags.NonPublic);
+        FieldInfo availableTurretsField = typeof(DungeonPage).GetField(
+            "_availableTurrets",
+            BindingFlags.Instance | BindingFlags.NonPublic);
+        FieldInfo eventRewardPendingField = typeof(DungeonPage).GetField(
+            "_eventRewardPending",
+            BindingFlags.Instance | BindingFlags.NonPublic);
+        Assert.That(playerCharactersField, Is.Not.Null);
+        Assert.That(availableTurretsField, Is.Not.Null);
+        Assert.That(eventRewardPendingField, Is.Not.Null);
+        playerCharactersField.SetValue(page, slots);
+        List<CharacterSO> available =
+            (List<CharacterSO>)availableTurretsField.GetValue(page);
+        available.AddRange(definitions);
+
+        for (int index = 0; index < DungeonPage.MaximumPartySize; index++)
+        {
+            eventRewardPendingField.SetValue(page, true);
+            Assert.That(
+                page.TryAcquireTurret(definitions[index]),
+                Is.True);
+        }
+
+        IReadOnlyList<CharacterSO> beforeReplacement =
+            page.GetAvailableCharacterRewardDefinitions();
+        Assert.That(beforeReplacement.Count, Is.EqualTo(1));
+        Assert.That(beforeReplacement[0], Is.SameAs(definitions[4]));
+
+        eventRewardPendingField.SetValue(page, true);
+        Assert.That(
+            page.TryAcquireTurret(definitions[4], 0),
+            Is.True);
+        Assert.That(
+            page.GetAvailableCharacterRewardDefinitions(),
+            Is.Empty);
+
+        eventRewardPendingField.SetValue(page, true);
+        Assert.That(
+            page.TryAcquireTurret(definitions[0], 0),
+            Is.False);
+        Assert.That(
+            page.OwnedTurrets[0].Definition,
+            Is.SameAs(definitions[4]));
+    }
+
+    [Test]
     public void ExplicitDamageAndStatusSkill_AppliesBothOnce_AndPaysOnce()
     {
         StatusEffectSO fire = LoadAsset<StatusEffectSO>(FireAssetPath);
@@ -4718,6 +5116,60 @@ public sealed class CharacterP0RegressionTests
         Assert.That(events[5].StatusEffect, Is.SameAs(earlierStatus));
         Assert.That(events[5].CurrentStacks, Is.Zero);
         Assert.That(character.GetActiveStatusEffects(), Is.Empty);
+    }
+
+    [Test]
+    public void AlliedStatus_RatioRemovalUsesCurrentStacksPerStatusType()
+    {
+        StatusEffectSO firstStatus = CreateRuntimeStatus(
+            "test_ratio_removal_a",
+            false,
+            true,
+            StatusEffectStackMode.AddAndRefreshDuration,
+            0);
+        StatusEffectSO secondStatus = CreateRuntimeStatus(
+            "test_ratio_removal_b",
+            false,
+            true,
+            StatusEffectStackMode.AddAndRefreshDuration,
+            0);
+        CharacterRuntime character = CreateCharacter(SuirenAssetPath);
+
+        Assert.That(
+            character.ApplyStatusEffect(firstStatus, 5f, 7),
+            Is.True);
+        Assert.That(
+            character.ApplyStatusEffect(secondStatus, 5f, 3),
+            Is.True);
+
+        Assert.That(
+            character.RemoveStatusEffects(
+                CharacterStatusRemovalTarget.Single,
+                firstStatus,
+                CharacterStatusRemovalAmount.Ratio(0.5f)),
+            Is.EqualTo(4),
+            "7 current stacks at one half must round up to 4 removed.");
+        Assert.That(
+            character.GetStatusStackCount(firstStatus),
+            Is.EqualTo(3));
+
+        Assert.That(
+            character.ApplyStatusEffect(firstStatus, 5f, 4),
+            Is.True);
+        Assert.That(
+            character.RemoveStatusEffects(
+                CharacterStatusRemovalTarget.All,
+                null,
+                CharacterStatusRemovalAmount.Ratio(0.25f)),
+            Is.EqualTo(3),
+            "All removal must resolve one quarter independently for each " +
+            "status type: ceil(7/4) + ceil(3/4).");
+        Assert.That(
+            character.GetStatusStackCount(firstStatus),
+            Is.EqualTo(5));
+        Assert.That(
+            character.GetStatusStackCount(secondStatus),
+            Is.EqualTo(2));
     }
 
     [Test]
@@ -5902,6 +6354,38 @@ public sealed class CharacterP0RegressionTests
         effect.FindPropertyRelative("statusStacks").floatValue = stacks;
     }
 
+    private static void ConfigureAttackTargetRelationPassive(
+        SerializedProperty passive,
+        CharacterPassiveAttackTargetRelation relation,
+        StatusEffectSO reward)
+    {
+        SetSections(
+            passive.FindPropertyRelative("sections"),
+            (int)CharacterPassiveSectionType.Linkage,
+            (int)CharacterPassiveSectionType.Condition,
+            (int)CharacterPassiveSectionType.Subject,
+            (int)CharacterPassiveSectionType.Ability);
+        passive.FindPropertyRelative("trigger").enumValueIndex =
+            (int)CharacterPassiveTrigger.OnAttack;
+        passive.FindPropertyRelative("linkage").enumValueIndex =
+            (int)CharacterActionLinkage.PreviousAttackSucceeded;
+        passive.FindPropertyRelative(
+            "attackTargetRelation").enumValueIndex = (int)relation;
+        passive.FindPropertyRelative("numericConditions").ClearArray();
+        passive.FindPropertyRelative("targetFaction").enumValueIndex =
+            (int)CharacterTargetFaction.Ally;
+        passive.FindPropertyRelative("subject").enumValueIndex =
+            (int)CharacterAttackSubject.Self;
+        SerializedProperty effects = passive.FindPropertyRelative("effects");
+        effects.arraySize = 1;
+        ConfigureApplyStatusEffect(
+            effects.GetArrayElementAtIndex(0),
+            CharacterEffectTargetMode.Source,
+            reward,
+            100f,
+            1f);
+    }
+
     private static void ConfigureRemoveStatusEffect(
         SerializedProperty effect,
         CharacterEffectTargetMode targetMode,
@@ -6944,6 +7428,7 @@ public sealed class CharacterP0RegressionTests
             { get; private set; }
         public Queue<IReadOnlyList<EnemyRuntime>> PlannedEnemySelections
             { get; } = new();
+        public HashSet<EnemyRuntime> InvalidEnemyTargets { get; } = new();
         public List<int> SelectionNumericConditionCounts
             { get; } = new();
         public IReadOnlyList<EnemyRuntime> SelectedEnemyTargets
@@ -7060,13 +7545,23 @@ public sealed class CharacterP0RegressionTests
             IReadOnlyList<CharacterNumericCondition> numericConditions)
         {
             FilterCharacterTargetCallCount++;
-            bool hasTargets = targets != null && targets.Count > 0;
+            List<EnemyRuntime> validTargets = new();
+            if (targets != null)
+            {
+                foreach (EnemyRuntime target in targets)
+                {
+                    if (target != null && !InvalidEnemyTargets.Contains(target))
+                        validTargets.Add(target);
+                }
+            }
+
+            bool hasTargets = validTargets.Count > 0;
             return CharacterConditionEvaluator.AllowsAction(
                     source,
                     conditionMatchMode,
                     numericConditions,
                     hasTargets)
-                ? targets ?? Array.Empty<EnemyRuntime>()
+                ? validTargets
                 : Array.Empty<EnemyRuntime>();
         }
 
@@ -7311,7 +7806,7 @@ public sealed class CharacterP0RegressionTests
             IReadOnlyList<EnemyRuntime> targets,
             CharacterStatusRemovalTarget removalTarget,
             StatusEffectSO statusEffect,
-            int removalCount,
+            CharacterStatusRemovalAmount removalAmount,
             bool showAttackRange)
         {
             return false;
@@ -7322,7 +7817,7 @@ public sealed class CharacterP0RegressionTests
             IReadOnlyList<IBattleCharacter> targets,
             CharacterStatusRemovalTarget removalTarget,
             StatusEffectSO statusEffect,
-            int removalCount)
+            CharacterStatusRemovalAmount removalAmount)
         {
             AlliedStatusRemovalCallCount++;
             LastAlliedStatusRemovalTargets =
@@ -7340,7 +7835,7 @@ public sealed class CharacterP0RegressionTests
                     removed |= target.RemoveStatusEffects(
                         removalTarget,
                         statusEffect,
-                        removalCount) > 0;
+                        removalAmount) > 0;
                 }
             }
 

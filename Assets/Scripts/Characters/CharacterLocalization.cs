@@ -75,12 +75,12 @@ public static class CharacterLocalization
         return UsesKoreanLocale
             ? $"공격력 {data.AttackPower:0.##}  |  " +
               $"공격 간격 {data.AttackCooldown:0.##}초  |  " +
-              $"패시브 {data.PassiveDefinitions.Count} / " +
+              $"패시브 {data.ConfiguredPassiveDefinitionCount} / " +
               $"공격 {data.AttackDefinitions.Count} / " +
               $"기술 {data.SkillDefinitions.Count}"
             : $"ATK {data.AttackPower:0.##}  |  " +
               $"INTERVAL {data.AttackCooldown:0.##}s  |  " +
-              $"PASSIVE {data.PassiveDefinitions.Count} / " +
+              $"PASSIVE {data.ConfiguredPassiveDefinitionCount} / " +
               $"ATTACK {data.AttackDefinitions.Count} / " +
               $"SKILL {data.SkillDefinitions.Count}";
     }
@@ -323,7 +323,7 @@ public static class CharacterLocalization
         foreach (CharacterPassiveDefinition definition in
                  data.PassiveDefinitions)
         {
-            if (definition == null)
+            if (definition == null || definition.IsEmptyPlaceholder)
                 continue;
 
             CharacterAttackSubject subject = definition.HasSection(
@@ -355,7 +355,9 @@ public static class CharacterLocalization
                     definition.StatusStacks,
                     definition.StatusRemovalEffect,
                     definition.StatusRemovalTarget,
+                    definition.StatusRemovalAmountMode,
                     definition.StatusRemovalCount,
+                    definition.StatusRemovalRatio,
                     data.CalculatePassiveDamage(definition));
             AppendCodexLine(
                 builder,
@@ -367,6 +369,7 @@ public static class CharacterLocalization
                             CharacterPassiveSectionType.Linkage),
                         definition.Linkage)
                     : string.Empty) +
+                FormatPassiveAttackTargetRelation(definition) +
                 FormatNumericConditions(
                     definition.HasSection(
                         CharacterPassiveSectionType.Condition),
@@ -408,7 +411,9 @@ public static class CharacterLocalization
                     definition.StatusStacks,
                     definition.StatusRemovalEffect,
                     definition.StatusRemovalTarget,
+                    definition.StatusRemovalAmountMode,
                     definition.StatusRemovalCount,
+                    definition.StatusRemovalRatio,
                     data.CalculateAttackDamage(definition));
             AppendCodexLine(
                 builder,
@@ -427,6 +432,7 @@ public static class CharacterLocalization
                     definition.Subject,
                     definition.SubjectMetric,
                     definition.SubjectCount) +
+                FormatTargetRetention(definition.TargetRetentionMode) +
                 FormatArea(definition.AreaOffsets) + " → " +
                 abilityDescription);
         }
@@ -479,7 +485,9 @@ public static class CharacterLocalization
                     definition.StatusStacks,
                     definition.StatusRemovalEffect,
                     definition.StatusRemovalTarget,
+                    definition.StatusRemovalAmountMode,
                     definition.StatusRemovalCount,
+                    definition.StatusRemovalRatio,
                     data.CalculateSkillDamage(definition));
             AppendCodexLine(
                 builder,
@@ -553,6 +561,31 @@ public static class CharacterLocalization
             default:
                 return UsesKoreanLocale ? "공격 시, " : "On attack, ";
         }
+    }
+
+    private static string FormatPassiveAttackTargetRelation(
+        CharacterPassiveDefinition definition)
+    {
+        if (definition == null ||
+            definition.Trigger != CharacterPassiveTrigger.OnAttack ||
+            !definition.HasAttackTargetRelationCondition)
+        {
+            return string.Empty;
+        }
+
+        return definition.AttackTargetRelation switch
+        {
+            CharacterPassiveAttackTargetRelation.SameAsPreviousAttack =>
+                UsesKoreanLocale
+                    ? "[직전 공격과 동일 대상] "
+                    : "[same target as previous attack] ",
+            CharacterPassiveAttackTargetRelation
+                    .DifferentFromPreviousAttack =>
+                UsesKoreanLocale
+                    ? "[직전 공격과 다른 대상] "
+                    : "[different target from previous attack] ",
+            _ => string.Empty
+        };
     }
 
     private static string FormatPassiveStatusCost(
@@ -744,6 +777,20 @@ public static class CharacterLocalization
         };
     }
 
+    private static string FormatTargetRetention(
+        CharacterAttackTargetRetentionMode retentionMode)
+    {
+        if (retentionMode !=
+            CharacterAttackTargetRetentionMode.LockUntilInvalid)
+        {
+            return string.Empty;
+        }
+
+        return UsesKoreanLocale
+            ? " (대상이 유효한 동안 고정)"
+            : " (locked while target remains valid)";
+    }
+
     private static string GetDungeonUpgradeName(
         CharacterDungeonUpgradeType upgradeType)
     {
@@ -774,7 +821,9 @@ public static class CharacterLocalization
         float statusStacks,
         StatusEffectSO statusRemovalEffect,
         CharacterStatusRemovalTarget statusRemovalTarget,
+        CharacterStatusRemovalAmountMode statusRemovalAmountMode,
         int statusRemovalCount,
+        float statusRemovalRatio,
         int finalDamage,
         bool includeFinalDamage = true)
     {
@@ -815,11 +864,23 @@ public static class CharacterLocalization
                     UsesKoreanLocale ? "전체 상태" : "All statuses",
                 _ => GetStatusEffectName(statusRemovalEffect)
             };
-            string countName = statusRemovalCount == 0
-                ? (UsesKoreanLocale ? "전부" : "all stacks")
-                : (UsesKoreanLocale
-                    ? $"{statusRemovalCount}스택"
-                    : $"{statusRemovalCount} stack(s)");
+            string countName;
+            if (statusRemovalAmountMode ==
+                CharacterStatusRemovalAmountMode.CurrentStacksRatio)
+            {
+                float percentage = Mathf.Clamp01(statusRemovalRatio) * 100f;
+                countName = UsesKoreanLocale
+                    ? $"현재 스택의 {percentage:0.##}%"
+                    : $"{percentage:0.##}% of current stacks";
+            }
+            else
+            {
+                countName = statusRemovalCount == 0
+                    ? (UsesKoreanLocale ? "전부" : "all stacks")
+                    : (UsesKoreanLocale
+                        ? $"{statusRemovalCount}스택"
+                        : $"{statusRemovalCount} stack(s)");
+            }
             return UsesKoreanLocale
                 ? $"상태 제거: {targetName} / {countName}"
                 : $"Remove: {targetName} / {countName}";
@@ -890,7 +951,9 @@ public static class CharacterLocalization
                         effect.StatusStacks,
                         null,
                         effect.StatusRemovalTarget,
+                        effect.StatusRemovalAmountMode,
                         effect.StatusRemovalCount,
+                        effect.StatusRemovalRatio,
                         finalDamage));
                     break;
                 case CharacterEffectType.RemoveStatus:
@@ -903,7 +966,9 @@ public static class CharacterLocalization
                         effect.StatusStacks,
                         effect.StatusEffect,
                         effect.StatusRemovalTarget,
+                        effect.StatusRemovalAmountMode,
                         effect.StatusRemovalCount,
+                        effect.StatusRemovalRatio,
                         finalDamage));
                     break;
                 case CharacterEffectType.GainResource:
@@ -937,7 +1002,9 @@ public static class CharacterLocalization
                         effect.StatusStacks,
                         null,
                         effect.StatusRemovalTarget,
+                        effect.StatusRemovalAmountMode,
                         effect.StatusRemovalCount,
+                        effect.StatusRemovalRatio,
                         finalDamage,
                         !hasRuntimeScaling);
                     builder.Append(AppendScalingTerms(

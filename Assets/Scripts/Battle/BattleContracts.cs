@@ -409,11 +409,8 @@ public static class BattleEffectExecutor
                     return default;
                 }
 
-                int removalCount = effect.StatusRemovalCount == 0
-                    ? 0
-                    : SaturatingMultiply(
-                        effect.StatusRemovalCount,
-                        amountMultiplier);
+                CharacterStatusRemovalAmount removalAmount =
+                    effect.StatusRemovalAmount.Multiply(amountMultiplier);
                 bool changed = effectContext.TargetFaction ==
                                CharacterTargetFaction.Ally
                     ? effectContext.Board.TryRemoveAlliedCharacterStatus(
@@ -421,13 +418,13 @@ public static class BattleEffectExecutor
                         effectContext.AllyTargets,
                         effect.StatusRemovalTarget,
                         effect.StatusEffect,
-                        removalCount)
+                        removalAmount)
                     : effectContext.Board.TryRemoveCharacterStatus(
                         effectContext.Source,
                         effectContext.EnemyTargets,
                         effect.StatusRemovalTarget,
                         effect.StatusEffect,
-                        removalCount,
+                        removalAmount,
                         showAttackRange);
                 result = new BattleEffectResult(true, changed);
                 break;
@@ -1414,14 +1411,14 @@ public interface IBattleBoard
         IReadOnlyList<EnemyRuntime> targets,
         CharacterStatusRemovalTarget removalTarget,
         StatusEffectSO statusEffect,
-        int removalCount,
+        CharacterStatusRemovalAmount removalAmount,
         bool showAttackRange);
     bool TryRemoveAlliedCharacterStatus(
         IBattleCharacter source,
         IReadOnlyList<IBattleCharacter> targets,
         CharacterStatusRemovalTarget removalTarget,
         StatusEffectSO statusEffect,
-        int removalCount);
+        CharacterStatusRemovalAmount removalAmount);
 }
 
 public interface IBattleCharacter
@@ -1465,5 +1462,5 @@ public interface IBattleCharacter
     int RemoveStatusEffects(
         CharacterStatusRemovalTarget removalTarget,
         StatusEffectSO statusEffect,
-        int removalCount);
+        CharacterStatusRemovalAmount removalAmount);
 }

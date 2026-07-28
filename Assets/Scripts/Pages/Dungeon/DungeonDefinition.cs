@@ -26,7 +26,10 @@ public sealed class DungeonDefinition : ScriptableObject
     [Header("Run Rules")]
     [SerializeField] private bool selectStartingCharacter = true;
     [SerializeField] private bool includeStartingConsumable = true;
-    [SerializeField] private bool useIntroBattleBalance = true;
+    [SerializeField, Tooltip(
+        "Uses the tutorial encounter setup for the first battle. " +
+        "This requires a Tutorial definition.")]
+    private bool useIntroBattleBalance;
     [SerializeField] private EDungeonCompletionDestination completionDestination =
         EDungeonCompletionDestination.Main;
 
@@ -50,6 +53,8 @@ public sealed class DungeonDefinition : ScriptableObject
     public bool SelectStartingCharacter => selectStartingCharacter;
     public bool IncludeStartingConsumable => includeStartingConsumable;
     public bool UseIntroBattleBalance => useIntroBattleBalance;
+    public bool UsesTutorialBattleSetup =>
+        HasTutorial && useIntroBattleBalance;
     public EDungeonCompletionDestination CompletionDestination =>
         completionDestination;
     public DungeonFieldView FieldViewPrefab => fieldViewPrefab;
@@ -169,6 +174,12 @@ public sealed class DungeonDefinition : ScriptableObject
                 return false;
             }
         }
+        else if (useIntroBattleBalance)
+        {
+            error =
+                "Intro battle balance requires a Tutorial definition.";
+            return false;
+        }
 
         error = string.Empty;
         return true;
@@ -187,6 +198,7 @@ public sealed class DungeonDefinition : ScriptableObject
         definition.minimumBattleCount = tutorialStage ? 1 : 5;
         definition.maximumBattleCount = tutorialStage ? 1 : 8;
         definition.insertEventBetweenBattles = !tutorialStage;
+        definition.useIntroBattleBalance = tutorialStage;
         definition.completionDestination = tutorialStage
             ? EDungeonCompletionDestination.StageSelect
             : EDungeonCompletionDestination.Main;

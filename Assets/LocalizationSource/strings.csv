@@ -257,3 +257,7 @@ character.mirinae.name,캐릭터 이름,title,,미리내,Mirinae
 character.mirinae.description,캐릭터 설명,body,,아카데미 천문학부 부장," Director of the Astronomy of Academy"
 status.starpowder.name,상태 이름,title,,별가루,Star Dust
 status.starpowder.description,상태 설명,tooltip,,효과 없이 스택만 누적되는 영구 상태입니다.,A permanent status that only stores stacks.
+status.combo.name,상태 이름,title,,연격,Combo
+status.combo.description,상태 설명,tooltip,,효과 없이 스택만 누적되는 영구 상태입니다.,A permanent status that only stores stacks.
+status.speed.name,상태 이름,title,,속도,Speed
+status.speed.description,상태 설명,tooltip,,공격 속도 상승,Attack speed glow

@@ -68,16 +68,63 @@ public readonly struct BattleVfxAnchorSnapshot
     public BattleVfxCoordinateSpace CoordinateSpace { get; }
     public Vector3 Position { get; }
     public Quaternion Rotation { get; }
+    public Vector3 FrameCenter { get; }
+    public Vector3 FrameRight { get; }
+    public Vector3 FrameUp { get; }
+    public bool HasFrame { get; }
     public bool IsValid { get; }
 
     public BattleVfxAnchorSnapshot(
         BattleVfxCoordinateSpace coordinateSpace,
         Vector3 position,
         Quaternion rotation)
+        : this(
+            coordinateSpace,
+            position,
+            rotation,
+            position,
+            Vector3.zero,
+            Vector3.zero)
+    {
+    }
+
+    public BattleVfxAnchorSnapshot(
+        BattleVfxCoordinateSpace coordinateSpace,
+        Vector3 position,
+        Quaternion rotation,
+        Vector3 frameRight,
+        Vector3 frameUp)
+        : this(
+            coordinateSpace,
+            position,
+            rotation,
+            position,
+            frameRight,
+            frameUp)
+    {
+    }
+
+    public BattleVfxAnchorSnapshot(
+        BattleVfxCoordinateSpace coordinateSpace,
+        Vector3 position,
+        Quaternion rotation,
+        Vector3 frameCenter,
+        Vector3 frameRight,
+        Vector3 frameUp)
     {
         CoordinateSpace = coordinateSpace;
         Position = position;
         Rotation = rotation;
+        bool hasFrame =
+            IsFinite(frameCenter) &&
+            IsFinite(frameRight) &&
+            IsFinite(frameUp) &&
+            frameRight.sqrMagnitude > 0.000001f &&
+            frameUp.sqrMagnitude > 0.000001f;
+        FrameCenter = hasFrame ? frameCenter : position;
+        FrameRight = hasFrame ? frameRight : Vector3.zero;
+        FrameUp = hasFrame ? frameUp : Vector3.zero;
+        HasFrame = hasFrame;
         IsValid = IsFinite(position) && IsFinite(rotation);
     }
 
@@ -89,6 +136,34 @@ public readonly struct BattleVfxAnchorSnapshot
             Quaternion.identity);
     }
 
+    public static BattleVfxAnchorSnapshot FromScreen(
+        Vector2 position,
+        Vector2 frameRight,
+        Vector2 frameUp)
+    {
+        return new BattleVfxAnchorSnapshot(
+            BattleVfxCoordinateSpace.Screen,
+            new Vector3(position.x, position.y, 0f),
+            Quaternion.identity,
+            new Vector3(frameRight.x, frameRight.y, 0f),
+            new Vector3(frameUp.x, frameUp.y, 0f));
+    }
+
+    public static BattleVfxAnchorSnapshot FromScreen(
+        Vector2 position,
+        Vector2 frameCenter,
+        Vector2 frameRight,
+        Vector2 frameUp)
+    {
+        return new BattleVfxAnchorSnapshot(
+            BattleVfxCoordinateSpace.Screen,
+            new Vector3(position.x, position.y, 0f),
+            Quaternion.identity,
+            new Vector3(frameCenter.x, frameCenter.y, 0f),
+            new Vector3(frameRight.x, frameRight.y, 0f),
+            new Vector3(frameUp.x, frameUp.y, 0f));
+    }
+
     public static BattleVfxAnchorSnapshot FromWorld(
         Vector3 position,
         Quaternion rotation)
@@ -97,6 +172,63 @@ public readonly struct BattleVfxAnchorSnapshot
             BattleVfxCoordinateSpace.World,
             position,
             rotation);
+    }
+
+    public static BattleVfxAnchorSnapshot FromWorld(
+        Vector3 position,
+        Quaternion rotation,
+        Vector3 frameRight,
+        Vector3 frameUp)
+    {
+        return new BattleVfxAnchorSnapshot(
+            BattleVfxCoordinateSpace.World,
+            position,
+            rotation,
+            frameRight,
+            frameUp);
+    }
+
+    public static BattleVfxAnchorSnapshot FromWorld(
+        Vector3 position,
+        Quaternion rotation,
+        Vector3 frameCenter,
+        Vector3 frameRight,
+        Vector3 frameUp)
+    {
+        return new BattleVfxAnchorSnapshot(
+            BattleVfxCoordinateSpace.World,
+            position,
+            rotation,
+            frameCenter,
+            frameRight,
+            frameUp);
+    }
+
+    public BattleVfxAnchorSnapshot WithFrame(
+        Vector3 frameRight,
+        Vector3 frameUp)
+    {
+        return new BattleVfxAnchorSnapshot(
+            CoordinateSpace,
+            Position,
+            Rotation,
+            Position,
+            frameRight,
+            frameUp);
+    }
+
+    public BattleVfxAnchorSnapshot WithFrame(
+        Vector3 frameCenter,
+        Vector3 frameRight,
+        Vector3 frameUp)
+    {
+        return new BattleVfxAnchorSnapshot(
+            CoordinateSpace,
+            Position,
+            Rotation,
+            frameCenter,
+            frameRight,
+            frameUp);
     }
 
     private static bool IsFinite(Vector3 value)
@@ -148,14 +280,32 @@ public interface IBattleVfxAnchorProvider
 
 public static class BattleVfxUiAnchorUtility
 {
+    private static readonly Vector3[] ScreenCorners = new Vector3[4];
+
     public static bool TryCreateScreenAnchor(
         RectTransform rectTransform,
         BattleVfxAnchorType anchorType,
         out BattleVfxAnchorSnapshot snapshot)
     {
+        return TryCreateScreenAnchor(
+            rectTransform,
+            null,
+            anchorType,
+            out snapshot);
+    }
+
+    public static bool TryCreateScreenAnchor(
+        RectTransform anchorRectTransform,
+        RectTransform frameRectTransform,
+        BattleVfxAnchorType anchorType,
+        out BattleVfxAnchorSnapshot snapshot)
+    {
         snapshot = default;
-        if (rectTransform == null || !rectTransform.gameObject.activeInHierarchy)
+        if (anchorRectTransform == null ||
+            !anchorRectTransform.gameObject.activeInHierarchy)
+        {
             return false;
+        }
 
         Vector2 normalizedPoint = anchorType switch
         {
@@ -165,14 +315,14 @@ public static class BattleVfxUiAnchorUtility
             BattleVfxAnchorType.Status => new Vector2(0.5f, 0.78f),
             _ => new Vector2(0.5f, 0.5f)
         };
-        Rect rect = rectTransform.rect;
+        Rect rect = anchorRectTransform.rect;
         Vector3 localPoint = new(
             Mathf.Lerp(rect.xMin, rect.xMax, normalizedPoint.x),
             Mathf.Lerp(rect.yMin, rect.yMax, normalizedPoint.y),
             0f);
-        Vector3 worldPoint = rectTransform.TransformPoint(localPoint);
+        Vector3 worldPoint = anchorRectTransform.TransformPoint(localPoint);
         Canvas rootCanvas =
-            rectTransform.GetComponentInParent<Canvas>()?.rootCanvas;
+            anchorRectTransform.GetComponentInParent<Canvas>()?.rootCanvas;
         Camera canvasCamera =
             rootCanvas != null &&
             rootCanvas.renderMode != RenderMode.ScreenSpaceOverlay
@@ -181,8 +331,86 @@ public static class BattleVfxUiAnchorUtility
         Vector2 screenPoint = RectTransformUtility.WorldToScreenPoint(
             canvasCamera,
             worldPoint);
-        snapshot = BattleVfxAnchorSnapshot.FromScreen(screenPoint);
+        if (frameRectTransform != null &&
+            TryGetScreenFrame(
+                frameRectTransform,
+                out Vector2 frameCenter,
+                out Vector2 frameRight,
+                out Vector2 frameUp))
+        {
+            snapshot = BattleVfxAnchorSnapshot.FromScreen(
+                screenPoint,
+                frameCenter,
+                frameRight,
+                frameUp);
+        }
+        else
+        {
+            snapshot = BattleVfxAnchorSnapshot.FromScreen(screenPoint);
+        }
         return snapshot.IsValid;
+    }
+
+    public static bool TryAttachScreenFrame(
+        BattleVfxAnchorSnapshot anchor,
+        RectTransform frameRectTransform,
+        out BattleVfxAnchorSnapshot snapshot)
+    {
+        snapshot = anchor;
+        if (!anchor.IsValid ||
+            anchor.CoordinateSpace != BattleVfxCoordinateSpace.Screen ||
+            !TryGetScreenFrame(
+                frameRectTransform,
+                out _,
+                out Vector2 frameRight,
+                out Vector2 frameUp))
+        {
+            return false;
+        }
+
+        snapshot = anchor.WithFrame(frameRight, frameUp);
+        return snapshot.HasFrame;
+    }
+
+    private static bool TryGetScreenFrame(
+        RectTransform rectTransform,
+        out Vector2 frameCenter,
+        out Vector2 frameRight,
+        out Vector2 frameUp)
+    {
+        frameCenter = default;
+        frameRight = default;
+        frameUp = default;
+        if (rectTransform == null ||
+            !rectTransform.gameObject.activeInHierarchy)
+        {
+            return false;
+        }
+
+        rectTransform.GetWorldCorners(ScreenCorners);
+        Canvas rootCanvas =
+            rectTransform.GetComponentInParent<Canvas>()?.rootCanvas;
+        Camera canvasCamera =
+            rootCanvas != null &&
+            rootCanvas.renderMode != RenderMode.ScreenSpaceOverlay
+                ? rootCanvas.worldCamera
+                : null;
+        Vector2 bottomLeft = RectTransformUtility.WorldToScreenPoint(
+            canvasCamera,
+            ScreenCorners[0]);
+        Vector2 topLeft = RectTransformUtility.WorldToScreenPoint(
+            canvasCamera,
+            ScreenCorners[1]);
+        Vector2 bottomRight = RectTransformUtility.WorldToScreenPoint(
+            canvasCamera,
+            ScreenCorners[3]);
+        frameRight = bottomRight - bottomLeft;
+        frameUp = topLeft - bottomLeft;
+        frameCenter = bottomLeft +
+                      frameRight * 0.5f +
+                      frameUp * 0.5f;
+        return frameRight.sqrMagnitude > 0.000001f &&
+               frameUp.sqrMagnitude > 0.000001f;
     }
 }
 

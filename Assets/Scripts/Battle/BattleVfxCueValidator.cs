@@ -180,48 +180,69 @@ public static class BattleVfxCueValidator
                 "CueId contains whitespace. Regenerate the ID for a stable key.");
         }
 
-        GameObject prefab = cue.Prefab;
-        if (prefab == null)
+        if (cue.UsesClipTimeline)
         {
-            if (cue.AudioClip == null)
-            {
-                AddError(
-                    result,
-                    "vfx.output_missing",
-                    "prefab",
-                    "Assign a 3D prefab or an audio clip.");
-            }
-            else
+            ValidateTimeline(cue, result);
+            if (cue.LegacyPrefab != null)
             {
                 AddWarning(
                     result,
-                    "vfx.prefab_missing",
+                    "vfx.legacy_prefab_ignored",
                     "prefab",
-                    "This cue is audio-only and does not create a 3D effect.");
+                    "Timeline clips are active, so the legacy single prefab is ignored.");
             }
         }
         else
         {
-            bool hasParticleSystem =
-                prefab.GetComponentInChildren<ParticleSystem>(true) != null;
-            if (cue.LifetimeMode ==
-                    BattleVfxLifetimeMode.ParticleSystem &&
-                !hasParticleSystem)
+            GameObject prefab = cue.LegacyPrefab;
+            if (prefab == null)
             {
-                AddWarning(
-                    result,
-                    "vfx.particle_missing",
+                if (cue.AudioClip == null)
+                {
+                    AddError(
+                        result,
+                        "vfx.output_missing",
+                        "prefab",
+                        "Assign a 3D prefab, an audio clip, or timeline clips.");
+                }
+                else
+                {
+                    AddWarning(
+                        result,
+                        "vfx.prefab_missing",
+                        "prefab",
+                        "This cue is audio-only and does not create a 3D effect.");
+                }
+            }
+            else
+            {
+                ValidatePrefab(
+                    prefab,
+                    cue.LifetimeMode,
                     "prefab",
-                    "ParticleSystem lifetime is selected, but the prefab has no ParticleSystem.");
+                    result);
             }
 
-            if (prefab.GetComponent<RectTransform>() != null)
+            if (cue.HasMotion)
             {
-                AddWarning(
-                    result,
-                    "vfx.ui_prefab",
-                    "prefab",
-                    "The prefab root uses RectTransform. Confirm that this is a world-space 3D effect.");
+                if (cue.IsPersistent)
+                {
+                    AddError(
+                        result,
+                        "vfx.motion_persistent",
+                        "lifetimeMode",
+                        "A moving cue cannot use Persistent lifetime.");
+                }
+
+                if (cue.AttachMode ==
+                    BattleVfxAttachMode.FollowTarget)
+                {
+                    AddWarning(
+                        result,
+                        "vfx.motion_follow",
+                        "attachMode",
+                        "Motion controls the transform, so Follow Target is ignored while the cue travels.");
+                }
             }
         }
 
@@ -233,26 +254,137 @@ public static class BattleVfxCueValidator
                 "prewarmCount",
                 "Prewarm count exceeds the concurrent limit and will be clamped at runtime.");
         }
+    }
 
-        if (!cue.HasMotion)
-            return;
+    private static void ValidateTimeline(
+        BattleVfxCueSO cue,
+        BattleVfxCueValidationResult result)
+    {
+        HashSet<string> clipIds =
+            new(StringComparer.OrdinalIgnoreCase);
+        bool hasOutput = cue.AudioClip != null;
+        for (int index = 0; index < cue.Clips.Count; index++)
+        {
+            BattleVfxClipDefinition clip = cue.Clips[index];
+            string path = $"clips[{index}]";
+            if (clip == null)
+            {
+                AddError(
+                    result,
+                    "vfx.clip_null",
+                    path,
+                    "Timeline clip is null.");
+                continue;
+            }
 
-        if (cue.IsPersistent)
+            string clipId = (clip.ClipId ?? string.Empty).Trim();
+            if (string.IsNullOrEmpty(clipId))
+            {
+                AddError(
+                    result,
+                    "vfx.clip_id_missing",
+                    $"{path}.clipId",
+                    "Timeline clips require a stable ClipId.");
+            }
+            else if (!clipIds.Add(clipId))
+            {
+                AddError(
+                    result,
+                    "vfx.clip_id_duplicate",
+                    $"{path}.clipId",
+                    $"ClipId '{clipId}' is duplicated in this cue.");
+            }
+
+            if (clip.Prefab == null && clip.AudioClip == null)
+            {
+                AddError(
+                    result,
+                    "vfx.clip_output_missing",
+                    $"{path}.prefab",
+                    "Assign a 3D prefab or audio clip.");
+            }
+            else
+            {
+                hasOutput = true;
+            }
+
+            if (clip.Prefab != null)
+            {
+                ValidatePrefab(
+                    clip.Prefab,
+                    clip.LifetimeMode,
+                    $"{path}.prefab",
+                    result);
+                bool canAdjustPlayback =
+                    clip.Prefab.GetComponentInChildren<ParticleSystem>(
+                        true) != null ||
+                    clip.Prefab.GetComponentInChildren<Animator>(
+                        true) != null;
+                if (clip.PlaybackFit != BattleVfxPlaybackFit.Natural &&
+                    !canAdjustPlayback)
+                {
+                    AddWarning(
+                        result,
+                        "vfx.clip_playback_unsupported",
+                        $"{path}.playbackFit",
+                        "Speed and loop fitting require a ParticleSystem or Animator.");
+                }
+            }
+
+            if (clip.HasMotion && clip.IsPersistent)
+            {
+                AddError(
+                    result,
+                    "vfx.clip_motion_persistent",
+                    $"{path}.lifetimeMode",
+                    "A moving timeline clip cannot be persistent.");
+            }
+            if (clip.HasMotion &&
+                clip.AttachMode == BattleVfxAttachMode.FollowTarget)
+            {
+                AddWarning(
+                    result,
+                    "vfx.clip_motion_follow",
+                    $"{path}.attachMode",
+                    "Motion controls the transform, so Follow Target is ignored while the clip travels.");
+            }
+        }
+
+        if (!hasOutput)
         {
             AddError(
                 result,
-                "vfx.motion_persistent",
-                "lifetimeMode",
-                "A moving cue cannot use Persistent lifetime.");
+                "vfx.output_missing",
+                "clips",
+                "The timeline does not contain a playable prefab or audio clip.");
         }
+    }
 
-        if (cue.AttachMode == BattleVfxAttachMode.FollowTarget)
+    private static void ValidatePrefab(
+        GameObject prefab,
+        BattleVfxLifetimeMode lifetimeMode,
+        string path,
+        BattleVfxCueValidationResult result)
+    {
+        bool hasParticleSystem =
+            prefab.GetComponentInChildren<ParticleSystem>(true) != null;
+        if (lifetimeMode == BattleVfxLifetimeMode.ParticleSystem &&
+            !hasParticleSystem)
         {
             AddWarning(
                 result,
-                "vfx.motion_follow",
-                "attachMode",
-                "Motion controls the transform, so Follow Target is ignored while the cue travels.");
+                "vfx.particle_missing",
+                path,
+                "ParticleSystem lifetime is selected, but the prefab has no ParticleSystem.");
+        }
+
+        if (prefab.GetComponent<RectTransform>() != null)
+        {
+            AddWarning(
+                result,
+                "vfx.ui_prefab",
+                path,
+                "The prefab root uses RectTransform. Confirm that this is a world-space 3D effect.");
         }
     }
 

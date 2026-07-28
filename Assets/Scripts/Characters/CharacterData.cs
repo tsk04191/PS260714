@@ -677,7 +677,24 @@ public sealed class CharacterData
             Array.Empty<CharacterDungeonUpgradeDefinition>();
 
     public bool HasCustomAttackDefinitions => AttackDefinitions.Count > 0;
-    public bool HasCustomPassiveDefinitions => PassiveDefinitions.Count > 0;
+    public int ConfiguredPassiveDefinitionCount
+    {
+        get
+        {
+            int count = 0;
+            foreach (CharacterPassiveDefinition definition in
+                     PassiveDefinitions)
+            {
+                if (definition != null && !definition.IsEmptyPlaceholder)
+                    count++;
+            }
+
+            return count;
+        }
+    }
+
+    public bool HasCustomPassiveDefinitions =>
+        ConfiguredPassiveDefinitionCount > 0;
     public bool HasCustomSkillDefinitions => SkillDefinitions.Count > 0;
     public Sprite PassiveAbilityIconSprite =>
         ResolvePassiveAbilityIconSprite();
@@ -729,8 +746,12 @@ public sealed class CharacterData
         foreach (CharacterPassiveDefinition definition in
                  PassiveDefinitions)
         {
-            if (definition?.IconSprite != null)
+            if (definition != null &&
+                !definition.IsEmptyPlaceholder &&
+                definition.IconSprite != null)
+            {
                 return definition.IconSprite;
+            }
         }
 
         return PassiveSdSprite != null

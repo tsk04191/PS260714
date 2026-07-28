@@ -12,6 +12,8 @@ public sealed class BattleVfxPlayer : MonoBehaviour, IBattleVfxRequestSink
     private Transform spawnRoot;
     [SerializeField, Min(0.01f)]
     private float screenAnchorDepth = 10f;
+    [SerializeField, Min(0.0001f)]
+    private float referenceTileWorldSize = 1f;
     [SerializeField]
     private bool useCameraRotationForScreenAnchors = true;
 
@@ -29,6 +31,7 @@ public sealed class BattleVfxPlayer : MonoBehaviour, IBattleVfxRequestSink
 
     private readonly List<ActiveVfx> _active = new();
     private readonly List<ScheduledVfx> _scheduled = new();
+    private readonly List<ScheduledVfxClip> _scheduledClips = new();
     private readonly Dictionary<GameObject, Stack<PooledVfx>>
         _pools = new();
     private readonly HashSet<BattleVfxCueSO> _prewarmedCues = new();
@@ -46,7 +49,8 @@ public sealed class BattleVfxPlayer : MonoBehaviour, IBattleVfxRequestSink
         ? spawnRoot
         : _ownedSpawnRoot;
     public int ActiveInstanceCount => _active.Count;
-    public int ScheduledRequestCount => _scheduled.Count;
+    public int ScheduledRequestCount =>
+        _scheduled.Count + _scheduledClips.Count;
     public BattleVfxQualityProfileSO QualityProfile => qualityProfile;
     public int SkippedByQualityCount => _skippedByQualityCount;
     public int SkippedByActiveBudgetCount =>
@@ -145,6 +149,12 @@ public sealed class BattleVfxPlayer : MonoBehaviour, IBattleVfxRequestSink
         }
 
         BattleVfxCueSO cue = request.Cue;
+        if (cue.UsesClipTimeline)
+        {
+            PlayCompositeNow(request);
+            return;
+        }
+
         if (cue.IsPersistent &&
             TryRefreshPersistent(request))
         {
@@ -201,7 +211,10 @@ public sealed class BattleVfxPlayer : MonoBehaviour, IBattleVfxRequestSink
                 cue.HasMotion ? cue.TravelDuration : 0f),
             sourceAnchor,
             targetAnchor,
-            ++_nextSequence));
+            ++_nextSequence,
+            null,
+            _nextSequence,
+            ResolveNaturalDuration(pooled)));
     }
 
     public void Advance(
@@ -222,21 +235,45 @@ public sealed class BattleVfxPlayer : MonoBehaviour, IBattleVfxRequestSink
                 continue;
             }
 
-            float deltaTime = active.Cue.UseBattleTime
+            float deltaTime = active.UseBattleTime
                 ? battleDeltaTime
                 : unscaledDeltaTime;
-            if (active.Cue.HasMotion)
+            if (active.HasMotion)
             {
                 active.MotionElapsed += deltaTime;
-                ApplyMotionTransform(active);
+                if (active.Clip != null)
+                    ApplyClipMotionTransform(active);
+                else
+                    ApplyMotionTransform(active);
             }
-            else if (active.Cue.AttachMode ==
+            else if (active.AttachMode ==
                      BattleVfxAttachMode.FollowTarget)
             {
                 RefreshFollowAnchor(active);
             }
 
-            if (active.Cue.IsPersistent && !active.IsStopping)
+            if (active.PlaybackFit ==
+                BattleVfxPlaybackFit.LoopToDuration &&
+                active.NaturalDuration > 0.01f)
+            {
+                active.PlaybackCycleElapsed += deltaTime;
+                if (active.PlaybackCycleElapsed >=
+                    active.NaturalDuration)
+                {
+                    active.PlaybackCycleElapsed %=
+                        active.NaturalDuration;
+                    Restart(active.Pooled);
+                    if (active.Clip != null)
+                    {
+                        ConfigurePlayback(
+                            active.Pooled,
+                            active.Clip,
+                            active.NaturalDuration);
+                    }
+                }
+            }
+
+            if (active.IsPersistent && !active.IsStopping)
                 continue;
 
             active.RemainingTime -= deltaTime;
@@ -245,6 +282,7 @@ public sealed class BattleVfxPlayer : MonoBehaviour, IBattleVfxRequestSink
         }
 
         AdvanceScheduled(battleDeltaTime, unscaledDeltaTime);
+        AdvanceScheduledClips(battleDeltaTime, unscaledDeltaTime);
     }
 
     private void AdvanceScheduled(
@@ -263,6 +301,28 @@ public sealed class BattleVfxPlayer : MonoBehaviour, IBattleVfxRequestSink
 
             _scheduled.RemoveAt(index);
             PlayNow(scheduled.Request);
+        }
+    }
+
+    private void AdvanceScheduledClips(
+        float battleDeltaTime,
+        float unscaledDeltaTime)
+    {
+        for (int index = _scheduledClips.Count - 1; index >= 0; index--)
+        {
+            ScheduledVfxClip scheduled = _scheduledClips[index];
+            float deltaTime = scheduled.Clip.UseBattleTime
+                ? battleDeltaTime
+                : unscaledDeltaTime;
+            scheduled.RemainingTime -= deltaTime;
+            if (scheduled.RemainingTime > 0f)
+                continue;
+
+            _scheduledClips.RemoveAt(index);
+            PlayClipNow(
+                scheduled.Request,
+                scheduled.Clip,
+                scheduled.GroupSequence);
         }
     }
 
@@ -287,9 +347,36 @@ public sealed class BattleVfxPlayer : MonoBehaviour, IBattleVfxRequestSink
         return false;
     }
 
+    public bool TryGetActiveInstance(
+        BattleVfxCueSO cue,
+        BattleVfxTargetHandle targetHandle,
+        string clipId,
+        out GameObject instance)
+    {
+        foreach (ActiveVfx active in _active)
+        {
+            if (active != null &&
+                active.Cue == cue &&
+                active.TargetHandle == targetHandle &&
+                string.Equals(
+                    active.Clip?.ClipId,
+                    clipId,
+                    StringComparison.Ordinal) &&
+                active.Pooled?.Instance != null)
+            {
+                instance = active.Pooled.Instance;
+                return true;
+            }
+        }
+
+        instance = null;
+        return false;
+    }
+
     public void ClearActive()
     {
         _scheduled.Clear();
+        _scheduledClips.Clear();
         for (int index = _active.Count - 1; index >= 0; index--)
             ReleaseAt(index, true);
     }
@@ -338,37 +425,193 @@ public sealed class BattleVfxPlayer : MonoBehaviour, IBattleVfxRequestSink
         }
 
         screenAnchorDepth = Mathf.Max(0.01f, screenAnchorDepth);
+        if (float.IsNaN(referenceTileWorldSize) ||
+            float.IsInfinity(referenceTileWorldSize))
+        {
+            referenceTileWorldSize = 1f;
+        }
+        referenceTileWorldSize = Mathf.Max(
+            0.0001f,
+            referenceTileWorldSize);
+    }
+
+    private void PlayCompositeNow(BattleVfxRequest request)
+    {
+        BattleVfxCueSO cue = request.Cue;
+        if (cue == null)
+            return;
+
+        if (cue.IsPersistent && TryRefreshPersistent(request))
+        {
+            PlayAudio(cue);
+            return;
+        }
+
+        EnforceCompositeConcurrentLimit(cue);
+        long groupSequence = ++_nextSequence;
+        EnsurePrewarmed(cue);
+        PlayAudio(cue);
+
+        bool hasOutput = false;
+        foreach (BattleVfxClipDefinition clip in cue.Clips)
+        {
+            if (clip == null ||
+                clip.Prefab == null && clip.AudioClip == null)
+            {
+                continue;
+            }
+
+            hasOutput = true;
+            if (clip.StartTime > 0f)
+            {
+                _scheduledClips.Add(new ScheduledVfxClip(
+                    request,
+                    clip,
+                    clip.StartTime,
+                    groupSequence,
+                    ++_nextSequence));
+            }
+            else
+            {
+                PlayClipNow(request, clip, groupSequence);
+            }
+        }
+
+        if (!hasOutput)
+            LogSkipped(cue, "has no playable timeline clips");
+    }
+
+    private void PlayClipNow(
+        BattleVfxRequest request,
+        BattleVfxClipDefinition clip,
+        long groupSequence)
+    {
+        if (request.Cue == null || clip == null)
+            return;
+
+        PlayAudio(clip.AudioClip);
+        if (clip.Prefab == null)
+            return;
+
+        if (!TryResolveClipAnchors(
+                request,
+                clip,
+                out BattleVfxAnchorSnapshot sourceAnchor,
+                out BattleVfxAnchorSnapshot targetAnchor))
+        {
+            LogSkipped(
+                request.Cue,
+                $"clip '{clip.ClipId}' has no valid placement frame");
+            return;
+        }
+
+        if (!TryReserveActiveBudget(request.Cue))
+            return;
+
+        PooledVfx pooled = Acquire(clip.Prefab);
+        if (pooled == null || pooled.Instance == null)
+            return;
+
+        ActivateClip(
+            pooled,
+            clip,
+            clip.HasMotion ? sourceAnchor : targetAnchor);
+        float naturalDuration = ResolveNaturalDuration(pooled);
+        Restart(pooled);
+        ConfigurePlayback(pooled, clip, naturalDuration);
+        _active.Add(new ActiveVfx(
+            pooled,
+            request,
+            clip.IsPersistent
+                ? float.PositiveInfinity
+                : Mathf.Max(
+                    clip.Duration,
+                    clip.HasMotion ? clip.TravelDuration : 0f),
+            sourceAnchor,
+            targetAnchor,
+            ++_nextSequence,
+            clip,
+            groupSequence,
+            naturalDuration));
     }
 
     private bool TryRefreshPersistent(BattleVfxRequest request)
     {
-        ActiveVfx existing = FindPersistent(request);
-        if (existing == null)
-            return false;
-
-        existing.Request = request;
-        existing.IsStopping = false;
-        existing.RemainingTime = float.PositiveInfinity;
-        if (TryResolveAnchor(
-                request.Target,
-                request.Cue.AnchorType,
-                out BattleVfxAnchorSnapshot anchor))
+        bool found = false;
+        foreach (ActiveVfx active in _active)
         {
-            ApplyTransform(existing.Pooled, request.Cue, anchor);
+            if (!MatchesPersistent(active, request))
+                continue;
+
+            found = true;
+            active.Request = request;
+            active.IsStopping = false;
+            active.RemainingTime = active.IsPersistent
+                ? float.PositiveInfinity
+                : active.Duration;
+            if (active.Clip != null)
+            {
+                if (TryResolveClipAnchors(
+                        request,
+                        active.Clip,
+                        out BattleVfxAnchorSnapshot sourceAnchor,
+                        out BattleVfxAnchorSnapshot targetAnchor))
+                {
+                    active.MotionStartAnchor = sourceAnchor;
+                    active.MotionEndAnchor = targetAnchor;
+                    ApplyClipTransform(
+                        active.Pooled,
+                        active.Clip,
+                        active.HasMotion ? sourceAnchor : targetAnchor);
+                }
+            }
+            else if (TryResolveAnchor(
+                         request.Target,
+                         request.Cue.AnchorType,
+                         out BattleVfxAnchorSnapshot anchor))
+            {
+                ApplyTransform(active.Pooled, request.Cue, anchor);
+            }
+            active.MotionElapsed = 0f;
+            active.PlaybackCycleElapsed = 0f;
+            Restart(active.Pooled);
+            if (active.Clip != null)
+            {
+                ConfigurePlayback(
+                    active.Pooled,
+                    active.Clip,
+                    active.NaturalDuration);
+            }
         }
-        Restart(existing.Pooled);
-        return true;
+
+        foreach (ScheduledVfxClip scheduled in _scheduledClips)
+        {
+            if (MatchesPersistent(scheduled.Request, request))
+                found = true;
+        }
+
+        return found;
     }
 
     private void StopPersistent(BattleVfxRequest request)
     {
+        for (int index = _scheduledClips.Count - 1; index >= 0; index--)
+        {
+            if (MatchesPersistent(
+                    _scheduledClips[index].Request,
+                    request))
+            {
+                _scheduledClips.RemoveAt(index);
+            }
+        }
+
         for (int index = _active.Count - 1; index >= 0; index--)
         {
             ActiveVfx active = _active[index];
             if (!MatchesPersistent(active, request))
                 continue;
 
-            if (active.Cue.StopMode == BattleVfxStopMode.Immediate)
+            if (active.StopMode == BattleVfxStopMode.Immediate)
             {
                 ReleaseAt(index, true);
                 continue;
@@ -378,19 +621,8 @@ public sealed class BattleVfxPlayer : MonoBehaviour, IBattleVfxRequestSink
             active.IsStopping = true;
             active.RemainingTime = Mathf.Max(
                 0.01f,
-                active.Cue.Duration);
+                active.Duration);
         }
-    }
-
-    private ActiveVfx FindPersistent(BattleVfxRequest request)
-    {
-        foreach (ActiveVfx active in _active)
-        {
-            if (MatchesPersistent(active, request))
-                return active;
-        }
-
-        return null;
     }
 
     private static bool MatchesPersistent(
@@ -406,8 +638,42 @@ public sealed class BattleVfxPlayer : MonoBehaviour, IBattleVfxRequestSink
             GetTargetIdentity(request.Target.BattleTarget));
     }
 
+    private static bool MatchesPersistent(
+        BattleVfxRequest candidate,
+        BattleVfxRequest request)
+    {
+        if (candidate.Cue != request.Cue)
+            return false;
+        if (candidate.Target.Handle.IsValid ||
+            request.Target.Handle.IsValid)
+        {
+            return candidate.Target.Handle == request.Target.Handle;
+        }
+        return ReferenceEquals(
+            GetTargetIdentity(candidate.Target.BattleTarget),
+            GetTargetIdentity(request.Target.BattleTarget));
+    }
+
     private void RefreshFollowAnchor(ActiveVfx active)
     {
+        if (active.Clip != null)
+        {
+            if (TryResolveClipAnchors(
+                    active.Request,
+                    active.Clip,
+                    out BattleVfxAnchorSnapshot sourceAnchor,
+                    out BattleVfxAnchorSnapshot targetAnchor))
+            {
+                active.MotionStartAnchor = sourceAnchor;
+                active.MotionEndAnchor = targetAnchor;
+                ApplyClipTransform(
+                    active.Pooled,
+                    active.Clip,
+                    targetAnchor);
+            }
+            return;
+        }
+
         if (!TryResolveAnchor(
                 active.Request.Target,
                 active.Cue.AnchorType,
@@ -441,10 +707,48 @@ public sealed class BattleVfxPlayer : MonoBehaviour, IBattleVfxRequestSink
         return anchor.IsValid;
     }
 
+    private bool TryResolveClipAnchors(
+        BattleVfxRequest request,
+        BattleVfxClipDefinition clip,
+        out BattleVfxAnchorSnapshot sourceAnchor,
+        out BattleVfxAnchorSnapshot targetAnchor)
+    {
+        sourceAnchor = default;
+        targetAnchor = default;
+        if (clip == null)
+            return false;
+
+        BattleVfxTarget placementTarget =
+            clip.PlacementArea == BattleVfxPlacementArea.Caster &&
+            request.SourceTarget.IsValid
+                ? request.SourceTarget
+                : request.Target;
+        if (!TryResolveAnchor(
+                placementTarget,
+                clip.AnchorType,
+                out targetAnchor))
+        {
+            return false;
+        }
+
+        if (!clip.HasMotion)
+        {
+            sourceAnchor = targetAnchor;
+            return true;
+        }
+
+        BattleVfxTarget motionSource = request.SourceTarget.IsValid
+            ? request.SourceTarget
+            : request.Target;
+        return TryResolveAnchor(
+            motionSource,
+            BattleVfxAnchorType.Muzzle,
+            out sourceAnchor);
+    }
+
     private void EnsurePrewarmed(BattleVfxCueSO cue)
     {
-        if (cue == null || cue.Prefab == null ||
-            !_prewarmedCues.Add(cue))
+        if (cue == null || !_prewarmedCues.Add(cue))
         {
             return;
         }
@@ -465,11 +769,32 @@ public sealed class BattleVfxPlayer : MonoBehaviour, IBattleVfxRequestSink
                 count,
                 qualityProfile.MaximumActiveInstances);
         }
-        Stack<PooledVfx> pool = GetPool(cue.Prefab);
+        if (cue.UsesClipTimeline)
+        {
+            HashSet<GameObject> prefabs = new();
+            foreach (BattleVfxClipDefinition clip in cue.Clips)
+            {
+                if (clip?.Prefab != null)
+                    prefabs.Add(clip.Prefab);
+            }
+            foreach (GameObject clipPrefab in prefabs)
+                PrewarmPrefab(clipPrefab, count);
+            return;
+        }
+
+        PrewarmPrefab(cue.LegacyPrefab, count);
+    }
+
+    private void PrewarmPrefab(GameObject prefab, int count)
+    {
+        if (prefab == null)
+            return;
+
+        Stack<PooledVfx> pool = GetPool(prefab);
         int missingCount = Mathf.Max(0, count - pool.Count);
         for (int index = 0; index < missingCount; index++)
         {
-            PooledVfx pooled = CreatePooled(cue.Prefab);
+            PooledVfx pooled = CreatePooled(prefab);
             if (pooled != null)
                 pool.Push(pooled);
         }
@@ -483,6 +808,71 @@ public sealed class BattleVfxPlayer : MonoBehaviour, IBattleVfxRequestSink
             if (oldestIndex < 0)
                 return;
             ReleaseAt(oldestIndex, true);
+        }
+    }
+
+    private void EnforceCompositeConcurrentLimit(BattleVfxCueSO cue)
+    {
+        while (CountCompositeGroups(cue) >= cue.MaximumConcurrent)
+        {
+            long oldestGroup = FindOldestCompositeGroup(cue);
+            if (oldestGroup <= 0)
+                return;
+            ReleaseGroup(cue, oldestGroup);
+        }
+    }
+
+    private int CountCompositeGroups(BattleVfxCueSO cue)
+    {
+        HashSet<long> groups = new();
+        foreach (ActiveVfx active in _active)
+        {
+            if (active?.Cue == cue)
+                groups.Add(active.GroupSequence);
+        }
+        foreach (ScheduledVfxClip scheduled in _scheduledClips)
+        {
+            if (scheduled.Request.Cue == cue)
+                groups.Add(scheduled.GroupSequence);
+        }
+        return groups.Count;
+    }
+
+    private long FindOldestCompositeGroup(BattleVfxCueSO cue)
+    {
+        long oldest = long.MaxValue;
+        foreach (ActiveVfx active in _active)
+        {
+            if (active?.Cue == cue)
+                oldest = Math.Min(oldest, active.GroupSequence);
+        }
+        foreach (ScheduledVfxClip scheduled in _scheduledClips)
+        {
+            if (scheduled.Request.Cue == cue)
+                oldest = Math.Min(oldest, scheduled.GroupSequence);
+        }
+        return oldest == long.MaxValue ? -1 : oldest;
+    }
+
+    private void ReleaseGroup(BattleVfxCueSO cue, long groupSequence)
+    {
+        for (int index = _scheduledClips.Count - 1; index >= 0; index--)
+        {
+            ScheduledVfxClip scheduled = _scheduledClips[index];
+            if (scheduled.Request.Cue == cue &&
+                scheduled.GroupSequence == groupSequence)
+            {
+                _scheduledClips.RemoveAt(index);
+            }
+        }
+        for (int index = _active.Count - 1; index >= 0; index--)
+        {
+            ActiveVfx active = _active[index];
+            if (active?.Cue == cue &&
+                active.GroupSequence == groupSequence)
+            {
+                ReleaseAt(index, true);
+            }
         }
     }
 
@@ -654,6 +1044,18 @@ public sealed class BattleVfxPlayer : MonoBehaviour, IBattleVfxRequestSink
         if (qualityProfile == null)
             return;
 
+        for (int index = _scheduledClips.Count - 1; index >= 0; index--)
+        {
+            BattleVfxCueSO cue =
+                _scheduledClips[index].Request.Cue;
+            if (IsCueAllowed(cue))
+                continue;
+
+            _scheduledClips.RemoveAt(index);
+            _skippedByQualityCount++;
+            LogSkipped(cue, "is below the current quality threshold");
+        }
+
         for (int index = _scheduled.Count - 1; index >= 0; index--)
         {
             BattleVfxCueSO cue = _scheduled[index].Request.Cue;
@@ -824,6 +1226,17 @@ public sealed class BattleVfxPlayer : MonoBehaviour, IBattleVfxRequestSink
         Restart(pooled);
     }
 
+    private void ActivateClip(
+        PooledVfx pooled,
+        BattleVfxClipDefinition clip,
+        BattleVfxAnchorSnapshot anchor)
+    {
+        pooled.Instance.transform.SetParent(GetOrCreateSpawnRoot(), false);
+        RestorePlaybackSettings(pooled);
+        ApplyClipTransform(pooled, clip, anchor);
+        pooled.Instance.SetActive(true);
+    }
+
     private void ApplyTransform(
         PooledVfx pooled,
         BattleVfxCueSO cue,
@@ -839,9 +1252,15 @@ public sealed class BattleVfxPlayer : MonoBehaviour, IBattleVfxRequestSink
             return;
         }
 
-        position += rotation * cue.LocalPosition;
+        float tileScale = ResolveLegacyTileScale(anchor);
+        position += rotation * (cue.LocalPosition * tileScale);
         rotation *= cue.LocalRotation;
-        ApplyWorldTransform(pooled, cue, position, rotation);
+        ApplyWorldTransform(
+            pooled,
+            cue,
+            position,
+            rotation,
+            tileScale);
     }
 
     private void ApplyMotionTransform(ActiveVfx active)
@@ -863,8 +1282,14 @@ public sealed class BattleVfxPlayer : MonoBehaviour, IBattleVfxRequestSink
 
         float progress = Mathf.Clamp01(
             active.MotionElapsed / active.Cue.TravelDuration);
+        float tileWorldSize = Mathf.Lerp(
+            ResolveTileWorldSize(active.MotionStartAnchor),
+            ResolveTileWorldSize(active.MotionEndAnchor),
+            progress);
+        float tileScale = ResolveLegacyTileScale(tileWorldSize);
         Vector3 position = EvaluateMotionPosition(
-            active.Cue,
+            active.Cue.MotionMode,
+            active.Cue.ArcHeight * tileScale,
             startPosition,
             endPosition,
             progress);
@@ -877,12 +1302,14 @@ public sealed class BattleVfxPlayer : MonoBehaviour, IBattleVfxRequestSink
             float nextProgress = Mathf.Min(1f, progress + 0.01f);
             float previousProgress = Mathf.Max(0f, progress - 0.01f);
             Vector3 direction = EvaluateMotionPosition(
-                                    active.Cue,
+                                    active.Cue.MotionMode,
+                                    active.Cue.ArcHeight * tileScale,
                                     startPosition,
                                     endPosition,
                                     nextProgress) -
                                 EvaluateMotionPosition(
-                                    active.Cue,
+                                    active.Cue.MotionMode,
+                                    active.Cue.ArcHeight * tileScale,
                                     startPosition,
                                     endPosition,
                                     previousProgress);
@@ -890,9 +1317,112 @@ public sealed class BattleVfxPlayer : MonoBehaviour, IBattleVfxRequestSink
                 rotation = Quaternion.LookRotation(direction.normalized);
         }
 
-        position += rotation * active.Cue.LocalPosition;
+        position += rotation *
+                    (active.Cue.LocalPosition * tileScale);
         rotation *= active.Cue.LocalRotation;
-        ApplyWorldTransform(active.Pooled, active.Cue, position, rotation);
+        ApplyWorldTransform(
+            active.Pooled,
+            active.Cue,
+            position,
+            rotation,
+            tileScale);
+    }
+
+    private void ApplyClipTransform(
+        PooledVfx pooled,
+        BattleVfxClipDefinition clip,
+        BattleVfxAnchorSnapshot anchor)
+    {
+        if (pooled?.Instance == null || clip == null)
+            return;
+        if (!TryConvertAnchor(
+                anchor,
+                clip.GridPosition,
+                out Vector3 position,
+                out Quaternion rotation,
+                out float tileWorldSize))
+        {
+            return;
+        }
+
+        float tileScale = ResolveTileScale(clip, tileWorldSize);
+        position += rotation * (clip.LocalPosition * tileScale);
+        rotation *= clip.LocalRotation;
+        ApplyWorldTransform(
+            pooled,
+            clip,
+            position,
+            rotation,
+            tileScale);
+    }
+
+    private void ApplyClipMotionTransform(ActiveVfx active)
+    {
+        BattleVfxClipDefinition clip = active?.Clip;
+        if (active?.Pooled?.Instance == null ||
+            clip == null ||
+            !clip.HasMotion ||
+            !TryConvertAnchor(
+                active.MotionStartAnchor,
+                clip.MotionSourceGridPosition,
+                out Vector3 startPosition,
+                out Quaternion startRotation,
+                out float startTileWorldSize) ||
+            !TryConvertAnchor(
+                active.MotionEndAnchor,
+                clip.GridPosition,
+                out Vector3 endPosition,
+                out Quaternion endRotation,
+                out float endTileWorldSize))
+        {
+            return;
+        }
+
+        float progress = Mathf.Clamp01(
+            active.MotionElapsed / clip.TravelDuration);
+        float tileWorldSize = Mathf.Lerp(
+            startTileWorldSize,
+            endTileWorldSize,
+            progress);
+        float tileScale = ResolveTileScale(clip, tileWorldSize);
+        Vector3 position = EvaluateMotionPosition(
+            clip.MotionMode,
+            clip.ArcHeight * tileScale,
+            startPosition,
+            endPosition,
+            progress);
+        Quaternion rotation = Quaternion.Slerp(
+            startRotation,
+            endRotation,
+            progress);
+        if (clip.FaceMotionDirection)
+        {
+            float nextProgress = Mathf.Min(1f, progress + 0.01f);
+            float previousProgress = Mathf.Max(0f, progress - 0.01f);
+            Vector3 direction = EvaluateMotionPosition(
+                                    clip.MotionMode,
+                                    clip.ArcHeight * tileScale,
+                                    startPosition,
+                                    endPosition,
+                                    nextProgress) -
+                                EvaluateMotionPosition(
+                                    clip.MotionMode,
+                                    clip.ArcHeight * tileScale,
+                                    startPosition,
+                                    endPosition,
+                                    previousProgress);
+            if (direction.sqrMagnitude > 0.000001f)
+                rotation = Quaternion.LookRotation(direction.normalized);
+        }
+
+        position += rotation * (clip.LocalPosition * tileScale);
+        rotation *= clip.LocalRotation;
+        ApplyWorldTransform(
+            active.Pooled,
+            clip,
+            position,
+            rotation,
+            tileScale);
     }
 
     private static Vector3 EvaluateMotionPosition(
@@ -912,11 +1442,29 @@ public sealed class BattleVfxPlayer : MonoBehaviour, IBattleVfxRequestSink
         return position;
     }
 
+    private static Vector3 EvaluateMotionPosition(
+        BattleVfxMotionMode motionMode,
+        float arcHeight,
+        Vector3 start,
+        Vector3 end,
+        float progress)
+    {
+        progress = Mathf.Clamp01(progress);
+        Vector3 position = Vector3.LerpUnclamped(start, end, progress);
+        if (motionMode == BattleVfxMotionMode.Arc)
+        {
+            position += Vector3.up *
+                        (4f * arcHeight * progress * (1f - progress));
+        }
+        return position;
+    }
+
     private static void ApplyWorldTransform(
         PooledVfx pooled,
         BattleVfxCueSO cue,
         Vector3 position,
-        Quaternion rotation)
+        Quaternion rotation,
+        float tileScale = 1f)
     {
         if (pooled?.Instance == null || cue == null)
             return;
@@ -925,7 +1473,93 @@ public sealed class BattleVfxPlayer : MonoBehaviour, IBattleVfxRequestSink
         instanceTransform.SetPositionAndRotation(position, rotation);
         instanceTransform.localScale = Vector3.Scale(
             pooled.AuthoredScale,
-            cue.LocalScale);
+            cue.LocalScale * tileScale);
+    }
+
+    private static void ApplyWorldTransform(
+        PooledVfx pooled,
+        BattleVfxClipDefinition clip,
+        Vector3 position,
+        Quaternion rotation,
+        float tileScale)
+    {
+        if (pooled?.Instance == null || clip == null)
+            return;
+
+        Transform instanceTransform = pooled.Instance.transform;
+        instanceTransform.SetPositionAndRotation(position, rotation);
+        Vector3 clipScale = Vector3.Scale(
+            clip.LocalScale,
+            Vector3.one * clip.UniformScale);
+        instanceTransform.localScale = Vector3.Scale(
+            pooled.AuthoredScale,
+            clipScale * tileScale);
+    }
+
+    private float ResolveTileScale(
+        BattleVfxClipDefinition clip,
+        float tileWorldSize)
+    {
+        if (clip == null ||
+            clip.ScaleMode == BattleVfxScaleMode.ManualOnly ||
+            tileWorldSize <= 0.0001f)
+        {
+            return 1f;
+        }
+
+        return Mathf.Max(
+            0.0001f,
+            tileWorldSize / referenceTileWorldSize);
+    }
+
+    private float ResolveLegacyTileScale(
+        BattleVfxAnchorSnapshot anchor)
+    {
+        return ResolveLegacyTileScale(ResolveTileWorldSize(anchor));
+    }
+
+    private float ResolveLegacyTileScale(float tileWorldSize)
+    {
+        if (tileWorldSize <= 0.0001f)
+            return 1f;
+        return Mathf.Max(
+            0.0001f,
+            tileWorldSize / referenceTileWorldSize);
+    }
+
+    private float ResolveTileWorldSize(
+        BattleVfxAnchorSnapshot anchor)
+    {
+        if (!anchor.IsValid || !anchor.HasFrame)
+            return 0f;
+        if (anchor.CoordinateSpace == BattleVfxCoordinateSpace.World)
+        {
+            return (
+                anchor.FrameRight.magnitude +
+                anchor.FrameUp.magnitude) * 0.5f;
+        }
+
+        Camera camera = WorldCamera;
+        if (camera == null)
+            return 0f;
+        float minimumDepth = Mathf.Max(
+            0.01f,
+            camera.nearClipPlane + 0.01f);
+        float depth = Mathf.Max(minimumDepth, screenAnchorDepth);
+        Vector3 screenCenter = anchor.FrameCenter;
+        screenCenter.z = depth;
+        Vector3 screenRight = anchor.FrameCenter + anchor.FrameRight;
+        screenRight.z = depth;
+        Vector3 screenUp = anchor.FrameCenter + anchor.FrameUp;
+        screenUp.z = depth;
+        Vector3 worldCenter = camera.ScreenToWorldPoint(screenCenter);
+        return (
+            Vector3.Distance(
+                worldCenter,
+                camera.ScreenToWorldPoint(screenRight)) +
+            Vector3.Distance(
+                worldCenter,
+                camera.ScreenToWorldPoint(screenUp))) * 0.5f;
     }
 
     private bool TryConvertAnchor(
@@ -940,7 +1574,9 @@ public sealed class BattleVfxPlayer : MonoBehaviour, IBattleVfxRequestSink
 
         if (anchor.CoordinateSpace == BattleVfxCoordinateSpace.World)
         {
-            position = anchor.Position;
+            position = anchor.HasFrame
+                ? anchor.FrameCenter
+                : anchor.Position;
             rotation = anchor.Rotation;
             return true;
         }
@@ -954,6 +1590,80 @@ public sealed class BattleVfxPlayer : MonoBehaviour, IBattleVfxRequestSink
             camera.nearClipPlane + 0.01f);
         Vector3 screenPosition = anchor.Position;
         screenPosition.z = Mathf.Max(minimumDepth, screenAnchorDepth);
+        position = camera.ScreenToWorldPoint(screenPosition);
+        rotation = useCameraRotationForScreenAnchors
+            ? camera.transform.rotation
+            : anchor.Rotation;
+        return true;
+    }
+
+    private bool TryConvertAnchor(
+        BattleVfxAnchorSnapshot anchor,
+        Vector2 gridPosition,
+        out Vector3 position,
+        out Quaternion rotation,
+        out float tileWorldSize)
+    {
+        position = default;
+        rotation = Quaternion.identity;
+        tileWorldSize = 0f;
+        if (!anchor.IsValid)
+            return false;
+
+        Vector2 normalizedOffset =
+            gridPosition / BattleVfxClipDefinition.GridDimension -
+            Vector2.one * 0.5f;
+        if (anchor.CoordinateSpace == BattleVfxCoordinateSpace.World)
+        {
+            position = anchor.HasFrame
+                ? anchor.FrameCenter
+                : anchor.Position;
+            if (anchor.HasFrame)
+            {
+                position += anchor.FrameRight * normalizedOffset.x +
+                            anchor.FrameUp * normalizedOffset.y;
+                tileWorldSize = (
+                    anchor.FrameRight.magnitude +
+                    anchor.FrameUp.magnitude) * 0.5f;
+            }
+            rotation = anchor.Rotation;
+            return true;
+        }
+
+        Camera camera = WorldCamera;
+        if (camera == null)
+            return false;
+
+        float minimumDepth = Mathf.Max(
+            0.01f,
+            camera.nearClipPlane + 0.01f);
+        float depth = Mathf.Max(minimumDepth, screenAnchorDepth);
+        Vector3 screenPosition = anchor.HasFrame
+            ? anchor.FrameCenter
+            : anchor.Position;
+        if (anchor.HasFrame)
+        {
+            screenPosition +=
+                anchor.FrameRight * normalizedOffset.x +
+                anchor.FrameUp * normalizedOffset.y;
+            Vector3 screenCenter = anchor.FrameCenter;
+            screenCenter.z = depth;
+            Vector3 screenRight =
+                anchor.FrameCenter + anchor.FrameRight;
+            screenRight.z = depth;
+            Vector3 screenUp =
+                anchor.FrameCenter + anchor.FrameUp;
+            screenUp.z = depth;
+            Vector3 worldCenter = camera.ScreenToWorldPoint(screenCenter);
+            tileWorldSize = (
+                Vector3.Distance(
+                    worldCenter,
+                    camera.ScreenToWorldPoint(screenRight)) +
+                Vector3.Distance(
+                    worldCenter,
+                    camera.ScreenToWorldPoint(screenUp))) * 0.5f;
+        }
+        screenPosition.z = depth;
         position = camera.ScreenToWorldPoint(screenPosition);
         rotation = useCameraRotationForScreenAnchors
             ? camera.transform.rotation
@@ -986,6 +1696,120 @@ public sealed class BattleVfxPlayer : MonoBehaviour, IBattleVfxRequestSink
                 main.startLifetime.constantMax);
         }
         return Mathf.Max(0.01f, lifetime);
+    }
+
+    private static float ResolveNaturalDuration(PooledVfx pooled)
+    {
+        if (pooled == null)
+            return 0.01f;
+
+        float duration = 0.01f;
+        for (int index = 0; index < pooled.Particles.Length; index++)
+        {
+            ParticleSystem particle = pooled.Particles[index];
+            if (particle == null)
+                continue;
+            ParticleSystem.MainModule main = particle.main;
+            float authoredSpeed = Mathf.Max(
+                0.0001f,
+                Mathf.Abs(pooled.ParticleSimulationSpeeds[index]));
+            duration = Mathf.Max(
+                duration,
+                (main.startDelay.constantMax +
+                 main.duration +
+                 main.startLifetime.constantMax) / authoredSpeed);
+        }
+        for (int index = 0; index < pooled.Animators.Length; index++)
+        {
+            Animator animator = pooled.Animators[index];
+            RuntimeAnimatorController controller =
+                animator != null
+                    ? animator.runtimeAnimatorController
+                    : null;
+            if (controller == null)
+                continue;
+            foreach (AnimationClip animationClip in controller.animationClips)
+            {
+                if (animationClip != null)
+                {
+                    float authoredSpeed = Mathf.Max(
+                        0.0001f,
+                        Mathf.Abs(pooled.AnimatorSpeeds[index]));
+                    duration = Mathf.Max(
+                        duration,
+                        animationClip.length / authoredSpeed);
+                }
+            }
+        }
+        return Mathf.Max(0.01f, duration);
+    }
+
+    private static void ConfigurePlayback(
+        PooledVfx pooled,
+        BattleVfxClipDefinition clip,
+        float naturalDuration)
+    {
+        if (pooled == null || clip == null)
+            return;
+
+        RestorePlaybackSettings(pooled);
+        float speedMultiplier = 1f;
+        if (clip.PlaybackFit ==
+            BattleVfxPlaybackFit.StretchToDuration)
+        {
+            speedMultiplier = Mathf.Clamp(
+                naturalDuration / clip.Duration,
+                0.01f,
+                100f);
+        }
+
+        for (int index = 0; index < pooled.Particles.Length; index++)
+        {
+            ParticleSystem particle = pooled.Particles[index];
+            if (particle == null)
+                continue;
+            ParticleSystem.MainModule main = particle.main;
+            main.simulationSpeed =
+                pooled.ParticleSimulationSpeeds[index] *
+                speedMultiplier;
+            if (clip.PlaybackFit ==
+                BattleVfxPlaybackFit.LoopToDuration)
+            {
+                main.loop = true;
+            }
+        }
+        for (int index = 0; index < pooled.Animators.Length; index++)
+        {
+            Animator animator = pooled.Animators[index];
+            if (animator != null)
+            {
+                animator.speed =
+                    pooled.AnimatorSpeeds[index] * speedMultiplier;
+            }
+        }
+    }
+
+    private static void RestorePlaybackSettings(PooledVfx pooled)
+    {
+        if (pooled == null)
+            return;
+
+        for (int index = 0; index < pooled.Particles.Length; index++)
+        {
+            ParticleSystem particle = pooled.Particles[index];
+            if (particle == null)
+                continue;
+            ParticleSystem.MainModule main = particle.main;
+            main.simulationSpeed =
+                pooled.ParticleSimulationSpeeds[index];
+            main.loop = pooled.ParticleLoopSettings[index];
+        }
+        for (int index = 0; index < pooled.Animators.Length; index++)
+        {
+            Animator animator = pooled.Animators[index];
+            if (animator != null)
+                animator.speed = pooled.AnimatorSpeeds[index];
+        }
     }
 
     private static void Restart(PooledVfx pooled)
@@ -1051,6 +1875,7 @@ public sealed class BattleVfxPlayer : MonoBehaviour, IBattleVfxRequestSink
 
         if (immediate)
             StopAndClear(pooled);
+        RestorePlaybackSettings(pooled);
         pooled.Instance.SetActive(false);
         pooled.Instance.transform.SetParent(GetOrCreateSpawnRoot(), false);
         GetPool(pooled.Prefab).Push(pooled);
@@ -1070,8 +1895,17 @@ public sealed class BattleVfxPlayer : MonoBehaviour, IBattleVfxRequestSink
 
     private void PlayAudio(BattleVfxCueSO cue)
     {
-        if (cue == null ||
-            cue.AudioClip == null ||
+        if (cue == null)
+        {
+            return;
+        }
+
+        PlayAudio(cue.AudioClip);
+    }
+
+    private void PlayAudio(AudioClip clip)
+    {
+        if (clip == null ||
             qualityProfile != null && !qualityProfile.EnableAudio)
         {
             return;
@@ -1083,7 +1917,7 @@ public sealed class BattleVfxPlayer : MonoBehaviour, IBattleVfxRequestSink
             audioSource = gameObject.AddComponent<AudioSource>();
         audioSource.playOnAwake = false;
         audioSource.spatialBlend = 0f;
-        audioSource.PlayOneShot(cue.AudioClip);
+        audioSource.PlayOneShot(clip);
     }
 
     private void LogSkipped(BattleVfxCueSO cue, string reason)
@@ -1116,17 +1950,42 @@ public sealed class BattleVfxPlayer : MonoBehaviour, IBattleVfxRequestSink
     {
         public PooledVfx Pooled { get; }
         public BattleVfxRequest Request { get; set; }
+        public BattleVfxClipDefinition Clip { get; }
         public BattleVfxCueSO Cue => Request.Cue;
         public BattleVfxTargetHandle TargetHandle =>
             Request.Target.Handle;
         public object TargetIdentity =>
             GetTargetIdentity(Request.Target.BattleTarget);
         public float RemainingTime { get; set; }
+        public float Duration => Clip != null
+            ? Clip.Duration
+            : Cue.Duration;
         public float MotionElapsed { get; set; }
-        public BattleVfxAnchorSnapshot MotionStartAnchor { get; }
-        public BattleVfxAnchorSnapshot MotionEndAnchor { get; }
+        public float PlaybackCycleElapsed { get; set; }
+        public float NaturalDuration { get; }
+        public BattleVfxAnchorSnapshot MotionStartAnchor { get; set; }
+        public BattleVfxAnchorSnapshot MotionEndAnchor { get; set; }
+        public BattleVfxAttachMode AttachMode => Clip != null
+            ? Clip.AttachMode
+            : Cue.AttachMode;
+        public BattleVfxStopMode StopMode => Clip != null
+            ? Clip.StopMode
+            : Cue.StopMode;
+        public BattleVfxPlaybackFit PlaybackFit => Clip != null
+            ? Clip.PlaybackFit
+            : BattleVfxPlaybackFit.Natural;
+        public bool UseBattleTime => Clip != null
+            ? Clip.UseBattleTime
+            : Cue.UseBattleTime;
+        public bool HasMotion => Clip != null
+            ? Clip.HasMotion
+            : Cue.HasMotion;
+        public bool IsPersistent => Clip != null
+            ? Clip.IsPersistent
+            : Cue.IsPersistent;
         public bool IsStopping { get; set; }
         public long Sequence { get; }
+        public long GroupSequence { get; }
 
         public ActiveVfx(
             PooledVfx pooled,
@@ -1134,14 +1993,20 @@ public sealed class BattleVfxPlayer : MonoBehaviour, IBattleVfxRequestSink
             float remainingTime,
             BattleVfxAnchorSnapshot motionStartAnchor,
             BattleVfxAnchorSnapshot motionEndAnchor,
-            long sequence)
+            long sequence,
+            BattleVfxClipDefinition clip,
+            long groupSequence,
+            float naturalDuration)
         {
             Pooled = pooled;
             Request = request;
+            Clip = clip;
             RemainingTime = remainingTime;
             MotionStartAnchor = motionStartAnchor;
             MotionEndAnchor = motionEndAnchor;
             Sequence = sequence;
+            GroupSequence = groupSequence;
+            NaturalDuration = Mathf.Max(0.01f, naturalDuration);
         }
     }
 
@@ -1162,14 +2027,40 @@ public sealed class BattleVfxPlayer : MonoBehaviour, IBattleVfxRequestSink
         }
     }
 
+    private sealed class ScheduledVfxClip
+    {
+        public BattleVfxRequest Request { get; }
+        public BattleVfxClipDefinition Clip { get; }
+        public float RemainingTime { get; set; }
+        public long GroupSequence { get; }
+        public long Sequence { get; }
+
+        public ScheduledVfxClip(
+            BattleVfxRequest request,
+            BattleVfxClipDefinition clip,
+            float remainingTime,
+            long groupSequence,
+            long sequence)
+        {
+            Request = request;
+            Clip = clip;
+            RemainingTime = Mathf.Max(0f, remainingTime);
+            GroupSequence = groupSequence;
+            Sequence = sequence;
+        }
+    }
+
     private sealed class PooledVfx
     {
         public GameObject Instance { get; }
         public GameObject Prefab { get; }
         public Vector3 AuthoredScale { get; }
         public ParticleSystem[] Particles { get; }
+        public float[] ParticleSimulationSpeeds { get; }
+        public bool[] ParticleLoopSettings { get; }
         public TrailRenderer[] Trails { get; }
         public Animator[] Animators { get; }
+        public float[] AnimatorSpeeds { get; }
 
         public PooledVfx(GameObject instance, GameObject prefab)
         {
@@ -1181,12 +2072,33 @@ public sealed class BattleVfxPlayer : MonoBehaviour, IBattleVfxRequestSink
             Particles = instance != null
                 ? instance.GetComponentsInChildren<ParticleSystem>(true)
                 : Array.Empty<ParticleSystem>();
+            ParticleSimulationSpeeds = new float[Particles.Length];
+            ParticleLoopSettings = new bool[Particles.Length];
+            for (int index = 0; index < Particles.Length; index++)
+            {
+                ParticleSystem particle = Particles[index];
+                if (particle == null)
+                {
+                    ParticleSimulationSpeeds[index] = 1f;
+                    continue;
+                }
+                ParticleSystem.MainModule main = particle.main;
+                ParticleSimulationSpeeds[index] = main.simulationSpeed;
+                ParticleLoopSettings[index] = main.loop;
+            }
             Trails = instance != null
                 ? instance.GetComponentsInChildren<TrailRenderer>(true)
                 : Array.Empty<TrailRenderer>();
             Animators = instance != null
                 ? instance.GetComponentsInChildren<Animator>(true)
                 : Array.Empty<Animator>();
+            AnimatorSpeeds = new float[Animators.Length];
+            for (int index = 0; index < Animators.Length; index++)
+            {
+                AnimatorSpeeds[index] = Animators[index] != null
+                    ? Animators[index].speed
+                    : 1f;
+            }
         }
     }
 }

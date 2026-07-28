@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Reflection;
 using System.Text;
 using NUnit.Framework;
 using UnityEditor;
@@ -415,6 +416,46 @@ public sealed class CharacterDefinitionValidationTests
 
         Assert.That(
             HasDiagnostic(result, "ability.removal_status_required"),
+            Is.True);
+    }
+
+    [Test]
+    public void Validate_StatusRemovalRatioOutsideRange_ReturnsError()
+    {
+        CharacterSO definition = CreateDefinition();
+        SerializedObject serialized = new(definition);
+        SerializedProperty attacks =
+            serialized.FindProperty("attackDefinitions");
+        attacks.arraySize = 1;
+        SerializedProperty attack = attacks.GetArrayElementAtIndex(0);
+        SetSections(
+            attack.FindPropertyRelative("sections"),
+            (int)CharacterAttackSectionType.Subject,
+            (int)CharacterAttackSectionType.Ability);
+        attack.FindPropertyRelative("targetFaction").enumValueIndex =
+            (int)CharacterTargetFaction.Ally;
+        attack.FindPropertyRelative("subject").enumValueIndex =
+            (int)CharacterAttackSubject.Self;
+        attack.FindPropertyRelative("damageType").enumValueIndex =
+            (int)CharacterAttackDamageType.StatusRemoval;
+        attack.FindPropertyRelative("statusRemovalTarget").enumValueIndex =
+            (int)CharacterStatusRemovalTarget.All;
+        attack.FindPropertyRelative(
+            "statusRemovalAmountMode").enumValueIndex =
+            (int)CharacterStatusRemovalAmountMode.CurrentStacksRatio;
+        serialized.ApplyModifiedPropertiesWithoutUndo();
+
+        FieldInfo ratioField = typeof(CharacterAttackDefinition).GetField(
+            "statusRemovalRatio",
+            BindingFlags.Instance | BindingFlags.NonPublic);
+        Assert.That(ratioField, Is.Not.Null);
+        ratioField.SetValue(definition.AttackDefinitions[0], 0f);
+
+        CharacterDefinitionValidationResult result =
+            CharacterDefinitionValidator.Validate(definition);
+
+        Assert.That(
+            HasDiagnostic(result, "ability.removal_ratio_invalid"),
             Is.True);
     }
 

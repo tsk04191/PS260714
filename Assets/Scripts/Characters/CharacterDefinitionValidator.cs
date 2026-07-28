@@ -376,6 +376,12 @@ public static class CharacterDefinitionValidator
                     "basic attack.");
             }
 
+            ValidateAttackTargetRetention(
+                definition,
+                hasSubject,
+                path,
+                result);
+
             if (hasSubject)
             {
                 if (index == 0 &&
@@ -438,6 +444,9 @@ public static class CharacterDefinitionValidator
                         definition.AppliedStatusEffect,
                         definition.StatusRemovalEffect,
                         definition.StatusRemovalTarget,
+                        definition.StatusRemovalAmountMode,
+                        definition.StatusRemovalCount,
+                        definition.StatusRemovalRatio,
                         definition.AreaOffsets,
                         path,
                         result);
@@ -467,6 +476,45 @@ public static class CharacterDefinitionValidator
         }
 
         return consistentTargetFaction;
+    }
+
+    private static void ValidateAttackTargetRetention(
+        CharacterAttackDefinition definition,
+        bool hasSubject,
+        string path,
+        CharacterDefinitionValidationResult result)
+    {
+        CharacterAttackTargetRetentionMode retentionMode =
+            definition.TargetRetentionMode;
+        if (!Enum.IsDefined(
+                typeof(CharacterAttackTargetRetentionMode),
+                retentionMode))
+        {
+            AddError(
+                result,
+                "attack.target_retention_invalid",
+                $"{path}.targetRetentionMode",
+                $"Unsupported target retention mode '{retentionMode}'.");
+            return;
+        }
+
+        if (retentionMode ==
+            CharacterAttackTargetRetentionMode.ReselectEachAttack)
+        {
+            return;
+        }
+
+        if (!hasSubject ||
+            !CharacterAttackDefinition.SupportsTargetRetention(
+                definition.Subject,
+                definition.SubjectCount))
+        {
+            AddError(
+                result,
+                "attack.target_retention_unsupported",
+                $"{path}.targetRetentionMode",
+                "Target retention requires a fresh single-target selector.");
+        }
     }
 
     private static void ValidatePassives(
@@ -568,7 +616,8 @@ public static class CharacterDefinitionValidator
                 definition.NumericConditions,
                 abilityTargetFaction,
                 path,
-                result);
+                result,
+                definition.HasAttackTargetRelationCondition);
             if (hasAbility)
             {
                 if (definition.HasExplicitEffects)
@@ -594,6 +643,9 @@ public static class CharacterDefinitionValidator
                         definition.AppliedStatusEffect,
                         definition.StatusRemovalEffect,
                         definition.StatusRemovalTarget,
+                        definition.StatusRemovalAmountMode,
+                        definition.StatusRemovalCount,
+                        definition.StatusRemovalRatio,
                         definition.AreaOffsets,
                         path,
                         result);
@@ -601,6 +653,7 @@ public static class CharacterDefinitionValidator
             }
 
             ValidatePassiveTrigger(definition, path, result);
+            ValidatePassiveAttackTargetRelation(definition, path, result);
             ValidateSelfStatusCost(definition, path, result);
         }
     }
@@ -679,6 +732,51 @@ public static class CharacterDefinitionValidator
                 $"{path}.triggerStatusEffect",
                 $"Status '{status.name}' cannot be acquired by the selected " +
                 "trigger faction.");
+        }
+    }
+
+    private static void ValidatePassiveAttackTargetRelation(
+        CharacterPassiveDefinition definition,
+        string path,
+        CharacterDefinitionValidationResult result)
+    {
+        if (!Enum.IsDefined(
+                typeof(CharacterPassiveAttackTargetRelation),
+                definition.AttackTargetRelation))
+        {
+            AddError(
+                result,
+                "passive.attack_target_relation_invalid",
+                $"{path}.attackTargetRelation",
+                $"Unsupported attack target relation " +
+                $"'{definition.AttackTargetRelation}'.");
+            return;
+        }
+
+        if (definition.AttackTargetRelation ==
+            CharacterPassiveAttackTargetRelation.Any)
+        {
+            return;
+        }
+
+        if (!definition.HasConditionSection)
+        {
+            AddWarning(
+                result,
+                "passive.attack_target_relation_section_missing",
+                $"{path}.attackTargetRelation",
+                "The attack target relation is ignored because the " +
+                "Condition section is absent.");
+        }
+
+        if (definition.Trigger != CharacterPassiveTrigger.OnAttack)
+        {
+            AddWarning(
+                result,
+                "passive.attack_target_relation_trigger_ignored",
+                $"{path}.attackTargetRelation",
+                "The attack target relation is evaluated only by OnAttack " +
+                "passives.");
         }
     }
 
@@ -871,6 +969,9 @@ public static class CharacterDefinitionValidator
                         definition.AppliedStatusEffect,
                         definition.StatusRemovalEffect,
                         definition.StatusRemovalTarget,
+                        definition.StatusRemovalAmountMode,
+                        definition.StatusRemovalCount,
+                        definition.StatusRemovalRatio,
                         definition.AreaOffsets,
                         path,
                         result);
@@ -1167,7 +1268,8 @@ public static class CharacterDefinitionValidator
         IReadOnlyList<CharacterNumericCondition> conditions,
         CharacterTargetFaction? targetFaction,
         string actionPath,
-        CharacterDefinitionValidationResult result)
+        CharacterDefinitionValidationResult result,
+        bool hasAdditionalCondition = false)
     {
         string path = $"{actionPath}.numericConditions";
         if (!hasConditionSection)
@@ -1187,6 +1289,9 @@ public static class CharacterDefinitionValidator
 
         if (conditions == null || conditions.Count == 0)
         {
+            if (hasAdditionalCondition)
+                return;
+
             AddError(
                 result,
                 "condition.empty",
@@ -1930,14 +2035,13 @@ public static class CharacterDefinitionValidator
         string effectPath,
         CharacterDefinitionValidationResult result)
     {
-        if (effect.StatusRemovalCount < 0)
-        {
-            AddError(
-                result,
-                "effect.removal_count_invalid",
-                $"{effectPath}.statusRemovalCount",
-                "Status removal count cannot be negative.");
-        }
+        ValidateStatusRemovalAmount(
+            effect.StatusRemovalAmountMode,
+            effect.StatusRemovalCount,
+            effect.StatusRemovalRatio,
+            effectPath,
+            "effect",
+            result);
 
         if (effect.StatusRemovalTarget !=
             CharacterStatusRemovalTarget.Single)
@@ -1983,6 +2087,9 @@ public static class CharacterDefinitionValidator
         StatusEffectSO appliedStatus,
         StatusEffectSO removalStatus,
         CharacterStatusRemovalTarget removalTarget,
+        CharacterStatusRemovalAmountMode removalAmountMode,
+        int removalCount,
+        float removalRatio,
         IReadOnlyList<CharacterTargetAreaOffset> areaOffsets,
         string actionPath,
         CharacterDefinitionValidationResult result)
@@ -2064,6 +2171,13 @@ public static class CharacterDefinitionValidator
                 break;
 
             case CharacterAttackDamageType.StatusRemoval:
+                ValidateStatusRemovalAmount(
+                    removalAmountMode,
+                    removalCount,
+                    removalRatio,
+                    actionPath,
+                    "ability",
+                    result);
                 if (removalTarget == CharacterStatusRemovalTarget.Single)
                 {
                     if (removalStatus == null)
@@ -2112,6 +2226,50 @@ public static class CharacterDefinitionValidator
             areaOffsets,
             actionPath,
             result);
+    }
+
+    private static void ValidateStatusRemovalAmount(
+        CharacterStatusRemovalAmountMode mode,
+        int count,
+        float ratio,
+        string path,
+        string codePrefix,
+        CharacterDefinitionValidationResult result)
+    {
+        if (!Enum.IsDefined(
+                typeof(CharacterStatusRemovalAmountMode),
+                mode))
+        {
+            AddError(
+                result,
+                $"{codePrefix}.removal_amount_mode_invalid",
+                $"{path}.statusRemovalAmountMode",
+                $"Unsupported status removal amount mode '{mode}'.");
+            return;
+        }
+
+        if (mode == CharacterStatusRemovalAmountMode.FixedStacks)
+        {
+            if (count < 0)
+            {
+                AddError(
+                    result,
+                    $"{codePrefix}.removal_count_invalid",
+                    $"{path}.statusRemovalCount",
+                    "Status removal count cannot be negative.");
+            }
+            return;
+        }
+
+        if (!IsFinite(ratio) || ratio <= 0f || ratio > 1f)
+        {
+            AddError(
+                result,
+                $"{codePrefix}.removal_ratio_invalid",
+                $"{path}.statusRemovalRatio",
+                "Status removal ratio must be finite and greater than zero " +
+                "and no greater than one.");
+        }
     }
 
     private static void ValidateAreaOffsets(
@@ -2937,6 +3095,42 @@ public static class StatusEffectDefinitionValidator
                 "status.trigger_block_scaling_invalid",
                 $"{path}.amountScaling",
                 "Trigger block effect scaling must be finite.");
+        }
+        if (effect.Type == CharacterEffectType.RemoveStatus)
+        {
+            if (!Enum.IsDefined(
+                    typeof(CharacterStatusRemovalAmountMode),
+                    effect.StatusRemovalAmountMode))
+            {
+                AddError(
+                    result,
+                    "status.trigger_block_removal_amount_mode_invalid",
+                    $"{path}.statusRemovalAmountMode",
+                    "Unsupported status removal amount mode.");
+            }
+            else if (effect.StatusRemovalAmountMode ==
+                     CharacterStatusRemovalAmountMode.FixedStacks)
+            {
+                if (effect.StatusRemovalCount < 0)
+                {
+                    AddError(
+                        result,
+                        "status.trigger_block_removal_count_invalid",
+                        $"{path}.statusRemovalCount",
+                        "Status removal count cannot be negative.");
+                }
+            }
+            else if (!IsFinite(effect.StatusRemovalRatio) ||
+                     effect.StatusRemovalRatio <= 0f ||
+                     effect.StatusRemovalRatio > 1f)
+            {
+                AddError(
+                    result,
+                    "status.trigger_block_removal_ratio_invalid",
+                    $"{path}.statusRemovalRatio",
+                    "Status removal ratio must be greater than zero and no " +
+                    "greater than one.");
+            }
         }
     }
 

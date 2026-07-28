@@ -31,6 +31,19 @@ public enum CharacterAttackSubject
     None
 }
 
+public enum CharacterAttackTargetRetentionMode
+{
+    ReselectEachAttack = 0,
+    LockUntilInvalid = 1
+}
+
+public enum CharacterPassiveAttackTargetRelation
+{
+    Any = 0,
+    SameAsPreviousAttack = 1,
+    DifferentFromPreviousAttack = 2
+}
+
 public enum CharacterTargetFaction
 {
     Enemy,
@@ -145,6 +158,107 @@ public enum CharacterStatusRemovalTarget
     Single,
     Random,
     All
+}
+
+public enum CharacterStatusRemovalAmountMode
+{
+    FixedStacks = 0,
+    CurrentStacksRatio = 1
+}
+
+public readonly struct CharacterStatusRemovalAmount
+{
+    public CharacterStatusRemovalAmountMode Mode { get; }
+    public int FixedStacks { get; }
+    public float CurrentStacksRatio { get; }
+
+    public CharacterStatusRemovalAmount(
+        CharacterStatusRemovalAmountMode mode,
+        int fixedStacks,
+        float currentStacksRatio)
+    {
+        Mode = mode;
+        FixedStacks = Mathf.Max(0, fixedStacks);
+        CurrentStacksRatio =
+            float.IsNaN(currentStacksRatio) ||
+            float.IsInfinity(currentStacksRatio)
+                ? 0f
+                : currentStacksRatio;
+    }
+
+    public static CharacterStatusRemovalAmount Fixed(int stacks)
+    {
+        return new CharacterStatusRemovalAmount(
+            CharacterStatusRemovalAmountMode.FixedStacks,
+            stacks,
+            0f);
+    }
+
+    public static CharacterStatusRemovalAmount Ratio(float ratio)
+    {
+        return new CharacterStatusRemovalAmount(
+            CharacterStatusRemovalAmountMode.CurrentStacksRatio,
+            0,
+            ratio);
+    }
+
+    public CharacterStatusRemovalAmount Multiply(int multiplier)
+    {
+        multiplier = Mathf.Max(1, multiplier);
+        if (Mode == CharacterStatusRemovalAmountMode.CurrentStacksRatio)
+            return Ratio(CurrentStacksRatio * multiplier);
+
+        if (FixedStacks == 0)
+            return this;
+        long scaled = (long)FixedStacks * multiplier;
+        return Fixed(
+            scaled >= int.MaxValue
+                ? int.MaxValue
+                : (int)scaled);
+    }
+
+    public int Resolve(int currentStacks)
+    {
+        currentStacks = Mathf.Max(0, currentStacks);
+        if (currentStacks == 0)
+            return 0;
+
+        if (Mode == CharacterStatusRemovalAmountMode.CurrentStacksRatio)
+        {
+            if (CurrentStacksRatio <= 0f)
+                return 0;
+
+            float ratio = Mathf.Min(1f, CurrentStacksRatio);
+            return Mathf.Clamp(
+                Mathf.CeilToInt(currentStacks * ratio),
+                1,
+                currentStacks);
+        }
+
+        return FixedStacks == 0
+            ? currentStacks
+            : Mathf.Min(FixedStacks, currentStacks);
+    }
+
+    public static void Normalize(
+        ref CharacterStatusRemovalAmountMode mode,
+        ref int fixedStacks,
+        ref float currentStacksRatio)
+    {
+        if (!Enum.IsDefined(
+                typeof(CharacterStatusRemovalAmountMode),
+                mode))
+        {
+            mode = CharacterStatusRemovalAmountMode.FixedStacks;
+        }
+
+        fixedStacks = Mathf.Max(0, fixedStacks);
+        currentStacksRatio =
+            float.IsNaN(currentStacksRatio) ||
+            float.IsInfinity(currentStacksRatio)
+                ? 0.5f
+                : Mathf.Clamp(currentStacksRatio, 0.01f, 1f);
+    }
 }
 
 public enum CharacterPassiveSectionType
@@ -617,8 +731,12 @@ public sealed class CharacterEffectDefinition :
     private StatusEffectSO statusEffect;
     [SerializeField]
     private CharacterStatusRemovalTarget statusRemovalTarget;
+    [SerializeField]
+    private CharacterStatusRemovalAmountMode statusRemovalAmountMode;
     [SerializeField, Min(0)]
     private int statusRemovalCount;
+    [SerializeField, Range(0.01f, 1f)]
+    private float statusRemovalRatio = 0.5f;
     [SerializeField]
     private BattleVfxCueSO castVfxCue;
     [SerializeField]
@@ -703,7 +821,15 @@ public sealed class CharacterEffectDefinition :
     public StatusEffectSO StatusEffect => statusEffect;
     public CharacterStatusRemovalTarget StatusRemovalTarget =>
         statusRemovalTarget;
+    public CharacterStatusRemovalAmountMode StatusRemovalAmountMode =>
+        statusRemovalAmountMode;
     public int StatusRemovalCount => statusRemovalCount;
+    public float StatusRemovalRatio => statusRemovalRatio;
+    public CharacterStatusRemovalAmount StatusRemovalAmount =>
+        new(
+            statusRemovalAmountMode,
+            statusRemovalCount,
+            statusRemovalRatio);
     public BattleVfxCueSO CastVfxCue => castVfxCue;
     public BattleVfxCueSO ProjectileVfxCue => projectileVfxCue;
     public BattleVfxCueSO ImpactVfxCue => impactVfxCue;
@@ -746,7 +872,10 @@ public sealed class CharacterEffectDefinition :
         sourceResourceScale = Mathf.Max(0f, sourceResourceScale);
         statusDuration = TimePrecision.Normalize(statusDuration, 0.1f);
         statusStacks = Mathf.Max(0.1f, statusStacks);
-        statusRemovalCount = Mathf.Max(0, statusRemovalCount);
+        CharacterStatusRemovalAmount.Normalize(
+            ref statusRemovalAmountMode,
+            ref statusRemovalCount,
+            ref statusRemovalRatio);
     }
 }
 
@@ -793,8 +922,12 @@ public sealed class CharacterSkillDefinition :
     private StatusEffectSO statusRemovalEffect;
     [SerializeField]
     private CharacterStatusRemovalTarget statusRemovalTarget;
+    [SerializeField]
+    private CharacterStatusRemovalAmountMode statusRemovalAmountMode;
     [SerializeField, Min(0)]
     private int statusRemovalCount;
+    [SerializeField, Range(0.01f, 1f)]
+    private float statusRemovalRatio = 0.5f;
     [SerializeField]
     private List<CharacterTargetAreaOffset> areaOffsets = new();
     [SerializeField]
@@ -828,7 +961,15 @@ public sealed class CharacterSkillDefinition :
     public StatusEffectSO StatusRemovalEffect => statusRemovalEffect;
     public CharacterStatusRemovalTarget StatusRemovalTarget =>
         statusRemovalTarget;
+    public CharacterStatusRemovalAmountMode StatusRemovalAmountMode =>
+        statusRemovalAmountMode;
     public int StatusRemovalCount => statusRemovalCount;
+    public float StatusRemovalRatio => statusRemovalRatio;
+    public CharacterStatusRemovalAmount StatusRemovalAmount =>
+        new(
+            statusRemovalAmountMode,
+            statusRemovalCount,
+            statusRemovalRatio);
     public IReadOnlyList<CharacterTargetAreaOffset> AreaOffsets =>
         areaOffsets;
     public IReadOnlyList<CharacterEffectDefinition> Effects => effects;
@@ -857,7 +998,10 @@ public sealed class CharacterSkillDefinition :
         damageAmount = Mathf.Max(0f, damageAmount);
         statusDuration = TimePrecision.Normalize(statusDuration, 0.1f);
         statusStacks = Mathf.Max(0.1f, statusStacks);
-        statusRemovalCount = Mathf.Max(0, statusRemovalCount);
+        CharacterStatusRemovalAmount.Normalize(
+            ref statusRemovalAmountMode,
+            ref statusRemovalCount,
+            ref statusRemovalRatio);
         areaOffsets ??= new List<CharacterTargetAreaOffset>();
         CharacterTargetAreaOffset.ValidateList(
             areaOffsets,
@@ -924,6 +1068,8 @@ public sealed class CharacterPassiveDefinition :
     [SerializeField]
     private CharacterConditionMatchMode conditionMatchMode;
     [SerializeField]
+    private CharacterPassiveAttackTargetRelation attackTargetRelation;
+    [SerializeField]
     private List<CharacterNumericCondition> numericConditions = new();
     [SerializeField]
     private CharacterTargetFaction targetFaction;
@@ -949,8 +1095,12 @@ public sealed class CharacterPassiveDefinition :
     private StatusEffectSO statusRemovalEffect;
     [SerializeField]
     private CharacterStatusRemovalTarget statusRemovalTarget;
+    [SerializeField]
+    private CharacterStatusRemovalAmountMode statusRemovalAmountMode;
     [SerializeField, Min(0)]
     private int statusRemovalCount;
+    [SerializeField, Range(0.01f, 1f)]
+    private float statusRemovalRatio = 0.5f;
     [SerializeField]
     private List<CharacterTargetAreaOffset> areaOffsets = new();
     [SerializeField]
@@ -976,6 +1126,11 @@ public sealed class CharacterPassiveDefinition :
         HasSection(CharacterPassiveSectionType.Condition);
     public CharacterConditionMatchMode ConditionMatchMode =>
         conditionMatchMode;
+    public CharacterPassiveAttackTargetRelation AttackTargetRelation =>
+        attackTargetRelation;
+    public bool HasAttackTargetRelationCondition =>
+        HasConditionSection &&
+        attackTargetRelation != CharacterPassiveAttackTargetRelation.Any;
     public IReadOnlyList<CharacterNumericCondition> NumericConditions =>
         numericConditions;
     public CharacterTargetFaction TargetFaction => targetFaction;
@@ -993,7 +1148,15 @@ public sealed class CharacterPassiveDefinition :
     public StatusEffectSO StatusRemovalEffect => statusRemovalEffect;
     public CharacterStatusRemovalTarget StatusRemovalTarget =>
         statusRemovalTarget;
+    public CharacterStatusRemovalAmountMode StatusRemovalAmountMode =>
+        statusRemovalAmountMode;
     public int StatusRemovalCount => statusRemovalCount;
+    public float StatusRemovalRatio => statusRemovalRatio;
+    public CharacterStatusRemovalAmount StatusRemovalAmount =>
+        new(
+            statusRemovalAmountMode,
+            statusRemovalCount,
+            statusRemovalRatio);
     public IReadOnlyList<CharacterTargetAreaOffset> AreaOffsets =>
         areaOffsets;
     public CharacterStatusStackCostDefinition SelfStatusCost =>
@@ -1024,12 +1187,22 @@ public sealed class CharacterPassiveDefinition :
         numericConditions ??= new List<CharacterNumericCondition>();
         foreach (CharacterNumericCondition condition in numericConditions)
             condition?.Validate();
+        if (!Enum.IsDefined(
+                typeof(CharacterPassiveAttackTargetRelation),
+                attackTargetRelation))
+        {
+            attackTargetRelation =
+                CharacterPassiveAttackTargetRelation.Any;
+        }
         cooldown = TimePrecision.Normalize(cooldown, TimePrecision.Step);
         subjectCount = Mathf.Max(1, subjectCount);
         damageAmount = Mathf.Max(0f, damageAmount);
         statusDuration = TimePrecision.Normalize(statusDuration, 0.1f);
         statusStacks = Mathf.Max(0.1f, statusStacks);
-        statusRemovalCount = Mathf.Max(0, statusRemovalCount);
+        CharacterStatusRemovalAmount.Normalize(
+            ref statusRemovalAmountMode,
+            ref statusRemovalCount,
+            ref statusRemovalRatio);
         selfStatusCost ??= new CharacterStatusStackCostDefinition();
         selfStatusCost.Validate();
         areaOffsets ??= new List<CharacterTargetAreaOffset>();
@@ -1104,6 +1277,8 @@ public sealed class CharacterAttackDefinition :
     private CharacterTargetFaction targetFaction;
     [SerializeField]
     private CharacterAttackSubject subject;
+    [SerializeField]
+    private CharacterAttackTargetRetentionMode targetRetentionMode;
     [SerializeField, Min(1)]
     private int subjectCount = 1;
     [SerializeField]
@@ -1125,8 +1300,12 @@ public sealed class CharacterAttackDefinition :
     private StatusEffectSO statusRemovalEffect;
     [SerializeField]
     private CharacterStatusRemovalTarget statusRemovalTarget;
+    [SerializeField]
+    private CharacterStatusRemovalAmountMode statusRemovalAmountMode;
     [SerializeField, Min(0)]
     private int statusRemovalCount;
+    [SerializeField, Range(0.01f, 1f)]
+    private float statusRemovalRatio = 0.5f;
     [SerializeField]
     private List<CharacterTargetAreaOffset> areaOffsets = new();
     [SerializeField]
@@ -1145,6 +1324,8 @@ public sealed class CharacterAttackDefinition :
         numericConditions;
     public CharacterTargetFaction TargetFaction => targetFaction;
     public CharacterAttackSubject Subject => subject;
+    public CharacterAttackTargetRetentionMode TargetRetentionMode =>
+        targetRetentionMode;
     public int SubjectCount => subjectCount;
     public CharacterAttackSubjectMetric SubjectMetric => subjectMetric;
     public CharacterAttackDamageType DamageType => damageType;
@@ -1158,7 +1339,15 @@ public sealed class CharacterAttackDefinition :
     public StatusEffectSO StatusRemovalEffect => statusRemovalEffect;
     public CharacterStatusRemovalTarget StatusRemovalTarget =>
         statusRemovalTarget;
+    public CharacterStatusRemovalAmountMode StatusRemovalAmountMode =>
+        statusRemovalAmountMode;
     public int StatusRemovalCount => statusRemovalCount;
+    public float StatusRemovalRatio => statusRemovalRatio;
+    public CharacterStatusRemovalAmount StatusRemovalAmount =>
+        new(
+            statusRemovalAmountMode,
+            statusRemovalCount,
+            statusRemovalRatio);
     public IReadOnlyList<CharacterTargetAreaOffset> AreaOffsets =>
         areaOffsets;
     public IReadOnlyList<CharacterEffectDefinition> Effects => effects;
@@ -1167,6 +1356,19 @@ public sealed class CharacterAttackDefinition :
     public bool HasSection(CharacterAttackSectionType sectionType)
     {
         return sections != null && sections.Contains(sectionType);
+    }
+
+    public static bool SupportsTargetRetention(
+        CharacterAttackSubject attackSubject,
+        int targetCount)
+    {
+        if (targetCount != 1)
+            return false;
+
+        return attackSubject == CharacterAttackSubject.Random ||
+               attackSubject == CharacterAttackSubject.HighestValue ||
+               attackSubject == CharacterAttackSubject.LowestValue ||
+               attackSubject == CharacterAttackSubject.RandomExceptSelf;
     }
 
     public float CalculateFinalAttackPower(float characterAttackPower)
@@ -1183,11 +1385,21 @@ public sealed class CharacterAttackDefinition :
         foreach (CharacterNumericCondition condition in numericConditions)
             condition?.Validate();
         NormalizeLegacySections();
+        if (!Enum.IsDefined(
+                typeof(CharacterAttackTargetRetentionMode),
+                targetRetentionMode))
+        {
+            targetRetentionMode =
+                CharacterAttackTargetRetentionMode.ReselectEachAttack;
+        }
         subjectCount = Mathf.Max(1, subjectCount);
         damageAmount = Mathf.Max(0f, damageAmount);
         statusDuration = TimePrecision.Normalize(statusDuration, 0.1f);
         statusStacks = Mathf.Max(0.1f, statusStacks);
-        statusRemovalCount = Mathf.Max(0, statusRemovalCount);
+        CharacterStatusRemovalAmount.Normalize(
+            ref statusRemovalAmountMode,
+            ref statusRemovalCount,
+            ref statusRemovalRatio);
         areaOffsets ??= new List<CharacterTargetAreaOffset>();
         CharacterTargetAreaOffset.ValidateList(
             areaOffsets,
@@ -1344,8 +1556,6 @@ public sealed class CharacterSO : ScriptableObject,
             RegenerateCharacterId();
 
         passiveDefinitions ??= new List<CharacterPassiveDefinition>();
-        passiveDefinitions.RemoveAll(definition =>
-            definition?.IsEmptyPlaceholder == true);
         foreach (CharacterPassiveDefinition definition in passiveDefinitions)
             definition?.Validate();
 

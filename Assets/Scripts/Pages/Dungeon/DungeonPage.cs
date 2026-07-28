@@ -163,6 +163,8 @@ public class DungeonPage : MonoBehaviour, IPage
     private CharacterSO _startingTurret;
     private readonly List<CharacterRuntime> _ownedTurrets = new();
     private readonly List<CharacterSO> _availableTurrets = new();
+    private readonly HashSet<string> _acquiredCharacterIds =
+        new(StringComparer.Ordinal);
     private readonly List<CharacterSO> _startingCharacterChoices = new();
     private readonly CharacterSO[] _slotDefaultDefinitions =
         new CharacterSO[MaximumPartySize];
@@ -687,6 +689,8 @@ public class DungeonPage : MonoBehaviour, IPage
         startingSlot.gameObject.SetActive(true);
         _ownedTurrets.Clear();
         _ownedTurrets.Add(startingSlot);
+        _acquiredCharacterIds.Clear();
+        RecordAcquiredCharacter(definition);
         _startingCharacterSelectionPending = false;
 
         if (flowController.StartRun(_session.PhaseSequence))
@@ -849,7 +853,7 @@ public class DungeonPage : MonoBehaviour, IPage
         int replacementSlotIndex = -1)
     {
         if (!_eventRewardPending || definition == null ||
-            !IsCharacterOwnedForDungeon(definition))
+            !CanAcquireCharacterReward(definition))
         {
             return false;
         }
@@ -877,8 +881,38 @@ public class DungeonPage : MonoBehaviour, IPage
                 return false;
         }
 
+        RecordAcquiredCharacter(definition);
         CompleteEventReward();
         return true;
+    }
+
+    public IReadOnlyList<CharacterSO>
+        GetAvailableCharacterRewardDefinitions()
+    {
+        if (_availableTurrets.Count == 0)
+            return Array.Empty<CharacterSO>();
+
+        List<CharacterSO> candidates = new();
+        HashSet<string> uniqueCharacterIds =
+            new(StringComparer.Ordinal);
+        foreach (CharacterSO definition in _availableTurrets)
+        {
+            if (!CanAcquireCharacterReward(definition))
+                continue;
+
+            string characterId = definition.CharacterId;
+            if (string.IsNullOrWhiteSpace(characterId) ||
+                !uniqueCharacterIds.Add(characterId))
+            {
+                continue;
+            }
+
+            candidates.Add(definition);
+        }
+
+        return candidates.Count > 0
+            ? candidates.ToArray()
+            : Array.Empty<CharacterSO>();
     }
 
     public void SetGridSize(int size)
@@ -1014,10 +1048,11 @@ public class DungeonPage : MonoBehaviour, IPage
         }
         else
         {
-            bool useIntroBalance = _session.Definition != null &&
-                                   _session.Definition.UseIntroBattleBalance &&
-                                   _session.CurrentBattleNumber == 1;
-            setupCreated = useIntroBalance
+            bool useTutorialSetup =
+                _session.Definition != null &&
+                _session.Definition.UsesTutorialBattleSetup &&
+                _session.CurrentBattleNumber == 1;
+            setupCreated = useTutorialSetup
                 ? TryCreateTutorialBattleSetup(plan, out setup, out error)
                 : TryCreateScaledBattleSetup(plan, out setup, out error);
         }
@@ -1942,6 +1977,7 @@ public class DungeonPage : MonoBehaviour, IPage
     private void ClearPlayerParty()
     {
         _ownedTurrets.Clear();
+        _acquiredCharacterIds.Clear();
         _startingTurret = null;
         _startingCharacterSelectionPending = false;
         _startingCharacterChoices.Clear();
@@ -1957,6 +1993,48 @@ public class DungeonPage : MonoBehaviour, IPage
             character.ConfigurePartySlot(index, partySlotColors[index]);
             character.gameObject.SetActive(false);
         }
+    }
+
+    private bool CanAcquireCharacterReward(CharacterSO definition)
+    {
+        return IsCharacterOwnedForDungeon(definition) &&
+               !HasAcquiredCharacter(definition);
+    }
+
+    private bool HasAcquiredCharacter(CharacterSO definition)
+    {
+        if (definition == null)
+            return false;
+
+        string characterId = definition.CharacterId;
+        if (!string.IsNullOrWhiteSpace(characterId) &&
+            _acquiredCharacterIds.Contains(characterId))
+        {
+            return true;
+        }
+
+        foreach (CharacterRuntime character in _ownedTurrets)
+        {
+            CharacterSO ownedDefinition = character?.Definition;
+            if (ReferenceEquals(ownedDefinition, definition) ||
+                ownedDefinition != null &&
+                string.Equals(
+                    ownedDefinition.CharacterId,
+                    characterId,
+                    StringComparison.Ordinal))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private void RecordAcquiredCharacter(CharacterSO definition)
+    {
+        string characterId = definition?.CharacterId;
+        if (!string.IsNullOrWhiteSpace(characterId))
+            _acquiredCharacterIds.Add(characterId);
     }
 
     private void InitializeEventTab()
@@ -2580,10 +2658,10 @@ public sealed class DungeonEventTab
             }
         }
 
-        foreach (CharacterSO definition in _page.AvailableTurrets)
+        foreach (CharacterSO definition in
+                 _page.GetAvailableCharacterRewardDefinitions())
         {
-            if (definition != null)
-                candidates.Add(RewardOption.CreateNewTurret(definition));
+            candidates.Add(RewardOption.CreateNewTurret(definition));
         }
 
         candidates.Add(RewardOption.CreateEnergyUpgrade(

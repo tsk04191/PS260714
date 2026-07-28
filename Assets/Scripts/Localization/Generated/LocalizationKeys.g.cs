@@ -89,12 +89,16 @@ namespace PS260714.Localization
         public const string SkillFocusEffect = "skill.focus.effect";
         public const string SkillFocusName = "skill.focus.name";
         public const string SkillFocusUsage = "skill.focus.usage";
+        public const string StatusComboDescription = "status.combo.description";
+        public const string StatusComboName = "status.combo.name";
         public const string StatusEmergencyKitDescription = "status.emergency_kit.description";
         public const string StatusEmergencyKitName = "status.emergency_kit.name";
         public const string StatusFireDescription = "status.fire.description";
         public const string StatusFireName = "status.fire.name";
         public const string StatusOpeningDescription = "status.opening.description";
         public const string StatusOpeningName = "status.opening.name";
+        public const string StatusSpeedDescription = "status.speed.description";
+        public const string StatusSpeedName = "status.speed.name";
         public const string StatusStarpowderDescription = "status.starpowder.description";
         public const string StatusStarpowderName = "status.starpowder.name";
         public const string StatusStunDescription = "status.stun.description";

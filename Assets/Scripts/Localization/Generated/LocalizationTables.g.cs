@@ -9,7 +9,7 @@ namespace PS260714.Localization
 {
     public static class GeneratedLocalizationTables
     {
-        public const string SourceHash = "142487306507501bef9f0639e92e6e93b155e361e6bd0c5070ee557c546930c0";
+        public const string SourceHash = "f423d30654052212e6a182917dcf6844f174a6a80b69847cd3de67acfa2df63a";
         public const string ReferenceLocale = "en-US";
 
         private static readonly LocalizationLocaleInfo[] LocaleData =
@@ -283,6 +283,10 @@ namespace PS260714.Localization
                 { "character.mirinae.description", new LocalizationEntry("\uC544\uCE74\uB370\uBBF8 \uCC9C\uBB38\uD559\uBD80 \uBD80\uC7A5", "body") },
                 { "status.starpowder.name", new LocalizationEntry("\uBCC4\uAC00\uB8E8", "title") },
                 { "status.starpowder.description", new LocalizationEntry("\uD6A8\uACFC \uC5C6\uC774 \uC2A4\uD0DD\uB9CC \uB204\uC801\uB418\uB294 \uC601\uAD6C \uC0C1\uD0DC\uC785\uB2C8\uB2E4.", "tooltip") },
+                { "status.combo.name", new LocalizationEntry("\uC5F0\uACA9", "title") },
+                { "status.combo.description", new LocalizationEntry("\uD6A8\uACFC \uC5C6\uC774 \uC2A4\uD0DD\uB9CC \uB204\uC801\uB418\uB294 \uC601\uAD6C \uC0C1\uD0DC\uC785\uB2C8\uB2E4.", "tooltip") },
+                { "status.speed.name", new LocalizationEntry("\uC18D\uB3C4", "title") },
+                { "status.speed.description", new LocalizationEntry("\uACF5\uACA9 \uC18D\uB3C4 \uC0C1\uC2B9", "tooltip") },
             };
 
         private static readonly Dictionary<string, LocalizationEntry>
@@ -547,6 +551,10 @@ namespace PS260714.Localization
                 { "character.mirinae.description", new LocalizationEntry(" Director of the Astronomy of Academy", "body") },
                 { "status.starpowder.name", new LocalizationEntry("Star Dust", "title") },
                 { "status.starpowder.description", new LocalizationEntry("A permanent status that only stores stacks.", "tooltip") },
+                { "status.combo.name", new LocalizationEntry("Combo", "title") },
+                { "status.combo.description", new LocalizationEntry("A permanent status that only stores stacks.", "tooltip") },
+                { "status.speed.name", new LocalizationEntry("Speed", "title") },
+                { "status.speed.description", new LocalizationEntry("Attack speed glow", "tooltip") },
             };
 
         private static readonly IReadOnlyDictionary<string, LocalizationEntry>

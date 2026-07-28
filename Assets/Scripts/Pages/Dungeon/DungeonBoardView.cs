@@ -374,8 +374,34 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
             GetOrCreateAllyVfxHandle(target.Ally);
         BattleVfxAnchorSnapshot allyAnchor = default;
         if (target.Ally is IBattleVfxAnchorProvider provider)
+        {
             provider.TryGetVfxAnchor(anchorType, out allyAnchor);
+            if (!allyAnchor.HasFrame &&
+                TryGetVfxTileFrame(out RectTransform tileFrame))
+            {
+                BattleVfxUiAnchorUtility.TryAttachScreenFrame(
+                    allyAnchor,
+                    tileFrame,
+                    out allyAnchor);
+            }
+        }
         return new BattleVfxTarget(allyHandle, target, allyAnchor);
+    }
+
+    private bool TryGetVfxTileFrame(out RectTransform tileFrame)
+    {
+        foreach (DungeonTileView tile in _tiles)
+        {
+            if (tile == null || !tile.gameObject.activeInHierarchy)
+                continue;
+
+            tileFrame = tile.transform as RectTransform;
+            if (tileFrame != null)
+                return true;
+        }
+
+        tileFrame = null;
+        return false;
     }
 
     public void Initialize(int gridSize, int stackSize)
@@ -859,8 +885,6 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
     {
         if (source == null || targets == null || targets.Count == 0)
             return Array.Empty<EnemyRuntime>();
-        if (numericConditions == null || numericConditions.Count == 0)
-            return targets;
 
         List<EnemyRuntime> result = new(targets.Count);
         foreach (EnemyRuntime target in targets)
@@ -888,13 +912,13 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
     {
         if (source == null || targets == null || targets.Count == 0)
             return Array.Empty<IBattleCharacter>();
-        if (numericConditions == null || numericConditions.Count == 0)
-            return targets;
 
         List<IBattleCharacter> result = new(targets.Count);
         foreach (IBattleCharacter target in targets)
         {
-            if (target != null && MatchesCharacterConditions(
+            if (target != null &&
+                _battleCharacters.Contains(target) &&
+                MatchesCharacterConditions(
                     source,
                     target,
                     conditionMatchMode,
@@ -1324,10 +1348,10 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
         IReadOnlyList<EnemyRuntime> targets,
         CharacterStatusRemovalTarget removalTarget,
         StatusEffectSO statusEffect,
-        int removalCount,
+        CharacterStatusRemovalAmount removalAmount,
         bool showAttackRange)
     {
-        if (targets == null || removalCount < 0)
+        if (targets == null)
             return false;
 
         bool removedAny = false;
@@ -1343,7 +1367,7 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
             int removed = tile.TryRemoveStatusFromTop(
                 removalTarget,
                 statusEffect,
-                removalCount,
+                removalAmount,
                 TryDamageTile);
             if (removed <= 0)
                 continue;
@@ -1362,9 +1386,9 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
         IReadOnlyList<IBattleCharacter> targets,
         CharacterStatusRemovalTarget removalTarget,
         StatusEffectSO statusEffect,
-        int removalCount)
+        CharacterStatusRemovalAmount removalAmount)
     {
-        if (targets == null || removalCount < 0)
+        if (targets == null)
             return false;
 
         bool removedAny = false;
@@ -1377,7 +1401,7 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
             removedAny |= target.RemoveStatusEffects(
                 removalTarget,
                 statusEffect,
-                removalCount) > 0;
+                removalAmount) > 0;
         }
 
         return removedAny;

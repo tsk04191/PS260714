@@ -95,6 +95,15 @@ public sealed class StatusEffectEditorTests
             "공격력 비율",
             "고정");
         AssertOptions(
+            "StatusRemovalTargetOptions",
+            "지정 상태",
+            "무작위 상태",
+            "모든 상태");
+        AssertOptions(
+            "StatusRemovalAmountModeOptions",
+            "고정 스택",
+            "현재 스택 비율");
+        AssertOptions(
             "StatTypeOptions",
             "공격력",
             "공격 속도",
@@ -255,10 +264,10 @@ public sealed class StatusEffectEditorTests
                 $"{method.Name} must not mutate UI on domain reload.");
         }
         Assert.That(
-            typeof(FireStatusEffectAssetGenerator).GetMethod(
-                "GenerateFromMenu",
-                BindingFlags.Public | BindingFlags.Static),
-            Is.Null);
+            typeof(StatusEffectEditorWindow).Assembly.GetType(
+                "FireStatusEffectAssetGenerator"),
+            Is.Null,
+            "Legacy 2D fire VFX generator must not return.");
     }
 
     [Test]
@@ -793,7 +802,7 @@ public sealed class BattleEffectCoreTests
         public int RemoveStatusEffects(
             CharacterStatusRemovalTarget removalTarget,
             StatusEffectSO statusEffect,
-            int removalCount)
+            CharacterStatusRemovalAmount removalAmount)
         {
             return 0;
         }

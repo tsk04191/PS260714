@@ -357,6 +357,9 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
     private bool _lastAttackAttempted;
     private bool _lastAttackSucceeded;
     private AbilityTargetSelection _lastAttackTargets;
+    private AbilityTargetSelection _previousAttackAttemptTargets;
+    private readonly Dictionary<int, AbilityTargetSelection>
+        _retainedAttackTargets = new();
 
     public CharacterSO Definition => original;
     public CharacterData Data { get; private set; }
@@ -627,6 +630,12 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
         IActiveSkillResource activeSkillResource,
         IBattleBoard board)
     {
+        if (!ReferenceEquals(_board, board))
+        {
+            _retainedAttackTargets.Clear();
+            _previousAttackAttemptTargets = default;
+        }
+
         if (_board != null)
         {
             _board.StatusApplied -= HandleStatusApplied;
@@ -770,6 +779,8 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
         _lastAttackAttempted = false;
         _lastAttackSucceeded = false;
         _lastAttackTargets = default;
+        _previousAttackAttemptTargets = default;
+        _retainedAttackTargets.Clear();
         ResetPassiveCooldowns();
         TotalDamageDealt = 0;
         EnsureSdInfoView();
@@ -934,15 +945,26 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
         if (removalCount < 0)
             return 0;
 
+        return RemoveStatusEffects(
+            removalTarget,
+            statusEffect,
+            CharacterStatusRemovalAmount.Fixed(removalCount));
+    }
+
+    public int RemoveStatusEffects(
+        CharacterStatusRemovalTarget removalTarget,
+        StatusEffectSO statusEffect,
+        CharacterStatusRemovalAmount removalAmount)
+    {
         float previousAttackSpeed = GetEffectiveAttackSpeed();
         int removed = removalTarget switch
         {
             CharacterStatusRemovalTarget.Single =>
-                RemoveSingleStatusEffect(statusEffect, removalCount),
+                RemoveSingleStatusEffect(statusEffect, removalAmount),
             CharacterStatusRemovalTarget.Random =>
-                RemoveRandomStatusEffect(removalCount),
+                RemoveRandomStatusEffect(removalAmount),
             CharacterStatusRemovalTarget.All =>
-                RemoveAllStatusEffects(removalCount),
+                RemoveAllStatusEffects(removalAmount),
             _ => 0
         };
         if (removed > 0)
@@ -957,15 +979,20 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
 
     private int RemoveSingleStatusEffect(
         StatusEffectSO definition,
-        int removalCount)
+        CharacterStatusRemovalAmount removalAmount)
     {
         if (definition == null || !definition.Removable)
             return 0;
 
-        return RemoveStatusStacks(definition.StatusId, removalCount);
+        int removalCount = removalAmount.Resolve(
+            GetStatusStackCount(definition));
+        return removalCount > 0
+            ? RemoveStatusStacks(definition.StatusId, removalCount)
+            : 0;
     }
 
-    private int RemoveRandomStatusEffect(int removalCount)
+    private int RemoveRandomStatusEffect(
+        CharacterStatusRemovalAmount removalAmount)
     {
         List<StatusEffectSO> candidates = new();
         foreach (StatusEffectRuntimeState state in _statusEffects.Values)
@@ -981,10 +1008,11 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
             ? 0
             : RemoveSingleStatusEffect(
                 candidates[UnityEngine.Random.Range(0, candidates.Count)],
-                removalCount);
+                removalAmount);
     }
 
-    private int RemoveAllStatusEffects(int removalCount)
+    private int RemoveAllStatusEffects(
+        CharacterStatusRemovalAmount removalAmount)
     {
         int removed = 0;
         List<string> statusIds = new(_statusEffects.Keys);
@@ -996,9 +1024,13 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
                 state.Definition != null &&
                 state.Definition.IncludedInAllRemoval)
             {
-                removed += RemoveStatusStacks(
-                    statusId,
-                    removalCount);
+                int removalCount = removalAmount.Resolve(state.StackCount);
+                if (removalCount > 0)
+                {
+                    removed += RemoveStatusStacks(
+                        statusId,
+                        removalCount);
+                }
             }
         }
 
@@ -1601,7 +1633,7 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
                 selected.StatusStacks,
                 selected.StatusRemovalEffect,
                 selected.StatusRemovalTarget,
-                selected.StatusRemovalCount);
+                selected.StatusRemovalAmount);
         RecordDamageDealt(effectResult.DamageDealt);
         if (effectResult.Succeeded)
             PlayActionSfx(selected.AudioClip);
@@ -1745,7 +1777,7 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
                             actionDefinition.StatusStacks,
                             actionDefinition.StatusRemovalEffect,
                             actionDefinition.StatusRemovalTarget,
-                            actionDefinition.StatusRemovalCount);
+                            actionDefinition.StatusRemovalAmount);
                 totalDamage += effectResult.DamageDealt;
                 previousAttempted = effectResult.Attempted;
                 previousSucceeded = effectResult.Succeeded;
@@ -1896,9 +1928,13 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
         int totalDamage = 0;
         AbilityTargetSelection previousTargets = default;
         AbilityTargetSelection lastAttemptedTargets = default;
-        foreach (CharacterAttackDefinition definition in
-                 Data.AttackDefinitions)
+        AbilityTargetSelection lastAttemptedSelectedTargets = default;
+        for (int definitionIndex = 0;
+             definitionIndex < Data.AttackDefinitions.Count;
+             definitionIndex++)
         {
+            CharacterAttackDefinition definition =
+                Data.AttackDefinitions[definitionIndex];
             if (definition == null ||
                 !definition.HasSection(CharacterAttackSectionType.Subject) ||
                 !definition.HasSection(CharacterAttackSectionType.Ability))
@@ -1925,20 +1961,17 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
             int abilityDamage = Data.CalculateAttackDamage(
                 definition,
                 GetEffectivePowerMultiplier());
-            AbilityTargetSelection targets;
+            AbilityTargetSelection selectedTargets =
+                SelectAttackDefinitionTargets(
+                    board,
+                    definition,
+                    definitionIndex,
+                    actionCondition,
+                    previousTargets);
+            AbilityTargetSelection targets = selectedTargets;
             BattleEffectResult effectResult;
             if (definition.HasExplicitEffects)
             {
-                targets = SelectCustomAbilityTargets(
-                    board,
-                    definition.TargetFaction,
-                    definition.Subject,
-                    definition.SubjectMetric,
-                    definition.SubjectCount,
-                    actionCondition.HasNumericConditions,
-                    actionCondition.MatchMode,
-                    actionCondition.NumericConditions,
-                    previousTargets);
                 if (!CharacterConditionEvaluator.AllowsAction(
                         this,
                         actionCondition.MatchMode,
@@ -1974,35 +2007,41 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
             }
             else
             {
-                bool succeeded = ExecuteCustomAbility(
-                    board,
-                    definition.TargetFaction,
-                    definition.Subject,
-                    definition.SubjectMetric,
-                    definition.SubjectCount,
-                    actionCondition.HasNumericConditions,
-                    actionCondition.MatchMode,
-                    actionCondition.NumericConditions,
-                    definition.DamageType,
-                    abilityDamage,
-                    definition.AppliedStatusEffect,
-                    definition.StatusDuration,
-                    definition.StatusStacks,
-                    definition.StatusRemovalEffect,
-                    definition.StatusRemovalTarget,
-                    definition.StatusRemovalCount,
-                    definition.AreaOffsets,
-                    previousTargets,
-                    out targets,
-                    out int damageDealt);
-                bool attempted = targets.Count > 0 &&
-                    HasUsableAbilityValue(
+                if (!CharacterConditionEvaluator.AllowsAction(
+                        this,
+                        actionCondition.MatchMode,
+                        actionCondition.NumericConditions,
+                        targets.Count > 0))
+                {
+                    effectResult = default;
+                }
+                else
+                {
+                    targets = ExpandCustomAbilityArea(
+                        board,
+                        targets,
+                        definition.AreaOffsets);
+                    bool succeeded = ExecuteCustomAbilityOnTargets(
+                        board,
+                        targets,
                         definition.DamageType,
-                        abilityDamage);
-                effectResult = new BattleEffectResult(
-                    attempted,
-                    succeeded,
-                    damageDealt);
+                        abilityDamage,
+                        definition.AppliedStatusEffect,
+                        definition.StatusDuration,
+                        definition.StatusStacks,
+                        definition.StatusRemovalEffect,
+                        definition.StatusRemovalTarget,
+                        definition.StatusRemovalAmount,
+                        out int damageDealt);
+                    bool attempted = targets.Count > 0 &&
+                        HasUsableAbilityValue(
+                            definition.DamageType,
+                            abilityDamage);
+                    effectResult = new BattleEffectResult(
+                        attempted,
+                        succeeded,
+                        damageDealt);
+                }
             }
 
             totalDamage += effectResult.DamageDealt;
@@ -2010,7 +2049,11 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
             previousSucceeded = effectResult.Succeeded;
             previousTargets = effectResult.Attempted ? targets : default;
             if (effectResult.Attempted)
+            {
                 lastAttemptedTargets = targets;
+                if (selectedTargets.Count > 0)
+                    lastAttemptedSelectedTargets = selectedTargets;
+            }
             anyAttempted |= effectResult.Attempted;
             anySucceeded |= effectResult.Succeeded;
             if (effectResult.Succeeded)
@@ -2025,20 +2068,106 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
         RecordDamageDealt(totalDamage);
         if (anyAttempted)
         {
+            CharacterPassiveAttackTargetRelation attackTargetRelation =
+                ResolveAttackTargetRelation(
+                    _previousAttackAttemptTargets,
+                    lastAttemptedSelectedTargets);
             ShowAttackSd();
             ExecuteCustomPassives(
                 board,
                 anyAttempted,
-                anySucceeded);
+                anySucceeded,
+                attackTargetRelation);
+            if (lastAttemptedSelectedTargets.Count > 0)
+            {
+                _previousAttackAttemptTargets =
+                    ReuseAbilityTargets(lastAttemptedSelectedTargets);
+            }
         }
 
         return anyAttempted || Data.AttackDefinitions.Count > 0;
     }
 
+    private AbilityTargetSelection SelectAttackDefinitionTargets(
+        IBattleBoard board,
+        CharacterAttackDefinition definition,
+        int definitionIndex,
+        CharacterActionConditionData actionCondition,
+        AbilityTargetSelection inheritedTargets)
+    {
+        bool retainsTarget = definition.TargetRetentionMode ==
+            CharacterAttackTargetRetentionMode.LockUntilInvalid &&
+            CharacterAttackDefinition.SupportsTargetRetention(
+                definition.Subject,
+                definition.SubjectCount);
+        if (!retainsTarget)
+        {
+            _retainedAttackTargets.Remove(definitionIndex);
+            return SelectCustomAbilityTargets(
+                board,
+                definition.TargetFaction,
+                definition.Subject,
+                definition.SubjectMetric,
+                definition.SubjectCount,
+                actionCondition.HasNumericConditions,
+                actionCondition.MatchMode,
+                actionCondition.NumericConditions,
+                inheritedTargets);
+        }
+
+        IReadOnlyList<CharacterNumericCondition> conditions =
+            actionCondition.HasNumericConditions
+                ? actionCondition.NumericConditions
+                : System.Array.Empty<CharacterNumericCondition>();
+        if (_retainedAttackTargets.TryGetValue(
+                definitionIndex,
+                out AbilityTargetSelection retainedTargets))
+        {
+            AbilityTargetSelection validTargets =
+                retainedTargets.Faction == CharacterTargetFaction.Ally
+                    ? AbilityTargetSelection.Allies(
+                        board.FilterAlliedCharacters(
+                            this,
+                            retainedTargets.AllyTargets,
+                            actionCondition.MatchMode,
+                            conditions))
+                    : AbilityTargetSelection.Enemies(
+                        board.FilterCharacterTargets(
+                            this,
+                            retainedTargets.EnemyTargets,
+                            actionCondition.MatchMode,
+                            conditions));
+            if (validTargets.Count == 1)
+                return validTargets;
+
+            _retainedAttackTargets.Remove(definitionIndex);
+        }
+
+        AbilityTargetSelection selectedTargets =
+            SelectCustomAbilityTargets(
+                board,
+                definition.TargetFaction,
+                definition.Subject,
+                definition.SubjectMetric,
+                definition.SubjectCount,
+                actionCondition.HasNumericConditions,
+                actionCondition.MatchMode,
+                actionCondition.NumericConditions,
+                inheritedTargets);
+        if (selectedTargets.Count == 1)
+        {
+            _retainedAttackTargets[definitionIndex] =
+                ReuseAbilityTargets(selectedTargets);
+        }
+
+        return selectedTargets;
+    }
+
     private void ExecuteCustomPassives(
         IBattleBoard board,
         bool attackAttempted,
-        bool attackSucceeded)
+        bool attackSucceeded,
+        CharacterPassiveAttackTargetRelation attackTargetRelation)
     {
         if (!Data.HasCustomPassiveDefinitions)
             return;
@@ -2049,6 +2178,7 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
                  Data.PassiveDefinitions)
         {
             if (definition == null ||
+                definition.IsEmptyPlaceholder ||
                 definition.Trigger != CharacterPassiveTrigger.OnAttack ||
                 !definition.HasSection(
                     CharacterPassiveSectionType.Ability))
@@ -2062,6 +2192,12 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
                     actionCondition.Linkage,
                     attackAttempted,
                     attackSucceeded))
+            {
+                continue;
+            }
+            if (!MatchesAttackTargetRelation(
+                    definition,
+                    attackTargetRelation))
             {
                 continue;
             }
@@ -2081,6 +2217,46 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
             NotifyPassiveActivated();
     }
 
+    private static CharacterPassiveAttackTargetRelation
+        ResolveAttackTargetRelation(
+            AbilityTargetSelection previousTargets,
+            AbilityTargetSelection currentTargets)
+    {
+        if (previousTargets.Count == 0 || currentTargets.Count == 0)
+            return CharacterPassiveAttackTargetRelation.Any;
+        if (previousTargets.Faction != currentTargets.Faction)
+        {
+            return CharacterPassiveAttackTargetRelation
+                .DifferentFromPreviousAttack;
+        }
+
+        bool sameTarget = currentTargets.Faction ==
+                          CharacterTargetFaction.Ally
+            ? ReferenceEquals(
+                previousTargets.AllyTargets[0],
+                currentTargets.AllyTargets[0])
+            : ReferenceEquals(
+                previousTargets.EnemyTargets[0],
+                currentTargets.EnemyTargets[0]);
+        return sameTarget
+            ? CharacterPassiveAttackTargetRelation.SameAsPreviousAttack
+            : CharacterPassiveAttackTargetRelation
+                .DifferentFromPreviousAttack;
+    }
+
+    private static bool MatchesAttackTargetRelation(
+        CharacterPassiveDefinition definition,
+        CharacterPassiveAttackTargetRelation actualRelation)
+    {
+        if (definition == null ||
+            !definition.HasAttackTargetRelationCondition)
+        {
+            return true;
+        }
+
+        return definition.AttackTargetRelation == actualRelation;
+    }
+
     private void TickCooldownPassives(float deltaTime, IBattleBoard board)
     {
         if (deltaTime <= 0f || board == null || Data == null ||
@@ -2095,6 +2271,7 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
                  Data.PassiveDefinitions)
         {
             if (definition == null ||
+                definition.IsEmptyPlaceholder ||
                 definition.Trigger != CharacterPassiveTrigger.OnCooldown ||
                 !definition.HasSection(CharacterPassiveSectionType.Ability))
             {
@@ -2145,6 +2322,9 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
                  Data.PassiveDefinitions)
         {
             if (definition != null &&
+                !definition.IsEmptyPlaceholder &&
+                definition.HasSection(
+                    CharacterPassiveSectionType.Ability) &&
                 definition.Trigger == CharacterPassiveTrigger.OnCooldown)
             {
                 _passiveCooldowns[definition] = definition.Cooldown;
@@ -2167,6 +2347,7 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
                  Data.PassiveDefinitions)
         {
             if (definition == null ||
+                definition.IsEmptyPlaceholder ||
                 definition.Trigger !=
                 CharacterPassiveTrigger.OnStatusAcquired ||
                 !MatchesStatusTarget(
@@ -2212,6 +2393,7 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
                  Data.PassiveDefinitions)
         {
             if (definition == null ||
+                definition.IsEmptyPlaceholder ||
                 definition.Trigger != CharacterPassiveTrigger.OnKill ||
                 !MatchesKillSource(definition, eventData.Killer) ||
                 !definition.HasSection(CharacterPassiveSectionType.Ability))
@@ -2438,7 +2620,7 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
                 definition.StatusStacks,
                 definition.StatusRemovalEffect,
                 definition.StatusRemovalTarget,
-                definition.StatusRemovalCount,
+                definition.StatusRemovalAmount,
                 definition.AreaOffsets,
                 inheritedTargets,
                 out AbilityTargetSelection targets,
@@ -2474,7 +2656,7 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
         float statusStacks,
         StatusEffectSO statusRemovalEffect,
         CharacterStatusRemovalTarget statusRemovalTarget,
-        int statusRemovalCount,
+        CharacterStatusRemovalAmount statusRemovalAmount,
         IReadOnlyList<CharacterTargetAreaOffset> areaOffsets,
         AbilityTargetSelection inheritedTargets,
         out AbilityTargetSelection targets,
@@ -2512,7 +2694,7 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
             statusStacks,
             statusRemovalEffect,
             statusRemovalTarget,
-            statusRemovalCount,
+            statusRemovalAmount,
             out damageDealt);
     }
 
@@ -2721,7 +2903,7 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
         float statusStacks,
         StatusEffectSO statusRemovalEffect,
         CharacterStatusRemovalTarget statusRemovalTarget,
-        int statusRemovalCount,
+        CharacterStatusRemovalAmount statusRemovalAmount,
         out int damageDealt)
     {
         damageDealt = 0;
@@ -2736,13 +2918,13 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
                     targets.AllyTargets,
                     statusRemovalTarget,
                     statusRemovalEffect,
-                    statusRemovalCount)
+                    statusRemovalAmount)
                 : board.TryRemoveCharacterStatus(
                     this,
                     targets.EnemyTargets,
                     statusRemovalTarget,
                     statusRemovalEffect,
-                    statusRemovalCount,
+                    statusRemovalAmount,
                     !targets.RangeAlreadyShown);
         }
 
@@ -2796,7 +2978,7 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
         float statusStacks,
         StatusEffectSO statusRemovalEffect,
         CharacterStatusRemovalTarget statusRemovalTarget,
-        int statusRemovalCount)
+        CharacterStatusRemovalAmount statusRemovalAmount)
     {
         List<EnemyRuntime> livingTargets = new();
         if (targets.Faction == CharacterTargetFaction.Enemy)
@@ -2823,7 +3005,7 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
             statusStacks,
             statusRemovalEffect,
             statusRemovalTarget,
-            statusRemovalCount,
+            statusRemovalAmount,
             out int damageDealt);
         if (succeeded &&
             board is IBattlePresentationEventPublisher publisher)
@@ -4001,13 +4183,13 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
         _passiveIconImage = EnsureAbilityIcon(
             "grpPassiveAbilityIcon",
             "imgPassiveAbilityIcon",
-            new Vector2(-8f, -6f),
+            new Vector2(-62f, -6f),
             CharacterAbilityIconKind.Passive,
             out _passiveIconFrame);
         _activeSkillIconImage = EnsureAbilityIcon(
             "grpActiveAbilityIcon",
             "imgActiveAbilityIcon",
-            new Vector2(-8f, -60f),
+            new Vector2(-8f, -6f),
             CharacterAbilityIconKind.Active,
             out _activeSkillIconFrame);
         RefreshAbilityIcons();
