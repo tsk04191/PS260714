@@ -237,7 +237,8 @@ public sealed class CharacterEditorWindow : EditorWindow
     {
         "앞선 공격이 성공할 경우",
         "앞선 공격과 동시에",
-        "없음"
+        "없음",
+        "앞선 공격이 성공하지 못한 경우"
     };
 
     private static readonly string[] AttackTargetRetentionModeOptions =
@@ -1477,6 +1478,13 @@ public sealed class CharacterEditorWindow : EditorWindow
                 CharacterPassiveTrigger trigger = triggerProperty != null
                     ? (CharacterPassiveTrigger)triggerProperty.enumValueIndex
                     : CharacterPassiveTrigger.OnAttack;
+                if (trigger != CharacterPassiveTrigger.OnAttack)
+                {
+                    SetEnumValue(
+                        definition,
+                        ActionLinkagePropertyName,
+                        (int)CharacterActionLinkage.None);
+                }
                 if (trigger == CharacterPassiveTrigger.OnStatusAcquired)
                 {
                     DrawAttackEnumPopup(
@@ -1566,10 +1574,6 @@ public sealed class CharacterEditorWindow : EditorWindow
                 }
                 else if (trigger == CharacterPassiveTrigger.OnKill)
                 {
-                    SetEnumValue(
-                        definition,
-                        ActionLinkagePropertyName,
-                        (int)CharacterActionLinkage.None);
                     SerializedProperty killSourceProperty =
                         definition.FindPropertyRelative(
                             PassiveKillSourcePropertyName);
@@ -1611,10 +1615,6 @@ public sealed class CharacterEditorWindow : EditorWindow
                 else if (trigger ==
                          CharacterPassiveTrigger.OnAttackTargetSelected)
                 {
-                    SetEnumValue(
-                        definition,
-                        ActionLinkagePropertyName,
-                        (int)CharacterActionLinkage.None);
                     EditorGUILayout.HelpBox(
                         "기본 공격 대상이 확정된 직후, 공격 효과가 실행되기 " +
                         "전에 패시브 발동을 시도합니다. 대상 설정의 " +
@@ -1757,7 +1757,7 @@ public sealed class CharacterEditorWindow : EditorWindow
                 SetEnumValue(
                     definition,
                     ActionLinkagePropertyName,
-                    (int)CharacterActionLinkage.PreviousAttackSucceeded);
+                    (int)CharacterActionLinkage.None);
                 break;
 
             case CharacterPassiveSectionType.Condition:

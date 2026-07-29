@@ -15,6 +15,8 @@ public sealed class CharacterP0RegressionTests
         "fixture:cooldown-cleanse";
     private const string AislingAssetPath =
         "fixture:previous-target-status";
+    private const string IsoldeAssetPath =
+        "Assets/Resources/Characters/2_Isolde.asset";
     private const string EmergencyKitAssetPath =
         "Assets/Resources/StatusEffects/EmergencyKit.asset";
     private const string FireAssetPath =
@@ -1030,6 +1032,169 @@ public sealed class CharacterP0RegressionTests
         Assert.That(board.CharacterTargetSelectionCallCount, Is.EqualTo(2));
         Assert.That(board.DamageTargetSnapshots[0], Does.Contain(firstTarget));
         Assert.That(board.DamageTargetSnapshots[1], Does.Contain(secondTarget));
+    }
+
+    [Test]
+    public void FailedAttackLinkage_UsesFallbackOnlyAfterPreviousFailure()
+    {
+        CharacterSO definition = CreateBaseCharacterFixture(
+            "FailedAttackFallbackFixture");
+        SerializedObject serialized = new(definition);
+        SerializedProperty attacks =
+            serialized.FindProperty("attackDefinitions");
+        attacks.arraySize = 2;
+        SerializedProperty fallback = attacks.GetArrayElementAtIndex(1);
+        SetSections(
+            fallback.FindPropertyRelative("sections"),
+            (int)CharacterAttackSectionType.Linkage,
+            (int)CharacterAttackSectionType.Subject,
+            (int)CharacterAttackSectionType.Ability);
+        fallback.FindPropertyRelative("linkage").enumValueIndex =
+            (int)CharacterActionLinkage.PreviousAttackFailed;
+        fallback.FindPropertyRelative("targetFaction").enumValueIndex =
+            (int)CharacterTargetFaction.Enemy;
+        fallback.FindPropertyRelative("subject").enumValueIndex =
+            (int)CharacterAttackSubject.Random;
+        fallback.FindPropertyRelative("subjectCount").intValue = 1;
+        fallback.FindPropertyRelative("damageType").enumValueIndex =
+            (int)CharacterAttackDamageType.Fixed;
+        fallback.FindPropertyRelative("damageAmountMode").enumValueIndex =
+            (int)CharacterDamageAmountMode.Fixed;
+        fallback.FindPropertyRelative("damageAmount").floatValue = 2f;
+        SerializedProperty effects =
+            fallback.FindPropertyRelative("effects");
+        effects.arraySize = 1;
+        ConfigureFixedDamageEffect(
+            effects.GetArrayElementAtIndex(0),
+            CharacterEffectTargetMode.InheritAction,
+            2f);
+        serialized.ApplyModifiedPropertiesWithoutUndo();
+
+        CharacterDefinitionValidationResult validation =
+            CharacterDefinitionValidator.Validate(definition);
+        Assert.That(
+            validation.IsValid,
+            Is.True,
+            string.Join("\n", validation.Diagnostics));
+
+        EnemyRuntime fallbackTarget = CreateEnemyRuntime();
+        FakeBattleBoard fallbackBoard = new()
+        {
+            LivingEnemyCountValue = 1,
+        };
+        fallbackBoard.PlannedEnemySelections.Enqueue(
+            Array.Empty<EnemyRuntime>());
+        fallbackBoard.PlannedEnemySelections.Enqueue(
+            new[] { fallbackTarget });
+        CharacterRuntime fallbackCharacter = CreateCharacter(definition);
+        fallbackCharacter.BindBattle(null, fallbackBoard);
+
+        fallbackCharacter.TickBattle(
+            fallbackCharacter.Data.AttackCooldown,
+            fallbackBoard);
+
+        Assert.That(
+            fallbackBoard.CharacterTargetSelectionCallCount,
+            Is.EqualTo(2));
+        Assert.That(fallbackBoard.DamageAmounts, Is.EqualTo(new[] { 2 }));
+        Assert.That(
+            fallbackBoard.DamageTargetSnapshots[0],
+            Does.Contain(fallbackTarget));
+
+        EnemyRuntime primaryTarget = CreateEnemyRuntime();
+        EnemyRuntime unusedFallbackTarget = CreateEnemyRuntime();
+        FakeBattleBoard primaryBoard = new()
+        {
+            LivingEnemyCountValue = 2,
+        };
+        primaryBoard.PlannedEnemySelections.Enqueue(
+            new[] { primaryTarget });
+        primaryBoard.PlannedEnemySelections.Enqueue(
+            new[] { unusedFallbackTarget });
+        CharacterRuntime primaryCharacter = CreateCharacter(definition);
+        primaryCharacter.BindBattle(null, primaryBoard);
+
+        primaryCharacter.TickBattle(
+            primaryCharacter.Data.AttackCooldown,
+            primaryBoard);
+
+        Assert.That(
+            primaryBoard.CharacterTargetSelectionCallCount,
+            Is.EqualTo(1));
+        Assert.That(primaryBoard.DamageAmounts, Is.EqualTo(new[] { 1 }));
+        Assert.That(
+            primaryBoard.DamageTargetSnapshots[0],
+            Does.Contain(primaryTarget));
+        Assert.That(primaryBoard.PlannedEnemySelections, Has.Count.EqualTo(1));
+    }
+
+    [Test]
+    public void IsoldeAsset_UsesRandomBloodFallbackAfterPrimaryFailure()
+    {
+        CharacterSO definition =
+            LoadAsset<CharacterSO>(IsoldeAssetPath);
+
+        Assert.That(definition.PassiveDefinitions, Is.Not.Empty);
+        Assert.That(
+            definition.PassiveDefinitions[0].Linkage,
+            Is.EqualTo(CharacterActionLinkage.None));
+        Assert.That(definition.AttackDefinitions, Has.Count.EqualTo(2));
+        CharacterAttackDefinition primary =
+            definition.AttackDefinitions[0];
+        CharacterAttackDefinition fallback =
+            definition.AttackDefinitions[1];
+        Assert.That(
+            primary.HasSection(CharacterAttackSectionType.Linkage),
+            Is.False);
+        Assert.That(
+            fallback.HasSection(CharacterAttackSectionType.Linkage),
+            Is.True);
+        Assert.That(
+            fallback.Linkage,
+            Is.EqualTo(CharacterActionLinkage.PreviousAttackFailed));
+        Assert.That(
+            fallback.Subject,
+            Is.EqualTo(CharacterAttackSubject.Random));
+        CharacterDefinitionValidationResult validation =
+            CharacterDefinitionValidator.Validate(definition);
+        Assert.That(
+            HasDiagnostic(validation, "passive.linkage_ignored"),
+            Is.False,
+            string.Join("\n", validation.Diagnostics));
+    }
+
+    [Test]
+    public void ActionDefinitions_DefaultLinkageToNone()
+    {
+        Assert.That(
+            new CharacterAttackDefinition().Linkage,
+            Is.EqualTo(CharacterActionLinkage.None));
+        Assert.That(
+            new CharacterPassiveDefinition().Linkage,
+            Is.EqualTo(CharacterActionLinkage.None));
+        Assert.That(
+            new CharacterSkillDefinition().Linkage,
+            Is.EqualTo(CharacterActionLinkage.None));
+    }
+
+    [Test]
+    public void NonAttackPassive_NormalizesLinkageToNone()
+    {
+        CharacterPassiveDefinition passive = new();
+        SetPrivateField(
+            passive,
+            "trigger",
+            CharacterPassiveTrigger.OnCooldown);
+        SetPrivateField(
+            passive,
+            "linkage",
+            CharacterActionLinkage.PreviousAttackSucceeded);
+
+        passive.Validate();
+
+        Assert.That(
+            passive.Linkage,
+            Is.EqualTo(CharacterActionLinkage.None));
     }
 
     [Test]

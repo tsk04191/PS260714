@@ -16,7 +16,8 @@ public enum CharacterActionLinkage
 {
     PreviousAttackSucceeded = 0,
     SimultaneousWithPreviousAttack = 1,
-    None = 2
+    None = 2,
+    PreviousAttackFailed = 3
 }
 
 public enum CharacterAttackSubject
@@ -1420,7 +1421,8 @@ public sealed class CharacterSkillDefinition :
     private int cost = 1;
     [FormerlySerializedAs("condition")]
     [SerializeField]
-    private CharacterActionLinkage linkage;
+    private CharacterActionLinkage linkage =
+        CharacterActionLinkage.None;
     [SerializeField]
     private CharacterConditionMatchMode conditionMatchMode;
     [SerializeField]
@@ -1612,7 +1614,8 @@ public sealed class CharacterPassiveDefinition :
     private float cooldown = 1f;
     [FormerlySerializedAs("detailCondition")]
     [SerializeField]
-    private CharacterActionLinkage linkage;
+    private CharacterActionLinkage linkage =
+        CharacterActionLinkage.None;
     [SerializeField]
     private CharacterConditionMatchMode conditionMatchMode;
     [SerializeField]
@@ -1765,6 +1768,8 @@ public sealed class CharacterPassiveDefinition :
     public void Validate()
     {
         sections ??= new List<CharacterPassiveSectionType>();
+        if (trigger != CharacterPassiveTrigger.OnAttack)
+            linkage = CharacterActionLinkage.None;
         triggerStatusEffects ??= new List<StatusEffectSO>();
         if (!Enum.IsDefined(
                 typeof(CharacterStatusSelectionScope),
@@ -1867,7 +1872,8 @@ public sealed class CharacterAttackDefinition :
     private AudioClip audioClip;
     [FormerlySerializedAs("condition")]
     [SerializeField]
-    private CharacterActionLinkage linkage;
+    private CharacterActionLinkage linkage =
+        CharacterActionLinkage.None;
     [SerializeField]
     private CharacterConditionMatchMode conditionMatchMode;
     [SerializeField]

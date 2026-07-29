@@ -3993,6 +3993,8 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
                 previousSucceeded,
             CharacterActionLinkage.SimultaneousWithPreviousAttack =>
                 previousAttempted,
+            CharacterActionLinkage.PreviousAttackFailed =>
+                !previousSucceeded,
             _ => true,
         };
     }

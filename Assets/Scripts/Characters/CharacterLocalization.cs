@@ -682,6 +682,10 @@ public static class CharacterLocalization
                 UsesKoreanLocale
                     ? "연동: 앞선 공격과 동시에, "
                     : "Alongside previous attack, ",
+            CharacterActionLinkage.PreviousAttackFailed =>
+                UsesKoreanLocale
+                    ? "연동: 앞선 공격이 성공하지 못했을 때, "
+                    : "When the previous attack does not succeed, ",
             _ => string.Empty,
         };
     }
