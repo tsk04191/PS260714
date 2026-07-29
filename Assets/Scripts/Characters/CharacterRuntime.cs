@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using PS260714.Localization;
 using TMPro;
@@ -217,6 +218,26 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
         }
     }
 
+    private sealed class PendingManualPassiveAction
+    {
+        public IBattleBoard Board { get; }
+        public CharacterPassiveDefinition Definition { get; }
+        public CharacterActionConditionData Condition { get; }
+        public AbilityTargetSelection InheritedTargets { get; }
+
+        public PendingManualPassiveAction(
+            IBattleBoard board,
+            CharacterPassiveDefinition definition,
+            CharacterActionConditionData condition,
+            AbilityTargetSelection inheritedTargets)
+        {
+            Board = board;
+            Definition = definition;
+            Condition = condition;
+            InheritedTargets = inheritedTargets;
+        }
+    }
+
     private sealed class EffectCostReservation
     {
         private readonly IActiveSkillResource _resource;
@@ -336,6 +357,9 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
     private IBattleBoard _board;
     private Image _panelImage;
     private Color _defaultPanelColor;
+    private bool _manualTargetCandidate;
+    private bool _manualTargetSelected;
+    private System.Func<CharacterRuntime, bool> _manualTargetHandler;
     private System.Func<CharacterRuntime, bool> _itemTargetHandler;
     private GameObject _skillTooltip;
     private TextMeshProUGUI _skillTooltipText;
@@ -360,6 +384,14 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
     private AbilityTargetSelection _previousAttackAttemptTargets;
     private readonly Dictionary<int, AbilityTargetSelection>
         _retainedAttackTargets = new();
+    private bool _manualTargetRequestPending;
+    private bool _hasCompletedManualTargetSelection;
+    private bool _manualTargetSelectionCancelled;
+    private AbilityTargetSelection _completedManualTargetSelection;
+    private bool _resumeActiveSkillAfterManualSelection;
+    private readonly List<PendingManualPassiveAction>
+        _pendingManualPassiveActions = new();
+    private bool _replayingManualPassiveAction;
 
     public CharacterSO Definition => original;
     public CharacterData Data { get; private set; }
@@ -580,6 +612,7 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
     private void OnDestroy()
     {
         LocalizationService.LocaleChanged -= HandleLocaleChanged;
+        _manualTargetHandler = null;
         _itemTargetHandler = null;
         BindBattle(null, null);
         SetCharacterData(null);
@@ -781,6 +814,12 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
         _lastAttackTargets = default;
         _previousAttackAttemptTargets = default;
         _retainedAttackTargets.Clear();
+        _manualTargetRequestPending = false;
+        _hasCompletedManualTargetSelection = false;
+        _manualTargetSelectionCancelled = false;
+        _completedManualTargetSelection = default;
+        _resumeActiveSkillAfterManualSelection = false;
+        _pendingManualPassiveActions.Clear();
         ResetPassiveCooldowns();
         TotalDamageDealt = 0;
         EnsureSdInfoView();
@@ -793,6 +832,12 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
             return;
 
         _board = board;
+        if (ProcessPendingManualActions())
+        {
+            RefreshUi();
+            return;
+        }
+
         TickSdActionTimers(deltaTime);
         TickTemporaryBoosts(deltaTime);
 
@@ -814,10 +859,20 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
 
         float disabledDuration = GetDisabledDuration();
         TickGenericStatusEffects(deltaTime, activeDeltaTime);
+        if (_manualTargetRequestPending)
+        {
+            RefreshUi();
+            return;
+        }
         activeDeltaTime -= Mathf.Min(activeDeltaTime, disabledDuration);
 
         if (!passiveCooldownPaused)
             TickCooldownPassives(deltaTime, board);
+        if (_manualTargetRequestPending)
+        {
+            RefreshUi();
+            return;
+        }
 
         if (activeDeltaTime <= 0f)
         {
@@ -969,30 +1024,9 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
         CharacterStatusRemovalAmount removalAmount)
     {
         float previousAttackSpeed = GetEffectiveAttackSpeed();
-        int removed = removalSelection.Target switch
-        {
-            CharacterStatusRemovalTarget.Single =>
-                RemoveSelectedStatusEffects(
-                    removalSelection,
-                    removalAmount),
-            CharacterStatusRemovalTarget.Random =>
-                RemoveRandomStatusEffect(
-                    removalSelection,
-                    removalAmount),
-            CharacterStatusRemovalTarget.All =>
-                RemoveMatchingStatusEffects(
-                    removalSelection,
-                    removalAmount),
-            CharacterStatusRemovalTarget.Buff =>
-                RemoveMatchingStatusEffects(
-                    removalSelection,
-                    removalAmount),
-            CharacterStatusRemovalTarget.Debuff =>
-                RemoveMatchingStatusEffects(
-                    removalSelection,
-                    removalAmount),
-            _ => 0
-        };
+        int removed = RemoveMatchingStatusEffects(
+            removalSelection,
+            removalAmount);
         if (removed > 0)
         {
             AdjustCooldownForAttackSpeedChange(
@@ -1000,29 +1034,6 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
                 GetEffectiveAttackSpeed());
             RefreshUi();
         }
-        return removed;
-    }
-
-    private int RemoveSelectedStatusEffects(
-        CharacterStatusRemovalSelection removalSelection,
-        CharacterStatusRemovalAmount removalAmount)
-    {
-        int removed = 0;
-        HashSet<StatusEffectSO> visited = new();
-        for (int index = 0;
-             index < removalSelection.ExplicitStatusCount;
-             index++)
-        {
-            StatusEffectSO definition =
-                removalSelection.GetExplicitStatus(index);
-            if (definition == null || !visited.Add(definition))
-                continue;
-
-            removed += RemoveSingleStatusEffect(
-                definition,
-                removalAmount);
-        }
-
         return removed;
     }
 
@@ -1040,52 +1051,81 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
             : 0;
     }
 
-    private int RemoveRandomStatusEffect(
-        CharacterStatusRemovalSelection removalSelection,
-        CharacterStatusRemovalAmount removalAmount)
-    {
-        List<StatusEffectSO> candidates = new();
-        foreach (StatusEffectRuntimeState state in _statusEffects.Values)
-        {
-            if (state.Definition != null &&
-                removalSelection.MatchesStatus(state.Definition))
-            {
-                candidates.Add(state.Definition);
-            }
-        }
-
-        return candidates.Count == 0
-            ? 0
-            : RemoveSingleStatusEffect(
-                candidates[UnityEngine.Random.Range(0, candidates.Count)],
-                removalAmount);
-    }
-
     private int RemoveMatchingStatusEffects(
         CharacterStatusRemovalSelection removalSelection,
         CharacterStatusRemovalAmount removalAmount)
     {
+        List<StatusEffectSO> candidates =
+            CollectStatusRemovalCandidates(removalSelection);
+        int selectedCount = CharacterStatusRemovalPick.SelectInPlace(
+            candidates,
+            removalSelection);
         int removed = 0;
-        List<string> statusIds = new(_statusEffects.Keys);
-        foreach (string statusId in statusIds)
+        for (int index = 0; index < selectedCount; index++)
         {
-            if (_statusEffects.TryGetValue(
-                    statusId,
-                    out StatusEffectRuntimeState state) &&
-                state.Definition != null &&
-                removalSelection.MatchesStatus(state.Definition))
-            {
-                int removalCount = removalAmount.Resolve(state.StackCount);
-                if (removalCount > 0)
-                {
-                    removed += RemoveStatusStacks(
-                        statusId,
-                        removalCount);
-                }
-            }
+            removed += RemoveSingleStatusEffect(
+                candidates[index],
+                removalAmount);
         }
 
         return removed;
+    }
+
+    private List<StatusEffectSO> CollectStatusRemovalCandidates(
+        CharacterStatusRemovalSelection removalSelection)
+    {
+        List<StatusEffectSO> candidates = new();
+        HashSet<string> visitedIds = new(StringComparer.Ordinal);
+        if (removalSelection.Target ==
+            CharacterStatusRemovalTarget.Single)
+        {
+            for (int index = 0;
+                 index < removalSelection.ExplicitStatusCount;
+                 index++)
+            {
+                AddStatusRemovalCandidate(
+                    candidates,
+                    visitedIds,
+                    removalSelection.GetExplicitStatus(index),
+                    removalSelection);
+            }
+        }
+        else
+        {
+            foreach (StatusEffectRuntimeState state in
+                     _statusEffects.Values)
+            {
+                AddStatusRemovalCandidate(
+                    candidates,
+                    visitedIds,
+                    state?.Definition,
+                    removalSelection);
+            }
+        }
+
+        candidates.Sort((left, right) => string.Compare(
+            left?.StatusId,
+            right?.StatusId,
+            StringComparison.Ordinal));
+        return candidates;
+    }
+
+    private void AddStatusRemovalCandidate(
+        List<StatusEffectSO> candidates,
+        HashSet<string> visitedIds,
+        StatusEffectSO definition,
+        CharacterStatusRemovalSelection removalSelection)
+    {
+        if (definition == null || !definition.Removable ||
+            string.IsNullOrWhiteSpace(definition.StatusId) ||
+            !visitedIds.Add(definition.StatusId) ||
+            !_statusEffects.ContainsKey(definition.StatusId) ||
+            !removalSelection.MatchesStatus(definition))
+        {
+            return;
+        }
+
+        candidates.Add(definition);
     }
 
     private int RemoveStatusStacks(
@@ -1497,6 +1537,33 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
         _itemTargetHandler = itemTargetHandler;
     }
 
+    public void BindManualTargetHandler(
+        System.Func<CharacterRuntime, bool> manualTargetHandler)
+    {
+        _manualTargetHandler = manualTargetHandler;
+    }
+
+    public void SetManualTargetSelectionState(
+        bool candidate,
+        bool selected)
+    {
+        _manualTargetCandidate = candidate;
+        _manualTargetSelected = candidate && selected;
+        RefreshManualTargetHighlight();
+    }
+
+    private void RefreshManualTargetHighlight()
+    {
+        if (_panelImage == null)
+            return;
+
+        _panelImage.color = !_manualTargetCandidate
+            ? _defaultPanelColor
+            : _manualTargetSelected
+                ? new Color(1f, 0.78f, 0.12f, 0.72f)
+                : new Color(0.2f, 0.9f, 0.5f, 0.5f);
+    }
+
     public bool ApplyAttackSpeedBoost(float multiplier, float duration)
     {
         multiplier = Mathf.Max(1f, multiplier);
@@ -1536,6 +1603,12 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
     {
         if (eventData == null ||
             eventData.button != PointerEventData.InputButton.Left)
+        {
+            return;
+        }
+
+        if (_manualTargetHandler != null &&
+            _manualTargetHandler(this))
         {
             return;
         }
@@ -1582,6 +1655,12 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
         if (kind != CharacterAbilityIconKind.Active)
             return;
 
+        if (_manualTargetHandler != null &&
+            _manualTargetHandler(this))
+        {
+            return;
+        }
+
         if (_itemTargetHandler != null && _itemTargetHandler(this))
             return;
 
@@ -1609,7 +1688,10 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
             return false;
         }
 
-        return TryActivateCustomSkill();
+        bool activated = TryActivateCustomSkill();
+        if (!activated && _manualTargetRequestPending)
+            _resumeActiveSkillAfterManualSelection = true;
+        return activated || _manualTargetRequestPending;
     }
 
     private bool TryActivateCustomSkill()
@@ -1650,6 +1732,8 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
                     costReservation,
                     out int damage))
             {
+                if (_manualTargetRequestPending)
+                    break;
                 continue;
             }
 
@@ -1682,8 +1766,7 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
                 selected.AppliedStatusEffect,
                 selected.StatusDuration,
                 selected.StatusStacks,
-                selected.StatusRemovalEffect,
-                selected.StatusRemovalTarget,
+                selected.StatusRemovalSelection,
                 selected.StatusRemovalAmount);
         RecordDamageDealt(effectResult.DamageDealt);
         if (effectResult.Succeeded)
@@ -1744,6 +1827,8 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
                     groupCostReservation,
                     out int damage))
             {
+                if (_manualTargetRequestPending)
+                    return false;
                 previousAttempted = false;
                 previousSucceeded = false;
                 previousTargets = default;
@@ -1826,8 +1911,7 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
                             actionDefinition.AppliedStatusEffect,
                             actionDefinition.StatusDuration,
                             actionDefinition.StatusStacks,
-                            actionDefinition.StatusRemovalEffect,
-                            actionDefinition.StatusRemovalTarget,
+                            actionDefinition.StatusRemovalSelection,
                             actionDefinition.StatusRemovalAmount);
                 totalDamage += effectResult.DamageDealt;
                 previousAttempted = effectResult.Attempted;
@@ -1914,6 +1998,9 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
             actionCondition.MatchMode,
             actionCondition.NumericConditions,
             inheritedTargets);
+        if (_manualTargetRequestPending)
+            return false;
+
         if (!CharacterConditionEvaluator.AllowsAction(
                 this,
                 actionCondition.MatchMode,
@@ -2016,6 +2103,9 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
                     definitionIndex,
                     actionCondition,
                     previousTargets);
+            if (_manualTargetRequestPending)
+                return false;
+
             AbilityTargetSelection targets = selectedTargets;
             BattleEffectResult effectResult;
             if (!CharacterConditionEvaluator.AllowsAction(
@@ -2081,8 +2171,7 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
                         definition.AppliedStatusEffect,
                         definition.StatusDuration,
                         definition.StatusStacks,
-                        definition.StatusRemovalEffect,
-                        definition.StatusRemovalTarget,
+                        definition.StatusRemovalSelection,
                         definition.StatusRemovalAmount,
                         out int damageDealt);
                     bool attempted = targets.Count > 0 &&
@@ -2452,7 +2541,7 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
                     definition.StatusTarget,
                     eventData.Target.Faction) ||
                 !MatchesTriggerStatus(
-                    definition.TriggerStatusEffect,
+                    definition.TriggerStatusSelection,
                     eventData.StatusEffect) ||
                 !definition.HasSection(CharacterPassiveSectionType.Ability))
             {
@@ -2568,18 +2657,15 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
     }
 
     private static bool MatchesTriggerStatus(
-        StatusEffectSO configuredStatus,
+        CharacterStatusSelection configuredStatuses,
         StatusEffectSO acquiredStatus)
     {
         if (acquiredStatus == null)
             return false;
-        if (configuredStatus == null)
+        if (configuredStatuses.Count == 0)
             return true;
 
-        return string.Equals(
-            configuredStatus.StatusId,
-            acquiredStatus.StatusId,
-            System.StringComparison.Ordinal);
+        return configuredStatuses.Contains(acquiredStatus);
     }
 
     private static AbilityTargetSelection CreateStatusEventTargets(
@@ -2617,6 +2703,21 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
             actionCondition,
             inheritedTargets,
             out damageDealt);
+        bool usesManualTarget =
+            definition?.HasSection(CharacterPassiveSectionType.Subject) ==
+                true &&
+            definition.Subject == CharacterAttackSubject.Manual;
+        if (!succeeded && usesManualTarget &&
+            _manualTargetRequestPending &&
+            !_replayingManualPassiveAction)
+        {
+            _pendingManualPassiveActions.Add(
+                new PendingManualPassiveAction(
+                    board,
+                    definition,
+                    actionCondition,
+                    inheritedTargets));
+        }
         if (!succeeded || cost == null)
             return succeeded;
 
@@ -2631,6 +2732,52 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
             $"Failed to consume passive status cost for " +
             $"'{Definition?.name ?? name}'.",
             this);
+        return true;
+    }
+
+    private bool ProcessPendingManualActions()
+    {
+        if (_manualTargetRequestPending)
+            return true;
+
+        if (_resumeActiveSkillAfterManualSelection &&
+            (_hasCompletedManualTargetSelection ||
+             _manualTargetSelectionCancelled))
+        {
+            _resumeActiveSkillAfterManualSelection = false;
+            TryActivateCustomSkill();
+            return true;
+        }
+
+        if (_pendingManualPassiveActions.Count == 0)
+            return false;
+
+        PendingManualPassiveAction pending =
+            _pendingManualPassiveActions[0];
+        _replayingManualPassiveAction = true;
+        bool succeeded;
+        int damageDealt;
+        try
+        {
+            succeeded = TryExecutePassiveAbility(
+                pending.Board,
+                pending.Definition,
+                pending.Condition,
+                pending.InheritedTargets,
+                out damageDealt);
+        }
+        finally
+        {
+            _replayingManualPassiveAction = false;
+        }
+
+        if (_manualTargetRequestPending)
+            return true;
+
+        _pendingManualPassiveActions.RemoveAt(0);
+        RecordDamageDealt(damageDealt);
+        if (succeeded)
+            NotifyPassiveActivated();
         return true;
     }
 
@@ -2665,6 +2812,9 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
                 actionCondition.MatchMode,
                 actionCondition.NumericConditions,
                 inheritedTargets);
+            if (_manualTargetRequestPending)
+                return false;
+
             if (!CharacterConditionEvaluator.AllowsAction(
                     this,
                     actionCondition.MatchMode,
@@ -2716,8 +2866,7 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
                 definition.AppliedStatusEffect,
                 definition.StatusDuration,
                 definition.StatusStacks,
-                definition.StatusRemovalEffect,
-                definition.StatusRemovalTarget,
+                definition.StatusRemovalSelection,
                 definition.StatusRemovalAmount,
                 definition.AreaOffsets,
                 inheritedTargets,
@@ -2752,8 +2901,7 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
         StatusEffectSO appliedStatusEffect,
         float statusDuration,
         float statusStacks,
-        StatusEffectSO statusRemovalEffect,
-        CharacterStatusRemovalTarget statusRemovalTarget,
+        CharacterStatusRemovalSelection statusRemovalSelection,
         CharacterStatusRemovalAmount statusRemovalAmount,
         IReadOnlyList<CharacterTargetAreaOffset> areaOffsets,
         AbilityTargetSelection inheritedTargets,
@@ -2770,6 +2918,12 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
             conditionMatchMode,
             numericConditions,
             inheritedTargets);
+        if (_manualTargetRequestPending)
+        {
+            damageDealt = 0;
+            return false;
+        }
+
         if (!CharacterConditionEvaluator.AllowsAction(
                 this,
                 conditionMatchMode,
@@ -2790,8 +2944,7 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
             appliedStatusEffect,
             statusDuration,
             statusStacks,
-            statusRemovalEffect,
-            statusRemovalTarget,
+            statusRemovalSelection,
             statusRemovalAmount,
             out damageDealt);
     }
@@ -2831,6 +2984,15 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
             hasNumericConditions
                 ? numericConditions
                 : System.Array.Empty<CharacterNumericCondition>();
+        if (subject == CharacterAttackSubject.Manual)
+        {
+            return ResolveManualAbilityTargets(
+                board,
+                targetFaction,
+                targetCount,
+                conditionMatchMode,
+                conditions);
+        }
         if (subject == CharacterAttackSubject.None)
         {
             AbilityTargetSelection reusedTargets =
@@ -2873,6 +3035,101 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
                 targetCount,
                 conditionMatchMode,
                 conditions));
+    }
+
+    private AbilityTargetSelection ResolveManualAbilityTargets(
+        IBattleBoard board,
+        CharacterTargetFaction targetFaction,
+        int targetCount,
+        CharacterConditionMatchMode conditionMatchMode,
+        IReadOnlyList<CharacterNumericCondition> conditions)
+    {
+        if (_manualTargetSelectionCancelled)
+        {
+            _manualTargetSelectionCancelled = false;
+            return default;
+        }
+
+        if (_hasCompletedManualTargetSelection)
+        {
+            if (_completedManualTargetSelection.Faction != targetFaction)
+                return default;
+
+            AbilityTargetSelection completed =
+                _completedManualTargetSelection;
+            _completedManualTargetSelection = default;
+            _hasCompletedManualTargetSelection = false;
+            return completed;
+        }
+
+        if (_manualTargetRequestPending || board == null ||
+            board is not IBattleManualTargetSelectionService service)
+        {
+            return default;
+        }
+
+        IReadOnlyList<IBattleCharacter> allyCandidates =
+            System.Array.Empty<IBattleCharacter>();
+        IReadOnlyList<EnemyRuntime> enemyCandidates =
+            System.Array.Empty<EnemyRuntime>();
+        if (targetFaction == CharacterTargetFaction.Ally)
+        {
+            allyCandidates = board.SelectAlliedCharacters(
+                this,
+                CharacterAttackSubject.All,
+                CharacterAttackSubjectMetric.Health,
+                int.MaxValue,
+                conditionMatchMode,
+                conditions);
+        }
+        else
+        {
+            enemyCandidates = board.SelectCharacterTargets(
+                this,
+                CharacterAttackSubject.All,
+                CharacterAttackSubjectMetric.Health,
+                int.MaxValue,
+                conditionMatchMode,
+                conditions);
+        }
+
+        int candidateCount =
+            targetFaction == CharacterTargetFaction.Ally
+                ? allyCandidates?.Count ?? 0
+                : enemyCandidates?.Count ?? 0;
+        if (candidateCount == 0)
+            return default;
+
+        BattleManualTargetSelectionRequest request = new(
+            this,
+            targetFaction,
+            Mathf.Max(1, targetCount),
+            enemyCandidates,
+            allyCandidates,
+            false,
+            HandleManualTargetSelectionCompleted);
+        if (!service.TryBeginManualTargetSelection(request))
+            return default;
+
+        _manualTargetRequestPending = true;
+        return default;
+    }
+
+    private void HandleManualTargetSelectionCompleted(
+        BattleManualTargetSelectionResult result)
+    {
+        _manualTargetRequestPending = false;
+        if (result.Cancelled || !result.HasTargets)
+        {
+            _manualTargetSelectionCancelled = true;
+            return;
+        }
+
+        _completedManualTargetSelection =
+            result.Faction == CharacterTargetFaction.Ally
+                ? AbilityTargetSelection.Allies(result.AllyTargets)
+                : AbilityTargetSelection.Enemies(result.EnemyTargets);
+        _hasCompletedManualTargetSelection = true;
     }
 
     private IReadOnlyList<PreparedEffectExecution>
@@ -2999,8 +3256,7 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
         StatusEffectSO appliedStatusEffect,
         float statusDuration,
         float statusStacks,
-        StatusEffectSO statusRemovalEffect,
-        CharacterStatusRemovalTarget statusRemovalTarget,
+        CharacterStatusRemovalSelection statusRemovalSelection,
         CharacterStatusRemovalAmount statusRemovalAmount,
         out int damageDealt)
     {
@@ -3010,19 +3266,16 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
 
         if (damageType == CharacterAttackDamageType.StatusRemoval)
         {
-            CharacterStatusRemovalSelection removalSelection = new(
-                statusRemovalTarget,
-                statusRemovalEffect);
             return targets.Faction == CharacterTargetFaction.Ally
                 ? board.TryRemoveAlliedCharacterStatus(
                     this,
                     targets.AllyTargets,
-                    removalSelection,
+                    statusRemovalSelection,
                     statusRemovalAmount)
                 : board.TryRemoveCharacterStatus(
                     this,
                     targets.EnemyTargets,
-                    removalSelection,
+                    statusRemovalSelection,
                     statusRemovalAmount,
                     !targets.RangeAlreadyShown);
         }
@@ -3075,8 +3328,7 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
         StatusEffectSO appliedStatusEffect,
         float statusDuration,
         float statusStacks,
-        StatusEffectSO statusRemovalEffect,
-        CharacterStatusRemovalTarget statusRemovalTarget,
+        CharacterStatusRemovalSelection statusRemovalSelection,
         CharacterStatusRemovalAmount statusRemovalAmount)
     {
         List<EnemyRuntime> livingTargets = new();
@@ -3102,8 +3354,7 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
             appliedStatusEffect,
             statusDuration,
             statusStacks,
-            statusRemovalEffect,
-            statusRemovalTarget,
+            statusRemovalSelection,
             statusRemovalAmount,
             out int damageDealt);
         if (succeeded &&
@@ -4511,8 +4762,7 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
                 : 1f;
         cooldownFill.color = EffectColor;
 
-        if (_panelImage != null)
-            _panelImage.color = _defaultPanelColor;
+        RefreshManualTargetHighlight();
 
         RefreshAbilityIcons();
 

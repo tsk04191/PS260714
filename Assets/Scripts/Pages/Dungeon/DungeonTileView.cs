@@ -21,6 +21,7 @@ public sealed class DungeonTileView : MonoBehaviour, IPointerClickHandler
     private readonly List<EnemyCard> _cards = new();
     private readonly List<float> _attackRangeHitDurations = new();
     private Image _attackRangeOverlay;
+    private Image _manualSelectionOverlay;
     private int _maximumStackSize;
     private float _currentCellSize;
 
@@ -55,6 +56,7 @@ public sealed class DungeonTileView : MonoBehaviour, IPointerClickHandler
 
         EnsureAttackRangeOverlay();
         ClearAttackRangeIndicator();
+        SetManualSelectionState(false, false);
     }
 
     private void Update()
@@ -320,6 +322,22 @@ public sealed class DungeonTileView : MonoBehaviour, IPointerClickHandler
         RefreshAttackRangeIndicator();
     }
 
+    internal void SetManualSelectionState(bool candidate, bool selected)
+    {
+        EnsureManualSelectionOverlay();
+        if (_manualSelectionOverlay == null)
+            return;
+
+        _manualSelectionOverlay.enabled = candidate;
+        if (!candidate)
+            return;
+
+        _manualSelectionOverlay.color = selected
+            ? new Color(1f, 0.78f, 0.12f, 0.42f)
+            : new Color(0.2f, 0.9f, 0.5f, 0.28f);
+        _manualSelectionOverlay.rectTransform.SetAsLastSibling();
+    }
+
     internal void TickStatusEffects(
         float deltaTime,
         Func<DungeonTileView, int, IBattleCharacter, int> applyDamage)
@@ -395,6 +413,7 @@ public sealed class DungeonTileView : MonoBehaviour, IPointerClickHandler
         _enemies.Clear();
         _cards.Clear();
         ClearAttackRangeIndicator();
+        SetManualSelectionState(false, false);
     }
 
     internal List<EnemyRuntime> CopyEnemyRuntimes()
@@ -468,6 +487,36 @@ public sealed class DungeonTileView : MonoBehaviour, IPointerClickHandler
         overlayRect.SetAsLastSibling();
         _attackRangeOverlay.raycastTarget = false;
         _attackRangeOverlay.enabled = false;
+    }
+
+    private void EnsureManualSelectionOverlay()
+    {
+        if (_manualSelectionOverlay != null)
+            return;
+
+        Transform existing = transform.Find("imgManualSelectionOverlay");
+        if (existing != null)
+            _manualSelectionOverlay = existing.GetComponent<Image>();
+        if (_manualSelectionOverlay == null)
+        {
+            GameObject overlayObject = new(
+                "imgManualSelectionOverlay",
+                typeof(RectTransform),
+                typeof(CanvasRenderer),
+                typeof(Image));
+            overlayObject.transform.SetParent(transform, false);
+            _manualSelectionOverlay = overlayObject.GetComponent<Image>();
+        }
+
+        RectTransform overlayRect = _manualSelectionOverlay.rectTransform;
+        overlayRect.anchorMin = Vector2.zero;
+        overlayRect.anchorMax = Vector2.one;
+        overlayRect.offsetMin = Vector2.zero;
+        overlayRect.offsetMax = Vector2.zero;
+        overlayRect.localScale = Vector3.one;
+        overlayRect.SetAsLastSibling();
+        _manualSelectionOverlay.raycastTarget = false;
+        _manualSelectionOverlay.enabled = false;
     }
 
     private void RefreshAttackRangeIndicator()

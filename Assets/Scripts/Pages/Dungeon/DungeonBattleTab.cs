@@ -790,7 +790,13 @@ public sealed class DungeonItemHandView : MonoBehaviour
         LocalizationService.LocaleChanged += HandleLocalizationChanged;
         LocalizationService.FontChanged += HandleLocalizationChanged;
         if (_page.Board != null)
+        {
             _page.Board.BindItemTargetHandler(HandleEnemyClicked);
+            _page.Board.ManualTargetSelectionPendingChanged +=
+                HandleManualTargetSelectionPendingChanged;
+            _page.Board.ManualTargetSelectionProgressChanged +=
+                RefreshCards;
+        }
         _previousBattleState = _battleManager.State;
         _focusCooldownRemaining = 0f;
         _initialized = true;
@@ -803,7 +809,13 @@ public sealed class DungeonItemHandView : MonoBehaviour
         {
             _page.BattleItemsChanged -= RebuildCards;
             if (_page.Board != null)
+            {
                 _page.Board.BindItemTargetHandler(null);
+                _page.Board.ManualTargetSelectionPendingChanged -=
+                    HandleManualTargetSelectionPendingChanged;
+                _page.Board.ManualTargetSelectionProgressChanged -=
+                    RefreshCards;
+            }
         }
         if (_battleManager != null)
         {
@@ -1048,6 +1060,13 @@ public sealed class DungeonItemHandView : MonoBehaviour
         RefreshCards();
     }
 
+    private void HandleManualTargetSelectionPendingChanged(bool pending)
+    {
+        if (pending)
+            _selectedItem = null;
+        RefreshCards();
+    }
+
     private void HandleLocalizationChanged(string unusedValue)
     {
         if (!_initialized)
@@ -1084,6 +1103,22 @@ public sealed class DungeonItemHandView : MonoBehaviour
     {
         if (_instructionText == null)
             return;
+
+        DungeonBoardView board = _page?.Board;
+        if (board?.IsManualTargetSelectionPending == true)
+        {
+            BattleManualTargetSelectionRequest request =
+                board.CurrentManualTargetRequest;
+            int required = request?.RequiredCount ?? 1;
+            int selected = board.CurrentManualSelectedCount;
+            bool korean = LocalizationService.CurrentLocale?.StartsWith(
+                "ko",
+                StringComparison.OrdinalIgnoreCase) == true;
+            _instructionText.text = korean
+                ? $"대상을 선택하세요 ({selected}/{required})"
+                : $"Select target(s) ({selected}/{required})";
+            return;
+        }
 
         if (!_selectedItem.HasValue)
         {

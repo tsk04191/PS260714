@@ -19,6 +19,8 @@ public sealed class CharacterEditorWindow : EditorWindow
     private const string PassiveStatusTargetPropertyName = "statusTarget";
     private const string PassiveTriggerStatusEffectPropertyName =
         "triggerStatusEffect";
+    private const string PassiveTriggerStatusEffectsPropertyName =
+        "triggerStatusEffects";
     private const string PassiveCooldownPropertyName = "cooldown";
     private const string PassiveAttackTargetRelationPropertyName =
         "attackTargetRelation";
@@ -57,6 +59,12 @@ public sealed class CharacterEditorWindow : EditorWindow
     private const string NumericConditionMetricPropertyName = "metric";
     private const string NumericComparisonPropertyName = "comparison";
     private const string NumericThresholdPropertyName = "threshold";
+    private const string ConditionStatusEffectsPropertyName =
+        "statusEffects";
+    private const string StatusConditionMatchModePropertyName =
+        "statusMatchMode";
+    private const string StatusConditionMatchCountPropertyName =
+        "statusMatchCount";
     private const string TargetFactionPropertyName = "targetFaction";
     private const string AttackSubjectPropertyName = "subject";
     private const string AttackTargetRetentionModePropertyName =
@@ -96,6 +104,10 @@ public sealed class CharacterEditorWindow : EditorWindow
         "statusRemovalEffects";
     private const string StatusRemovalTargetPropertyName =
         "statusRemovalTarget";
+    private const string StatusRemovalPickModePropertyName =
+        "statusRemovalPickMode";
+    private const string StatusRemovalPickCountPropertyName =
+        "statusRemovalPickCount";
     private const string StatusRemovalAmountModePropertyName =
         "statusRemovalAmountMode";
     private const string StatusRemovalCountPropertyName =
@@ -219,6 +231,13 @@ public sealed class CharacterEditorWindow : EditorWindow
         "하나 이상 만족 (OR)"
     };
 
+    private static readonly string[] StatusConditionMatchModeOptions =
+    {
+        "하나 이상",
+        "모두",
+        "N개 이상"
+    };
+
     private static readonly string[] ConditionTargetOptions =
     {
         "행동 대상",
@@ -276,6 +295,7 @@ public sealed class CharacterEditorWindow : EditorWindow
     private static readonly string[] AttackSubjectOptions =
     {
         "없음 - 앞선 공격 대상",
+        "수동 선택",
         "랜덤",
         "전체",
         "가장 많은 수치",
@@ -285,6 +305,7 @@ public sealed class CharacterEditorWindow : EditorWindow
     private static readonly int[] AttackSubjectValues =
     {
         (int)CharacterAttackSubject.None,
+        (int)CharacterAttackSubject.Manual,
         (int)CharacterAttackSubject.Random,
         (int)CharacterAttackSubject.All,
         (int)CharacterAttackSubject.HighestValue,
@@ -294,6 +315,7 @@ public sealed class CharacterEditorWindow : EditorWindow
     private static readonly string[] AllyAttackSubjectOptions =
     {
         "없음 - 앞선 공격 대상",
+        "수동 선택",
         "자신",
         "랜덤 - 자신 포함",
         "랜덤 - 자신 제외",
@@ -306,6 +328,7 @@ public sealed class CharacterEditorWindow : EditorWindow
     private static readonly int[] AllyAttackSubjectValues =
     {
         (int)CharacterAttackSubject.None,
+        (int)CharacterAttackSubject.Manual,
         (int)CharacterAttackSubject.Self,
         (int)CharacterAttackSubject.Random,
         (int)CharacterAttackSubject.RandomExceptSelf,
@@ -458,6 +481,12 @@ public sealed class CharacterEditorWindow : EditorWindow
         (int)CharacterStatusRemovalTarget.Buff,
         (int)CharacterStatusRemovalTarget.Debuff,
         (int)CharacterStatusRemovalTarget.All
+    };
+
+    private static readonly string[] StatusRemovalPickModeOptions =
+    {
+        "조건에 맞는 상태 모두",
+        "조건에 맞는 상태 중 N개"
     };
 
     private static readonly string[] StatusRemovalAmountModeOptions =
@@ -1430,13 +1459,32 @@ public sealed class CharacterEditorWindow : EditorWindow
                     SerializedProperty triggerStatusEffect =
                         definition.FindPropertyRelative(
                             PassiveTriggerStatusEffectPropertyName);
+                    SerializedProperty triggerStatusEffects =
+                        definition.FindPropertyRelative(
+                            PassiveTriggerStatusEffectsPropertyName);
                     if (triggerStatusEffect != null)
                     {
-                        EditorGUILayout.PropertyField(
+                        SerializedProperty statusTarget =
+                            definition.FindPropertyRelative(
+                                PassiveStatusTargetPropertyName);
+                        CharacterTargetFaction? filterFaction =
+                            statusTarget?.enumValueIndex switch
+                            {
+                                (int)CharacterPassiveStatusTarget.Enemy =>
+                                    CharacterTargetFaction.Enemy,
+                                (int)CharacterPassiveStatusTarget.Ally =>
+                                    CharacterTargetFaction.Ally,
+                                _ => null
+                            };
+                        PS260714StatusEffectSelection.Draw(
+                            triggerStatusEffects,
                             triggerStatusEffect,
                             new GUIContent(
                                 "상태 필터",
-                                "비워 두면 모든 상태 적용에 반응합니다."));
+                                "비워 두면 모든 상태 적용에 반응합니다."),
+                            new PS260714StatusEffectSelectionOptions(
+                                allowNone: true,
+                                targetFaction: filterFaction));
                     }
                     EditorGUILayout.HelpBox(
                         "선택한 진영의 대상에게 지정 상태가 적용되면 " +
@@ -1636,6 +1684,10 @@ public sealed class CharacterEditorWindow : EditorWindow
                         PassiveTriggerStatusEffectPropertyName);
                 if (triggerStatusEffect != null)
                     triggerStatusEffect.objectReferenceValue = null;
+                SerializedProperty triggerStatusEffects =
+                    definition.FindPropertyRelative(
+                        PassiveTriggerStatusEffectsPropertyName);
+                triggerStatusEffects?.ClearArray();
                 SerializedProperty cooldown = definition.FindPropertyRelative(
                     PassiveCooldownPropertyName);
                 if (cooldown != null)
@@ -1727,9 +1779,11 @@ public sealed class CharacterEditorWindow : EditorWindow
             return;
         }
 
-        EditorGUILayout.PropertyField(
+        PS260714StatusEffectSelection.DrawSingle(
             statusEffect,
-            new GUIContent("요구 상태"));
+            new GUIContent("요구 상태"),
+            new PS260714StatusEffectSelectionOptions(
+                targetFaction: CharacterTargetFaction.Ally));
         requiredStacks.intValue = Mathf.Max(
             1,
             EditorGUILayout.IntField(
@@ -2864,6 +2918,9 @@ public sealed class CharacterEditorWindow : EditorWindow
             {
                 SerializedProperty heldStatus =
                     condition.FindPropertyRelative(StatusEffectPropertyName);
+                SerializedProperty heldStatuses =
+                    condition.FindPropertyRelative(
+                        ConditionStatusEffectsPropertyName);
                 if (heldStatus == null)
                 {
                     EditorGUILayout.HelpBox(
@@ -2872,22 +2929,47 @@ public sealed class CharacterEditorWindow : EditorWindow
                 }
                 else
                 {
-                    EditorGUILayout.PropertyField(
+                    CharacterTargetFaction statusFaction =
+                        checksSource || targetsAllies
+                            ? CharacterTargetFaction.Ally
+                            : CharacterTargetFaction.Enemy;
+                    PS260714StatusEffectSelection.Draw(
+                        heldStatuses,
                         heldStatus,
                         new GUIContent(
                             "상태 종류",
-                            "스택 수를 확인할 StatusEffectSO입니다."));
-                    if (heldStatus.objectReferenceValue == null)
+                            "스택 수를 확인할 상태를 선택합니다."),
+                        new PS260714StatusEffectSelectionOptions(
+                            targetFaction: statusFaction));
+
+                    SerializedProperty statusMatchMode =
+                        condition.FindPropertyRelative(
+                            StatusConditionMatchModePropertyName);
+                    DrawAttackEnumPopup(
+                        statusMatchMode,
+                        "상태 선택 판정",
+                        StatusConditionMatchModeOptions);
+                    if (statusMatchMode != null &&
+                        statusMatchMode.enumValueIndex ==
+                        (int)CharacterStatusConditionMatchMode.AtLeastCount)
                     {
-                        EditorGUILayout.HelpBox(
-                            "스택 수를 확인할 StatusEffectSO를 선택하세요.",
-                            MessageType.Error);
+                        SerializedProperty statusMatchCount =
+                            condition.FindPropertyRelative(
+                                StatusConditionMatchCountPropertyName);
+                        if (statusMatchCount != null)
+                        {
+                            statusMatchCount.intValue = Mathf.Max(
+                                1,
+                                EditorGUILayout.IntField(
+                                    "필요 상태 수",
+                                    statusMatchCount.intValue));
+                        }
                     }
                 }
 
                 EditorGUILayout.HelpBox(
-                    "보유 중은 1 이상, 미보유는 0과 같음으로 " +
-                    "설정할 수 있습니다.",
+                    "선택한 각 상태에 아래 스택 비교를 적용한 뒤 " +
+                    "하나 이상/모두/N개 이상으로 결합합니다.",
                     MessageType.Info);
             }
 
@@ -3071,6 +3153,18 @@ public sealed class CharacterEditorWindow : EditorWindow
             StatusEffectPropertyName);
         if (statusEffect != null)
             statusEffect.objectReferenceValue = null;
+        SerializedProperty statusEffects = condition.FindPropertyRelative(
+            ConditionStatusEffectsPropertyName);
+        statusEffects?.ClearArray();
+        SetEnumValue(
+            condition,
+            StatusConditionMatchModePropertyName,
+            (int)CharacterStatusConditionMatchMode.Any);
+        SerializedProperty statusMatchCount =
+            condition.FindPropertyRelative(
+                StatusConditionMatchCountPropertyName);
+        if (statusMatchCount != null)
+            statusMatchCount.intValue = 1;
     }
 
     private static void MigrateLegacyStatusCondition(
@@ -3616,6 +3710,14 @@ public sealed class CharacterEditorWindow : EditorWindow
                 CopyEnumProperty(
                     definition,
                     effect,
+                    StatusRemovalPickModePropertyName);
+                CopyIntProperty(
+                    definition,
+                    effect,
+                    StatusRemovalPickCountPropertyName);
+                CopyEnumProperty(
+                    definition,
+                    effect,
                     StatusRemovalAmountModePropertyName);
                 CopyIntProperty(
                     definition,
@@ -3768,6 +3870,14 @@ public sealed class CharacterEditorWindow : EditorWindow
             effect,
             StatusRemovalTargetPropertyName,
             (int)CharacterStatusRemovalTarget.Single);
+        SetEnumValue(
+            effect,
+            StatusRemovalPickModePropertyName,
+            (int)CharacterStatusRemovalPickMode.AllMatches);
+        SerializedProperty removalPickCount = effect.FindPropertyRelative(
+            StatusRemovalPickCountPropertyName);
+        if (removalPickCount != null)
+            removalPickCount.intValue = 1;
         effect.FindPropertyRelative(
             StatusRemovalEffectsPropertyName)?.ClearArray();
         SetEnumValue(
@@ -4177,9 +4287,11 @@ public sealed class CharacterEditorWindow : EditorWindow
         if (statusEffect == null || stacksScale == null)
             return;
 
-        EditorGUILayout.PropertyField(
+        PS260714StatusEffectSelection.DrawSingle(
             statusEffect,
-            new GUIContent($"{label} 기준", tooltip));
+            new GUIContent($"{label} 기준", tooltip),
+            new PS260714StatusEffectSelectionOptions(
+                allowNone: true));
         stacksScale.floatValue = EditorGUILayout.FloatField(
             new GUIContent($"{label} 스택 배율", tooltip),
             stacksScale.floatValue);
@@ -4210,7 +4322,7 @@ public sealed class CharacterEditorWindow : EditorWindow
             return;
         }
 
-        EditorGUILayout.PropertyField(
+        PS260714StatusEffectSelection.DrawSingle(
             statusEffect,
             new GUIContent(
                 "부여 상태",
@@ -4273,6 +4385,15 @@ public sealed class CharacterEditorWindow : EditorWindow
             (int)CharacterStatusRemovalTarget.Single);
         SetEnumValue(
             definition,
+            StatusRemovalPickModePropertyName,
+            (int)CharacterStatusRemovalPickMode.AllMatches);
+        SerializedProperty removalPickCount =
+            definition?.FindPropertyRelative(
+                StatusRemovalPickCountPropertyName);
+        if (removalPickCount != null)
+            removalPickCount.intValue = 1;
+        SetEnumValue(
+            definition,
             StatusRemovalAmountModePropertyName,
             (int)CharacterStatusRemovalAmountMode.FixedStacks);
         SerializedProperty removalEffect = definition?.FindPropertyRelative(
@@ -4309,6 +4430,12 @@ public sealed class CharacterEditorWindow : EditorWindow
         SerializedProperty removalAmountMode =
             definition.FindPropertyRelative(
                 StatusRemovalAmountModePropertyName);
+        SerializedProperty removalPickMode =
+            definition.FindPropertyRelative(
+                StatusRemovalPickModePropertyName);
+        SerializedProperty removalPickCount =
+            definition.FindPropertyRelative(
+                StatusRemovalPickCountPropertyName);
         SerializedProperty removalCount = definition.FindPropertyRelative(
             StatusRemovalCountPropertyName);
         SerializedProperty removalRatio = definition.FindPropertyRelative(
@@ -4317,7 +4444,8 @@ public sealed class CharacterEditorWindow : EditorWindow
             statusEffectPropertyName);
         SerializedProperty removalEffects = definition.FindPropertyRelative(
             StatusRemovalEffectsPropertyName);
-        if (removalTarget == null || removalAmountMode == null ||
+        if (removalTarget == null || removalPickMode == null ||
+            removalPickCount == null || removalAmountMode == null ||
             removalCount == null || removalRatio == null ||
             removalEffect == null)
         {
@@ -4329,6 +4457,30 @@ public sealed class CharacterEditorWindow : EditorWindow
 
         DrawStatusRemovalTargetPopup(removalTarget, "제거 대상");
         if (removalTarget.enumValueIndex ==
+            (int)CharacterStatusRemovalTarget.Random)
+        {
+            removalPickMode.enumValueIndex =
+                (int)CharacterStatusRemovalPickMode.RandomCount;
+        }
+        else
+        {
+            DrawAttackEnumPopup(
+                removalPickMode,
+                "상태 종류 선택",
+                StatusRemovalPickModeOptions);
+        }
+        if (removalPickMode.enumValueIndex ==
+            (int)CharacterStatusRemovalPickMode.RandomCount)
+        {
+            removalPickCount.intValue = Mathf.Max(
+                1,
+                EditorGUILayout.IntField(
+                    new GUIContent(
+                        "선택할 상태 종류",
+                        "후보 상태 종류 중 중복 없이 무작위로 선택합니다."),
+                    removalPickCount.intValue));
+        }
+        if (removalTarget.enumValueIndex ==
             (int)CharacterStatusRemovalTarget.Single)
         {
             if (removalEffects != null)
@@ -4338,7 +4490,9 @@ public sealed class CharacterEditorWindow : EditorWindow
                     removalEffect,
                     new GUIContent(
                         "제거 상태",
-                        "여러 상태를 선택할 수 있으며 분류와 검색으로 목록을 필터링합니다."));
+                        "여러 상태를 선택할 수 있으며 분류와 검색으로 목록을 필터링합니다."),
+                    new PS260714StatusEffectSelectionOptions(
+                        requireRemovable: true));
             }
             else
             {

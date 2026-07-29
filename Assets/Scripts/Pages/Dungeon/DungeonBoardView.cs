@@ -8,7 +8,8 @@ using Random = UnityEngine.Random;
 [RequireComponent(typeof(RectTransform))]
 public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
     IBattlePresentationEventPublisher,
-    IBattleVfxTargetResolver
+    IBattleVfxTargetResolver,
+    IBattleManualTargetSelectionService
 {
     private const int MaximumStatusEventsPerDispatch = 128;
     private const int MaximumDefeatEventsPerDispatch = 128;
@@ -28,6 +29,9 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
     private readonly List<DungeonTileView> _tiles = new();
     private readonly List<IBattleCharacter> _battleCharacters = new();
     private Func<EnemyRuntime, bool> _itemTargetHandler;
+    private BattleManualTargetSelectionRequest _manualTargetRequest;
+    private readonly List<EnemyRuntime> _manualEnemyTargets = new();
+    private readonly List<IBattleCharacter> _manualAllyTargets = new();
     private EnemyRuntime _forcedPriorityTarget;
     private float _forcedPriorityRemaining;
     private int _maximumStackSize = 8;
@@ -92,12 +96,22 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
         }
     }
     public BattleVfxPlayer VfxPlayer => vfxPlayer;
+    public bool IsManualTargetSelectionPending =>
+        _manualTargetRequest != null;
+    public BattleManualTargetSelectionRequest CurrentManualTargetRequest =>
+        _manualTargetRequest;
+    public int CurrentManualSelectedCount =>
+        _manualTargetRequest?.Faction == CharacterTargetFaction.Ally
+            ? _manualAllyTargets.Count
+            : _manualEnemyTargets.Count;
     public event Action<BattleEnemyDefeatedEvent> EnemyDefeated;
     public event Action<EnemyRuntime> EnemyClicked;
     public event Action<BattleStatusAppliedEvent> StatusApplied;
     public event Action<BattleEffectResolvedEvent> EffectResolved;
     public event Action<StatusEffectLifecycleEvent> StatusLifecycle;
     public event Action<BattleUnitLifecycleEvent> UnitLifecycle;
+    public event Action<bool> ManualTargetSelectionPendingChanged;
+    public event Action ManualTargetSelectionProgressChanged;
 
     public void PublishEffectResolved(BattleEffectResolvedEvent eventData)
     {
@@ -307,6 +321,160 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
         Func<EnemyRuntime, bool> itemTargetHandler)
     {
         _itemTargetHandler = itemTargetHandler;
+    }
+
+    public bool TryBeginManualTargetSelection(
+        BattleManualTargetSelectionRequest request)
+    {
+        if (request == null || request.Source == null ||
+            request.RequiredCount <= 0 ||
+            IsManualTargetSelectionPending)
+        {
+            return false;
+        }
+
+        _manualTargetRequest = request;
+        _manualEnemyTargets.Clear();
+        _manualAllyTargets.Clear();
+        RefreshManualTargetHighlights();
+        ManualTargetSelectionPendingChanged?.Invoke(true);
+        ManualTargetSelectionProgressChanged?.Invoke();
+        return true;
+    }
+
+    public void CancelManualTargetSelection()
+    {
+        if (_manualTargetRequest == null)
+            return;
+
+        BattleManualTargetSelectionRequest request =
+            _manualTargetRequest;
+        ClearManualTargetSelection();
+        request.Complete(new BattleManualTargetSelectionResult(
+            request.Faction,
+            null,
+            null,
+            true));
+    }
+
+    private void CompleteManualTargetSelection()
+    {
+        if (_manualTargetRequest == null)
+            return;
+
+        BattleManualTargetSelectionRequest request =
+            _manualTargetRequest;
+        BattleManualTargetSelectionResult result = new(
+            request.Faction,
+            _manualEnemyTargets.ToArray(),
+            _manualAllyTargets.ToArray());
+        ClearManualTargetSelection();
+        request.Complete(result);
+    }
+
+    private void ClearManualTargetSelection()
+    {
+        if (_manualTargetRequest == null)
+            return;
+
+        _manualTargetRequest = null;
+        _manualEnemyTargets.Clear();
+        _manualAllyTargets.Clear();
+        RefreshManualTargetHighlights();
+        ManualTargetSelectionProgressChanged?.Invoke();
+        ManualTargetSelectionPendingChanged?.Invoke(false);
+    }
+
+    private bool HandleManualEnemyClicked(EnemyRuntime enemy)
+    {
+        BattleManualTargetSelectionRequest request =
+            _manualTargetRequest;
+        if (request == null ||
+            request.Faction != CharacterTargetFaction.Enemy ||
+            enemy == null ||
+            !ContainsReference(request.EnemyCandidates, enemy))
+        {
+            return false;
+        }
+
+        if (!_manualEnemyTargets.Remove(enemy))
+            _manualEnemyTargets.Add(enemy);
+        RefreshManualTargetHighlights();
+        ManualTargetSelectionProgressChanged?.Invoke();
+        if (_manualEnemyTargets.Count >= request.RequiredCount)
+            CompleteManualTargetSelection();
+        return true;
+    }
+
+    private bool HandleManualAllyClicked(CharacterRuntime character)
+    {
+        BattleManualTargetSelectionRequest request =
+            _manualTargetRequest;
+        if (request == null ||
+            request.Faction != CharacterTargetFaction.Ally ||
+            character == null ||
+            !ContainsReference(request.AllyCandidates, character))
+        {
+            return false;
+        }
+
+        if (!_manualAllyTargets.Remove(character))
+            _manualAllyTargets.Add(character);
+        RefreshManualTargetHighlights();
+        ManualTargetSelectionProgressChanged?.Invoke();
+        if (_manualAllyTargets.Count >= request.RequiredCount)
+            CompleteManualTargetSelection();
+        return true;
+    }
+
+    private void RefreshManualTargetHighlights()
+    {
+        BattleManualTargetSelectionRequest request =
+            _manualTargetRequest;
+        foreach (DungeonTileView tile in _tiles)
+        {
+            EnemyRuntime enemy = tile?.TopEnemy;
+            bool candidate = request != null &&
+                             request.Faction ==
+                             CharacterTargetFaction.Enemy &&
+                             ContainsReference(
+                                 request.EnemyCandidates,
+                                 enemy);
+            tile?.SetManualSelectionState(
+                candidate,
+                candidate && _manualEnemyTargets.Contains(enemy));
+        }
+
+        foreach (CharacterRuntime character in
+                 _boundPresentationCharacters)
+        {
+            bool candidate = request != null &&
+                             request.Faction ==
+                             CharacterTargetFaction.Ally &&
+                             ContainsReference(
+                                 request.AllyCandidates,
+                                 character);
+            character?.SetManualTargetSelectionState(
+                candidate,
+                candidate && _manualAllyTargets.Contains(character));
+        }
+    }
+
+    private static bool ContainsReference<T>(
+        IReadOnlyList<T> values,
+        T target)
+        where T : class
+    {
+        if (values == null || target == null)
+            return false;
+
+        foreach (T value in values)
+        {
+            if (ReferenceEquals(value, target))
+                return true;
+        }
+
+        return false;
     }
 
     public void SetBattleCharacters(
@@ -713,7 +881,8 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
         // changes faction without going through the character editor.
         if (subject == CharacterAttackSubject.Self ||
             subject == CharacterAttackSubject.RandomExceptSelf ||
-            subject == CharacterAttackSubject.None)
+            subject == CharacterAttackSubject.None ||
+            subject == CharacterAttackSubject.Manual)
             subject = CharacterAttackSubject.Random;
         else if (subject == CharacterAttackSubject.AllExceptSelf)
             subject = CharacterAttackSubject.All;
@@ -815,7 +984,8 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
         if (source == null)
             return Array.Empty<IBattleCharacter>();
 
-        if (subject == CharacterAttackSubject.None)
+        if (subject == CharacterAttackSubject.None ||
+            subject == CharacterAttackSubject.Manual)
             subject = CharacterAttackSubject.Random;
 
         List<IBattleCharacter> candidates = new();
@@ -1027,6 +1197,20 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
                 continue;
             }
 
+            if (condition.Metric ==
+                CharacterNumericConditionMetric.StatusStackCount)
+            {
+                bool statusMatched =
+                    CharacterConditionEvaluator.MatchesStatusCondition(
+                        condition,
+                        tile.TopEnemy.GetStatusStackCount);
+                if (matchAny && statusMatched)
+                    return true;
+                if (!matchAny && !statusMatched)
+                    return false;
+                continue;
+            }
+
             float value = condition.Metric switch
             {
                 CharacterNumericConditionMetric.Health =>
@@ -1040,9 +1224,6 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
                     tile.StackCount,
                 CharacterNumericConditionMetric.Shield =>
                     tile.TopEnemy.CurrentShield,
-                CharacterNumericConditionMetric.StatusStackCount =>
-                    tile.TopEnemy.GetStatusStackCount(
-                        condition.StatusEffect),
                 _ => 0f
             };
             bool matched = CharacterConditionEvaluator.Compare(
@@ -2228,8 +2409,10 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
 
             case EnemyAbilityConditionType.SourceHasStatus:
             {
-                bool hasStatus =
-                    source?.HasStatusEffect(condition.StatusEffect) == true;
+                bool hasStatus = source != null &&
+                    EnemyAbilityConditionEvaluator.MatchesStatusSelection(
+                        condition,
+                        source.HasStatusEffect);
                 return hasStatus == condition.Expected;
             }
 
@@ -2267,15 +2450,19 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
                 bool hasStatus = false;
                 foreach (EnemyRuntime target in enemyTargets)
                 {
-                    hasStatus |=
-                        target?.HasStatusEffect(condition.StatusEffect) ==
-                        true;
+                    hasStatus |= target != null &&
+                        EnemyAbilityConditionEvaluator
+                            .MatchesStatusSelection(
+                                condition,
+                                target.HasStatusEffect);
                 }
                 foreach (IBattleCharacter target in playerTargets)
                 {
-                    hasStatus |=
-                        target?.HasStatusEffect(condition.StatusEffect) ==
-                        true;
+                    hasStatus |= target != null &&
+                        EnemyAbilityConditionEvaluator
+                            .MatchesStatusSelection(
+                                condition,
+                                target.HasStatusEffect);
                 }
                 return hasStatus == condition.Expected;
             }
@@ -2345,6 +2532,7 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
 
     public void ClearAllEnemies()
     {
+        CancelManualTargetSelection();
         _forcedPriorityTarget = null;
         _forcedPriorityRemaining = 0f;
         _statusEventQueue.Clear();
@@ -2881,6 +3069,7 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
         }
 
         character.StatusLifecycle += HandleStatusLifecycle;
+        character.BindManualTargetHandler(HandleManualAllyClicked);
         GetOrCreateAllyVfxHandle(character);
     }
 
@@ -2889,7 +3078,11 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
         foreach (CharacterRuntime character in _boundPresentationCharacters)
         {
             if (character != null)
+            {
                 character.StatusLifecycle -= HandleStatusLifecycle;
+                character.BindManualTargetHandler(null);
+                character.SetManualTargetSelectionState(false, false);
+            }
         }
 
         _boundPresentationCharacters.Clear();
@@ -3001,6 +3194,9 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
     private void HandleEnemyClicked(EnemyRuntime enemy)
     {
         if (enemy == null)
+            return;
+
+        if (HandleManualEnemyClicked(enemy))
             return;
 
         if (_itemTargetHandler != null && _itemTargetHandler(enemy))

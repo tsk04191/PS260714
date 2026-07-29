@@ -28,7 +28,8 @@ public enum CharacterAttackSubject
     Self,
     AllExceptSelf,
     RandomExceptSelf,
-    None
+    None,
+    Manual
 }
 
 public enum CharacterAttackTargetRetentionMode
@@ -98,6 +99,80 @@ public enum CharacterConditionMatchMode
     Any
 }
 
+public enum CharacterStatusConditionMatchMode
+{
+    Any = 0,
+    All = 1,
+    AtLeastCount = 2
+}
+
+public readonly struct CharacterStatusSelection
+{
+    private readonly IReadOnlyList<StatusEffectSO> _statusEffects;
+
+    public StatusEffectSO LegacyStatusEffect { get; }
+    public IReadOnlyList<StatusEffectSO> StatusEffects =>
+        _statusEffects ?? Array.Empty<StatusEffectSO>();
+    public bool UsesStatusList =>
+        _statusEffects != null && _statusEffects.Count > 0;
+    public int Count =>
+        UsesStatusList
+            ? _statusEffects.Count
+            : LegacyStatusEffect != null
+                ? 1
+                : 0;
+
+    public CharacterStatusSelection(
+        StatusEffectSO legacyStatusEffect,
+        IReadOnlyList<StatusEffectSO> statusEffects = null)
+    {
+        LegacyStatusEffect = legacyStatusEffect;
+        _statusEffects = statusEffects;
+    }
+
+    public StatusEffectSO GetStatus(int index)
+    {
+        if (UsesStatusList)
+        {
+            return index >= 0 && index < _statusEffects.Count
+                ? _statusEffects[index]
+                : null;
+        }
+
+        return index == 0 ? LegacyStatusEffect : null;
+    }
+
+    public bool Contains(StatusEffectSO definition)
+    {
+        if (definition == null)
+            return false;
+
+        for (int index = 0; index < Count; index++)
+        {
+            if (IsSameStatus(GetStatus(index), definition))
+                return true;
+        }
+
+        return false;
+    }
+
+    public static bool IsSameStatus(
+        StatusEffectSO left,
+        StatusEffectSO right)
+    {
+        if (ReferenceEquals(left, right))
+            return true;
+        if (left == null || right == null)
+            return false;
+
+        return !string.IsNullOrWhiteSpace(left.StatusId) &&
+               string.Equals(
+                   left.StatusId,
+                   right.StatusId,
+                   StringComparison.Ordinal);
+    }
+}
+
 public interface ICharacterConditionalActionDefinition
 {
     bool HasLinkageSection { get; }
@@ -162,11 +237,19 @@ public enum CharacterStatusRemovalTarget
     Debuff = 4
 }
 
+public enum CharacterStatusRemovalPickMode
+{
+    AllMatches = 0,
+    RandomCount = 1
+}
+
 public readonly struct CharacterStatusRemovalSelection
 {
     private readonly IReadOnlyList<StatusEffectSO> _statusEffects;
 
     public CharacterStatusRemovalTarget Target { get; }
+    public CharacterStatusRemovalPickMode PickMode { get; }
+    public int PickCount { get; }
     public StatusEffectSO LegacyStatusEffect { get; }
     public IReadOnlyList<StatusEffectSO> StatusEffects =>
         _statusEffects ?? Array.Empty<StatusEffectSO>();
@@ -176,12 +259,22 @@ public readonly struct CharacterStatusRemovalSelection
     public CharacterStatusRemovalSelection(
         CharacterStatusRemovalTarget target,
         StatusEffectSO legacyStatusEffect,
-        IReadOnlyList<StatusEffectSO> statusEffects = null)
+        IReadOnlyList<StatusEffectSO> statusEffects = null,
+        CharacterStatusRemovalPickMode pickMode =
+            CharacterStatusRemovalPickMode.AllMatches,
+        int pickCount = 1)
     {
         Target = target;
+        PickMode = target == CharacterStatusRemovalTarget.Random
+            ? CharacterStatusRemovalPickMode.RandomCount
+            : pickMode;
+        PickCount = Math.Max(1, pickCount);
         LegacyStatusEffect = legacyStatusEffect;
         _statusEffects = statusEffects;
     }
+
+    public bool UsesRandomCount =>
+        PickMode == CharacterStatusRemovalPickMode.RandomCount;
 
     public int ExplicitStatusCount =>
         UsesStatusList
@@ -272,6 +365,50 @@ public readonly struct CharacterStatusRemovalSelection
                    left.StatusId,
                    right.StatusId,
                    StringComparison.Ordinal);
+    }
+}
+
+public static class CharacterStatusRemovalPick
+{
+    public static void Normalize(
+        ref CharacterStatusRemovalPickMode mode,
+        ref int count)
+    {
+        if (!Enum.IsDefined(
+                typeof(CharacterStatusRemovalPickMode),
+                mode))
+        {
+            mode = CharacterStatusRemovalPickMode.AllMatches;
+        }
+
+        count = Mathf.Max(1, count);
+    }
+
+    public static int SelectInPlace<T>(
+        List<T> candidates,
+        CharacterStatusRemovalSelection selection)
+    {
+        if (candidates == null || candidates.Count == 0)
+            return 0;
+        if (!selection.UsesRandomCount)
+            return candidates.Count;
+
+        int selectedCount = Mathf.Min(
+            selection.PickCount,
+            candidates.Count);
+        for (int index = 0; index < selectedCount; index++)
+        {
+            int randomIndex = UnityEngine.Random.Range(
+                index,
+                candidates.Count);
+            if (randomIndex == index)
+                continue;
+
+            (candidates[index], candidates[randomIndex]) =
+                (candidates[randomIndex], candidates[index]);
+        }
+
+        return selectedCount;
     }
 }
 
@@ -461,6 +598,12 @@ public sealed class CharacterNumericCondition
 
     [SerializeField]
     private StatusEffectSO statusEffect;
+    [SerializeField]
+    private List<StatusEffectSO> statusEffects = new();
+    [SerializeField]
+    private CharacterStatusConditionMatchMode statusMatchMode;
+    [SerializeField, Min(1)]
+    private int statusMatchCount = 1;
 
     public CharacterConditionType Type => type;
     public CharacterConditionTarget Target => target;
@@ -475,9 +618,20 @@ public sealed class CharacterNumericCondition
     public float Threshold =>
         type == CharacterConditionType.HasStatus ? 1f : threshold;
     public StatusEffectSO StatusEffect => statusEffect;
+    public IReadOnlyList<StatusEffectSO> StatusEffects =>
+        statusEffects != null
+            ? statusEffects
+            : Array.Empty<StatusEffectSO>();
+    public CharacterStatusSelection StatusSelection =>
+        new(statusEffect, statusEffects);
+    public CharacterStatusConditionMatchMode StatusMatchMode =>
+        statusMatchMode;
+    public int StatusMatchCount => statusMatchCount;
+    public int RequiredStatusMatchCount => Math.Max(1, statusMatchCount);
 
     public void Validate()
     {
+        statusEffects ??= new List<StatusEffectSO>();
         if (type == CharacterConditionType.HasStatus)
         {
             type = CharacterConditionType.Numeric;
@@ -486,6 +640,13 @@ public sealed class CharacterNumericCondition
             threshold = 1f;
         }
 
+        if (!Enum.IsDefined(
+                typeof(CharacterStatusConditionMatchMode),
+                statusMatchMode))
+        {
+            statusMatchMode = CharacterStatusConditionMatchMode.Any;
+        }
+        statusMatchCount = Mathf.Max(1, statusMatchCount);
         if (float.IsNaN(threshold) || float.IsInfinity(threshold))
             threshold = 0f;
     }
@@ -499,6 +660,14 @@ public static class CharacterConditionEvaluator
     {
         if (condition == null || character == null)
             return false;
+
+        if (condition.Metric ==
+            CharacterNumericConditionMetric.StatusStackCount)
+        {
+            return MatchesStatusCondition(
+                condition,
+                character.GetStatusStackCount);
+        }
 
         float value = condition.Metric switch
         {
@@ -515,14 +684,79 @@ public static class CharacterConditionEvaluator
                 character.CurrentAttackSpeed,
             CharacterNumericConditionMetric.Shield =>
                 character.CurrentShield,
-            CharacterNumericConditionMetric.StatusStackCount =>
-                character.GetStatusStackCount(condition.StatusEffect),
             _ => 0f
         };
         return Compare(
             value,
             condition.Comparison,
             condition.Threshold);
+    }
+
+    internal static bool MatchesStatusCondition(
+        CharacterNumericCondition condition,
+        Func<StatusEffectSO, int> getStatusStackCount)
+    {
+        if (condition == null || getStatusStackCount == null)
+            return false;
+
+        CharacterStatusSelection selection = condition.StatusSelection;
+        if (selection.Count == 0)
+            return false;
+
+        int selectedCount = 0;
+        int matchedCount = 0;
+        for (int index = 0; index < selection.Count; index++)
+        {
+            StatusEffectSO status = selection.GetStatus(index);
+            if (status == null || IsDuplicateStatus(
+                    selection,
+                    status,
+                    index))
+            {
+                continue;
+            }
+
+            selectedCount++;
+            if (Compare(
+                    getStatusStackCount(status),
+                    condition.Comparison,
+                    condition.Threshold))
+            {
+                matchedCount++;
+            }
+        }
+
+        if (selectedCount == 0)
+            return false;
+
+        return condition.StatusMatchMode switch
+        {
+            CharacterStatusConditionMatchMode.Any =>
+                matchedCount >= 1,
+            CharacterStatusConditionMatchMode.All =>
+                matchedCount == selectedCount,
+            CharacterStatusConditionMatchMode.AtLeastCount =>
+                matchedCount >= condition.RequiredStatusMatchCount,
+            _ => false
+        };
+    }
+
+    private static bool IsDuplicateStatus(
+        CharacterStatusSelection selection,
+        StatusEffectSO status,
+        int index)
+    {
+        for (int previous = 0; previous < index; previous++)
+        {
+            if (CharacterStatusSelection.IsSameStatus(
+                    selection.GetStatus(previous),
+                    status))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     public static bool Compare(
@@ -850,6 +1084,10 @@ public sealed class CharacterEffectDefinition :
     [SerializeField]
     private CharacterStatusRemovalTarget statusRemovalTarget;
     [SerializeField]
+    private CharacterStatusRemovalPickMode statusRemovalPickMode;
+    [SerializeField, Min(1)]
+    private int statusRemovalPickCount = 1;
+    [SerializeField]
     private CharacterStatusRemovalAmountMode statusRemovalAmountMode;
     [SerializeField, Min(0)]
     private int statusRemovalCount;
@@ -941,11 +1179,16 @@ public sealed class CharacterEffectDefinition :
         statusRemovalEffects;
     public CharacterStatusRemovalTarget StatusRemovalTarget =>
         statusRemovalTarget;
+    public CharacterStatusRemovalPickMode StatusRemovalPickMode =>
+        statusRemovalPickMode;
+    public int StatusRemovalPickCount => statusRemovalPickCount;
     public CharacterStatusRemovalSelection StatusRemovalSelection =>
         new(
             statusRemovalTarget,
             statusEffect,
-            statusRemovalEffects);
+            statusRemovalEffects,
+            statusRemovalPickMode,
+            statusRemovalPickCount);
     public CharacterStatusRemovalAmountMode StatusRemovalAmountMode =>
         statusRemovalAmountMode;
     public int StatusRemovalCount => statusRemovalCount;
@@ -964,6 +1207,9 @@ public sealed class CharacterEffectDefinition :
         targetSelector ??= new CharacterEffectTargetSelector();
         statusRemovalEffects ??= new List<StatusEffectSO>();
         targetSelector.Validate();
+        CharacterStatusRemovalPick.Normalize(
+            ref statusRemovalPickMode,
+            ref statusRemovalPickCount);
         if (float.IsNaN(damageAmount) || float.IsInfinity(damageAmount))
             damageAmount = 0f;
         if (float.IsNaN(sourceResourceScale) ||
@@ -1049,6 +1295,10 @@ public sealed class CharacterSkillDefinition :
     [SerializeField]
     private CharacterStatusRemovalTarget statusRemovalTarget;
     [SerializeField]
+    private CharacterStatusRemovalPickMode statusRemovalPickMode;
+    [SerializeField, Min(1)]
+    private int statusRemovalPickCount = 1;
+    [SerializeField]
     private CharacterStatusRemovalAmountMode statusRemovalAmountMode;
     [SerializeField, Min(0)]
     private int statusRemovalCount;
@@ -1087,6 +1337,16 @@ public sealed class CharacterSkillDefinition :
     public StatusEffectSO StatusRemovalEffect => statusRemovalEffect;
     public CharacterStatusRemovalTarget StatusRemovalTarget =>
         statusRemovalTarget;
+    public CharacterStatusRemovalPickMode StatusRemovalPickMode =>
+        statusRemovalPickMode;
+    public int StatusRemovalPickCount => statusRemovalPickCount;
+    public CharacterStatusRemovalSelection StatusRemovalSelection =>
+        new(
+            statusRemovalTarget,
+            statusRemovalEffect,
+            null,
+            statusRemovalPickMode,
+            statusRemovalPickCount);
     public CharacterStatusRemovalAmountMode StatusRemovalAmountMode =>
         statusRemovalAmountMode;
     public int StatusRemovalCount => statusRemovalCount;
@@ -1124,6 +1384,9 @@ public sealed class CharacterSkillDefinition :
         damageAmount = Mathf.Max(0f, damageAmount);
         statusDuration = TimePrecision.Normalize(statusDuration, 0.1f);
         statusStacks = Mathf.Max(0.1f, statusStacks);
+        CharacterStatusRemovalPick.Normalize(
+            ref statusRemovalPickMode,
+            ref statusRemovalPickCount);
         CharacterStatusRemovalAmount.Normalize(
             ref statusRemovalAmountMode,
             ref statusRemovalCount,
@@ -1186,6 +1449,8 @@ public sealed class CharacterPassiveDefinition :
     private CharacterPassiveStatusTarget statusTarget;
     [SerializeField]
     private StatusEffectSO triggerStatusEffect;
+    [SerializeField]
+    private List<StatusEffectSO> triggerStatusEffects = new();
     [SerializeField, Min(0.1f)]
     private float cooldown = 1f;
     [FormerlySerializedAs("detailCondition")]
@@ -1222,6 +1487,10 @@ public sealed class CharacterPassiveDefinition :
     [SerializeField]
     private CharacterStatusRemovalTarget statusRemovalTarget;
     [SerializeField]
+    private CharacterStatusRemovalPickMode statusRemovalPickMode;
+    [SerializeField, Min(1)]
+    private int statusRemovalPickCount = 1;
+    [SerializeField]
     private CharacterStatusRemovalAmountMode statusRemovalAmountMode;
     [SerializeField, Min(0)]
     private int statusRemovalCount;
@@ -1242,6 +1511,12 @@ public sealed class CharacterPassiveDefinition :
     public CharacterSO SpecifiedKillerCharacter => specifiedKillerCharacter;
     public CharacterPassiveStatusTarget StatusTarget => statusTarget;
     public StatusEffectSO TriggerStatusEffect => triggerStatusEffect;
+    public IReadOnlyList<StatusEffectSO> TriggerStatusEffects =>
+        triggerStatusEffects != null
+            ? triggerStatusEffects
+            : Array.Empty<StatusEffectSO>();
+    public CharacterStatusSelection TriggerStatusSelection =>
+        new(triggerStatusEffect, triggerStatusEffects);
     public float Cooldown => TimePrecision.Normalize(
         cooldown,
         TimePrecision.Step);
@@ -1274,6 +1549,16 @@ public sealed class CharacterPassiveDefinition :
     public StatusEffectSO StatusRemovalEffect => statusRemovalEffect;
     public CharacterStatusRemovalTarget StatusRemovalTarget =>
         statusRemovalTarget;
+    public CharacterStatusRemovalPickMode StatusRemovalPickMode =>
+        statusRemovalPickMode;
+    public int StatusRemovalPickCount => statusRemovalPickCount;
+    public CharacterStatusRemovalSelection StatusRemovalSelection =>
+        new(
+            statusRemovalTarget,
+            statusRemovalEffect,
+            null,
+            statusRemovalPickMode,
+            statusRemovalPickCount);
     public CharacterStatusRemovalAmountMode StatusRemovalAmountMode =>
         statusRemovalAmountMode;
     public int StatusRemovalCount => statusRemovalCount;
@@ -1310,6 +1595,7 @@ public sealed class CharacterPassiveDefinition :
     public void Validate()
     {
         sections ??= new List<CharacterPassiveSectionType>();
+        triggerStatusEffects ??= new List<StatusEffectSO>();
         numericConditions ??= new List<CharacterNumericCondition>();
         foreach (CharacterNumericCondition condition in numericConditions)
             condition?.Validate();
@@ -1325,6 +1611,9 @@ public sealed class CharacterPassiveDefinition :
         damageAmount = Mathf.Max(0f, damageAmount);
         statusDuration = TimePrecision.Normalize(statusDuration, 0.1f);
         statusStacks = Mathf.Max(0.1f, statusStacks);
+        CharacterStatusRemovalPick.Normalize(
+            ref statusRemovalPickMode,
+            ref statusRemovalPickCount);
         CharacterStatusRemovalAmount.Normalize(
             ref statusRemovalAmountMode,
             ref statusRemovalCount,
@@ -1427,6 +1716,10 @@ public sealed class CharacterAttackDefinition :
     [SerializeField]
     private CharacterStatusRemovalTarget statusRemovalTarget;
     [SerializeField]
+    private CharacterStatusRemovalPickMode statusRemovalPickMode;
+    [SerializeField, Min(1)]
+    private int statusRemovalPickCount = 1;
+    [SerializeField]
     private CharacterStatusRemovalAmountMode statusRemovalAmountMode;
     [SerializeField, Min(0)]
     private int statusRemovalCount;
@@ -1465,6 +1758,16 @@ public sealed class CharacterAttackDefinition :
     public StatusEffectSO StatusRemovalEffect => statusRemovalEffect;
     public CharacterStatusRemovalTarget StatusRemovalTarget =>
         statusRemovalTarget;
+    public CharacterStatusRemovalPickMode StatusRemovalPickMode =>
+        statusRemovalPickMode;
+    public int StatusRemovalPickCount => statusRemovalPickCount;
+    public CharacterStatusRemovalSelection StatusRemovalSelection =>
+        new(
+            statusRemovalTarget,
+            statusRemovalEffect,
+            null,
+            statusRemovalPickMode,
+            statusRemovalPickCount);
     public CharacterStatusRemovalAmountMode StatusRemovalAmountMode =>
         statusRemovalAmountMode;
     public int StatusRemovalCount => statusRemovalCount;
@@ -1522,6 +1825,9 @@ public sealed class CharacterAttackDefinition :
         damageAmount = Mathf.Max(0f, damageAmount);
         statusDuration = TimePrecision.Normalize(statusDuration, 0.1f);
         statusStacks = Mathf.Max(0.1f, statusStacks);
+        CharacterStatusRemovalPick.Normalize(
+            ref statusRemovalPickMode,
+            ref statusRemovalPickCount);
         CharacterStatusRemovalAmount.Normalize(
             ref statusRemovalAmountMode,
             ref statusRemovalCount,

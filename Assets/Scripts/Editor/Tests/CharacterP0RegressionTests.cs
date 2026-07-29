@@ -1308,6 +1308,55 @@ public sealed class CharacterP0RegressionTests
     }
 
     [Test]
+    public void StatusPassive_MultiFilterTriggersForEitherSelectedStatus()
+    {
+        CharacterSO definition = CreateSuirenFeatureFixture();
+        StatusEffectSO stun = LoadAsset<StatusEffectSO>(StunAssetPath);
+        StatusEffectSO combo = LoadAsset<StatusEffectSO>(ComboAssetPath);
+        SerializedObject serialized = new(definition);
+        SerializedProperty passive = serialized
+            .FindProperty("passiveDefinitions")
+            .GetArrayElementAtIndex(1);
+        passive.FindPropertyRelative(
+            "triggerStatusEffect").objectReferenceValue = null;
+        SerializedProperty triggerStatuses =
+            passive.FindPropertyRelative("triggerStatusEffects");
+        triggerStatuses.arraySize = 2;
+        triggerStatuses.GetArrayElementAtIndex(0)
+            .objectReferenceValue = stun;
+        triggerStatuses.GetArrayElementAtIndex(1)
+            .objectReferenceValue = combo;
+        SerializedProperty removeEffect = passive
+            .FindPropertyRelative("effects")
+            .GetArrayElementAtIndex(0);
+        removeEffect.FindPropertyRelative(
+            "statusEffect").objectReferenceValue = combo;
+        serialized.ApplyModifiedPropertiesWithoutUndo();
+
+        CharacterRuntime suiren = CreateCharacter(definition);
+        CharacterRuntime ally = CreateCharacter(
+            CreateBaseCharacterFixture("MultiStatusTargetFixture"));
+        StatusEffectSO emergencyKit =
+            LoadAsset<StatusEffectSO>(EmergencyKitAssetPath);
+        FakeBattleBoard board = new();
+        suiren.BindBattle(null, board);
+        ally.BindBattle(null, board);
+
+        Assert.That(
+            suiren.ApplyStatusEffect(emergencyKit, 1f, 2),
+            Is.True);
+        Assert.That(ally.ApplyStatusEffect(combo, 5f, 1), Is.True);
+
+        Assert.That(ally.HasStatusEffect(combo), Is.False);
+        Assert.That(
+            suiren.GetStatusStackCount(emergencyKit),
+            Is.EqualTo(1));
+        Assert.That(
+            board.LastAlliedStatusRemovalTargets,
+            Is.EquivalentTo(new IBattleCharacter[] { ally }));
+    }
+
+    [Test]
     public void StatusPassive_IgnoresWrongTargetStatusAndMissingCost()
     {
         CharacterRuntime suiren = CreateCharacter(
@@ -1895,6 +1944,133 @@ public sealed class CharacterP0RegressionTests
             Is.GreaterThan(0),
             "At least one fixture effect must protect the " +
             "serialized target defaults.");
+    }
+
+    [Test]
+    public void ManualSkill_WaitsForSelectionThenResumesWithChosenTarget()
+    {
+        CharacterSO definition =
+            CreateExplicitDamageAndStatusCharacter(null);
+        SerializedObject serialized = new(definition);
+        SerializedProperty skill = serialized
+            .FindProperty("skillDefinitions")
+            .GetArrayElementAtIndex(0);
+        skill.FindPropertyRelative("subject").enumValueIndex =
+            (int)CharacterAttackSubject.Manual;
+        skill.FindPropertyRelative("subjectCount").intValue = 1;
+        serialized.ApplyModifiedPropertiesWithoutUndo();
+
+        CharacterRuntime character = CreateCharacter(definition);
+        EnemyRuntime enemy = CreateEnemyRuntime();
+        FakeActiveSkillResource resource = new(6, 10);
+        FakeBattleBoard board = new()
+        {
+            LivingEnemyCountValue = 1,
+            SelectedEnemyTargets = new[] { enemy },
+        };
+        character.BindBattle(resource, board);
+
+        Assert.That(character.TryActivateActiveSkill(), Is.True);
+        Assert.That(board.IsManualTargetSelectionPending, Is.True);
+        Assert.That(
+            board.CurrentManualTargetRequest.RequiredCount,
+            Is.EqualTo(1));
+        Assert.That(resource.Current, Is.EqualTo(6));
+        Assert.That(resource.TrySpendCallCount, Is.Zero);
+        Assert.That(board.DamageTargetSnapshots, Is.Empty);
+
+        board.CompleteManualEnemyTargets(enemy);
+        character.TickBattle(0.1f, board);
+
+        Assert.That(board.IsManualTargetSelectionPending, Is.False);
+        Assert.That(resource.Current, Is.EqualTo(4));
+        Assert.That(resource.TrySpendCallCount, Is.EqualTo(1));
+        Assert.That(board.DamageTargetSnapshots, Has.Count.EqualTo(1));
+        Assert.That(
+            board.DamageTargetSnapshots[0],
+            Is.EqualTo(new[] { enemy }));
+        Assert.That(board.DamageAmounts, Is.EqualTo(new[] { 4 }));
+    }
+
+    [Test]
+    public void ManualBasicAttack_WaitsForSelectionThenUsesChosenTarget()
+    {
+        CharacterSO definition = CreateBaseCharacterFixture(
+            "ManualBasicAttackFixture",
+            attackPower: 10f,
+            attackCooldown: 0.1f);
+        SerializedObject serialized = new(definition);
+        serialized.FindProperty("attackDefinitions")
+            .GetArrayElementAtIndex(0)
+            .FindPropertyRelative("subject")
+            .enumValueIndex = (int)CharacterAttackSubject.Manual;
+        serialized.ApplyModifiedPropertiesWithoutUndo();
+
+        CharacterRuntime character = CreateCharacter(definition);
+        EnemyRuntime enemy = CreateEnemyRuntime();
+        FakeBattleBoard board = new()
+        {
+            LivingEnemyCountValue = 1,
+            SelectedEnemyTargets = new[] { enemy },
+        };
+        character.BindBattle(null, board);
+
+        character.TickBattle(0.2f, board);
+
+        Assert.That(board.IsManualTargetSelectionPending, Is.True);
+        Assert.That(board.DamageTargetSnapshots, Is.Empty);
+
+        board.CompleteManualEnemyTargets(enemy);
+        character.TickBattle(0.1f, board);
+
+        Assert.That(board.IsManualTargetSelectionPending, Is.False);
+        Assert.That(board.DamageTargetSnapshots, Has.Count.EqualTo(1));
+        Assert.That(
+            board.DamageTargetSnapshots[0],
+            Is.EqualTo(new[] { enemy }));
+        Assert.That(board.DamageAmounts, Is.EqualTo(new[] { 1 }));
+    }
+
+    [Test]
+    public void ManualCooldownPassive_WaitsForSelectionThenResumes()
+    {
+        CharacterSO definition = CreateBaseCharacterFixture(
+            "ManualCooldownPassiveFixture");
+        SerializedObject serialized = new(definition);
+        SerializedProperty passive = serialized
+            .FindProperty("passiveDefinitions")
+            .GetArrayElementAtIndex(0);
+        passive.FindPropertyRelative("trigger").enumValueIndex =
+            (int)CharacterPassiveTrigger.OnCooldown;
+        passive.FindPropertyRelative("cooldown").floatValue = 0.1f;
+        passive.FindPropertyRelative("targetFaction").enumValueIndex =
+            (int)CharacterTargetFaction.Enemy;
+        passive.FindPropertyRelative("subject").enumValueIndex =
+            (int)CharacterAttackSubject.Manual;
+        serialized.ApplyModifiedPropertiesWithoutUndo();
+
+        CharacterRuntime character = CreateCharacter(definition);
+        EnemyRuntime enemy = CreateEnemyRuntime();
+        FakeActiveSkillResource resource = new(0, 10);
+        FakeBattleBoard board = new()
+        {
+            LivingEnemyCountValue = 1,
+            SelectedEnemyTargets = new[] { enemy },
+        };
+        character.BindBattle(resource, board);
+
+        character.TickBattle(0.2f, board);
+
+        Assert.That(board.IsManualTargetSelectionPending, Is.True);
+        Assert.That(resource.Current, Is.Zero);
+        Assert.That(resource.TryGainCallCount, Is.Zero);
+
+        board.CompleteManualEnemyTargets(enemy);
+        character.TickBattle(0.1f, board);
+
+        Assert.That(board.IsManualTargetSelectionPending, Is.False);
+        Assert.That(resource.Current, Is.EqualTo(1));
+        Assert.That(resource.TryGainCallCount, Is.EqualTo(1));
     }
 
     [Test]
@@ -5277,6 +5453,131 @@ public sealed class CharacterP0RegressionTests
     }
 
     [Test]
+    public void AlliedStatus_ExplicitSelectionRandomCountRemovesExactlyNStatuses()
+    {
+        StatusEffectSO firstStatus = CreateRuntimeStatus(
+            "test_multi_random_removal_a",
+            false,
+            true,
+            StatusEffectStackMode.AddAndRefreshDuration,
+            0);
+        StatusEffectSO secondStatus = CreateRuntimeStatus(
+            "test_multi_random_removal_b",
+            false,
+            true,
+            StatusEffectStackMode.AddAndRefreshDuration,
+            0);
+        StatusEffectSO thirdStatus = CreateRuntimeStatus(
+            "test_multi_random_removal_c",
+            false,
+            true,
+            StatusEffectStackMode.AddAndRefreshDuration,
+            0);
+        CharacterRuntime character = CreateCharacter(SuirenAssetPath);
+        character.ApplyStatusEffect(firstStatus, 5f, 1);
+        character.ApplyStatusEffect(secondStatus, 5f, 1);
+        character.ApplyStatusEffect(thirdStatus, 5f, 1);
+
+        CharacterStatusRemovalSelection selection = new(
+            CharacterStatusRemovalTarget.Single,
+            null,
+            new[] { firstStatus, secondStatus, thirdStatus },
+            CharacterStatusRemovalPickMode.RandomCount,
+            2);
+        int removed = character.RemoveStatusEffects(
+            selection,
+            CharacterStatusRemovalAmount.Fixed(0));
+
+        Assert.That(removed, Is.EqualTo(2));
+        Assert.That(
+            character.GetStatusStackCount(firstStatus) +
+            character.GetStatusStackCount(secondStatus) +
+            character.GetStatusStackCount(thirdStatus),
+            Is.EqualTo(1));
+    }
+
+    [Test]
+    public void AlliedStatus_BuffRandomCountIgnoresDebuffsAndProtectedBuffs()
+    {
+        StatusEffectSO firstBuff = CreateRuntimeStatus(
+            "test_random_buff_removal_a",
+            false,
+            true,
+            StatusEffectStackMode.AddAndRefreshDuration,
+            0);
+        StatusEffectSO secondBuff = CreateRuntimeStatus(
+            "test_random_buff_removal_b",
+            false,
+            true,
+            StatusEffectStackMode.AddAndRefreshDuration,
+            0);
+        StatusEffectSO thirdBuff = CreateRuntimeStatus(
+            "test_random_buff_removal_c",
+            false,
+            true,
+            StatusEffectStackMode.AddAndRefreshDuration,
+            0);
+        StatusEffectSO protectedBuff = CreateRuntimeStatus(
+            "test_random_buff_removal_protected",
+            false,
+            true,
+            StatusEffectStackMode.AddAndRefreshDuration,
+            0);
+        StatusEffectSO debuff = CreateRuntimeStatus(
+            "test_random_buff_removal_debuff",
+            false,
+            true,
+            StatusEffectStackMode.AddAndRefreshDuration,
+            0);
+        ConfigureStatusRemovalMetadata(
+            firstBuff,
+            StatusEffectAlignment.Buff,
+            true);
+        ConfigureStatusRemovalMetadata(
+            secondBuff,
+            StatusEffectAlignment.Buff,
+            true);
+        ConfigureStatusRemovalMetadata(
+            thirdBuff,
+            StatusEffectAlignment.Buff,
+            true);
+        ConfigureStatusRemovalMetadata(
+            protectedBuff,
+            StatusEffectAlignment.Buff,
+            false);
+        ConfigureStatusRemovalMetadata(
+            debuff,
+            StatusEffectAlignment.Debuff,
+            true);
+        CharacterRuntime character = CreateCharacter(SuirenAssetPath);
+        character.ApplyStatusEffect(firstBuff, 5f, 1);
+        character.ApplyStatusEffect(secondBuff, 5f, 1);
+        character.ApplyStatusEffect(thirdBuff, 5f, 1);
+        character.ApplyStatusEffect(protectedBuff, 5f, 1);
+        character.ApplyStatusEffect(debuff, 5f, 1);
+
+        int removed = character.RemoveStatusEffects(
+            new CharacterStatusRemovalSelection(
+                CharacterStatusRemovalTarget.Buff,
+                null,
+                null,
+                CharacterStatusRemovalPickMode.RandomCount,
+                2),
+            CharacterStatusRemovalAmount.Fixed(0));
+
+        Assert.That(removed, Is.EqualTo(2));
+        Assert.That(
+            character.GetStatusStackCount(firstBuff) +
+            character.GetStatusStackCount(secondBuff) +
+            character.GetStatusStackCount(thirdBuff),
+            Is.EqualTo(1));
+        Assert.That(
+            character.GetStatusStackCount(protectedBuff),
+            Is.EqualTo(1));
+        Assert.That(character.GetStatusStackCount(debuff), Is.EqualTo(1));
+    }
+
+    [Test]
     public void AlliedStatus_AlignmentRemovalRespectsProtectedStatuses()
     {
         StatusEffectSO buff = CreateRuntimeStatus(
@@ -5403,6 +5704,75 @@ public sealed class CharacterP0RegressionTests
         Assert.That(removed, Is.EqualTo(3));
         Assert.That(GetEnemyStatusStacks(enemy, debuff), Is.Zero);
         Assert.That(GetEnemyStatusStacks(enemy, buff), Is.EqualTo(2));
+    }
+
+    [Test]
+    public void EnemyStatus_DebuffRandomCountRemovesExactlyNStatuses()
+    {
+        StatusEffectSO firstDebuff = CreateRuntimeStatus(
+            "test_enemy_random_debuff_removal_a",
+            true,
+            false,
+            StatusEffectStackMode.AddAndRefreshDuration,
+            0);
+        StatusEffectSO secondDebuff = CreateRuntimeStatus(
+            "test_enemy_random_debuff_removal_b",
+            true,
+            false,
+            StatusEffectStackMode.AddAndRefreshDuration,
+            0);
+        StatusEffectSO thirdDebuff = CreateRuntimeStatus(
+            "test_enemy_random_debuff_removal_c",
+            true,
+            false,
+            StatusEffectStackMode.AddAndRefreshDuration,
+            0);
+        StatusEffectSO buff = CreateRuntimeStatus(
+            "test_enemy_random_debuff_removal_buff",
+            true,
+            false,
+            StatusEffectStackMode.AddAndRefreshDuration,
+            0);
+        ConfigureStatusRemovalMetadata(
+            firstDebuff,
+            StatusEffectAlignment.Debuff,
+            true);
+        ConfigureStatusRemovalMetadata(
+            secondDebuff,
+            StatusEffectAlignment.Debuff,
+            true);
+        ConfigureStatusRemovalMetadata(
+            thirdDebuff,
+            StatusEffectAlignment.Debuff,
+            true);
+        ConfigureStatusRemovalMetadata(
+            buff,
+            StatusEffectAlignment.Buff,
+            true);
+        EnemyRuntime enemy = CreateEnemyRuntime();
+        CharacterRuntime source = CreateCharacter(SuirenAssetPath);
+        ApplyEnemyStatus(enemy, firstDebuff, 5f, 1, source, 1f);
+        ApplyEnemyStatus(enemy, secondDebuff, 5f, 1, source, 1f);
+        ApplyEnemyStatus(enemy, thirdDebuff, 5f, 1, source, 1f);
+        ApplyEnemyStatus(enemy, buff, 5f, 1, source, 1f);
+
+        int removed = RemoveEnemyStatuses(
+            enemy,
+            new CharacterStatusRemovalSelection(
+                CharacterStatusRemovalTarget.Debuff,
+                null,
+                null,
+                CharacterStatusRemovalPickMode.RandomCount,
+                2),
+            CharacterStatusRemovalAmount.Fixed(0));
+
+        Assert.That(removed, Is.EqualTo(2));
+        Assert.That(
+            GetEnemyStatusStacks(enemy, firstDebuff) +
+            GetEnemyStatusStacks(enemy, secondDebuff) +
+            GetEnemyStatusStacks(enemy, thirdDebuff),
+            Is.EqualTo(1));
+        Assert.That(GetEnemyStatusStacks(enemy, buff), Is.EqualTo(1));
     }
 
     [Test]
@@ -5681,6 +6051,117 @@ public sealed class CharacterP0RegressionTests
         Assert.That(enemy.GetActiveStatusEffects(), Is.Empty);
     }
 
+    [Test]
+    public void StatusStackCondition_MultiSelectionSupportsAnyAllAndCount()
+    {
+        StatusEffectSO first = CreateRuntimeStatus(
+            "condition-first",
+            canTargetEnemy: false,
+            canTargetAlly: true,
+            StatusEffectStackMode.AddAndRefreshDuration,
+            operationCount: 0);
+        StatusEffectSO second = CreateRuntimeStatus(
+            "condition-second",
+            canTargetEnemy: false,
+            canTargetAlly: true,
+            StatusEffectStackMode.AddAndRefreshDuration,
+            operationCount: 0);
+        CharacterRuntime character = CreateCharacter(
+            CreateBaseCharacterFixture("status-condition-selection"));
+        Assert.That(
+            character.ApplyStatusEffect(first, 1f, 1),
+            Is.True);
+
+        CharacterNumericCondition condition = new();
+        SetPrivateField(
+            condition,
+            "metric",
+            CharacterNumericConditionMetric.StatusStackCount);
+        SetPrivateField(
+            condition,
+            "comparison",
+            CharacterNumericComparison.GreaterThanOrEqual);
+        SetPrivateField(condition, "threshold", 1f);
+        SetPrivateField(
+            condition,
+            "statusEffects",
+            new List<StatusEffectSO> { first, second });
+
+        SetPrivateField(
+            condition,
+            "statusMatchMode",
+            CharacterStatusConditionMatchMode.Any);
+        Assert.That(
+            CharacterConditionEvaluator.MatchesCharacter(
+                condition,
+                character),
+            Is.True);
+
+        SetPrivateField(
+            condition,
+            "statusMatchMode",
+            CharacterStatusConditionMatchMode.All);
+        Assert.That(
+            CharacterConditionEvaluator.MatchesCharacter(
+                condition,
+                character),
+            Is.False);
+
+        Assert.That(
+            character.ApplyStatusEffect(second, 1f, 1),
+            Is.True);
+        Assert.That(
+            CharacterConditionEvaluator.MatchesCharacter(
+                condition,
+                character),
+            Is.True);
+
+        SetPrivateField(
+            condition,
+            "statusMatchMode",
+            CharacterStatusConditionMatchMode.AtLeastCount);
+        SetPrivateField(condition, "statusMatchCount", 2);
+        Assert.That(
+            CharacterConditionEvaluator.MatchesCharacter(
+                condition,
+                character),
+            Is.True);
+    }
+
+    [Test]
+    public void StatusStackCondition_EmptyListUsesLegacyStatusField()
+    {
+        StatusEffectSO status = CreateRuntimeStatus(
+            "condition-legacy",
+            canTargetEnemy: false,
+            canTargetAlly: true,
+            StatusEffectStackMode.AddAndRefreshDuration,
+            operationCount: 0);
+        CharacterRuntime character = CreateCharacter(
+            CreateBaseCharacterFixture("status-condition-legacy"));
+        Assert.That(
+            character.ApplyStatusEffect(status, 1f, 1),
+            Is.True);
+
+        CharacterNumericCondition condition = new();
+        SetPrivateField(
+            condition,
+            "metric",
+            CharacterNumericConditionMetric.StatusStackCount);
+        SetPrivateField(
+            condition,
+            "comparison",
+            CharacterNumericComparison.GreaterThanOrEqual);
+        SetPrivateField(condition, "threshold", 1f);
+        SetPrivateField(condition, "statusEffect", status);
+
+        Assert.That(
+            CharacterConditionEvaluator.MatchesCharacter(
+                condition,
+                character),
+            Is.True);
+    }
+
     private StatusEffectSO CreateRuntimeStatus(
         string statusId,
         bool canTargetEnemy,
@@ -5718,6 +6199,18 @@ public sealed class CharacterP0RegressionTests
             Mathf.Max(0, operationCount);
         serialized.ApplyModifiedPropertiesWithoutUndo();
         return status;
+    }
+
+    private static void SetPrivateField(
+        object target,
+        string fieldName,
+        object value)
+    {
+        FieldInfo field = target.GetType().GetField(
+            fieldName,
+            BindingFlags.Instance | BindingFlags.NonPublic);
+        Assert.That(field, Is.Not.Null, $"Missing field '{fieldName}'.");
+        field.SetValue(target, value);
     }
 
     private static void ConfigureStatusRemovalMetadata(
@@ -7667,7 +8160,9 @@ public sealed class CharacterP0RegressionTests
         }
     }
 
-    private sealed class FakeBattleBoard : IBattleBoard
+    private sealed class FakeBattleBoard :
+        IBattleBoard,
+        IBattleManualTargetSelectionService
     {
         private EnemyRuntime _centerTarget;
         private EnemyRuntime _crossTarget;
@@ -7709,9 +8204,16 @@ public sealed class CharacterP0RegressionTests
             { get; } = new();
         public List<StatusEffectSO> AppliedStatuses { get; } = new();
         public int StatusApplyCallCount { get; private set; }
+        public bool IsManualTargetSelectionPending =>
+            CurrentManualTargetRequest != null;
+        public BattleManualTargetSelectionRequest
+            CurrentManualTargetRequest { get; private set; }
+        public int CurrentManualSelectedCount { get; private set; }
 
         public event Action<BattleEnemyDefeatedEvent> EnemyDefeated;
         public event Action<BattleStatusAppliedEvent> StatusApplied;
+        public event Action<bool> ManualTargetSelectionPendingChanged;
+        public event Action ManualTargetSelectionProgressChanged;
 
         public void ConfigureAislingTargets(
             EnemyRuntime centerTarget,
@@ -7739,6 +8241,60 @@ public sealed class CharacterP0RegressionTests
         public void NotifyStatusApplied(BattleStatusAppliedEvent eventData)
         {
             StatusApplied?.Invoke(eventData);
+        }
+
+        public bool TryBeginManualTargetSelection(
+            BattleManualTargetSelectionRequest request)
+        {
+            if (request == null ||
+                request.RequiredCount <= 0 ||
+                IsManualTargetSelectionPending)
+            {
+                return false;
+            }
+
+            CurrentManualTargetRequest = request;
+            CurrentManualSelectedCount = 0;
+            ManualTargetSelectionProgressChanged?.Invoke();
+            ManualTargetSelectionPendingChanged?.Invoke(true);
+            return true;
+        }
+
+        public void CompleteManualEnemyTargets(
+            params EnemyRuntime[] targets)
+        {
+            BattleManualTargetSelectionRequest request =
+                CurrentManualTargetRequest;
+            Assert.That(request, Is.Not.Null);
+            Assert.That(
+                request.Faction,
+                Is.EqualTo(CharacterTargetFaction.Enemy));
+            CurrentManualTargetRequest = null;
+            CurrentManualSelectedCount = 0;
+            ManualTargetSelectionProgressChanged?.Invoke();
+            ManualTargetSelectionPendingChanged?.Invoke(false);
+            request.Complete(new BattleManualTargetSelectionResult(
+                CharacterTargetFaction.Enemy,
+                targets,
+                null));
+        }
+
+        public void CancelManualTargetSelection()
+        {
+            BattleManualTargetSelectionRequest request =
+                CurrentManualTargetRequest;
+            if (request == null)
+                return;
+
+            CurrentManualTargetRequest = null;
+            CurrentManualSelectedCount = 0;
+            ManualTargetSelectionProgressChanged?.Invoke();
+            ManualTargetSelectionPendingChanged?.Invoke(false);
+            request.Complete(new BattleManualTargetSelectionResult(
+                request.Faction,
+                null,
+                null,
+                true));
         }
 
         public bool TryAddEnemy(EnemyRuntime enemy)

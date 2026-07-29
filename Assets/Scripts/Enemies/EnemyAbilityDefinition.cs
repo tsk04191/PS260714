@@ -167,6 +167,12 @@ public sealed class EnemyAbilityConditionDefinition
     [SerializeField]
     private StatusEffectSO statusEffect;
     [SerializeField]
+    private List<StatusEffectSO> statusEffects = new();
+    [SerializeField]
+    private CharacterStatusConditionMatchMode statusMatchMode;
+    [SerializeField, Min(1)]
+    private int statusMatchCount = 1;
+    [SerializeField]
     private CharacterAttackDamageType incomingDamageType;
     [SerializeField]
     private bool expected = true;
@@ -175,6 +181,16 @@ public sealed class EnemyAbilityConditionDefinition
     public CharacterNumericComparison Comparison => comparison;
     public float Threshold => threshold;
     public StatusEffectSO StatusEffect => statusEffect;
+    public IReadOnlyList<StatusEffectSO> StatusEffects =>
+        statusEffects != null
+            ? statusEffects
+            : Array.Empty<StatusEffectSO>();
+    public CharacterStatusSelection StatusSelection =>
+        new(statusEffect, statusEffects);
+    public CharacterStatusConditionMatchMode StatusMatchMode =>
+        statusMatchMode;
+    public int StatusMatchCount => statusMatchCount;
+    public int RequiredStatusMatchCount => Mathf.Max(1, statusMatchCount);
     public CharacterAttackDamageType IncomingDamageType =>
         incomingDamageType;
     public bool Expected => expected;
@@ -215,6 +231,14 @@ public sealed class EnemyAbilityConditionDefinition
 
     public void Validate()
     {
+        statusEffects ??= new List<StatusEffectSO>();
+        if (!Enum.IsDefined(
+                typeof(CharacterStatusConditionMatchMode),
+                statusMatchMode))
+        {
+            statusMatchMode = CharacterStatusConditionMatchMode.Any;
+        }
+        statusMatchCount = Mathf.Max(1, statusMatchCount);
         if (float.IsNaN(threshold) || float.IsInfinity(threshold))
             threshold = 0f;
     }
@@ -584,8 +608,9 @@ internal static class EnemyAbilityConditionEvaluator
                         condition.Comparison,
                         condition.Threshold),
                 EnemyAbilityConditionType.SourceHasStatus =>
-                    (source.HasStatusEffect(condition.StatusEffect) ==
-                     condition.Expected),
+                    MatchesStatusSelection(
+                        condition,
+                        source.HasStatusEffect) == condition.Expected,
                 EnemyAbilityConditionType.HasAlternateTarget =>
                     hasAlternateTarget == condition.Expected,
                 _ => false
@@ -597,6 +622,65 @@ internal static class EnemyAbilityConditionEvaluator
         }
 
         return !evaluatedAny || !matchAny;
+    }
+
+    internal static bool MatchesStatusSelection(
+        EnemyAbilityConditionDefinition condition,
+        Func<StatusEffectSO, bool> hasStatus)
+    {
+        if (condition == null || hasStatus == null)
+            return false;
+
+        CharacterStatusSelection selection = condition.StatusSelection;
+        int selectedCount = 0;
+        int matchedCount = 0;
+        for (int index = 0; index < selection.Count; index++)
+        {
+            StatusEffectSO status = selection.GetStatus(index);
+            if (status == null || ContainsEarlierStatus(
+                    selection,
+                    status,
+                    index))
+            {
+                continue;
+            }
+
+            selectedCount++;
+            if (hasStatus(status))
+                matchedCount++;
+        }
+
+        if (selectedCount == 0)
+            return false;
+
+        return condition.StatusMatchMode switch
+        {
+            CharacterStatusConditionMatchMode.Any =>
+                matchedCount >= 1,
+            CharacterStatusConditionMatchMode.All =>
+                matchedCount == selectedCount,
+            CharacterStatusConditionMatchMode.AtLeastCount =>
+                matchedCount >= condition.RequiredStatusMatchCount,
+            _ => false
+        };
+    }
+
+    private static bool ContainsEarlierStatus(
+        CharacterStatusSelection selection,
+        StatusEffectSO status,
+        int index)
+    {
+        for (int previous = 0; previous < index; previous++)
+        {
+            if (CharacterStatusSelection.IsSameStatus(
+                    selection.GetStatus(previous),
+                    status))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private static bool Compare(

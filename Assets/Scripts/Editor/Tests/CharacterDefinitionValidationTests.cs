@@ -462,6 +462,54 @@ public sealed class CharacterDefinitionValidationTests
     }
 
     [Test]
+    public void Validate_StatusRemovalRandomCountBelowOne_ReturnsError()
+    {
+        CharacterSO definition = CreateDefinition();
+        SerializedObject serialized = new(definition);
+        SerializedProperty attacks =
+            serialized.FindProperty("attackDefinitions");
+        attacks.arraySize = 1;
+        SerializedProperty attack = attacks.GetArrayElementAtIndex(0);
+        SetSections(
+            attack.FindPropertyRelative("sections"),
+            (int)CharacterAttackSectionType.Subject,
+            (int)CharacterAttackSectionType.Ability);
+        attack.FindPropertyRelative("targetFaction").enumValueIndex =
+            (int)CharacterTargetFaction.Ally;
+        attack.FindPropertyRelative("subject").enumValueIndex =
+            (int)CharacterAttackSubject.Self;
+        attack.FindPropertyRelative("damageType").enumValueIndex =
+            (int)CharacterAttackDamageType.StatusRemoval;
+        attack.FindPropertyRelative("statusRemovalTarget").enumValueIndex =
+            (int)CharacterStatusRemovalTarget.Buff;
+        serialized.ApplyModifiedPropertiesWithoutUndo();
+
+        CharacterAttackDefinition runtimeAttack =
+            definition.AttackDefinitions[0];
+        FieldInfo pickModeField =
+            typeof(CharacterAttackDefinition).GetField(
+                "statusRemovalPickMode",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+        FieldInfo pickCountField =
+            typeof(CharacterAttackDefinition).GetField(
+                "statusRemovalPickCount",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+        Assert.That(pickModeField, Is.Not.Null);
+        Assert.That(pickCountField, Is.Not.Null);
+        pickModeField.SetValue(
+            runtimeAttack,
+            CharacterStatusRemovalPickMode.RandomCount);
+        pickCountField.SetValue(runtimeAttack, 0);
+
+        CharacterDefinitionValidationResult result =
+            CharacterDefinitionValidator.Validate(definition);
+
+        Assert.That(
+            HasDiagnostic(result, "ability.removal_pick_count_invalid"),
+            Is.True);
+    }
+
+    [Test]
     public void Validate_ExplicitMultipleStatusRemoval_AcceptsUniqueStatuses()
     {
         StatusEffectSO fire =

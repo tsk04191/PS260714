@@ -384,6 +384,17 @@ public static class CharacterDefinitionValidator
 
             if (hasSubject)
             {
+                if (definition.Subject ==
+                        CharacterAttackSubject.Manual &&
+                    definitions.Count > 1)
+                {
+                    AddError(
+                        result,
+                        "attack.manual_sequence_unsupported",
+                        $"{path}.subject",
+                        "Manual target selection currently requires a " +
+                        "single basic attack definition.");
+                }
                 if (index == 0 &&
                     definition.Subject == CharacterAttackSubject.None)
                 {
@@ -444,6 +455,8 @@ public static class CharacterDefinitionValidator
                         definition.AppliedStatusEffect,
                         definition.StatusRemovalEffect,
                         definition.StatusRemovalTarget,
+                        definition.StatusRemovalPickMode,
+                        definition.StatusRemovalPickCount,
                         definition.StatusRemovalAmountMode,
                         definition.StatusRemovalCount,
                         definition.StatusRemovalRatio,
@@ -643,6 +656,8 @@ public static class CharacterDefinitionValidator
                         definition.AppliedStatusEffect,
                         definition.StatusRemovalEffect,
                         definition.StatusRemovalTarget,
+                        definition.StatusRemovalPickMode,
+                        definition.StatusRemovalPickCount,
                         definition.StatusRemovalAmountMode,
                         definition.StatusRemovalCount,
                         definition.StatusRemovalRatio,
@@ -709,29 +724,58 @@ public static class CharacterDefinitionValidator
         }
 
         if (definition.Trigger !=
-                CharacterPassiveTrigger.OnStatusAcquired ||
-            definition.TriggerStatusEffect == null)
+            CharacterPassiveTrigger.OnStatusAcquired)
         {
             return;
         }
 
-        StatusEffectSO status = definition.TriggerStatusEffect;
-        bool canReachTarget = definition.StatusTarget switch
+        CharacterStatusSelection selection =
+            definition.TriggerStatusSelection;
+        for (int index = 0; index < selection.Count; index++)
         {
-            CharacterPassiveStatusTarget.Enemy => status.CanTargetEnemy,
-            CharacterPassiveStatusTarget.Ally => status.CanTargetAlly,
-            CharacterPassiveStatusTarget.All =>
-                status.CanTargetEnemy || status.CanTargetAlly,
-            _ => false
-        };
-        if (!canReachTarget)
-        {
-            AddError(
-                result,
-                "passive.trigger_status_faction_mismatch",
-                $"{path}.triggerStatusEffect",
-                $"Status '{status.name}' cannot be acquired by the selected " +
-                "trigger faction.");
+            StatusEffectSO status = selection.GetStatus(index);
+            string statusPath = selection.UsesStatusList
+                ? $"{path}.triggerStatusEffects[{index}]"
+                : $"{path}.triggerStatusEffect";
+            if (status == null)
+            {
+                AddError(
+                    result,
+                    "passive.trigger_status_null",
+                    statusPath,
+                    "Trigger status selection contains a null entry.");
+                continue;
+            }
+
+            if (ContainsEarlierStatus(selection, status, index))
+            {
+                AddError(
+                    result,
+                    "passive.trigger_status_duplicate",
+                    statusPath,
+                    $"Status '{status.name}' is selected more than once.");
+                continue;
+            }
+
+            bool canReachTarget = definition.StatusTarget switch
+            {
+                CharacterPassiveStatusTarget.Enemy =>
+                    status.CanTargetEnemy,
+                CharacterPassiveStatusTarget.Ally =>
+                    status.CanTargetAlly,
+                CharacterPassiveStatusTarget.All =>
+                    status.CanTargetEnemy || status.CanTargetAlly,
+                _ => false
+            };
+            if (!canReachTarget)
+            {
+                AddError(
+                    result,
+                    "passive.trigger_status_faction_mismatch",
+                    statusPath,
+                    $"Status '{status.name}' cannot be acquired by the " +
+                    "selected trigger faction.");
+            }
         }
     }
 
@@ -805,16 +849,39 @@ public static class CharacterDefinitionValidator
         if (definition.StatusTarget == CharacterPassiveStatusTarget.Enemy)
             return CharacterTargetFaction.Enemy;
 
-        StatusEffectSO triggerStatus = definition.TriggerStatusEffect;
-        if (triggerStatus == null ||
-            triggerStatus.CanTargetAlly == triggerStatus.CanTargetEnemy)
+        CharacterStatusSelection triggerStatuses =
+            definition.TriggerStatusSelection;
+        if (triggerStatuses.Count == 0)
         {
             return null;
         }
 
-        return triggerStatus.CanTargetAlly
-            ? CharacterTargetFaction.Ally
-            : CharacterTargetFaction.Enemy;
+        CharacterTargetFaction? inferredFaction = null;
+        for (int index = 0; index < triggerStatuses.Count; index++)
+        {
+            StatusEffectSO triggerStatus =
+                triggerStatuses.GetStatus(index);
+            if (triggerStatus == null ||
+                triggerStatus.CanTargetAlly ==
+                triggerStatus.CanTargetEnemy)
+            {
+                return null;
+            }
+
+            CharacterTargetFaction statusFaction =
+                triggerStatus.CanTargetAlly
+                    ? CharacterTargetFaction.Ally
+                    : CharacterTargetFaction.Enemy;
+            if (inferredFaction.HasValue &&
+                inferredFaction.Value != statusFaction)
+            {
+                return null;
+            }
+
+            inferredFaction = statusFaction;
+        }
+
+        return inferredFaction;
     }
 
     private static void ValidateSelfStatusCost(
@@ -926,6 +993,16 @@ public static class CharacterDefinitionValidator
                 definition.HasSection(CharacterSkillSectionType.Subject)
                     ? definition.Subject
                     : CharacterAttackSubject.Random;
+            if (effectiveSubject == CharacterAttackSubject.Manual &&
+                definitions.Count > 1)
+            {
+                AddError(
+                    result,
+                    "skill.manual_sequence_unsupported",
+                    $"{path}.subject",
+                    "Manual target selection currently requires a single " +
+                    "skill definition.");
+            }
             bool reusesTarget =
                 effectiveSubject == CharacterAttackSubject.None;
             CharacterTargetFaction? abilityTargetFaction = reusesTarget
@@ -975,6 +1052,8 @@ public static class CharacterDefinitionValidator
                         definition.AppliedStatusEffect,
                         definition.StatusRemovalEffect,
                         definition.StatusRemovalTarget,
+                        definition.StatusRemovalPickMode,
+                        definition.StatusRemovalPickCount,
                         definition.StatusRemovalAmountMode,
                         definition.StatusRemovalCount,
                         definition.StatusRemovalRatio,
@@ -1353,27 +1432,99 @@ public static class CharacterDefinitionValidator
                 CharacterNumericConditionMetric.StatusStackCount;
             if (checksStatusStacks)
             {
-                StatusEffectSO status = condition.StatusEffect;
-                if (status == null)
+                CharacterStatusSelection selection =
+                    condition.StatusSelection;
+                if (selection.Count == 0)
                 {
                     AddError(
                         result,
                         "condition.status_required",
-                        $"{conditionPath}.statusEffect",
-                        "Status stack condition requires an explicit " +
+                        $"{conditionPath}.statusEffects",
+                        "Status stack condition requires at least one " +
                         "StatusEffectSO.");
                 }
-                else if (conditionTargetFaction.HasValue &&
-                         !CanTargetFaction(
-                             status,
-                             conditionTargetFaction.Value))
+
+                int uniqueStatusCount = 0;
+                for (int statusIndex = 0;
+                     statusIndex < selection.Count;
+                     statusIndex++)
+                {
+                    StatusEffectSO status =
+                        selection.GetStatus(statusIndex);
+                    string statusPath = selection.UsesStatusList
+                        ? $"{conditionPath}.statusEffects[{statusIndex}]"
+                        : $"{conditionPath}.statusEffect";
+                    if (status == null)
+                    {
+                        AddError(
+                            result,
+                            "condition.status_null",
+                            statusPath,
+                            "Status selection contains a null entry.");
+                        continue;
+                    }
+
+                    if (ContainsEarlierStatus(
+                            selection,
+                            status,
+                            statusIndex))
+                    {
+                        AddError(
+                            result,
+                            "condition.status_duplicate",
+                            statusPath,
+                            $"Status '{status.name}' is selected more than " +
+                            "once.");
+                        continue;
+                    }
+
+                    uniqueStatusCount++;
+                    if (conditionTargetFaction.HasValue &&
+                        !CanTargetFaction(
+                            status,
+                            conditionTargetFaction.Value))
+                    {
+                        AddError(
+                            result,
+                            "condition.status_faction_mismatch",
+                            statusPath,
+                            $"Status '{status.name}' cannot exist on the " +
+                            "selected condition target.");
+                    }
+                }
+
+                if (!Enum.IsDefined(
+                        typeof(CharacterStatusConditionMatchMode),
+                        condition.StatusMatchMode))
                 {
                     AddError(
                         result,
-                        "condition.status_faction_mismatch",
-                        $"{conditionPath}.statusEffect",
-                        $"Status '{status.name}' cannot exist on the selected " +
-                        "condition target.");
+                        "condition.status_match_mode_invalid",
+                        $"{conditionPath}.statusMatchMode",
+                        $"Unsupported status match mode " +
+                        $"'{condition.StatusMatchMode}'.");
+                }
+                else if (condition.StatusMatchMode ==
+                         CharacterStatusConditionMatchMode.AtLeastCount)
+                {
+                    if (condition.StatusMatchCount < 1)
+                    {
+                        AddError(
+                            result,
+                            "condition.status_match_count_invalid",
+                            $"{conditionPath}.statusMatchCount",
+                            "Required status match count must be at least 1.");
+                    }
+                    else if (condition.StatusMatchCount >
+                             uniqueStatusCount)
+                    {
+                        AddError(
+                            result,
+                            "condition.status_match_count_exceeds_selection",
+                            $"{conditionPath}.statusMatchCount",
+                            "Required status match count cannot exceed the " +
+                            "number of selected statuses.");
+                    }
                 }
             }
 
@@ -1430,6 +1581,18 @@ public static class CharacterDefinitionValidator
         string actionPath,
         CharacterDefinitionValidationResult result)
     {
+        if (!Enum.IsDefined(
+                typeof(CharacterAttackSubject),
+                subject))
+        {
+            AddError(
+                result,
+                "subject.mode_invalid",
+                $"{actionPath}.subject",
+                $"Unsupported target selection mode '{subject}'.");
+            return;
+        }
+
         if (targetFaction == CharacterTargetFaction.Enemy &&
             (subject == CharacterAttackSubject.Self ||
              subject == CharacterAttackSubject.AllExceptSelf ||
@@ -1756,6 +1919,15 @@ public static class CharacterDefinitionValidator
                 "FreshSelection cannot reuse an action target. Use " +
                 "InheritAction or choose an explicit selection mode.");
         }
+        else if (selector.Subject == CharacterAttackSubject.Manual)
+        {
+            AddError(
+                result,
+                "effect.fresh_subject_manual_unsupported",
+                $"{selectorPath}.subject",
+                "Manual target selection is currently supported only by " +
+                "the action-level subject.");
+        }
         else if (validFaction)
         {
             ValidateSubject(
@@ -2041,6 +2213,12 @@ public static class CharacterDefinitionValidator
         string effectPath,
         CharacterDefinitionValidationResult result)
     {
+        ValidateStatusRemovalPick(
+            effect.StatusRemovalPickMode,
+            effect.StatusRemovalPickCount,
+            effectPath,
+            "effect",
+            result);
         ValidateStatusRemovalAmount(
             effect.StatusRemovalAmountMode,
             effect.StatusRemovalCount,
@@ -2124,6 +2302,18 @@ public static class CharacterDefinitionValidator
                     $"{targetFaction} targets.");
             }
         }
+
+        if (selection.UsesRandomCount &&
+            selection.PickCount > visited.Count)
+        {
+            AddWarning(
+                result,
+                "effect.removal_pick_count_exceeds_explicit",
+                $"{effectPath}.statusRemovalPickCount",
+                "The requested status type count exceeds the number of " +
+                "unique explicit statuses. Runtime will remove every " +
+                "available explicit status.");
+        }
     }
 
     private static void ValidateAbility(
@@ -2134,6 +2324,8 @@ public static class CharacterDefinitionValidator
         StatusEffectSO appliedStatus,
         StatusEffectSO removalStatus,
         CharacterStatusRemovalTarget removalTarget,
+        CharacterStatusRemovalPickMode removalPickMode,
+        int removalPickCount,
         CharacterStatusRemovalAmountMode removalAmountMode,
         int removalCount,
         float removalRatio,
@@ -2218,6 +2410,12 @@ public static class CharacterDefinitionValidator
                 break;
 
             case CharacterAttackDamageType.StatusRemoval:
+                ValidateStatusRemovalPick(
+                    removalPickMode,
+                    removalPickCount,
+                    actionPath,
+                    "ability",
+                    result);
                 ValidateStatusRemovalAmount(
                     removalAmountMode,
                     removalCount,
@@ -2285,6 +2483,35 @@ public static class CharacterDefinitionValidator
             areaOffsets,
             actionPath,
             result);
+    }
+
+    private static void ValidateStatusRemovalPick(
+        CharacterStatusRemovalPickMode mode,
+        int count,
+        string path,
+        string codePrefix,
+        CharacterDefinitionValidationResult result)
+    {
+        if (!Enum.IsDefined(
+                typeof(CharacterStatusRemovalPickMode),
+                mode))
+        {
+            AddError(
+                result,
+                $"{codePrefix}.removal_pick_mode_invalid",
+                $"{path}.statusRemovalPickMode",
+                $"Unsupported status removal pick mode '{mode}'.");
+            return;
+        }
+
+        if (count < 1)
+        {
+            AddError(
+                result,
+                $"{codePrefix}.removal_pick_count_invalid",
+                $"{path}.statusRemovalPickCount",
+                "Status removal type count must be at least one.");
+        }
     }
 
     private static void ValidateStatusRemovalAmount(
@@ -2474,6 +2701,24 @@ public static class CharacterDefinitionValidator
                (faction == CharacterTargetFaction.Ally
                    ? status.CanTargetAlly
                    : status.CanTargetEnemy);
+    }
+
+    private static bool ContainsEarlierStatus(
+        CharacterStatusSelection selection,
+        StatusEffectSO status,
+        int index)
+    {
+        for (int previous = 0; previous < index; previous++)
+        {
+            if (CharacterStatusSelection.IsSameStatus(
+                    selection.GetStatus(previous),
+                    status))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private static bool IsFinite(float value)

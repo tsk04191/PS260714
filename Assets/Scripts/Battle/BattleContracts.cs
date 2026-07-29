@@ -1045,7 +1045,8 @@ public static class BattleEffectExecutor
         IBattleEffectTargetSelector selector =
             effect.BattleTargetSelector;
         if (context.Board == null || selector == null ||
-            selector.Subject == CharacterAttackSubject.None)
+            selector.Subject == CharacterAttackSubject.None ||
+            selector.Subject == CharacterAttackSubject.Manual)
         {
             return false;
         }
@@ -1318,6 +1319,86 @@ public readonly struct BattleEnemyDefeatedEvent
         Enemy = enemy;
         Killer = killer;
     }
+}
+
+public readonly struct BattleManualTargetSelectionResult
+{
+    public CharacterTargetFaction Faction { get; }
+    public IReadOnlyList<EnemyRuntime> EnemyTargets { get; }
+    public IReadOnlyList<IBattleCharacter> AllyTargets { get; }
+    public bool Cancelled { get; }
+    public bool HasTargets =>
+        Faction == CharacterTargetFaction.Ally
+            ? AllyTargets != null && AllyTargets.Count > 0
+            : EnemyTargets != null && EnemyTargets.Count > 0;
+
+    public BattleManualTargetSelectionResult(
+        CharacterTargetFaction faction,
+        IReadOnlyList<EnemyRuntime> enemyTargets,
+        IReadOnlyList<IBattleCharacter> allyTargets,
+        bool cancelled = false)
+    {
+        Faction = faction;
+        EnemyTargets = enemyTargets ?? Array.Empty<EnemyRuntime>();
+        AllyTargets = allyTargets ?? Array.Empty<IBattleCharacter>();
+        Cancelled = cancelled;
+    }
+}
+
+public sealed class BattleManualTargetSelectionRequest
+{
+    private readonly Action<BattleManualTargetSelectionResult> _complete;
+
+    public IBattleCharacter Source { get; }
+    public CharacterTargetFaction Faction { get; }
+    public int TargetCount { get; }
+    public IReadOnlyList<EnemyRuntime> EnemyCandidates { get; }
+    public IReadOnlyList<IBattleCharacter> AllyCandidates { get; }
+    public bool AllowCancel { get; }
+
+    public BattleManualTargetSelectionRequest(
+        IBattleCharacter source,
+        CharacterTargetFaction faction,
+        int targetCount,
+        IReadOnlyList<EnemyRuntime> enemyCandidates,
+        IReadOnlyList<IBattleCharacter> allyCandidates,
+        bool allowCancel,
+        Action<BattleManualTargetSelectionResult> complete)
+    {
+        Source = source;
+        Faction = faction;
+        TargetCount = Mathf.Max(1, targetCount);
+        EnemyCandidates =
+            enemyCandidates ?? Array.Empty<EnemyRuntime>();
+        AllyCandidates =
+            allyCandidates ?? Array.Empty<IBattleCharacter>();
+        AllowCancel = allowCancel;
+        _complete = complete;
+    }
+
+    public int CandidateCount =>
+        Faction == CharacterTargetFaction.Ally
+            ? AllyCandidates.Count
+            : EnemyCandidates.Count;
+    public int RequiredCount => Mathf.Min(TargetCount, CandidateCount);
+
+    public void Complete(BattleManualTargetSelectionResult result)
+    {
+        _complete?.Invoke(result);
+    }
+}
+
+public interface IBattleManualTargetSelectionService
+{
+    bool IsManualTargetSelectionPending { get; }
+    BattleManualTargetSelectionRequest CurrentManualTargetRequest { get; }
+    int CurrentManualSelectedCount { get; }
+    event Action<bool> ManualTargetSelectionPendingChanged;
+    event Action ManualTargetSelectionProgressChanged;
+
+    bool TryBeginManualTargetSelection(
+        BattleManualTargetSelectionRequest request);
+    void CancelManualTargetSelection();
 }
 
 public interface IBattleBoard

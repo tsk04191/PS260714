@@ -432,17 +432,105 @@ public static class EnemyDefinitionValidator
                     $"{path}.type",
                     $"Condition type '{condition.Type}' is unsupported.");
             }
-            if ((condition.Type ==
+            if (condition.Type ==
                     EnemyAbilityConditionType.SourceHasStatus ||
-                 condition.Type ==
-                    EnemyAbilityConditionType.TargetHasStatus) &&
-                condition.StatusEffect == null)
+                condition.Type ==
+                    EnemyAbilityConditionType.TargetHasStatus)
             {
-                AddError(
-                    result,
-                    "ability.condition_status_missing",
-                    $"{path}.statusEffect",
-                    "A status condition requires a StatusEffectSO.");
+                CharacterStatusSelection selection =
+                    condition.StatusSelection;
+                if (selection.Count == 0)
+                {
+                    AddError(
+                        result,
+                        "ability.condition_status_missing",
+                        $"{path}.statusEffects",
+                        "A status condition requires at least one " +
+                        "StatusEffectSO.");
+                }
+
+                int uniqueStatusCount = 0;
+                for (int statusIndex = 0;
+                     statusIndex < selection.Count;
+                     statusIndex++)
+                {
+                    StatusEffectSO status =
+                        selection.GetStatus(statusIndex);
+                    string statusPath = selection.UsesStatusList
+                        ? $"{path}.statusEffects[{statusIndex}]"
+                        : $"{path}.statusEffect";
+                    if (status == null)
+                    {
+                        AddError(
+                            result,
+                            "ability.condition_status_null",
+                            statusPath,
+                            "Status selection contains a null entry.");
+                        continue;
+                    }
+
+                    if (ContainsEarlierStatus(
+                            selection,
+                            status,
+                            statusIndex))
+                    {
+                        AddError(
+                            result,
+                            "ability.condition_status_duplicate",
+                            statusPath,
+                            $"Status '{status.name}' is selected more than " +
+                            "once.");
+                        continue;
+                    }
+
+                    uniqueStatusCount++;
+                    CharacterTargetFaction? faction =
+                        GetConditionStatusFaction(ability, condition.Type);
+                    if (faction.HasValue &&
+                        !CanTargetFaction(status, faction.Value))
+                    {
+                        AddError(
+                            result,
+                            "ability.condition_status_faction_mismatch",
+                            statusPath,
+                            $"Status '{status.name}' cannot exist on the " +
+                            "selected condition target.");
+                    }
+                }
+
+                if (!Enum.IsDefined(
+                        typeof(CharacterStatusConditionMatchMode),
+                        condition.StatusMatchMode))
+                {
+                    AddError(
+                        result,
+                        "ability.condition_status_match_mode_invalid",
+                        $"{path}.statusMatchMode",
+                        $"Status match mode '{condition.StatusMatchMode}' " +
+                        "is unsupported.");
+                }
+                else if (condition.StatusMatchMode ==
+                         CharacterStatusConditionMatchMode.AtLeastCount)
+                {
+                    if (condition.StatusMatchCount < 1)
+                    {
+                        AddError(
+                            result,
+                            "ability.condition_status_match_count_invalid",
+                            $"{path}.statusMatchCount",
+                            "Required status count must be at least 1.");
+                    }
+                    else if (condition.StatusMatchCount >
+                             uniqueStatusCount)
+                    {
+                        AddError(
+                            result,
+                            "ability.condition_status_match_count_exceeds_selection",
+                            $"{path}.statusMatchCount",
+                            "Required status count cannot exceed the number " +
+                            "of selected statuses.");
+                    }
+                }
             }
             if (condition.Type ==
                     EnemyAbilityConditionType.IncomingDamageType &&
@@ -457,6 +545,53 @@ public static class EnemyDefinitionValidator
                     "before-damage trigger.");
             }
         }
+    }
+
+    private static CharacterTargetFaction? GetConditionStatusFaction(
+        EnemyAbilityDefinition ability,
+        EnemyAbilityConditionType type)
+    {
+        if (type == EnemyAbilityConditionType.SourceHasStatus)
+            return CharacterTargetFaction.Enemy;
+
+        return ability.Target?.Faction switch
+        {
+            EnemyAbilityTargetFaction.Self =>
+                CharacterTargetFaction.Enemy,
+            EnemyAbilityTargetFaction.EnemyAllies =>
+                CharacterTargetFaction.Enemy,
+            EnemyAbilityTargetFaction.PlayerCharacters =>
+                CharacterTargetFaction.Ally,
+            _ => null
+        };
+    }
+
+    private static bool CanTargetFaction(
+        StatusEffectSO status,
+        CharacterTargetFaction faction)
+    {
+        return status != null &&
+               (faction == CharacterTargetFaction.Ally
+                   ? status.CanTargetAlly
+                   : status.CanTargetEnemy);
+    }
+
+    private static bool ContainsEarlierStatus(
+        CharacterStatusSelection selection,
+        StatusEffectSO status,
+        int index)
+    {
+        for (int previous = 0; previous < index; previous++)
+        {
+            if (CharacterStatusSelection.IsSameStatus(
+                    selection.GetStatus(previous),
+                    status))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private static void ValidateOperations(

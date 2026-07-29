@@ -371,7 +371,11 @@ public static class CharacterLocalization
                     definition.StatusRemovalAmountMode,
                     definition.StatusRemovalCount,
                     definition.StatusRemovalRatio,
-                    data.CalculatePassiveDamage(definition));
+                    data.CalculatePassiveDamage(definition),
+                    statusRemovalPickMode:
+                        definition.StatusRemovalPickMode,
+                    statusRemovalPickCount:
+                        definition.StatusRemovalPickCount);
             AppendCodexLine(
                 builder,
                 $"{(UsesKoreanLocale ? "패시브" : "PASSIVE")} {index++}: " +
@@ -427,7 +431,11 @@ public static class CharacterLocalization
                     definition.StatusRemovalAmountMode,
                     definition.StatusRemovalCount,
                     definition.StatusRemovalRatio,
-                    data.CalculateAttackDamage(definition));
+                    data.CalculateAttackDamage(definition),
+                    statusRemovalPickMode:
+                        definition.StatusRemovalPickMode,
+                    statusRemovalPickCount:
+                        definition.StatusRemovalPickCount);
             AppendCodexLine(
                 builder,
                 $"{(UsesKoreanLocale ? "공격" : "ATTACK")} {index++}: " +
@@ -501,7 +509,11 @@ public static class CharacterLocalization
                     definition.StatusRemovalAmountMode,
                     definition.StatusRemovalCount,
                     definition.StatusRemovalRatio,
-                    data.CalculateSkillDamage(definition));
+                    data.CalculateSkillDamage(definition),
+                    statusRemovalPickMode:
+                        definition.StatusRemovalPickMode,
+                    statusRemovalPickCount:
+                        definition.StatusRemovalPickCount);
             AppendCodexLine(
                 builder,
                 $"{(UsesKoreanLocale ? "기술" : "SKILL")} {index++}: " +
@@ -564,9 +576,17 @@ public static class CharacterLocalization
                         UsesKoreanLocale ? "적" : "an enemy",
                     _ => UsesKoreanLocale ? "누군가" : "any combatant"
                 };
-                string statusName = definition.TriggerStatusEffect != null
-                    ? GetStatusEffectName(definition.TriggerStatusEffect)
+                CharacterStatusSelection triggerStatuses =
+                    definition.TriggerStatusSelection;
+                string statusName = triggerStatuses.Count > 0
+                    ? FormatStatusSelectionNames(triggerStatuses)
                     : (UsesKoreanLocale ? "상태" : "a status");
+                if (triggerStatuses.Count > 1)
+                {
+                    statusName = UsesKoreanLocale
+                        ? $"{statusName} 중 하나"
+                        : $"any of {statusName}";
+                }
                 return UsesKoreanLocale
                     ? $"{targetName}에게 {statusName} 적용 시, "
                     : $"When {targetName} gains {statusName}, ";
@@ -676,11 +696,7 @@ public static class CharacterLocalization
                 CharacterNumericConditionMetric.Shield =>
                     UsesKoreanLocale ? "보호막" : "shield",
                 CharacterNumericConditionMetric.StatusStackCount =>
-                    UsesKoreanLocale
-                        ? $"{GetStatusEffectName(condition.StatusEffect)} " +
-                          "상태 스택"
-                        : $"{GetStatusEffectName(condition.StatusEffect)} " +
-                          "status stacks",
+                    FormatStatusConditionMetric(condition),
                 _ => UsesKoreanLocale ? "체력" : "health"
             };
             if (condition.Target == CharacterConditionTarget.Source)
@@ -734,6 +750,16 @@ public static class CharacterLocalization
             return UsesKoreanLocale
                 ? "앞선 공격과 동일한 대상"
                 : "Same target(s) as the previous attack";
+        }
+        if (subject == CharacterAttackSubject.Manual)
+        {
+            string manualFaction =
+                faction == CharacterTargetFaction.Ally
+                    ? (UsesKoreanLocale ? "아군" : "ally")
+                    : (UsesKoreanLocale ? "적" : "enemy");
+            return UsesKoreanLocale
+                ? $"플레이어가 선택한 {manualFaction} {count}명"
+                : $"{count} manually selected {manualFaction} target(s)";
         }
 
         if (faction == CharacterTargetFaction.Ally)
@@ -845,7 +871,10 @@ public static class CharacterLocalization
         float statusRemovalRatio,
         int finalDamage,
         bool includeFinalDamage = true,
-        IReadOnlyList<StatusEffectSO> statusRemovalEffects = null)
+        IReadOnlyList<StatusEffectSO> statusRemovalEffects = null,
+        CharacterStatusRemovalPickMode statusRemovalPickMode =
+            CharacterStatusRemovalPickMode.AllMatches,
+        int statusRemovalPickCount = 1)
     {
         string typeName = damageType switch
         {
@@ -876,20 +905,33 @@ public static class CharacterLocalization
 
         if (damageType == CharacterAttackDamageType.StatusRemoval)
         {
+            bool usesRandomCount =
+                statusRemovalTarget ==
+                    CharacterStatusRemovalTarget.Random ||
+                statusRemovalPickMode ==
+                    CharacterStatusRemovalPickMode.RandomCount;
             string targetName = statusRemovalTarget switch
             {
                 CharacterStatusRemovalTarget.Random =>
-                    UsesKoreanLocale ? "랜덤 상태" : "Random status",
+                    UsesKoreanLocale ? "제거 가능 상태" : "removable statuses",
                 CharacterStatusRemovalTarget.Buff =>
-                    UsesKoreanLocale ? "모든 버프" : "All buffs",
+                    UsesKoreanLocale ? "버프" : "buffs",
                 CharacterStatusRemovalTarget.Debuff =>
-                    UsesKoreanLocale ? "모든 디버프" : "All debuffs",
+                    UsesKoreanLocale ? "디버프" : "debuffs",
                 CharacterStatusRemovalTarget.All =>
-                    UsesKoreanLocale ? "전체 상태" : "All statuses",
+                    UsesKoreanLocale ? "전체 상태" : "statuses",
                 _ => FormatStatusRemovalNames(
                     statusRemovalEffect,
                     statusRemovalEffects)
             };
+            targetName = usesRandomCount
+                ? (UsesKoreanLocale
+                    ? $"{targetName} 중 {Mathf.Max(1, statusRemovalPickCount)}개"
+                    : $"{Mathf.Max(1, statusRemovalPickCount)} of " +
+                      $"{targetName}")
+                : (UsesKoreanLocale
+                    ? $"{targetName} 모두"
+                    : $"all {targetName}");
             string countName;
             if (statusRemovalAmountMode ==
                 CharacterStatusRemovalAmountMode.CurrentStacksRatio)
@@ -945,6 +987,63 @@ public static class CharacterLocalization
         return names.Count > 0
             ? string.Join(", ", names)
             : GetStatusEffectName(legacyStatus);
+    }
+
+    private static string FormatStatusConditionMetric(
+        CharacterNumericCondition condition)
+    {
+        if (condition == null)
+            return UsesKoreanLocale ? "상태 스택" : "status stacks";
+
+        CharacterStatusSelection selection = condition.StatusSelection;
+        string names = FormatStatusSelectionNames(selection);
+        string match = condition.StatusMatchMode switch
+        {
+            CharacterStatusConditionMatchMode.All =>
+                UsesKoreanLocale ? $"{names} 모두" : $"all of {names}",
+            CharacterStatusConditionMatchMode.AtLeastCount =>
+                UsesKoreanLocale
+                    ? $"{names} 중 {condition.RequiredStatusMatchCount}개 이상"
+                    : $"at least {condition.RequiredStatusMatchCount} of " +
+                      names,
+            _ => UsesKoreanLocale
+                ? $"{names} 중 하나 이상"
+                : $"any of {names}"
+        };
+        return UsesKoreanLocale
+            ? $"{match}의 상태 스택"
+            : $"{match} status stacks";
+    }
+
+    private static string FormatStatusSelectionNames(
+        CharacterStatusSelection selection)
+    {
+        List<string> names = new();
+        for (int index = 0; index < selection.Count; index++)
+        {
+            StatusEffectSO status = selection.GetStatus(index);
+            if (status == null)
+                continue;
+
+            bool duplicate = false;
+            for (int previous = 0; previous < index; previous++)
+            {
+                if (CharacterStatusSelection.IsSameStatus(
+                        selection.GetStatus(previous),
+                        status))
+                {
+                    duplicate = true;
+                    break;
+                }
+            }
+
+            if (!duplicate)
+                names.Add(GetStatusEffectName(status));
+        }
+
+        return names.Count > 0
+            ? string.Join(", ", names)
+            : (UsesKoreanLocale ? "상태" : "status");
     }
 
     private static string FormatEffects(
@@ -1017,7 +1116,11 @@ public static class CharacterLocalization
                         effect.StatusRemovalRatio,
                         finalDamage,
                         statusRemovalEffects:
-                            effect.StatusRemovalEffects));
+                            effect.StatusRemovalEffects,
+                        statusRemovalPickMode:
+                            effect.StatusRemovalPickMode,
+                        statusRemovalPickCount:
+                            effect.StatusRemovalPickCount));
                     break;
                 case CharacterEffectType.GainResource:
                     builder.Append(FormatResourceGain(effect));

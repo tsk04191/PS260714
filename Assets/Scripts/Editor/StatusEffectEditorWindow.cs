@@ -873,7 +873,7 @@ public sealed class StatusEffectEditorWindow : EditorWindow
     private static void DrawEffectStatusApplication(
         SerializedProperty effect)
     {
-        EditorGUILayout.PropertyField(
+        PS260714StatusEffectSelection.DrawSingle(
             effect.FindPropertyRelative("statusEffect"),
             new GUIContent("부여 상태"));
         DrawFloatProperty(effect, "statusDuration", "지속시간 (초)", 0.1f);
@@ -902,7 +902,9 @@ public sealed class StatusEffectEditorWindow : EditorWindow
                 effect.FindPropertyRelative("statusEffect"),
                 new GUIContent(
                     "제거 상태",
-                    "여러 상태를 선택할 수 있으며 분류와 검색으로 목록을 필터링합니다."));
+                    "여러 상태를 선택할 수 있으며 분류와 검색으로 목록을 필터링합니다."),
+                new PS260714StatusEffectSelectionOptions(
+                    requireRemovable: true));
         }
 
         SerializedProperty count =
@@ -1651,9 +1653,11 @@ public sealed class StatusEffectEditorWindow : EditorWindow
         if (status == null || scale == null)
             return;
 
-        EditorGUILayout.PropertyField(
+        PS260714StatusEffectSelection.DrawSingle(
             status,
-            new GUIContent($"{label} 기준"));
+            new GUIContent($"{label} 기준"),
+            new PS260714StatusEffectSelectionOptions(
+                allowNone: true));
         scale.floatValue = EditorGUILayout.FloatField(
             $"{label} 스택 배율",
             scale.floatValue);

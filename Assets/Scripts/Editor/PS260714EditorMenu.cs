@@ -224,12 +224,30 @@ internal static class PS260714AssetEditorList
     }
 }
 
+internal readonly struct PS260714StatusEffectSelectionOptions
+{
+    internal bool AllowNone { get; }
+    internal CharacterTargetFaction? TargetFaction { get; }
+    internal bool RequireRemovable { get; }
+
+    internal PS260714StatusEffectSelectionOptions(
+        bool allowNone = false,
+        CharacterTargetFaction? targetFaction = null,
+        bool requireRemovable = false)
+    {
+        AllowNone = allowNone;
+        TargetFaction = targetFaction;
+        RequireRemovable = requireRemovable;
+    }
+}
+
 internal static class PS260714StatusEffectSelection
 {
     internal static void Draw(
         SerializedProperty statusEffects,
         SerializedProperty legacyStatusEffect,
-        GUIContent label)
+        GUIContent label,
+        PS260714StatusEffectSelectionOptions options = default)
     {
         if (statusEffects == null)
         {
@@ -255,11 +273,55 @@ internal static class PS260714StatusEffectSelection
                 new StatusEffectMultiSelectPopup(
                     statusEffects.serializedObject.targetObject,
                     statusEffects.propertyPath,
-                    legacyStatusEffect?.propertyPath));
+                    legacyStatusEffect?.propertyPath,
+                    options));
         }
         EditorGUILayout.EndHorizontal();
 
-        DrawSelectedRows(statusEffects, legacyStatusEffect);
+        DrawSelectedRows(statusEffects, legacyStatusEffect, options);
+    }
+
+    internal static void DrawSingle(
+        SerializedProperty statusEffect,
+        GUIContent label,
+        PS260714StatusEffectSelectionOptions options = default)
+    {
+        if (statusEffect == null)
+        {
+            EditorGUILayout.HelpBox(
+                "Status effect property could not be found.",
+                MessageType.Error);
+            return;
+        }
+
+        StatusEffectSO selected =
+            statusEffect.objectReferenceValue as StatusEffectSO;
+        EditorGUILayout.BeginHorizontal();
+        EditorGUILayout.PrefixLabel(label);
+        GUIContent buttonContent = selected != null
+            ? new GUIContent(
+                selected.name,
+                PS260714AssetEditorList.GetAssetPreview(selected.Icon),
+                selected.StatusId)
+            : new GUIContent(options.AllowNone ? "없음" : "상태 선택");
+        if (GUILayout.Button(buttonContent, EditorStyles.popup))
+        {
+            Rect buttonRect = GUILayoutUtility.GetLastRect();
+            PopupWindow.Show(
+                buttonRect,
+                new StatusEffectSingleSelectPopup(
+                    statusEffect.serializedObject.targetObject,
+                    statusEffect.propertyPath,
+                    options));
+        }
+        EditorGUILayout.EndHorizontal();
+
+        if (selected == null && !options.AllowNone)
+        {
+            EditorGUILayout.HelpBox(
+                "상태 효과를 선택하세요.",
+                MessageType.Error);
+        }
     }
 
     private static int GetSelectedCount(
@@ -288,7 +350,8 @@ internal static class PS260714StatusEffectSelection
 
     private static void DrawSelectedRows(
         SerializedProperty statusEffects,
-        SerializedProperty legacyStatusEffect)
+        SerializedProperty legacyStatusEffect,
+        PS260714StatusEffectSelectionOptions options)
     {
         if (statusEffects.arraySize == 0)
         {
@@ -304,7 +367,7 @@ internal static class PS260714StatusEffectSelection
                             .ApplyModifiedProperties();
                     });
             }
-            else
+            else if (!options.AllowNone)
             {
                 EditorGUILayout.HelpBox(
                     "제거할 상태를 하나 이상 선택하세요.",
@@ -366,6 +429,206 @@ internal static class PS260714StatusEffectSelection
             array.DeleteArrayElementAtIndex(index);
     }
 
+    private sealed class StatusEffectSingleSelectPopup : PopupWindowContent
+    {
+        private enum AlignmentFilter
+        {
+            All = 0,
+            Buff = 1,
+            Debuff = 2,
+            Neutral = 3
+        }
+
+        private static readonly string[] FilterLabels =
+        {
+            "전체",
+            "버프",
+            "디버프",
+            "중립"
+        };
+
+        private readonly UnityEngine.Object _target;
+        private readonly string _statusEffectPath;
+        private readonly PS260714StatusEffectSelectionOptions _options;
+        private readonly List<StatusEffectSO> _definitions = new();
+
+        private Vector2 _scroll;
+        private string _searchText = string.Empty;
+        private AlignmentFilter _filter;
+
+        internal StatusEffectSingleSelectPopup(
+            UnityEngine.Object target,
+            string statusEffectPath,
+            PS260714StatusEffectSelectionOptions options)
+        {
+            _target = target;
+            _statusEffectPath = statusEffectPath;
+            _options = options;
+            foreach (string guid in AssetDatabase.FindAssets(
+                         "t:StatusEffectSO"))
+            {
+                string path = AssetDatabase.GUIDToAssetPath(guid);
+                StatusEffectSO definition =
+                    AssetDatabase.LoadAssetAtPath<StatusEffectSO>(path);
+                if (definition != null)
+                    _definitions.Add(definition);
+            }
+
+            _definitions.Sort((left, right) => string.Compare(
+                left.name,
+                right.name,
+                StringComparison.OrdinalIgnoreCase));
+        }
+
+        public override Vector2 GetWindowSize()
+        {
+            return new Vector2(380f, 430f);
+        }
+
+        public override void OnGUI(Rect rect)
+        {
+            if (_target == null)
+            {
+                editorWindow.Close();
+                return;
+            }
+
+            _filter = (AlignmentFilter)GUILayout.Toolbar(
+                (int)_filter,
+                FilterLabels);
+            _searchText = EditorGUILayout.TextField(
+                _searchText,
+                EditorStyles.toolbarSearchField);
+
+            SerializedObject serialized = new(_target);
+            serialized.UpdateIfRequiredOrScript();
+            SerializedProperty statusEffect =
+                serialized.FindProperty(_statusEffectPath);
+            if (statusEffect == null)
+            {
+                EditorGUILayout.HelpBox(
+                    "Status effect property could not be found.",
+                    MessageType.Error);
+                return;
+            }
+
+            StatusEffectSO selected =
+                statusEffect.objectReferenceValue as StatusEffectSO;
+            using (EditorGUILayout.ScrollViewScope scroll =
+                   new(_scroll))
+            {
+                _scroll = scroll.scrollPosition;
+                if (_options.AllowNone)
+                {
+                    bool noneSelected = selected == null;
+                    bool chooseNone = EditorGUILayout.ToggleLeft(
+                        "없음",
+                        noneSelected,
+                        GUILayout.Height(24f));
+                    if (chooseNone && !noneSelected)
+                    {
+                        SetSelection(serialized, statusEffect, null);
+                        return;
+                    }
+                }
+
+                int visibleCount = 0;
+                foreach (StatusEffectSO definition in _definitions)
+                {
+                    if (!MatchesFilter(definition))
+                        continue;
+
+                    visibleCount++;
+                    bool isSelected = IsSameStatus(
+                        selected,
+                        definition);
+                    bool choose = EditorGUILayout.ToggleLeft(
+                        new GUIContent(
+                            definition.name,
+                            PS260714AssetEditorList.GetAssetPreview(
+                                definition.Icon),
+                            definition.StatusId),
+                        isSelected,
+                        GUILayout.Height(24f));
+                    if (choose && !isSelected)
+                    {
+                        SetSelection(
+                            serialized,
+                            statusEffect,
+                            definition);
+                        return;
+                    }
+                    if (!choose && isSelected && _options.AllowNone)
+                    {
+                        SetSelection(serialized, statusEffect, null);
+                        return;
+                    }
+                }
+
+                if (visibleCount == 0)
+                {
+                    EditorGUILayout.HelpBox(
+                        "현재 필터에 맞는 상태 효과가 없습니다.",
+                        MessageType.Info);
+                }
+            }
+        }
+
+        private void SetSelection(
+            SerializedObject serialized,
+            SerializedProperty statusEffect,
+            StatusEffectSO definition)
+        {
+            Undo.RecordObject(_target, "Change Status Effect Selection");
+            statusEffect.objectReferenceValue = definition;
+            serialized.ApplyModifiedProperties();
+            editorWindow.Close();
+        }
+
+        private bool MatchesFilter(StatusEffectSO definition)
+        {
+            if (definition == null)
+                return false;
+            if (_options.RequireRemovable && !definition.Removable)
+                return false;
+            if (_options.TargetFaction.HasValue)
+            {
+                bool canTarget = _options.TargetFaction.Value ==
+                    CharacterTargetFaction.Ally
+                        ? definition.CanTargetAlly
+                        : definition.CanTargetEnemy;
+                if (!canTarget)
+                    return false;
+            }
+
+            string search = (_searchText ?? string.Empty).Trim();
+            if (!string.IsNullOrEmpty(search) &&
+                definition.name.IndexOf(
+                    search,
+                    StringComparison.OrdinalIgnoreCase) < 0 &&
+                (definition.NameLocalizationKey ?? string.Empty).IndexOf(
+                    search,
+                    StringComparison.OrdinalIgnoreCase) < 0 &&
+                (definition.StatusId ?? string.Empty).IndexOf(
+                    search,
+                    StringComparison.OrdinalIgnoreCase) < 0)
+            {
+                return false;
+            }
+
+            return _filter switch
+            {
+                AlignmentFilter.Buff =>
+                    definition.Alignment == StatusEffectAlignment.Buff,
+                AlignmentFilter.Debuff =>
+                    definition.Alignment == StatusEffectAlignment.Debuff,
+                AlignmentFilter.Neutral =>
+                    definition.Alignment == StatusEffectAlignment.Neutral,
+                _ => true
+            };
+        }
+    }
+
     private sealed class StatusEffectMultiSelectPopup : PopupWindowContent
     {
         private enum AlignmentFilter
@@ -387,6 +650,7 @@ internal static class PS260714StatusEffectSelection
         private readonly UnityEngine.Object _target;
         private readonly string _statusEffectsPath;
         private readonly string _legacyStatusEffectPath;
+        private readonly PS260714StatusEffectSelectionOptions _options;
         private readonly List<StatusEffectSO> _definitions = new();
 
         private Vector2 _scroll;
@@ -396,11 +660,13 @@ internal static class PS260714StatusEffectSelection
         public StatusEffectMultiSelectPopup(
             UnityEngine.Object target,
             string statusEffectsPath,
-            string legacyStatusEffectPath)
+            string legacyStatusEffectPath,
+            PS260714StatusEffectSelectionOptions options)
         {
             _target = target;
             _statusEffectsPath = statusEffectsPath;
             _legacyStatusEffectPath = legacyStatusEffectPath;
+            _options = options;
             LoadDefinitions();
         }
 
@@ -508,6 +774,17 @@ internal static class PS260714StatusEffectSelection
         {
             if (definition == null)
                 return false;
+            if (_options.RequireRemovable && !definition.Removable)
+                return false;
+            if (_options.TargetFaction.HasValue)
+            {
+                bool canTarget = _options.TargetFaction.Value ==
+                    CharacterTargetFaction.Ally
+                        ? definition.CanTargetAlly
+                        : definition.CanTargetEnemy;
+                if (!canTarget)
+                    return false;
+            }
 
             string search = (_searchText ?? string.Empty).Trim();
             if (!string.IsNullOrEmpty(search) &&
@@ -515,6 +792,9 @@ internal static class PS260714StatusEffectSelection
                     search,
                     StringComparison.OrdinalIgnoreCase) < 0 &&
                 (definition.NameLocalizationKey ?? string.Empty).IndexOf(
+                    search,
+                    StringComparison.OrdinalIgnoreCase) < 0 &&
+                (definition.StatusId ?? string.Empty).IndexOf(
                     search,
                     StringComparison.OrdinalIgnoreCase) < 0)
             {
@@ -540,16 +820,17 @@ internal static class PS260714StatusEffectSelection
         {
             if (statusEffects.arraySize == 0)
             {
-                return ReferenceEquals(
-                    legacyStatusEffect?.objectReferenceValue,
+                return IsSameStatus(
+                    legacyStatusEffect?.objectReferenceValue as
+                        StatusEffectSO,
                     definition);
             }
 
             for (int index = 0; index < statusEffects.arraySize; index++)
             {
-                if (ReferenceEquals(
+                if (IsSameStatus(
                         statusEffects.GetArrayElementAtIndex(index)
-                            .objectReferenceValue,
+                            .objectReferenceValue as StatusEffectSO,
                         definition))
                 {
                     return true;
@@ -586,9 +867,9 @@ internal static class PS260714StatusEffectSelection
                      index >= 0;
                      index--)
                 {
-                    if (!ReferenceEquals(
+                    if (!IsSameStatus(
                             statusEffects.GetArrayElementAtIndex(index)
-                                .objectReferenceValue,
+                                .objectReferenceValue as StatusEffectSO,
                             definition))
                     {
                         continue;
@@ -621,5 +902,12 @@ internal static class PS260714StatusEffectSelection
             statusEffects.GetArrayElementAtIndex(0)
                 .objectReferenceValue = legacy;
         }
+    }
+
+    private static bool IsSameStatus(
+        StatusEffectSO left,
+        StatusEffectSO right)
+    {
+        return CharacterStatusSelection.IsSameStatus(left, right);
     }
 }

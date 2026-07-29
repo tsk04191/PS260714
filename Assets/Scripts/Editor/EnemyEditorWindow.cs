@@ -597,10 +597,42 @@ public sealed class EnemyEditorWindow : EditorWindow
 
                     case EnemyAbilityConditionType.SourceHasStatus:
                     case EnemyAbilityConditionType.TargetHasStatus:
+                        SerializedProperty legacyStatus =
+                            condition.FindPropertyRelative("statusEffect");
+                        SerializedProperty statuses =
+                            condition.FindPropertyRelative("statusEffects");
+                        CharacterTargetFaction? statusFaction =
+                            ResolveConditionStatusFaction(ability, type);
+                        PS260714StatusEffectSelection.Draw(
+                            statuses,
+                            legacyStatus,
+                            new GUIContent("Status Effects"),
+                            new PS260714StatusEffectSelectionOptions(
+                                targetFaction: statusFaction));
                         DrawRelative(
                             condition,
-                            "statusEffect",
-                            "Status Effect");
+                            "statusMatchMode",
+                            "Status Match");
+                        SerializedProperty statusMatchMode =
+                            condition.FindPropertyRelative(
+                                "statusMatchMode");
+                        if (statusMatchMode != null &&
+                            statusMatchMode.enumValueIndex ==
+                            (int)CharacterStatusConditionMatchMode
+                                .AtLeastCount)
+                        {
+                            SerializedProperty matchCount =
+                                condition.FindPropertyRelative(
+                                    "statusMatchCount");
+                            if (matchCount != null)
+                            {
+                                matchCount.intValue = Mathf.Max(
+                                    1,
+                                    EditorGUILayout.IntField(
+                                        "Required Status Count",
+                                        matchCount.intValue));
+                            }
+                        }
                         DrawRelative(
                             condition,
                             "expected",
@@ -947,11 +979,47 @@ public sealed class EnemyEditorWindow : EditorWindow
             (int)CharacterNumericComparison.LessThanOrEqual);
         SetFloat(condition, "threshold", 50f);
         SetObject(condition, "statusEffect", null);
+        SerializedProperty statuses =
+            condition.FindPropertyRelative("statusEffects");
+        statuses?.ClearArray();
+        SetEnum(
+            condition,
+            "statusMatchMode",
+            (int)CharacterStatusConditionMatchMode.Any);
+        SerializedProperty statusMatchCount =
+            condition.FindPropertyRelative("statusMatchCount");
+        if (statusMatchCount != null)
+            statusMatchCount.intValue = 1;
         SetEnum(
             condition,
             "incomingDamageType",
             (int)CharacterAttackDamageType.Physical);
         SetBool(condition, "expected", true);
+    }
+
+    private static CharacterTargetFaction? ResolveConditionStatusFaction(
+        SerializedProperty ability,
+        EnemyAbilityConditionType type)
+    {
+        if (type == EnemyAbilityConditionType.SourceHasStatus)
+            return CharacterTargetFaction.Enemy;
+
+        SerializedProperty faction = ability?
+            .FindPropertyRelative("target")?
+            .FindPropertyRelative("faction");
+        if (faction == null)
+            return null;
+
+        return (EnemyAbilityTargetFaction)faction.enumValueIndex switch
+        {
+            EnemyAbilityTargetFaction.Self =>
+                CharacterTargetFaction.Enemy,
+            EnemyAbilityTargetFaction.EnemyAllies =>
+                CharacterTargetFaction.Enemy,
+            EnemyAbilityTargetFaction.PlayerCharacters =>
+                CharacterTargetFaction.Ally,
+            _ => null
+        };
     }
 
     private static void AddOperation(

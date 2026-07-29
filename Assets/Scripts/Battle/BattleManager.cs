@@ -39,6 +39,9 @@ public sealed class BattleManager : MonoBehaviour, IActiveSkillResource
     private float _battleTimeRemaining;
     private int _gameSpeedIndex;
     private bool _isPaused;
+    private bool _manualTargetSelectionPending;
+    private IBattleManualTargetSelectionService
+        _manualTargetSelectionService;
     private bool _boardFull;
     private bool _controlsGameTime;
     private int _activeSkillResource;
@@ -51,6 +54,8 @@ public sealed class BattleManager : MonoBehaviour, IActiveSkillResource
     public bool IsInitialized => _manager != null;
     public bool HasSession => _board != null;
     public bool IsPaused => _isPaused;
+    public bool IsManualTargetSelectionPending =>
+        _manualTargetSelectionPending;
     public bool IsBoardFull => _boardFull;
     public float GameSpeed => GameSpeedScales[_gameSpeedIndex];
     public float SpawnInterval => GetNextSpawnInterval();
@@ -92,7 +97,8 @@ public sealed class BattleManager : MonoBehaviour, IActiveSkillResource
 
     private void Update()
     {
-        if (State != EBattleState.Running || _board == null)
+        if (State != EBattleState.Running || _board == null ||
+            _manualTargetSelectionPending)
             return;
 
         float deltaTime = Time.deltaTime;
@@ -105,9 +111,17 @@ public sealed class BattleManager : MonoBehaviour, IActiveSkillResource
 
         TickActiveSkillRecharge(deltaTime);
         _board.TickStatusEffects(deltaTime);
+        if (_manualTargetSelectionPending)
+            return;
         _board.TickEnemyAbilities(deltaTime, _characters);
+        if (_manualTargetSelectionPending)
+            return;
         foreach (IBattleCharacter character in _characters)
+        {
             character.TickBattle(deltaTime, _board);
+            if (_manualTargetSelectionPending)
+                return;
+        }
 
         TickEnemySpawnQueue(deltaTime);
         CheckForCompletion();
@@ -146,6 +160,14 @@ public sealed class BattleManager : MonoBehaviour, IActiveSkillResource
 
         ReleaseSession();
         _board = board;
+        _manualTargetSelectionService =
+            board as IBattleManualTargetSelectionService;
+        if (_manualTargetSelectionService != null)
+        {
+            _manualTargetSelectionService
+                .ManualTargetSelectionPendingChanged +=
+                HandleManualTargetSelectionPendingChanged;
+        }
         _spawnInterval = TimePrecision.Normalize(spawnInterval, 0.1f);
         _battleDuration = TimePrecision.FloorToTenth(timeLimit);
         _battleTimeRemaining = _battleDuration;
@@ -189,6 +211,7 @@ public sealed class BattleManager : MonoBehaviour, IActiveSkillResource
     public bool CanSpend(int amount)
     {
         return amount >= 0 && State == EBattleState.Running &&
+               !_manualTargetSelectionPending &&
                _activeSkillResource >= amount;
     }
 
@@ -275,7 +298,8 @@ public sealed class BattleManager : MonoBehaviour, IActiveSkillResource
     public void TogglePause()
     {
         if (!HasSession || (State != EBattleState.Running &&
-            State != EBattleState.Paused))
+            State != EBattleState.Paused) ||
+            _manualTargetSelectionPending)
         {
             return;
         }
@@ -469,6 +493,7 @@ public sealed class BattleManager : MonoBehaviour, IActiveSkillResource
             return;
 
         Result = result;
+        _manualTargetSelectionService?.CancelManualTargetSelection();
         _isPaused = false;
         SetState(EBattleState.Completed);
         RestoreDefaultTimeScale();
@@ -482,6 +507,15 @@ public sealed class BattleManager : MonoBehaviour, IActiveSkillResource
     private void ReleaseSession()
     {
         RestoreDefaultTimeScale();
+        if (_manualTargetSelectionService != null)
+        {
+            _manualTargetSelectionService
+                .ManualTargetSelectionPendingChanged -=
+                HandleManualTargetSelectionPendingChanged;
+            _manualTargetSelectionService.CancelManualTargetSelection();
+        }
+        _manualTargetSelectionService = null;
+        _manualTargetSelectionPending = false;
         foreach (IBattleCharacter character in _characters)
             character?.BindBattle(null, null);
 
@@ -510,12 +544,23 @@ public sealed class BattleManager : MonoBehaviour, IActiveSkillResource
     {
         _gameSpeedIndex = 0;
         _isPaused = false;
+        _manualTargetSelectionPending = false;
     }
 
     private void ApplyBattleTimeScale()
     {
-        Time.timeScale = _isPaused ? 0f : GameSpeedScales[_gameSpeedIndex];
+        Time.timeScale = _isPaused || _manualTargetSelectionPending
+            ? 0f
+            : GameSpeedScales[_gameSpeedIndex];
         _controlsGameTime = true;
+    }
+
+    private void HandleManualTargetSelectionPendingChanged(bool pending)
+    {
+        _manualTargetSelectionPending = pending;
+        if (HasSession && State != EBattleState.Completed)
+            ApplyBattleTimeScale();
+        TimeControlChanged?.Invoke();
     }
 
     private void RestoreDefaultTimeScale()

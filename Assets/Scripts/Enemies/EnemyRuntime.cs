@@ -613,63 +613,10 @@ public sealed class EnemyRuntime
         CharacterStatusRemovalAmount removalAmount,
         Func<int, IBattleCharacter, bool> applyDamage)
     {
-        return removalSelection.Target switch
-        {
-            CharacterStatusRemovalTarget.Single =>
-                RemoveSelectedStatusEffects(
-                    removalSelection,
-                    removalAmount,
-                    applyDamage),
-            CharacterStatusRemovalTarget.Random =>
-                RemoveRandomStatusEffect(
-                    removalSelection,
-                    removalAmount,
-                    applyDamage),
-            CharacterStatusRemovalTarget.All =>
-                RemoveMatchingStatusEffects(
-                    removalSelection,
-                    removalAmount,
-                    applyDamage),
-            CharacterStatusRemovalTarget.Buff =>
-                RemoveMatchingStatusEffects(
-                    removalSelection,
-                    removalAmount,
-                    applyDamage),
-            CharacterStatusRemovalTarget.Debuff =>
-                RemoveMatchingStatusEffects(
-                    removalSelection,
-                    removalAmount,
-                    applyDamage),
-            _ => 0
-        };
-    }
-
-    private int RemoveSelectedStatusEffects(
-        CharacterStatusRemovalSelection removalSelection,
-        CharacterStatusRemovalAmount removalAmount,
-        Func<int, IBattleCharacter, bool> applyDamage)
-    {
-        int removed = 0;
-        HashSet<StatusEffectSO> visited = new();
-        for (int index = 0;
-             index < removalSelection.ExplicitStatusCount;
-             index++)
-        {
-            StatusEffectSO statusEffect =
-                removalSelection.GetExplicitStatus(index);
-            if (statusEffect == null || !visited.Add(statusEffect))
-                continue;
-
-            removed += RemoveStatusEffect(
-                statusEffect,
-                removalAmount,
-                applyDamage,
-                out bool continueExecution);
-            if (!continueExecution)
-                break;
-        }
-
-        return removed;
+        return RemoveMatchingStatusEffects(
+            removalSelection,
+            removalAmount,
+            applyDamage);
     }
 
     private int RemoveStatusEffect(
@@ -693,64 +640,86 @@ public sealed class EnemyRuntime
             : 0;
     }
 
-    private int RemoveRandomStatusEffect(
-        CharacterStatusRemovalSelection removalSelection,
-        CharacterStatusRemovalAmount removalAmount,
-        Func<int, IBattleCharacter, bool> applyDamage)
-    {
-        List<StatusEffectSO> candidates = new();
-        foreach (StatusEffectRuntimeState state in _statusEffects.Values)
-        {
-            if (state.Definition != null &&
-                removalSelection.MatchesStatus(state.Definition))
-            {
-                candidates.Add(state.Definition);
-            }
-        }
-
-        if (candidates.Count == 0)
-            return 0;
-
-        return RemoveStatusEffect(
-            candidates[UnityEngine.Random.Range(0, candidates.Count)],
-            removalAmount,
-            applyDamage,
-            out _);
-    }
-
     private int RemoveMatchingStatusEffects(
         CharacterStatusRemovalSelection removalSelection,
         CharacterStatusRemovalAmount removalAmount,
         Func<int, IBattleCharacter, bool> applyDamage)
     {
-        // 카운트가 1 이상이면 각 상태 종류에서 해당 수만큼 제거한다.
-        // 0이면 모든 종류의 모든 스택을 제거한다.
+        List<StatusEffectSO> candidates =
+            CollectStatusRemovalCandidates(removalSelection);
+        int selectedCount = CharacterStatusRemovalPick.SelectInPlace(
+            candidates,
+            removalSelection);
         int removed = 0;
-        List<string> statusIds = new(_statusEffects.Keys);
-        foreach (string statusId in statusIds)
+        for (int index = 0; index < selectedCount; index++)
         {
-            if (_statusEffects.TryGetValue(
-                    statusId,
-                    out StatusEffectRuntimeState state) &&
-                state.Definition != null &&
-                removalSelection.MatchesStatus(state.Definition))
-            {
-                int removalCount = removalAmount.Resolve(state.StackCount);
-                bool continueExecution = true;
-                if (removalCount > 0)
-                {
-                    removed += RemoveStatusStacks(
-                        statusId,
-                        removalCount,
-                        applyDamage,
-                        out continueExecution);
-                }
-                if (!continueExecution)
-                    break;
-            }
+            removed += RemoveStatusEffect(
+                candidates[index],
+                removalAmount,
+                applyDamage,
+                out bool continueExecution);
+            if (!continueExecution)
+                break;
         }
 
         return removed;
+    }
+
+    private List<StatusEffectSO> CollectStatusRemovalCandidates(
+        CharacterStatusRemovalSelection removalSelection)
+    {
+        List<StatusEffectSO> candidates = new();
+        HashSet<string> visitedIds = new(StringComparer.Ordinal);
+        if (removalSelection.Target ==
+            CharacterStatusRemovalTarget.Single)
+        {
+            for (int index = 0;
+                 index < removalSelection.ExplicitStatusCount;
+                 index++)
+            {
+                AddStatusRemovalCandidate(
+                    candidates,
+                    visitedIds,
+                    removalSelection.GetExplicitStatus(index),
+                    removalSelection);
+            }
+        }
+        else
+        {
+            foreach (StatusEffectRuntimeState state in
+                     _statusEffects.Values)
+            {
+                AddStatusRemovalCandidate(
+                    candidates,
+                    visitedIds,
+                    state?.Definition,
+                    removalSelection);
+            }
+        }
+
+        candidates.Sort((left, right) => string.Compare(
+            left?.StatusId,
+            right?.StatusId,
+            StringComparison.Ordinal));
+        return candidates;
+    }
+
+    private void AddStatusRemovalCandidate(
+        List<StatusEffectSO> candidates,
+        HashSet<string> visitedIds,
+        StatusEffectSO definition,
+        CharacterStatusRemovalSelection removalSelection)
+    {
+        if (definition == null || !definition.Removable ||
+            string.IsNullOrWhiteSpace(definition.StatusId) ||
+            !visitedIds.Add(definition.StatusId) ||
+            !_statusEffects.ContainsKey(definition.StatusId) ||
+            !removalSelection.MatchesStatus(definition))
+        {
+            return;
+        }
+
+        candidates.Add(definition);
     }
 
     private int RemoveStatusStacks(
