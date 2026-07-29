@@ -573,14 +573,28 @@ public static class CharacterDefinitionValidator
             ValidateSections(definition.Sections, $"{path}.sections", result);
             bool hasAbility = definition.HasSection(
                 CharacterPassiveSectionType.Ability);
-            if (!hasAbility)
+            bool hasStatusContribution =
+                definition.HasStatusContributionSection;
+            if (!hasAbility && !hasStatusContribution)
             {
                 AddError(
                     result,
                     "passive.ability_required",
                     $"{path}.sections",
-                    "A passive requires an Ability section to execute.");
+                    "A passive requires an Ability or Status Contribution " +
+                    "section.");
             }
+            if (hasStatusContribution)
+            {
+                ValidateStatusContributionMultipliers(
+                    definition.StatusContributionMultipliers,
+                    $"{path}.statusContributionMultipliers",
+                    false,
+                    result);
+            }
+
+            if (!hasAbility)
+                continue;
 
             CharacterAttackSubject effectiveSubject =
                 definition.HasSection(CharacterPassiveSectionType.Subject)
@@ -729,6 +743,35 @@ public static class CharacterDefinitionValidator
             return;
         }
 
+        if (!Enum.IsDefined(
+                typeof(CharacterPassiveStatusTarget),
+                definition.StatusTarget))
+        {
+            AddError(
+                result,
+                "passive.trigger_status_target_invalid",
+                $"{path}.statusTarget",
+                $"Unsupported trigger status target " +
+                $"'{definition.StatusTarget}'.");
+        }
+        if (!Enum.IsDefined(
+                typeof(CharacterStatusSelectionScope),
+                definition.TriggerStatusScope))
+        {
+            AddError(
+                result,
+                "passive.trigger_status_scope_invalid",
+                $"{path}.triggerStatusScope",
+                $"Unsupported trigger status scope " +
+                $"'{definition.TriggerStatusScope}'.");
+            return;
+        }
+        if (definition.TriggerStatusScope !=
+            CharacterStatusSelectionScope.SelectedStatuses)
+        {
+            return;
+        }
+
         CharacterStatusSelection selection =
             definition.TriggerStatusSelection;
         for (int index = 0; index < selection.Count; index++)
@@ -848,6 +891,12 @@ public static class CharacterDefinitionValidator
             return CharacterTargetFaction.Ally;
         if (definition.StatusTarget == CharacterPassiveStatusTarget.Enemy)
             return CharacterTargetFaction.Enemy;
+
+        if (definition.TriggerStatusScope !=
+            CharacterStatusSelectionScope.SelectedStatuses)
+        {
+            return null;
+        }
 
         CharacterStatusSelection triggerStatuses =
             definition.TriggerStatusSelection;
@@ -1432,9 +1481,25 @@ public static class CharacterDefinitionValidator
                 CharacterNumericConditionMetric.StatusStackCount;
             if (checksStatusStacks)
             {
+                bool hasValidStatusScope = Enum.IsDefined(
+                    typeof(CharacterStatusSelectionScope),
+                    condition.StatusSelectionScope);
+                if (!hasValidStatusScope)
+                {
+                    AddError(
+                        result,
+                        "condition.status_selection_scope_invalid",
+                        $"{conditionPath}.statusSelectionScope",
+                        $"Unsupported status selection scope " +
+                        $"'{condition.StatusSelectionScope}'.");
+                }
+                bool selectsConfiguredStatuses =
+                    condition.StatusSelectionScope ==
+                    CharacterStatusSelectionScope.SelectedStatuses;
                 CharacterStatusSelection selection =
                     condition.StatusSelection;
-                if (selection.Count == 0)
+                if (selectsConfiguredStatuses &&
+                    selection.Count == 0)
                 {
                     AddError(
                         result,
@@ -1446,6 +1511,7 @@ public static class CharacterDefinitionValidator
 
                 int uniqueStatusCount = 0;
                 for (int statusIndex = 0;
+                     selectsConfiguredStatuses &&
                      statusIndex < selection.Count;
                      statusIndex++)
                 {
@@ -1516,7 +1582,8 @@ public static class CharacterDefinitionValidator
                             "Required status match count must be at least 1.");
                     }
                     else if (condition.StatusMatchCount >
-                             uniqueStatusCount)
+                             uniqueStatusCount &&
+                             selectsConfiguredStatuses)
                     {
                         AddError(
                             result,
@@ -1813,6 +1880,128 @@ public static class CharacterDefinitionValidator
                         $"{effectPath}.type",
                         $"Unsupported effect type '{effect.Type}'.");
                     break;
+            }
+
+            ValidateStatusContributionMultipliers(
+                effect.StatusContributionMultipliers,
+                $"{effectPath}.statusContributionMultipliers",
+                true,
+                result);
+        }
+    }
+
+    private static void ValidateStatusContributionMultipliers(
+        IReadOnlyList<CharacterStatusStatContributionMultiplier> modifiers,
+        string path,
+        bool effectLocal,
+        CharacterDefinitionValidationResult result)
+    {
+        if (modifiers == null)
+        {
+            AddError(
+                result,
+                "status_contribution.list_null",
+                path,
+                "Status contribution multiplier list is null.");
+            return;
+        }
+
+        for (int index = 0; index < modifiers.Count; index++)
+        {
+            string modifierPath = $"{path}[{index}]";
+            CharacterStatusStatContributionMultiplier modifier =
+                modifiers[index];
+            if (modifier == null)
+            {
+                AddError(
+                    result,
+                    "status_contribution.null",
+                    modifierPath,
+                    "Status contribution multiplier is null.");
+                continue;
+            }
+
+            StatusEffectSO status = modifier.StatusEffect;
+            if (status == null)
+            {
+                AddError(
+                    result,
+                    "status_contribution.status_required",
+                    $"{modifierPath}.statusEffect",
+                    "A status contribution multiplier requires a status.");
+            }
+            else if (!status.CanTargetAlly)
+            {
+                AddError(
+                    result,
+                    "status_contribution.status_faction_mismatch",
+                    $"{modifierPath}.statusEffect",
+                    $"Status '{status.name}' cannot be held by the source " +
+                    "character.");
+            }
+
+            if (!Enum.IsDefined(
+                    typeof(StatusEffectStatType),
+                    modifier.StatType))
+            {
+                AddError(
+                    result,
+                    "status_contribution.stat_invalid",
+                    $"{modifierPath}.statType",
+                    $"Unsupported status stat type '{modifier.StatType}'.");
+            }
+            else if (effectLocal &&
+                     modifier.StatType != StatusEffectStatType.AttackPower)
+            {
+                AddError(
+                    result,
+                    "status_contribution.effect_stat_unsupported",
+                    $"{modifierPath}.statType",
+                    "Effect-local contribution multipliers currently " +
+                    "support AttackPower only.");
+            }
+            else if (modifier.StatType ==
+                     StatusEffectStatType.TargetPriority)
+            {
+                AddError(
+                    result,
+                    "status_contribution.stat_unsupported",
+                    $"{modifierPath}.statType",
+                    "TargetPriority contribution multipliers are not " +
+                    "supported.");
+            }
+
+            if (!IsFinite(modifier.Multiplier) ||
+                modifier.Multiplier < 0f)
+            {
+                AddError(
+                    result,
+                    "status_contribution.multiplier_invalid",
+                    $"{modifierPath}.multiplier",
+                    "Status contribution multiplier must be finite and " +
+                    "non-negative.");
+            }
+
+            for (int previous = 0; previous < index; previous++)
+            {
+                CharacterStatusStatContributionMultiplier earlier =
+                    modifiers[previous];
+                if (earlier == null ||
+                    earlier.StatType != modifier.StatType ||
+                    !CharacterStatusSelection.IsSameStatus(
+                        earlier.StatusEffect,
+                        modifier.StatusEffect))
+                {
+                    continue;
+                }
+
+                AddError(
+                    result,
+                    "status_contribution.duplicate",
+                    modifierPath,
+                    "The same status and stat contribution is configured " +
+                    "more than once.");
+                break;
             }
         }
     }

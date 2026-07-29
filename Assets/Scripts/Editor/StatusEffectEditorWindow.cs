@@ -799,12 +799,35 @@ public sealed class StatusEffectEditorWindow : EditorWindow
         {
             SerializedProperty selector =
                 effect.FindPropertyRelative("targetSelector");
-            EditorGUILayout.PropertyField(
-                selector,
-                new GUIContent(
+            if (selector == null)
+            {
+                EditorGUILayout.HelpBox(
+                    "별도 대상 선택 속성을 찾을 수 없습니다.",
+                    MessageType.Error);
+            }
+            else
+            {
+                EditorGUILayout.LabelField(
                     "별도 대상 선택",
-                    "상태 보유자와 별도로 새 대상을 선택합니다."),
-                true);
+                    EditorStyles.boldLabel);
+                EditorGUILayout.PropertyField(
+                    selector.FindPropertyRelative("targetFaction"),
+                    new GUIContent("대상 진영"));
+                EditorGUILayout.PropertyField(
+                    selector.FindPropertyRelative("subject"),
+                    new GUIContent("선정 방식"));
+                EditorGUILayout.PropertyField(
+                    selector.FindPropertyRelative("subjectMetric"),
+                    new GUIContent("비교 수치"));
+                EditorGUILayout.PropertyField(
+                    selector.FindPropertyRelative("subjectCount"),
+                    new GUIContent("대상 수"));
+                CharacterEditorWindow.DrawNumericConditions(selector);
+                EditorGUILayout.PropertyField(
+                    selector.FindPropertyRelative("areaOffsets"),
+                    new GUIContent("범위 좌표"),
+                    true);
+            }
         }
 
         switch (selectedType)

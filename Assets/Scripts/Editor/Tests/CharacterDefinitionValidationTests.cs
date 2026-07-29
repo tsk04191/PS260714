@@ -322,6 +322,60 @@ public sealed class CharacterDefinitionValidationTests
     }
 
     [Test]
+    public void Validate_StatusScopeDoesNotRequireExplicitStatusAssets()
+    {
+        CharacterSO definition = CreateDefinition();
+        SerializedObject serialized = new(definition);
+        SerializedProperty attacks =
+            serialized.FindProperty("attackDefinitions");
+        attacks.arraySize = 1;
+        SerializedProperty attack = attacks.GetArrayElementAtIndex(0);
+        SetSections(
+            attack.FindPropertyRelative("sections"),
+            (int)CharacterAttackSectionType.Subject,
+            (int)CharacterAttackSectionType.Condition,
+            (int)CharacterAttackSectionType.Ability);
+        attack.FindPropertyRelative("targetFaction").enumValueIndex =
+            (int)CharacterTargetFaction.Enemy;
+        attack.FindPropertyRelative("subject").enumValueIndex =
+            (int)CharacterAttackSubject.Random;
+        SerializedProperty conditions =
+            attack.FindPropertyRelative("numericConditions");
+        conditions.arraySize = 1;
+        SerializedProperty condition =
+            conditions.GetArrayElementAtIndex(0);
+        condition.FindPropertyRelative("type").enumValueIndex =
+            (int)CharacterConditionType.Numeric;
+        condition.FindPropertyRelative("metric").enumValueIndex =
+            (int)CharacterNumericConditionMetric.StatusStackCount;
+        condition.FindPropertyRelative(
+            "statusSelectionScope").enumValueIndex =
+            (int)CharacterStatusSelectionScope.AllDebuffs;
+        condition.FindPropertyRelative("statusMatchMode").enumValueIndex =
+            (int)CharacterStatusConditionMatchMode.AtLeastCount;
+        condition.FindPropertyRelative("statusMatchCount").intValue = 3;
+        condition.FindPropertyRelative("comparison").enumValueIndex =
+            (int)CharacterNumericComparison.GreaterThanOrEqual;
+        condition.FindPropertyRelative("threshold").floatValue = 1f;
+        attack.FindPropertyRelative("damageType").enumValueIndex =
+            (int)CharacterAttackDamageType.Fixed;
+        attack.FindPropertyRelative("damageAmount").floatValue = 1f;
+        serialized.ApplyModifiedPropertiesWithoutUndo();
+
+        CharacterDefinitionValidationResult result =
+            CharacterDefinitionValidator.Validate(definition);
+
+        Assert.That(
+            HasDiagnostic(result, "condition.status_required"),
+            Is.False);
+        Assert.That(
+            HasDiagnostic(
+                result,
+                "condition.status_match_count_exceeds_selection"),
+            Is.False);
+    }
+
+    [Test]
     public void Validate_SourceConditionRejectsEnemyOnlyMetric()
     {
         CharacterSO definition = CreateDefinition();

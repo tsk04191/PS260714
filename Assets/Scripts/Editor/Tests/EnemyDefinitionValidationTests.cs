@@ -106,6 +106,52 @@ public sealed class EnemyDefinitionValidationTests
     }
 
     [Test]
+    public void StatusScopeCondition_DoesNotRequireExplicitStatusAssets()
+    {
+        EnemySO definition = CreateEnemy("status_scope_enemy");
+        SerializedObject serialized = new(definition);
+        SerializedProperty abilities =
+            serialized.FindProperty("abilities");
+        ConfigureAbility(
+            abilities,
+            0,
+            "status_scope_heal",
+            EnemyAbilityTrigger.OnCooldown,
+            EnemyAbilityOperationType.ExecuteEffects,
+            4f);
+        SerializedProperty conditions = abilities
+            .GetArrayElementAtIndex(0)
+            .FindPropertyRelative("conditions");
+        conditions.arraySize = 1;
+        SerializedProperty condition =
+            conditions.GetArrayElementAtIndex(0);
+        condition.FindPropertyRelative("type").enumValueIndex =
+            (int)EnemyAbilityConditionType.SourceHasStatus;
+        condition.FindPropertyRelative(
+            "statusSelectionScope").enumValueIndex =
+            (int)CharacterStatusSelectionScope.AllBuffs;
+        condition.FindPropertyRelative("statusMatchMode").enumValueIndex =
+            (int)CharacterStatusConditionMatchMode.AtLeastCount;
+        condition.FindPropertyRelative("statusMatchCount").intValue = 2;
+        condition.FindPropertyRelative("expected").boolValue = true;
+        serialized.ApplyModifiedPropertiesWithoutUndo();
+
+        EnemyDefinitionValidationResult result =
+            EnemyDefinitionValidator.Validate(definition);
+
+        Assert.That(
+            HasCode(result, "ability.condition_status_missing"),
+            Is.False,
+            BuildFailureMessage(result));
+        Assert.That(
+            HasCode(
+                result,
+                "ability.condition_status_match_count_exceeds_selection"),
+            Is.False,
+            BuildFailureMessage(result));
+    }
+
+    [Test]
     public void DuplicateAbilityId_IsRejected()
     {
         EnemySO definition = CreateEnemy("duplicate_ability_enemy");

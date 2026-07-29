@@ -9,7 +9,7 @@ namespace PS260714.Localization
 {
     public static class GeneratedLocalizationTables
     {
-        public const string SourceHash = "60653e335a6bd2ac82965d57d76765f010ee5b036596c5ce579b462f7be8a622";
+        public const string SourceHash = "6ce45517222253a78ec7210f533f67748f5a67a023a5432f8d1bfec2cad2996a";
         public const string ReferenceLocale = "en-US";
 
         private static readonly LocalizationLocaleInfo[] LocaleData =
@@ -299,6 +299,12 @@ namespace PS260714.Localization
                 { "character.calista.description", new LocalizationEntry("\uC544\uCE74\uB370\uBBF8 \uAE30\uC0AC\uB2E8 \uAD50\uD658\uD559\uC0DD", "body") },
                 { "status.focus.name", new LocalizationEntry("\uC9D1\uC911", "title") },
                 { "status.focus.description", new LocalizationEntry("\uB300\uC0C1\uC744 \uCD5C\uC6B0\uC120 \uBAA9\uD45C\uB85C \uC124\uC815\uD569\uB2C8\uB2E4.", "tooltip") },
+                { "character.lilias.name", new LocalizationEntry("\uB9B4\uB9AC\uC544\uC2A4", "title") },
+                { "character.lilias.description", new LocalizationEntry("\uC544\uCE74\uB370\uBBF8 \uAE30\uC0AC\uB2E8 \uAD50\uD658\uD559\uC0DD", "body") },
+                { "character.isana.name", new LocalizationEntry("\uC774\uC0AC\uB098", "title") },
+                { "character.isana.description", new LocalizationEntry("\uC544\uCE74\uB370\uBBF8 \uAE30\uC0AC\uB2E8 \uAD50\uD658\uD559\uC0DD", "body") },
+                { "status.dualside.name", new LocalizationEntry("\uB4C0\uC5BC\uC0AC\uC774\uB4DC", "title") },
+                { "status.dualside.description", new LocalizationEntry("\uB4C0\uC5BC\uC0AC\uC774\uB4DC", "tooltip") },
             };
 
         private static readonly Dictionary<string, LocalizationEntry>
@@ -579,6 +585,12 @@ namespace PS260714.Localization
                 { "character.calista.description", new LocalizationEntry("exchange student of Order", "body") },
                 { "status.focus.name", new LocalizationEntry("Focus", "title") },
                 { "status.focus.description", new LocalizationEntry("Pick first target", "tooltip") },
+                { "character.lilias.name", new LocalizationEntry("Lilias", "title") },
+                { "character.lilias.description", new LocalizationEntry("exchange student of Order", "body") },
+                { "character.isana.name", new LocalizationEntry("Isana", "title") },
+                { "character.isana.description", new LocalizationEntry("exchange student of Order", "body") },
+                { "status.dualside.name", new LocalizationEntry("DualSide", "title") },
+                { "status.dualside.description", new LocalizationEntry("DualSide", "tooltip") },
             };
 
         private static readonly IReadOnlyDictionary<string, LocalizationEntry>

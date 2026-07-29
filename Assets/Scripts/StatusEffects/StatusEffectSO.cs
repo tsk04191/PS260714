@@ -147,31 +147,36 @@ public struct StatusEffectStatAccumulator
 
     public void Add(
         StatusEffectStatModifierDefinition modifier,
-        int stacks)
+        int stacks,
+        float contributionMultiplier = 1f)
     {
         if (modifier == null ||
             float.IsNaN(modifier.Value) ||
-            float.IsInfinity(modifier.Value))
+            float.IsInfinity(modifier.Value) ||
+            float.IsNaN(contributionMultiplier) ||
+            float.IsInfinity(contributionMultiplier))
         {
             return;
         }
 
         EnsureInitialized();
+        contributionMultiplier = Mathf.Max(0f, contributionMultiplier);
         int multiplier = modifier.ScaleWithStacks
             ? Mathf.Max(1, stacks)
             : 1;
+        float scaledValue = modifier.Value * contributionMultiplier;
         switch (modifier.Mode)
         {
             case StatusEffectStatModifierMode.Flat:
-                _flat += modifier.Value * multiplier;
+                _flat += scaledValue * multiplier;
                 break;
 
             case StatusEffectStatModifierMode.AdditiveRatio:
-                _additiveRatio += modifier.Value * multiplier;
+                _additiveRatio += scaledValue * multiplier;
                 break;
 
             case StatusEffectStatModifierMode.MultiplicativeRatio:
-                float factor = Mathf.Max(0f, 1f + modifier.Value);
+                float factor = Mathf.Max(0f, 1f + scaledValue);
                 _multiplicativeFactor *= Mathf.Pow(factor, multiplier);
                 break;
         }

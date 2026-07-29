@@ -246,6 +246,26 @@ public readonly struct EffectContext
             TargetStatusStacks);
     }
 
+    public EffectContext WithSourceAttackPower(float sourceAttackPower)
+    {
+        return new EffectContext(
+            SourceTarget,
+            Board,
+            Resource,
+            ActionKind,
+            TargetFaction,
+            EnemyTargets,
+            AllyTargets,
+            sourceAttackPower,
+            SourceResource,
+            SourceResourceMaximum,
+            Target,
+            TargetCurrentHealth,
+            TargetMaximumHealth,
+            SourceStatusStacks,
+            TargetStatusStacks);
+    }
+
     public EffectContext RetargetToSource()
     {
         if (SourceTarget.Enemy != null)

@@ -2541,6 +2541,7 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
                     definition.StatusTarget,
                     eventData.Target.Faction) ||
                 !MatchesTriggerStatus(
+                    definition.TriggerStatusScope,
                     definition.TriggerStatusSelection,
                     eventData.StatusEffect) ||
                 !definition.HasSection(CharacterPassiveSectionType.Ability))
@@ -2657,11 +2658,22 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
     }
 
     private static bool MatchesTriggerStatus(
+        CharacterStatusSelectionScope scope,
         CharacterStatusSelection configuredStatuses,
         StatusEffectSO acquiredStatus)
     {
         if (acquiredStatus == null)
             return false;
+        if (scope == CharacterStatusSelectionScope.AllBuffs)
+        {
+            return acquiredStatus.Alignment ==
+                   StatusEffectAlignment.Buff;
+        }
+        if (scope == CharacterStatusSelectionScope.AllDebuffs)
+        {
+            return acquiredStatus.Alignment ==
+                   StatusEffectAlignment.Debuff;
+        }
         if (configuredStatuses.Count == 0)
             return true;
 
@@ -3207,7 +3219,8 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
                     actionTargets.Faction,
                     actionTargets.EnemyTargets,
                     actionTargets.AllyTargets,
-                    GetScalingAttackPower());
+                    GetScalingAttackPower(
+                        effect.StatusContributionMultipliers));
                 int spendAmount = Data.CalculateEffectAmount(
                     effect,
                     reservationContext);
@@ -3406,6 +3419,13 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
             targets.EnemyTargets,
             targets.AllyTargets,
             GetScalingAttackPower());
+        float[] effectAttackPowers = new float[effects.Count];
+        for (int index = 0; index < effects.Count; index++)
+        {
+            CharacterEffectDefinition effect = effects[index];
+            effectAttackPowers[index] = GetScalingAttackPower(
+                effect?.StatusContributionMultipliers);
+        }
         for (int index = 0; index < effects.Count; index++)
         {
             CharacterEffectDefinition effect = effects[index];
@@ -3421,8 +3441,10 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
                 GetPreparedEffect(preparedEffects, index);
             AbilityTargetSelection preparedTargets =
                 preparedEffect.Targets;
+            EffectContext effectActionContext =
+                context.WithSourceAttackPower(effectAttackPowers[index]);
             if (!TryResolveEffectContext(
-                    context,
+                    effectActionContext,
                     effect,
                     preparedTargets,
                     out EffectContext effectContext))
@@ -4076,11 +4098,19 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
         return GetEffectiveAttackPower() / Data.AttackPower;
     }
 
-    private float GetScalingAttackPower()
+    private float GetScalingAttackPower(
+        IReadOnlyList<CharacterStatusStatContributionMultiplier>
+            localContributionMultipliers = null)
     {
-        return Data != null
-            ? Data.AttackPower * GetEffectivePowerMultiplier()
-            : 0f;
+        if (Data == null)
+            return 0f;
+
+        float modifiedPower = GetStatusModifiedStat(
+            Data.AttackPower,
+            StatusEffectStatType.AttackPower,
+            StatusEffectOperationType.AttackPowerModifier,
+            localContributionMultipliers);
+        return Mathf.Max(0f, modifiedPower * _powerMultiplier);
     }
 
     private float GetEffectiveAttackSpeed()
@@ -4116,7 +4146,9 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
     private float GetStatusModifiedStat(
         float baseValue,
         StatusEffectStatType statType,
-        StatusEffectOperationType? operationType)
+        StatusEffectOperationType? operationType,
+        IReadOnlyList<CharacterStatusStatContributionMultiplier>
+            localContributionMultipliers = null)
     {
         StatusEffectStatAccumulator accumulator = default;
         foreach (StatusEffectRuntimeState state in _statusEffects.Values)
@@ -4128,6 +4160,11 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
             }
 
             int stacks = Mathf.Max(1, state.StackCount);
+            float contributionMultiplier =
+                GetStatusContributionMultiplier(
+                    state.Definition,
+                    statType,
+                    localContributionMultipliers);
             IReadOnlyList<StatusEffectStatModifierDefinition> modifiers =
                 state.Definition.StatModifiers;
             if (modifiers != null)
@@ -4138,7 +4175,10 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
                     if (modifier != null &&
                         modifier.StatType == statType)
                     {
-                        accumulator.Add(modifier, stacks);
+                        accumulator.Add(
+                            modifier,
+                            stacks,
+                            contributionMultiplier);
                     }
                 }
             }
@@ -4160,7 +4200,8 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
                 }
 
                 float value = operation.Value *
-                    (operation.ScaleWithStacks ? stacks : 1);
+                    (operation.ScaleWithStacks ? stacks : 1) *
+                    contributionMultiplier;
                 if (operation.ValueMode == StatusEffectValueMode.Fixed)
                     accumulator.AddFlat(value);
                 else if (operation.ValueMode == StatusEffectValueMode.Ratio)
@@ -4169,6 +4210,86 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
         }
 
         return accumulator.Evaluate(baseValue);
+    }
+
+    private float GetStatusContributionMultiplier(
+        StatusEffectSO statusEffect,
+        StatusEffectStatType statType,
+        IReadOnlyList<CharacterStatusStatContributionMultiplier>
+            localContributionMultipliers)
+    {
+        float multiplier = 1f;
+        if (Data?.PassiveDefinitions != null)
+        {
+            foreach (CharacterPassiveDefinition passive in
+                     Data.PassiveDefinitions)
+            {
+                if (passive == null ||
+                    !passive.HasStatusContributionSection)
+                {
+                    continue;
+                }
+
+                multiplier *= ResolveStatusContributionMultiplier(
+                    passive.StatusContributionMultipliers,
+                    statusEffect,
+                    statType);
+            }
+        }
+
+        multiplier *= ResolveStatusContributionMultiplier(
+            localContributionMultipliers,
+            statusEffect,
+            statType);
+        return float.IsNaN(multiplier) ||
+               float.IsInfinity(multiplier)
+            ? 1f
+            : Mathf.Max(0f, multiplier);
+    }
+
+    private static float ResolveStatusContributionMultiplier(
+        IReadOnlyList<CharacterStatusStatContributionMultiplier> modifiers,
+        StatusEffectSO statusEffect,
+        StatusEffectStatType statType)
+    {
+        if (modifiers == null || statusEffect == null)
+            return 1f;
+
+        float multiplier = 1f;
+        foreach (CharacterStatusStatContributionMultiplier modifier in
+                 modifiers)
+        {
+            if (modifier == null ||
+                modifier.StatType != statType ||
+                !IsSameStatus(
+                    modifier.StatusEffect,
+                    statusEffect))
+            {
+                continue;
+            }
+
+            multiplier *= Mathf.Max(0f, modifier.Multiplier);
+        }
+
+        return multiplier;
+    }
+
+    private static bool IsSameStatus(
+        StatusEffectSO left,
+        StatusEffectSO right)
+    {
+        if (ReferenceEquals(left, right))
+            return true;
+        if (left == null || right == null ||
+            string.IsNullOrWhiteSpace(left.StatusId))
+        {
+            return false;
+        }
+
+        return string.Equals(
+            left.StatusId,
+            right.StatusId,
+            StringComparison.Ordinal);
     }
 
     private void AdjustCooldownForAttackSpeedChange(

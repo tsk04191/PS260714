@@ -46,6 +46,72 @@ public sealed class EnemyP0RegressionTests
     }
 
     [Test]
+    public void StatusCondition_BuffAndDebuffScopesCountActiveStatuses()
+    {
+        StatusEffectSO firstBuff =
+            CreateStatusForConditionScope(
+                "enemy-condition-buff-first",
+                StatusEffectAlignment.Buff);
+        StatusEffectSO secondBuff =
+            CreateStatusForConditionScope(
+                "enemy-condition-buff-second",
+                StatusEffectAlignment.Buff);
+        StatusEffectSO debuff =
+            CreateStatusForConditionScope(
+                "enemy-condition-debuff",
+                StatusEffectAlignment.Debuff);
+        IReadOnlyList<BattleStatusSnapshot> activeStatuses =
+            new[]
+            {
+                new BattleStatusSnapshot(firstBuff, 1, 5f),
+                new BattleStatusSnapshot(secondBuff, 1, 5f),
+                new BattleStatusSnapshot(debuff, 1, 5f),
+            };
+
+        EnemyAbilityConditionDefinition condition = new();
+        SetPrivateField(
+            condition,
+            "type",
+            EnemyAbilityConditionType.SourceHasStatus);
+        SetPrivateField(
+            condition,
+            "statusSelectionScope",
+            CharacterStatusSelectionScope.AllBuffs);
+        SetPrivateField(
+            condition,
+            "statusMatchMode",
+            CharacterStatusConditionMatchMode.AtLeastCount);
+        SetPrivateField(condition, "statusMatchCount", 2);
+        SetPrivateField(condition, "expected", true);
+
+        Assert.That(
+            EvaluateEnemyStatusCondition(
+                condition,
+                _ => false,
+                activeStatuses),
+            Is.True);
+
+        SetPrivateField(
+            condition,
+            "statusSelectionScope",
+            CharacterStatusSelectionScope.AllDebuffs);
+        Assert.That(
+            EvaluateEnemyStatusCondition(
+                condition,
+                _ => false,
+                activeStatuses),
+            Is.False);
+
+        SetPrivateField(condition, "statusMatchCount", 1);
+        Assert.That(
+            EvaluateEnemyStatusCondition(
+                condition,
+                _ => false,
+                activeStatuses),
+            Is.True);
+    }
+
+    [Test]
     public void EnemyCodex_DeduplicatesDefinitionsByIdAndEnemyType()
     {
         EnemySO basic = LoadEnemy("Basic");
@@ -1738,6 +1804,38 @@ public sealed class EnemyP0RegressionTests
             InstanceNonPublic);
         Assert.That(field, Is.Not.Null, $"Missing field '{fieldName}'.");
         return (List<T>)field.GetValue(target);
+    }
+
+    private StatusEffectSO CreateStatusForConditionScope(
+        string statusId,
+        StatusEffectAlignment alignment)
+    {
+        StatusEffectSO status =
+            ScriptableObject.CreateInstance<StatusEffectSO>();
+        status.hideFlags = HideFlags.HideAndDontSave;
+        status.name = statusId;
+        _createdObjects.Add(status);
+        SetPrivateField(status, "statusId", statusId);
+        SetPrivateField(status, "alignment", alignment);
+        return status;
+    }
+
+    private static bool EvaluateEnemyStatusCondition(
+        EnemyAbilityConditionDefinition condition,
+        Func<StatusEffectSO, bool> hasStatus,
+        IReadOnlyList<BattleStatusSnapshot> activeStatuses)
+    {
+        Type evaluatorType = typeof(EnemyAbilityConditionDefinition)
+            .Assembly
+            .GetType("EnemyAbilityConditionEvaluator");
+        Assert.That(evaluatorType, Is.Not.Null);
+        MethodInfo method = evaluatorType.GetMethod(
+            "MatchesStatusSelection",
+            BindingFlags.Static | BindingFlags.NonPublic);
+        Assert.That(method, Is.Not.Null);
+        return (bool)method.Invoke(
+            null,
+            new object[] { condition, hasStatus, activeStatuses });
     }
 
     private static void SetPrivateField(

@@ -169,6 +169,8 @@ public sealed class EnemyAbilityConditionDefinition
     [SerializeField]
     private List<StatusEffectSO> statusEffects = new();
     [SerializeField]
+    private CharacterStatusSelectionScope statusSelectionScope;
+    [SerializeField]
     private CharacterStatusConditionMatchMode statusMatchMode;
     [SerializeField, Min(1)]
     private int statusMatchCount = 1;
@@ -187,6 +189,8 @@ public sealed class EnemyAbilityConditionDefinition
             : Array.Empty<StatusEffectSO>();
     public CharacterStatusSelection StatusSelection =>
         new(statusEffect, statusEffects);
+    public CharacterStatusSelectionScope StatusSelectionScope =>
+        statusSelectionScope;
     public CharacterStatusConditionMatchMode StatusMatchMode =>
         statusMatchMode;
     public int StatusMatchCount => statusMatchCount;
@@ -232,6 +236,13 @@ public sealed class EnemyAbilityConditionDefinition
     public void Validate()
     {
         statusEffects ??= new List<StatusEffectSO>();
+        if (!Enum.IsDefined(
+                typeof(CharacterStatusSelectionScope),
+                statusSelectionScope))
+        {
+            statusSelectionScope =
+                CharacterStatusSelectionScope.SelectedStatuses;
+        }
         if (!Enum.IsDefined(
                 typeof(CharacterStatusConditionMatchMode),
                 statusMatchMode))
@@ -610,7 +621,9 @@ internal static class EnemyAbilityConditionEvaluator
                 EnemyAbilityConditionType.SourceHasStatus =>
                     MatchesStatusSelection(
                         condition,
-                        source.HasStatusEffect) == condition.Expected,
+                        source.HasStatusEffect,
+                        source.GetActiveStatusEffects()) ==
+                    condition.Expected,
                 EnemyAbilityConditionType.HasAlternateTarget =>
                     hasAlternateTarget == condition.Expected,
                 _ => false
@@ -626,10 +639,19 @@ internal static class EnemyAbilityConditionEvaluator
 
     internal static bool MatchesStatusSelection(
         EnemyAbilityConditionDefinition condition,
-        Func<StatusEffectSO, bool> hasStatus)
+        Func<StatusEffectSO, bool> hasStatus,
+        IReadOnlyList<BattleStatusSnapshot> activeStatuses = null)
     {
         if (condition == null || hasStatus == null)
             return false;
+
+        if (condition.StatusSelectionScope !=
+            CharacterStatusSelectionScope.SelectedStatuses)
+        {
+            return MatchesStatusScope(
+                condition,
+                activeStatuses);
+        }
 
         CharacterStatusSelection selection = condition.StatusSelection;
         int selectedCount = 0;
@@ -653,6 +675,67 @@ internal static class EnemyAbilityConditionEvaluator
         if (selectedCount == 0)
             return false;
 
+        return MatchesStatusCount(
+            condition,
+            selectedCount,
+            matchedCount);
+    }
+
+    private static bool MatchesStatusScope(
+        EnemyAbilityConditionDefinition condition,
+        IReadOnlyList<BattleStatusSnapshot> activeStatuses)
+    {
+        if (activeStatuses == null)
+            return false;
+
+        StatusEffectAlignment expectedAlignment =
+            condition.StatusSelectionScope switch
+            {
+                CharacterStatusSelectionScope.AllBuffs =>
+                    StatusEffectAlignment.Buff,
+                CharacterStatusSelectionScope.AllDebuffs =>
+                    StatusEffectAlignment.Debuff,
+                _ => (StatusEffectAlignment)(-1)
+            };
+        if (!Enum.IsDefined(
+                typeof(StatusEffectAlignment),
+                expectedAlignment))
+        {
+            return false;
+        }
+
+        int matchedCount = 0;
+        for (int index = 0; index < activeStatuses.Count; index++)
+        {
+            BattleStatusSnapshot snapshot = activeStatuses[index];
+            StatusEffectSO status = snapshot.Definition;
+            if (!snapshot.IsValid ||
+                status.Alignment != expectedAlignment ||
+                ContainsEarlierStatus(
+                    activeStatuses,
+                    status,
+                    index))
+            {
+                continue;
+            }
+
+            matchedCount++;
+        }
+
+        if (matchedCount == 0)
+            return false;
+
+        return MatchesStatusCount(
+            condition,
+            matchedCount,
+            matchedCount);
+    }
+
+    private static bool MatchesStatusCount(
+        EnemyAbilityConditionDefinition condition,
+        int selectedCount,
+        int matchedCount)
+    {
         return condition.StatusMatchMode switch
         {
             CharacterStatusConditionMatchMode.Any =>
@@ -663,6 +746,24 @@ internal static class EnemyAbilityConditionEvaluator
                 matchedCount >= condition.RequiredStatusMatchCount,
             _ => false
         };
+    }
+
+    private static bool ContainsEarlierStatus(
+        IReadOnlyList<BattleStatusSnapshot> statuses,
+        StatusEffectSO status,
+        int index)
+    {
+        for (int previous = 0; previous < index; previous++)
+        {
+            if (CharacterStatusSelection.IsSameStatus(
+                    statuses[previous].Definition,
+                    status))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private static bool ContainsEarlierStatus(

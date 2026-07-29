@@ -1203,7 +1203,8 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
                 bool statusMatched =
                     CharacterConditionEvaluator.MatchesStatusCondition(
                         condition,
-                        tile.TopEnemy.GetStatusStackCount);
+                        tile.TopEnemy.GetStatusStackCount,
+                        tile.TopEnemy.GetActiveStatusEffects());
                 if (matchAny && statusMatched)
                     return true;
                 if (!matchAny && !statusMatched)
@@ -2412,7 +2413,8 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
                 bool hasStatus = source != null &&
                     EnemyAbilityConditionEvaluator.MatchesStatusSelection(
                         condition,
-                        source.HasStatusEffect);
+                        source.HasStatusEffect,
+                        source.GetActiveStatusEffects());
                 return hasStatus == condition.Expected;
             }
 
@@ -2454,7 +2456,8 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
                         EnemyAbilityConditionEvaluator
                             .MatchesStatusSelection(
                                 condition,
-                                target.HasStatusEffect);
+                                target.HasStatusEffect,
+                                target.GetActiveStatusEffects());
                 }
                 foreach (IBattleCharacter target in playerTargets)
                 {
@@ -2462,7 +2465,8 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
                         EnemyAbilityConditionEvaluator
                             .MatchesStatusSelection(
                                 condition,
-                                target.HasStatusEffect);
+                                target.HasStatusEffect,
+                                target.GetActiveStatusEffects());
                 }
                 return hasStatus == condition.Expected;
             }

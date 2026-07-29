@@ -437,9 +437,26 @@ public static class EnemyDefinitionValidator
                 condition.Type ==
                     EnemyAbilityConditionType.TargetHasStatus)
             {
+                bool hasValidStatusScope = Enum.IsDefined(
+                    typeof(CharacterStatusSelectionScope),
+                    condition.StatusSelectionScope);
+                if (!hasValidStatusScope)
+                {
+                    AddError(
+                        result,
+                        "ability.condition_status_scope_invalid",
+                        $"{path}.statusSelectionScope",
+                        $"Status selection scope " +
+                        $"'{condition.StatusSelectionScope}' is " +
+                        "unsupported.");
+                }
+                bool selectsConfiguredStatuses =
+                    condition.StatusSelectionScope ==
+                    CharacterStatusSelectionScope.SelectedStatuses;
                 CharacterStatusSelection selection =
                     condition.StatusSelection;
-                if (selection.Count == 0)
+                if (selectsConfiguredStatuses &&
+                    selection.Count == 0)
                 {
                     AddError(
                         result,
@@ -451,6 +468,7 @@ public static class EnemyDefinitionValidator
 
                 int uniqueStatusCount = 0;
                 for (int statusIndex = 0;
+                     selectsConfiguredStatuses &&
                      statusIndex < selection.Count;
                      statusIndex++)
                 {
@@ -521,7 +539,8 @@ public static class EnemyDefinitionValidator
                             "Required status count must be at least 1.");
                     }
                     else if (condition.StatusMatchCount >
-                             uniqueStatusCount)
+                             uniqueStatusCount &&
+                             selectsConfiguredStatuses)
                     {
                         AddError(
                             result,

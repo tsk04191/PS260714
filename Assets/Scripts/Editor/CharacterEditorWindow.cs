@@ -21,6 +21,8 @@ public sealed class CharacterEditorWindow : EditorWindow
         "triggerStatusEffect";
     private const string PassiveTriggerStatusEffectsPropertyName =
         "triggerStatusEffects";
+    private const string PassiveTriggerStatusScopePropertyName =
+        "triggerStatusScope";
     private const string PassiveCooldownPropertyName = "cooldown";
     private const string PassiveAttackTargetRelationPropertyName =
         "attackTargetRelation";
@@ -61,6 +63,8 @@ public sealed class CharacterEditorWindow : EditorWindow
     private const string NumericThresholdPropertyName = "threshold";
     private const string ConditionStatusEffectsPropertyName =
         "statusEffects";
+    private const string StatusSelectionScopePropertyName =
+        "statusSelectionScope";
     private const string StatusConditionMatchModePropertyName =
         "statusMatchMode";
     private const string StatusConditionMatchCountPropertyName =
@@ -95,6 +99,14 @@ public sealed class CharacterEditorWindow : EditorWindow
         "targetStatusScalingEffect";
     private const string TargetStatusStacksScalePropertyName =
         "targetStatusStacksScale";
+    private const string StatusContributionMultipliersPropertyName =
+        "statusContributionMultipliers";
+    private const string StatusContributionStatusPropertyName =
+        "statusEffect";
+    private const string StatusContributionStatTypePropertyName =
+        "statType";
+    private const string StatusContributionMultiplierPropertyName =
+        "multiplier";
     private const string StatusDurationPropertyName = "statusDuration";
     private const string StatusStacksPropertyName = "statusStacks";
     private const string StatusEffectPropertyName = "statusEffect";
@@ -129,6 +141,7 @@ public sealed class CharacterEditorWindow : EditorWindow
         CharacterPassiveSectionType.Linkage,
         CharacterPassiveSectionType.Condition,
         CharacterPassiveSectionType.SelfStatusCost,
+        CharacterPassiveSectionType.StatusContribution,
         CharacterPassiveSectionType.Subject,
         CharacterPassiveSectionType.Ability
     };
@@ -162,6 +175,14 @@ public sealed class CharacterEditorWindow : EditorWindow
         "제한 없음",
         "직전 공격과 동일",
         "직전 공격과 다름"
+    };
+
+    private static readonly string[] StatusContributionStatTypeOptions =
+    {
+        "공격력",
+        "공격 속도",
+        "받는 피해",
+        "대상 우선순위 (미지원)"
     };
 
     private static readonly CharacterAttackSectionType[] AttackSectionOrder =
@@ -236,6 +257,13 @@ public sealed class CharacterEditorWindow : EditorWindow
         "하나 이상",
         "모두",
         "N개 이상"
+    };
+
+    private static readonly string[] StatusSelectionScopeOptions =
+    {
+        "선택한 상태",
+        "보유한 모든 버프",
+        "보유한 모든 디버프"
     };
 
     private static readonly string[] ConditionTargetOptions =
@@ -1456,13 +1484,26 @@ public sealed class CharacterEditorWindow : EditorWindow
                             PassiveStatusTargetPropertyName),
                         "상태 획득 대상",
                         PassiveStatusTargetOptions);
+                    SerializedProperty triggerStatusScope =
+                        definition.FindPropertyRelative(
+                            PassiveTriggerStatusScopePropertyName);
+                    DrawAttackEnumPopup(
+                        triggerStatusScope,
+                        "상태 필터 범위",
+                        StatusSelectionScopeOptions);
                     SerializedProperty triggerStatusEffect =
                         definition.FindPropertyRelative(
                             PassiveTriggerStatusEffectPropertyName);
                     SerializedProperty triggerStatusEffects =
                         definition.FindPropertyRelative(
                             PassiveTriggerStatusEffectsPropertyName);
-                    if (triggerStatusEffect != null)
+                    bool selectsTriggerStatuses =
+                        triggerStatusScope == null ||
+                        triggerStatusScope.enumValueIndex ==
+                        (int)CharacterStatusSelectionScope
+                            .SelectedStatuses;
+                    if (selectsTriggerStatuses &&
+                        triggerStatusEffect != null)
                     {
                         SerializedProperty statusTarget =
                             definition.FindPropertyRelative(
@@ -1485,6 +1526,13 @@ public sealed class CharacterEditorWindow : EditorWindow
                             new PS260714StatusEffectSelectionOptions(
                                 allowNone: true,
                                 targetFaction: filterFaction));
+                    }
+                    else if (!selectsTriggerStatuses)
+                    {
+                        EditorGUILayout.HelpBox(
+                            "획득한 상태의 버프/디버프 분류로 필터링합니다. " +
+                            "개별 상태 선택 목록은 사용하지 않습니다.",
+                            MessageType.Info);
                     }
                     EditorGUILayout.HelpBox(
                         "선택한 진영의 대상에게 지정 상태가 적용되면 " +
@@ -1595,6 +1643,13 @@ public sealed class CharacterEditorWindow : EditorWindow
                 DrawPassiveSelfStatusCost(definition);
                 break;
 
+            case CharacterPassiveSectionType.StatusContribution:
+                DrawStatusContributionMultipliers(
+                    definition.FindPropertyRelative(
+                        StatusContributionMultipliersPropertyName),
+                    false);
+                break;
+
             case CharacterPassiveSectionType.Subject:
                 DrawAttackSubject(definition, true);
                 break;
@@ -1648,6 +1703,9 @@ public sealed class CharacterEditorWindow : EditorWindow
             CharacterPassiveSectionType.SelfStatusCost);
         ResetPassiveSectionValue(
             definition,
+            CharacterPassiveSectionType.StatusContribution);
+        ResetPassiveSectionValue(
+            definition,
             CharacterPassiveSectionType.Subject);
         ResetPassiveSectionValue(
             definition,
@@ -1688,6 +1746,10 @@ public sealed class CharacterEditorWindow : EditorWindow
                     definition.FindPropertyRelative(
                         PassiveTriggerStatusEffectsPropertyName);
                 triggerStatusEffects?.ClearArray();
+                SetEnumValue(
+                    definition,
+                    PassiveTriggerStatusScopePropertyName,
+                    (int)CharacterStatusSelectionScope.SelectedStatuses);
                 SerializedProperty cooldown = definition.FindPropertyRelative(
                     PassiveCooldownPropertyName);
                 if (cooldown != null)
@@ -1708,6 +1770,11 @@ public sealed class CharacterEditorWindow : EditorWindow
 
             case CharacterPassiveSectionType.SelfStatusCost:
                 ResetPassiveSelfStatusCost(definition);
+                break;
+
+            case CharacterPassiveSectionType.StatusContribution:
+                definition.FindPropertyRelative(
+                    StatusContributionMultipliersPropertyName)?.ClearArray();
                 break;
 
             case CharacterPassiveSectionType.Subject:
@@ -1823,6 +1890,112 @@ public sealed class CharacterEditorWindow : EditorWindow
             StatusCostConsumedStacksPropertyName);
         if (consumedStacks != null)
             consumedStacks.intValue = 1;
+    }
+
+    private static void DrawStatusContributionMultipliers(
+        SerializedProperty modifiers,
+        bool effectLocal)
+    {
+        if (modifiers == null)
+        {
+            EditorGUILayout.HelpBox(
+                "상태 기여 배율 목록을 찾을 수 없습니다.",
+                MessageType.Error);
+            return;
+        }
+
+        EditorGUILayout.HelpBox(
+            effectLocal
+                ? "이 효과를 계산할 때 선택한 상태가 제공하는 공격력 " +
+                  "기여도에만 배율을 적용합니다."
+                : "선택한 상태가 자신에게 제공하는 능력치 기여도에 " +
+                  "상시 배율을 적용합니다. 여러 규칙이 일치하면 " +
+                  "배율을 서로 곱합니다.",
+            MessageType.Info);
+
+        int removeIndex = -1;
+        for (int index = 0; index < modifiers.arraySize; index++)
+        {
+            SerializedProperty modifier =
+                modifiers.GetArrayElementAtIndex(index);
+            EditorGUILayout.BeginVertical(EditorStyles.helpBox);
+            EditorGUILayout.BeginHorizontal();
+            EditorGUILayout.LabelField(
+                $"기여 배율 {index + 1}",
+                EditorStyles.miniBoldLabel);
+            if (GUILayout.Button(
+                    "X",
+                    EditorStyles.miniButton,
+                    GUILayout.Width(24f)))
+            {
+                removeIndex = index;
+            }
+            EditorGUILayout.EndHorizontal();
+
+            PS260714StatusEffectSelection.DrawSingle(
+                modifier.FindPropertyRelative(
+                    StatusContributionStatusPropertyName),
+                new GUIContent("상태"));
+
+            SerializedProperty statType = modifier.FindPropertyRelative(
+                StatusContributionStatTypePropertyName);
+            if (effectLocal && statType != null)
+            {
+                statType.enumValueIndex =
+                    (int)StatusEffectStatType.AttackPower;
+            }
+            using (new EditorGUI.DisabledScope(effectLocal))
+            {
+                DrawAttackEnumPopup(
+                    statType,
+                    "능력치",
+                    StatusContributionStatTypeOptions);
+            }
+
+            SerializedProperty multiplier = modifier.FindPropertyRelative(
+                StatusContributionMultiplierPropertyName);
+            if (multiplier != null)
+            {
+                multiplier.floatValue = Mathf.Max(
+                    0f,
+                    EditorGUILayout.FloatField(
+                        new GUIContent(
+                            "총 기여 배율",
+                            "1은 기본 기여도, 1.5는 150%, 3은 300%입니다."),
+                        multiplier.floatValue));
+            }
+            EditorGUILayout.EndVertical();
+
+            if (removeIndex >= 0)
+                break;
+        }
+
+        if (removeIndex >= 0)
+        {
+            modifiers.DeleteArrayElementAtIndex(removeIndex);
+            GUI.changed = true;
+        }
+
+        if (GUILayout.Button("+ 상태 기여 배율 추가", EditorStyles.miniButton))
+        {
+            int newIndex = modifiers.arraySize;
+            modifiers.InsertArrayElementAtIndex(newIndex);
+            SerializedProperty modifier =
+                modifiers.GetArrayElementAtIndex(newIndex);
+            SetObjectReferenceValue(
+                modifier,
+                StatusContributionStatusPropertyName,
+                null);
+            SetEnumValue(
+                modifier,
+                StatusContributionStatTypePropertyName,
+                (int)StatusEffectStatType.AttackPower);
+            SetFloatValue(
+                modifier,
+                StatusContributionMultiplierPropertyName,
+                1f);
+            GUI.changed = true;
+        }
     }
 
     private void ShowPassiveSectionMenu(int passiveIndex)
@@ -1945,8 +2118,10 @@ public sealed class CharacterEditorWindow : EditorWindow
             CharacterPassiveSectionType.Linkage => "1. 트리거 / 연동",
             CharacterPassiveSectionType.Condition => "2. 조건",
             CharacterPassiveSectionType.SelfStatusCost => "3. 자기 상태 비용",
-            CharacterPassiveSectionType.Subject => "4. 대상",
-            CharacterPassiveSectionType.Ability => "5. 능력",
+            CharacterPassiveSectionType.StatusContribution =>
+                "4. 상태 능력치 기여 배율",
+            CharacterPassiveSectionType.Subject => "5. 대상",
+            CharacterPassiveSectionType.Ability => "6. 능력",
             _ => sectionType.ToString()
         };
     }
@@ -2843,7 +3018,7 @@ public sealed class CharacterEditorWindow : EditorWindow
         return (CharacterTargetFaction)currentIndex;
     }
 
-    private static void DrawNumericConditions(SerializedProperty definition)
+    internal static void DrawNumericConditions(SerializedProperty definition)
     {
         SerializedProperty matchMode = definition.FindPropertyRelative(
             ConditionMatchModePropertyName);
@@ -2916,18 +3091,29 @@ public sealed class CharacterEditorWindow : EditorWindow
                 (int)CharacterNumericConditionMetric.StatusStackCount;
             if (checksStatusStacks)
             {
+                SerializedProperty statusSelectionScope =
+                    condition.FindPropertyRelative(
+                        StatusSelectionScopePropertyName);
+                DrawAttackEnumPopup(
+                    statusSelectionScope,
+                    "상태 선택 범위",
+                    StatusSelectionScopeOptions);
+                bool selectsConfiguredStatuses =
+                    statusSelectionScope == null ||
+                    statusSelectionScope.enumValueIndex ==
+                    (int)CharacterStatusSelectionScope.SelectedStatuses;
                 SerializedProperty heldStatus =
                     condition.FindPropertyRelative(StatusEffectPropertyName);
                 SerializedProperty heldStatuses =
                     condition.FindPropertyRelative(
                         ConditionStatusEffectsPropertyName);
-                if (heldStatus == null)
+                if (selectsConfiguredStatuses && heldStatus == null)
                 {
                     EditorGUILayout.HelpBox(
                         "보유 상태 속성을 찾을 수 없습니다.",
                         MessageType.Error);
                 }
-                else
+                else if (selectsConfiguredStatuses)
                 {
                     CharacterTargetFaction statusFaction =
                         checksSource || targetsAllies
@@ -2941,34 +3127,41 @@ public sealed class CharacterEditorWindow : EditorWindow
                             "스택 수를 확인할 상태를 선택합니다."),
                         new PS260714StatusEffectSelectionOptions(
                             targetFaction: statusFaction));
+                }
+                else
+                {
+                    EditorGUILayout.HelpBox(
+                        "대상이 현재 보유한 서로 다른 버프/디버프 종류를 " +
+                        "아래 판정의 후보로 사용합니다.",
+                        MessageType.Info);
+                }
 
-                    SerializedProperty statusMatchMode =
+                SerializedProperty statusMatchMode =
+                    condition.FindPropertyRelative(
+                        StatusConditionMatchModePropertyName);
+                DrawAttackEnumPopup(
+                    statusMatchMode,
+                    "상태 선택 판정",
+                    StatusConditionMatchModeOptions);
+                if (statusMatchMode != null &&
+                    statusMatchMode.enumValueIndex ==
+                    (int)CharacterStatusConditionMatchMode.AtLeastCount)
+                {
+                    SerializedProperty statusMatchCount =
                         condition.FindPropertyRelative(
-                            StatusConditionMatchModePropertyName);
-                    DrawAttackEnumPopup(
-                        statusMatchMode,
-                        "상태 선택 판정",
-                        StatusConditionMatchModeOptions);
-                    if (statusMatchMode != null &&
-                        statusMatchMode.enumValueIndex ==
-                        (int)CharacterStatusConditionMatchMode.AtLeastCount)
+                            StatusConditionMatchCountPropertyName);
+                    if (statusMatchCount != null)
                     {
-                        SerializedProperty statusMatchCount =
-                            condition.FindPropertyRelative(
-                                StatusConditionMatchCountPropertyName);
-                        if (statusMatchCount != null)
-                        {
-                            statusMatchCount.intValue = Mathf.Max(
-                                1,
-                                EditorGUILayout.IntField(
-                                    "필요 상태 수",
-                                    statusMatchCount.intValue));
-                        }
+                        statusMatchCount.intValue = Mathf.Max(
+                            1,
+                            EditorGUILayout.IntField(
+                                "필요 상태 수",
+                                statusMatchCount.intValue));
                     }
                 }
 
                 EditorGUILayout.HelpBox(
-                    "선택한 각 상태에 아래 스택 비교를 적용한 뒤 " +
+                    "범위에 포함된 각 상태에 아래 스택 비교를 적용한 뒤 " +
                     "하나 이상/모두/N개 이상으로 결합합니다.",
                     MessageType.Info);
             }
@@ -3156,6 +3349,10 @@ public sealed class CharacterEditorWindow : EditorWindow
         SerializedProperty statusEffects = condition.FindPropertyRelative(
             ConditionStatusEffectsPropertyName);
         statusEffects?.ClearArray();
+        SetEnumValue(
+            condition,
+            StatusSelectionScopePropertyName,
+            (int)CharacterStatusSelectionScope.SelectedStatuses);
         SetEnumValue(
             condition,
             StatusConditionMatchModePropertyName,
@@ -3845,6 +4042,8 @@ public sealed class CharacterEditorWindow : EditorWindow
             effect,
             TargetStatusStacksScalePropertyName,
             0f);
+        effect.FindPropertyRelative(
+            StatusContributionMultipliersPropertyName)?.ClearArray();
 
         SerializedProperty duration = effect.FindPropertyRelative(
             StatusDurationPropertyName);
@@ -4044,6 +4243,15 @@ public sealed class CharacterEditorWindow : EditorWindow
             TargetStatusStacksScalePropertyName,
             "대상 상태",
             "각 대상에게 적용된 지정 상태의 스택 수 × 배율");
+        SerializedProperty contributionMultipliers =
+            definition.FindPropertyRelative(
+                StatusContributionMultipliersPropertyName);
+        if (contributionMultipliers != null)
+        {
+            DrawStatusContributionMultipliers(
+                contributionMultipliers,
+                true);
+        }
     }
 
     private static void DrawResourceGainAmount(
@@ -4079,6 +4287,15 @@ public sealed class CharacterEditorWindow : EditorWindow
             SourceStatusStacksScalePropertyName,
             "시전자 상태",
             "시전자에게 적용된 지정 상태의 스택 수 × 배율");
+        SerializedProperty contributionMultipliers =
+            definition.FindPropertyRelative(
+                StatusContributionMultipliersPropertyName);
+        if (contributionMultipliers != null)
+        {
+            DrawStatusContributionMultipliers(
+                contributionMultipliers,
+                true);
+        }
     }
 
     private static void DrawResourceSpendAmount(
@@ -4151,6 +4368,15 @@ public sealed class CharacterEditorWindow : EditorWindow
             TargetStatusStacksScalePropertyName,
             "대상 상태",
             "각 대상에게 적용된 지정 상태의 스택 수 × 배율");
+        SerializedProperty contributionMultipliers =
+            definition.FindPropertyRelative(
+                StatusContributionMultipliersPropertyName);
+        if (contributionMultipliers != null)
+        {
+            DrawStatusContributionMultipliers(
+                contributionMultipliers,
+                true);
+        }
     }
 
     private static void DrawHealthSpendAmount(
@@ -4223,6 +4449,15 @@ public sealed class CharacterEditorWindow : EditorWindow
             TargetStatusStacksScalePropertyName,
             "대상 상태",
             "각 대상에게 적용된 지정 상태의 스택 수 × 배율");
+        SerializedProperty contributionMultipliers =
+            definition.FindPropertyRelative(
+                StatusContributionMultipliersPropertyName);
+        if (contributionMultipliers != null)
+        {
+            DrawStatusContributionMultipliers(
+                contributionMultipliers,
+                true);
+        }
         EditorGUILayout.HelpBox(
             "보호막은 대상별로 누적되며 피해보다 먼저 소모됩니다. " +
             "전투 리셋 시 남은 보호막은 제거됩니다.",

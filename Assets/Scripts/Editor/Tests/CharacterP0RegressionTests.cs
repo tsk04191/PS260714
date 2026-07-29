@@ -1357,6 +1357,55 @@ public sealed class CharacterP0RegressionTests
     }
 
     [Test]
+    public void StatusPassive_AllDebuffsScopeIgnoresBuffsAndTriggersForDebuff()
+    {
+        CharacterSO definition = CreateSuirenFeatureFixture();
+        SerializedObject serialized = new(definition);
+        SerializedProperty passive = serialized
+            .FindProperty("passiveDefinitions")
+            .GetArrayElementAtIndex(1);
+        passive.FindPropertyRelative("triggerStatusScope").enumValueIndex =
+            (int)CharacterStatusSelectionScope.AllDebuffs;
+        serialized.ApplyModifiedPropertiesWithoutUndo();
+
+        CharacterRuntime owner = CreateCharacter(definition);
+        CharacterRuntime ally = CreateCharacter(
+            CreateBaseCharacterFixture("StatusScopeTargetFixture"));
+        StatusEffectSO emergencyKit =
+            LoadAsset<StatusEffectSO>(EmergencyKitAssetPath);
+        StatusEffectSO stun = LoadAsset<StatusEffectSO>(StunAssetPath);
+        Assert.That(
+            emergencyKit.Alignment,
+            Is.EqualTo(StatusEffectAlignment.Buff));
+        Assert.That(
+            stun.Alignment,
+            Is.EqualTo(StatusEffectAlignment.Debuff));
+
+        FakeBattleBoard board = new();
+        owner.BindBattle(null, board);
+        ally.BindBattle(null, board);
+        Assert.That(
+            owner.ApplyStatusEffect(emergencyKit, 1f, 2),
+            Is.True);
+
+        Assert.That(
+            ally.ApplyStatusEffect(emergencyKit, 5f, 1),
+            Is.True);
+        Assert.That(
+            owner.GetStatusStackCount(emergencyKit),
+            Is.EqualTo(2),
+            "A buff must not trigger an AllDebuffs passive.");
+
+        Assert.That(
+            ally.ApplyStatusEffect(stun, 5f, 1),
+            Is.True);
+        Assert.That(
+            owner.GetStatusStackCount(emergencyKit),
+            Is.EqualTo(1));
+        Assert.That(ally.HasStatusEffect(stun), Is.False);
+    }
+
+    [Test]
     public void StatusPassive_IgnoresWrongTargetStatusAndMissingCost()
     {
         CharacterRuntime suiren = CreateCharacter(
@@ -5067,6 +5116,132 @@ public sealed class CharacterP0RegressionTests
     }
 
     [Test]
+    public void PassiveStatusContributionMultiplier_ScalesCommonBuffStat()
+    {
+        StatusEffectSO power = CreateRuntimeStatus(
+            "test_common_power",
+            false,
+            true,
+            StatusEffectStackMode.AddAndRefreshDuration,
+            0);
+        ConfigureRuntimeStatusModifier(
+            power,
+            0,
+            StatusEffectStatType.AttackPower,
+            StatusEffectStatModifierMode.Flat,
+            1f,
+            true);
+
+        CharacterSO definition = CreateBaseCharacterFixture(
+            "PassiveStatusContributionFixture",
+            10f);
+        SerializedObject serialized = new(definition);
+        SerializedProperty passive = serialized
+            .FindProperty("passiveDefinitions")
+            .GetArrayElementAtIndex(0);
+        SetSections(
+            passive.FindPropertyRelative("sections"),
+            (int)CharacterPassiveSectionType.StatusContribution);
+        passive.FindPropertyRelative("effects").ClearArray();
+        ConfigureStatusContributionMultiplier(
+            passive,
+            0,
+            power,
+            StatusEffectStatType.AttackPower,
+            1.5f);
+        serialized.ApplyModifiedPropertiesWithoutUndo();
+
+        CharacterDefinitionValidationResult validation =
+            CharacterDefinitionValidator.Validate(definition);
+        Assert.That(
+            validation.IsValid,
+            Is.True,
+            string.Join("\n", validation.Diagnostics));
+
+        CharacterRuntime character = CreateCharacter(definition);
+        Assert.That(character.CurrentAttackPower, Is.EqualTo(10f));
+        Assert.That(
+            character.ApplyStatusEffect(power, 5f, 2),
+            Is.True);
+        Assert.That(
+            character.CurrentAttackPower,
+            Is.EqualTo(13f).Within(0.0001f));
+        Assert.That(
+            CharacterLocalization.GetPassiveDescription(character.Data),
+            Does.Contain("1.5"));
+    }
+
+    [Test]
+    public void EffectStatusContributionMultiplier_IsLocalToThatEffect()
+    {
+        StatusEffectSO power = CreateRuntimeStatus(
+            "test_heavy_blade_power",
+            false,
+            true,
+            StatusEffectStackMode.AddAndRefreshDuration,
+            0);
+        ConfigureRuntimeStatusModifier(
+            power,
+            0,
+            StatusEffectStatType.AttackPower,
+            StatusEffectStatModifierMode.Flat,
+            1f,
+            true);
+
+        CharacterSO definition = CreateBaseCharacterFixture(
+            "EffectStatusContributionFixture",
+            10f);
+        SerializedObject serialized = new(definition);
+        SerializedProperty damage = serialized
+            .FindProperty("attackDefinitions")
+            .GetArrayElementAtIndex(0)
+            .FindPropertyRelative("effects")
+            .GetArrayElementAtIndex(0);
+        ConfigureDamageEffect(
+            damage,
+            CharacterEffectTargetMode.InheritAction,
+            CharacterDamageAmountMode.Ratio,
+            1f);
+        ConfigureStatusContributionMultiplier(
+            damage,
+            0,
+            power,
+            StatusEffectStatType.AttackPower,
+            3f);
+        serialized.ApplyModifiedPropertiesWithoutUndo();
+
+        CharacterDefinitionValidationResult validation =
+            CharacterDefinitionValidator.Validate(definition);
+        Assert.That(
+            validation.IsValid,
+            Is.True,
+            string.Join("\n", validation.Diagnostics));
+
+        CharacterRuntime character = CreateCharacter(definition);
+        Assert.That(
+            character.ApplyStatusEffect(power, 5f, 2),
+            Is.True);
+        Assert.That(
+            character.CurrentAttackPower,
+            Is.EqualTo(12f).Within(0.0001f),
+            "The effect-local multiplier must not alter the displayed stat.");
+
+        EnemyRuntime target = CreateEnemyRuntime();
+        FakeBattleBoard board = new()
+        {
+            LivingEnemyCountValue = 1,
+            SelectedEnemyTargets = new[] { target },
+        };
+        character.BindBattle(null, board);
+        character.TickBattle(character.Data.AttackCooldown, board);
+
+        Assert.That(
+            board.DamageAmounts,
+            Is.EqualTo(new[] { 16 }),
+            "Base 10 plus two Power stacks at three damage each.");
+    }
+
+    [Test]
     public void ModularStatusControls_BlockOnlyConfiguredActionGroups()
     {
         StatusEffectSO granular = CreateRuntimeStatus(
@@ -6129,6 +6304,111 @@ public sealed class CharacterP0RegressionTests
     }
 
     [Test]
+    public void StatusStackCondition_BuffAndDebuffScopesSupportAllAndCount()
+    {
+        StatusEffectSO firstBuff = CreateRuntimeStatus(
+            "condition-scope-buff-first",
+            canTargetEnemy: false,
+            canTargetAlly: true,
+            StatusEffectStackMode.AddAndRefreshDuration,
+            operationCount: 0);
+        StatusEffectSO secondBuff = CreateRuntimeStatus(
+            "condition-scope-buff-second",
+            canTargetEnemy: false,
+            canTargetAlly: true,
+            StatusEffectStackMode.AddAndRefreshDuration,
+            operationCount: 0);
+        StatusEffectSO debuff = CreateRuntimeStatus(
+            "condition-scope-debuff",
+            canTargetEnemy: false,
+            canTargetAlly: true,
+            StatusEffectStackMode.AddAndRefreshDuration,
+            operationCount: 0);
+        ConfigureStatusRemovalMetadata(
+            firstBuff,
+            StatusEffectAlignment.Buff,
+            true);
+        ConfigureStatusRemovalMetadata(
+            secondBuff,
+            StatusEffectAlignment.Buff,
+            true);
+        ConfigureStatusRemovalMetadata(
+            debuff,
+            StatusEffectAlignment.Debuff,
+            true);
+
+        CharacterRuntime character = CreateCharacter(
+            CreateBaseCharacterFixture("status-condition-scope"));
+        Assert.That(character.ApplyStatusEffect(firstBuff, 5f, 1), Is.True);
+        Assert.That(character.ApplyStatusEffect(secondBuff, 5f, 2), Is.True);
+        Assert.That(character.ApplyStatusEffect(debuff, 5f, 3), Is.True);
+
+        CharacterNumericCondition condition = new();
+        SetPrivateField(
+            condition,
+            "metric",
+            CharacterNumericConditionMetric.StatusStackCount);
+        SetPrivateField(
+            condition,
+            "comparison",
+            CharacterNumericComparison.GreaterThanOrEqual);
+        SetPrivateField(condition, "threshold", 1f);
+        SetPrivateField(
+            condition,
+            "statusSelectionScope",
+            CharacterStatusSelectionScope.AllBuffs);
+        SetPrivateField(
+            condition,
+            "statusMatchMode",
+            CharacterStatusConditionMatchMode.All);
+        Assert.That(
+            CharacterConditionEvaluator.MatchesCharacter(
+                condition,
+                character),
+            Is.True);
+
+        SetPrivateField(
+            condition,
+            "statusMatchMode",
+            CharacterStatusConditionMatchMode.AtLeastCount);
+        SetPrivateField(condition, "statusMatchCount", 2);
+        Assert.That(
+            CharacterConditionEvaluator.MatchesCharacter(
+                condition,
+                character),
+            Is.True,
+            "Both active buffs must count as distinct matches.");
+
+        SetPrivateField(condition, "threshold", 2f);
+        SetPrivateField(
+            condition,
+            "statusMatchMode",
+            CharacterStatusConditionMatchMode.All);
+        Assert.That(
+            CharacterConditionEvaluator.MatchesCharacter(
+                condition,
+                character),
+            Is.False,
+            "All must apply the stack comparison to every active buff.");
+
+        SetPrivateField(
+            condition,
+            "statusSelectionScope",
+            CharacterStatusSelectionScope.AllDebuffs);
+        SetPrivateField(
+            condition,
+            "statusMatchMode",
+            CharacterStatusConditionMatchMode.AtLeastCount);
+        SetPrivateField(condition, "statusMatchCount", 1);
+        Assert.That(
+            CharacterConditionEvaluator.MatchesCharacter(
+                condition,
+                character),
+            Is.True,
+            "The debuff scope must exclude both buffs.");
+    }
+
+    [Test]
     public void StatusStackCondition_EmptyListUsesLegacyStatusField()
     {
         StatusEffectSO status = CreateRuntimeStatus(
@@ -6276,6 +6556,28 @@ public sealed class CharacterP0RegressionTests
             scaleWithStacks;
         serialized.ApplyModifiedPropertiesWithoutUndo();
         status.ValidateDefinition();
+    }
+
+    private static void ConfigureStatusContributionMultiplier(
+        SerializedProperty owner,
+        int modifierIndex,
+        StatusEffectSO status,
+        StatusEffectStatType statType,
+        float multiplier)
+    {
+        SerializedProperty modifiers = owner.FindPropertyRelative(
+            "statusContributionMultipliers");
+        if (modifiers.arraySize <= modifierIndex)
+            modifiers.arraySize = modifierIndex + 1;
+
+        SerializedProperty modifier =
+            modifiers.GetArrayElementAtIndex(modifierIndex);
+        modifier.FindPropertyRelative("statusEffect").objectReferenceValue =
+            status;
+        modifier.FindPropertyRelative("statType").enumValueIndex =
+            (int)statType;
+        modifier.FindPropertyRelative("multiplier").floatValue =
+            multiplier;
     }
 
     private static void ConfigureRuntimeStatusControl(

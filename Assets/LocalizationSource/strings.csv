@@ -273,3 +273,9 @@ character.calista.name,캐릭터 이름,title,,칼리스타,Calista
 character.calista.description,캐릭터 설명,body,,아카데미 기사단 교환학생,exchange student of Order
 status.focus.name,상태 이름,title,,집중,Focus
 status.focus.description,상태 설명,tooltip,,대상을 최우선 목표로 설정합니다.,Pick first target
+character.lilias.name,캐릭터 이름,title,,릴리아스,Lilias
+character.lilias.description,캐릭터 설명,body,,아카데미 기사단 교환학생,exchange student of Order
+character.isana.name,캐릭터 이름,title,,이사나,Isana
+character.isana.description,캐릭터 설명,body,,아카데미 기사단 교환학생,exchange student of Order
+status.dualside.name,상태 이름,title,,듀얼사이드,DualSide
+status.dualside.description,상태 설명,tooltip,,듀얼사이드,DualSide

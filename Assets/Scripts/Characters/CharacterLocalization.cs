@@ -326,6 +326,19 @@ public static class CharacterLocalization
             if (definition == null || definition.IsEmptyPlaceholder)
                 continue;
 
+            if (definition.HasStatusContributionSection &&
+                !definition.HasSection(
+                    CharacterPassiveSectionType.Ability))
+            {
+                AppendCodexLine(
+                    builder,
+                    $"{(UsesKoreanLocale ? "패시브" : "PASSIVE")} " +
+                    $"{index++}: " +
+                    FormatStatusContributionMultipliers(
+                        definition.StatusContributionMultipliers));
+                continue;
+            }
+
             CharacterAttackSubject subject = definition.HasSection(
                 CharacterPassiveSectionType.Subject)
                 ? definition.Subject
@@ -578,10 +591,19 @@ public static class CharacterLocalization
                 };
                 CharacterStatusSelection triggerStatuses =
                     definition.TriggerStatusSelection;
-                string statusName = triggerStatuses.Count > 0
-                    ? FormatStatusSelectionNames(triggerStatuses)
-                    : (UsesKoreanLocale ? "상태" : "a status");
-                if (triggerStatuses.Count > 1)
+                string statusName = definition.TriggerStatusScope switch
+                {
+                    CharacterStatusSelectionScope.AllBuffs =>
+                        UsesKoreanLocale ? "버프" : "a buff",
+                    CharacterStatusSelectionScope.AllDebuffs =>
+                        UsesKoreanLocale ? "디버프" : "a debuff",
+                    _ => triggerStatuses.Count > 0
+                        ? FormatStatusSelectionNames(triggerStatuses)
+                        : (UsesKoreanLocale ? "상태" : "a status")
+                };
+                if (definition.TriggerStatusScope ==
+                        CharacterStatusSelectionScope.SelectedStatuses &&
+                    triggerStatuses.Count > 1)
                 {
                     statusName = UsesKoreanLocale
                         ? $"{statusName} 중 하나"
@@ -995,6 +1017,35 @@ public static class CharacterLocalization
         if (condition == null)
             return UsesKoreanLocale ? "상태 스택" : "status stacks";
 
+        if (condition.StatusSelectionScope !=
+            CharacterStatusSelectionScope.SelectedStatuses)
+        {
+            string category = condition.StatusSelectionScope ==
+                              CharacterStatusSelectionScope.AllBuffs
+                ? (UsesKoreanLocale ? "보유 버프" : "active buffs")
+                : (UsesKoreanLocale ? "보유 디버프" : "active debuffs");
+            string categoryMatch = condition.StatusMatchMode switch
+            {
+                CharacterStatusConditionMatchMode.All =>
+                    UsesKoreanLocale
+                        ? $"{category} 모두"
+                        : $"all {category}",
+                CharacterStatusConditionMatchMode.AtLeastCount =>
+                    UsesKoreanLocale
+                        ? $"{category} 중 " +
+                          $"{condition.RequiredStatusMatchCount}개 이상"
+                        : $"at least " +
+                          $"{condition.RequiredStatusMatchCount} " +
+                          category,
+                _ => UsesKoreanLocale
+                    ? $"{category} 중 하나 이상"
+                    : $"any {category}"
+            };
+            return UsesKoreanLocale
+                ? $"{categoryMatch}의 상태 스택"
+                : $"{categoryMatch} status stacks";
+        }
+
         CharacterStatusSelection selection = condition.StatusSelection;
         string names = FormatStatusSelectionNames(selection);
         string match = condition.StatusMatchMode switch
@@ -1143,7 +1194,8 @@ public static class CharacterLocalization
                         effect.TargetCurrentHealthScale != 0f ||
                         effect.TargetMaxHealthScale != 0f ||
                         effect.SourceStatusStacksScale != 0f ||
-                        effect.TargetStatusStacksScale != 0f;
+                        effect.TargetStatusStacksScale != 0f ||
+                        effect.StatusContributionMultipliers.Count > 0;
                     string damageText = FormatAbility(
                         effect.DamageType,
                         effect.DamageAmountMode,
@@ -1321,6 +1373,9 @@ public static class CharacterLocalization
             UsesKoreanLocale
                 ? $"시전자 {sourceStatusName} 스택"
                 : $"Source {sourceStatusName} Stacks");
+        AppendStatusContributionMultipliers(
+            builder,
+            effect.StatusContributionMultipliers);
         if (!includeTargetTerms)
             return builder.ToString();
 
@@ -1341,6 +1396,65 @@ public static class CharacterLocalization
                 ? $"대상 {targetStatusName} 스택"
                 : $"Target {targetStatusName} Stacks");
         return builder.ToString();
+    }
+
+    private static string FormatStatusContributionMultipliers(
+        IReadOnlyList<CharacterStatusStatContributionMultiplier> modifiers)
+    {
+        if (modifiers == null || modifiers.Count == 0)
+        {
+            return UsesKoreanLocale
+                ? "설정된 상태 기여 배율 없음"
+                : "No status contribution multipliers";
+        }
+
+        StringBuilder builder = new();
+        AppendStatusContributionMultipliers(builder, modifiers);
+        return builder.ToString().TrimStart(' ', '/', '+');
+    }
+
+    private static void AppendStatusContributionMultipliers(
+        StringBuilder builder,
+        IReadOnlyList<CharacterStatusStatContributionMultiplier> modifiers)
+    {
+        if (builder == null || modifiers == null)
+            return;
+
+        foreach (CharacterStatusStatContributionMultiplier modifier in
+                 modifiers)
+        {
+            if (modifier?.StatusEffect == null)
+                continue;
+
+            if (builder.Length > 0)
+                builder.Append(" / ");
+            string statusName = GetStatusEffectName(
+                modifier.StatusEffect);
+            string statName = FormatStatusStatType(modifier.StatType);
+            builder.Append(
+                UsesKoreanLocale
+                    ? $"{statusName}의 {statName} 기여 ×" +
+                      $"{modifier.Multiplier:0.##}"
+                    : $"{statusName} {statName} contribution ×" +
+                      $"{modifier.Multiplier:0.##}");
+        }
+    }
+
+    private static string FormatStatusStatType(
+        StatusEffectStatType statType)
+    {
+        return statType switch
+        {
+            StatusEffectStatType.AttackPower =>
+                UsesKoreanLocale ? "공격력" : "Attack Power",
+            StatusEffectStatType.AttackSpeed =>
+                UsesKoreanLocale ? "공격 속도" : "Attack Speed",
+            StatusEffectStatType.IncomingDamage =>
+                UsesKoreanLocale ? "받는 피해" : "Incoming Damage",
+            StatusEffectStatType.TargetPriority =>
+                UsesKoreanLocale ? "대상 우선순위" : "Target Priority",
+            _ => statType.ToString()
+        };
     }
 
     private static void AppendScalingTerm(

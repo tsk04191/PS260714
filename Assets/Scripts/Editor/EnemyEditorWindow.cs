@@ -597,18 +597,40 @@ public sealed class EnemyEditorWindow : EditorWindow
 
                     case EnemyAbilityConditionType.SourceHasStatus:
                     case EnemyAbilityConditionType.TargetHasStatus:
+                        SerializedProperty statusSelectionScope =
+                            condition.FindPropertyRelative(
+                                "statusSelectionScope");
+                        DrawRelative(
+                            condition,
+                            "statusSelectionScope",
+                            "Status Scope");
+                        bool selectsConfiguredStatuses =
+                            statusSelectionScope == null ||
+                            statusSelectionScope.enumValueIndex ==
+                            (int)CharacterStatusSelectionScope
+                                .SelectedStatuses;
                         SerializedProperty legacyStatus =
                             condition.FindPropertyRelative("statusEffect");
                         SerializedProperty statuses =
                             condition.FindPropertyRelative("statusEffects");
                         CharacterTargetFaction? statusFaction =
                             ResolveConditionStatusFaction(ability, type);
-                        PS260714StatusEffectSelection.Draw(
-                            statuses,
-                            legacyStatus,
-                            new GUIContent("Status Effects"),
-                            new PS260714StatusEffectSelectionOptions(
-                                targetFaction: statusFaction));
+                        if (selectsConfiguredStatuses)
+                        {
+                            PS260714StatusEffectSelection.Draw(
+                                statuses,
+                                legacyStatus,
+                                new GUIContent("Status Effects"),
+                                new PS260714StatusEffectSelectionOptions(
+                                    targetFaction: statusFaction));
+                        }
+                        else
+                        {
+                            EditorGUILayout.HelpBox(
+                                "The condition counts distinct active " +
+                                "buffs/debuffs on the evaluated unit.",
+                                MessageType.Info);
+                        }
                         DrawRelative(
                             condition,
                             "statusMatchMode",
@@ -982,6 +1004,10 @@ public sealed class EnemyEditorWindow : EditorWindow
         SerializedProperty statuses =
             condition.FindPropertyRelative("statusEffects");
         statuses?.ClearArray();
+        SetEnum(
+            condition,
+            "statusSelectionScope",
+            (int)CharacterStatusSelectionScope.SelectedStatuses);
         SetEnum(
             condition,
             "statusMatchMode",

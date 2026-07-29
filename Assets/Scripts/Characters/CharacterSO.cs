@@ -106,6 +106,13 @@ public enum CharacterStatusConditionMatchMode
     AtLeastCount = 2
 }
 
+public enum CharacterStatusSelectionScope
+{
+    SelectedStatuses = 0,
+    AllBuffs = 1,
+    AllDebuffs = 2
+}
+
 public readonly struct CharacterStatusSelection
 {
     private readonly IReadOnlyList<StatusEffectSO> _statusEffects;
@@ -519,7 +526,31 @@ public enum CharacterPassiveSectionType
     Ability = 1,
     Subject = 2,
     Condition = 3,
-    SelfStatusCost = 4
+    SelfStatusCost = 4,
+    StatusContribution = 5
+}
+
+[Serializable]
+public sealed class CharacterStatusStatContributionMultiplier
+{
+    [SerializeField]
+    private StatusEffectSO statusEffect;
+    [SerializeField]
+    private StatusEffectStatType statType;
+    [SerializeField, Min(0f)]
+    private float multiplier = 1f;
+
+    public StatusEffectSO StatusEffect => statusEffect;
+    public StatusEffectStatType StatType => statType;
+    public float Multiplier => multiplier;
+
+    public void Validate()
+    {
+        if (float.IsNaN(multiplier) || float.IsInfinity(multiplier))
+            multiplier = 1f;
+
+        multiplier = Mathf.Max(0f, multiplier);
+    }
 }
 
 public enum CharacterPassiveTrigger
@@ -601,6 +632,8 @@ public sealed class CharacterNumericCondition
     [SerializeField]
     private List<StatusEffectSO> statusEffects = new();
     [SerializeField]
+    private CharacterStatusSelectionScope statusSelectionScope;
+    [SerializeField]
     private CharacterStatusConditionMatchMode statusMatchMode;
     [SerializeField, Min(1)]
     private int statusMatchCount = 1;
@@ -624,6 +657,8 @@ public sealed class CharacterNumericCondition
             : Array.Empty<StatusEffectSO>();
     public CharacterStatusSelection StatusSelection =>
         new(statusEffect, statusEffects);
+    public CharacterStatusSelectionScope StatusSelectionScope =>
+        statusSelectionScope;
     public CharacterStatusConditionMatchMode StatusMatchMode =>
         statusMatchMode;
     public int StatusMatchCount => statusMatchCount;
@@ -640,6 +675,13 @@ public sealed class CharacterNumericCondition
             threshold = 1f;
         }
 
+        if (!Enum.IsDefined(
+                typeof(CharacterStatusSelectionScope),
+                statusSelectionScope))
+        {
+            statusSelectionScope =
+                CharacterStatusSelectionScope.SelectedStatuses;
+        }
         if (!Enum.IsDefined(
                 typeof(CharacterStatusConditionMatchMode),
                 statusMatchMode))
@@ -666,7 +708,8 @@ public static class CharacterConditionEvaluator
         {
             return MatchesStatusCondition(
                 condition,
-                character.GetStatusStackCount);
+                character.GetStatusStackCount,
+                character.GetActiveStatusEffects());
         }
 
         float value = condition.Metric switch
@@ -694,10 +737,19 @@ public static class CharacterConditionEvaluator
 
     internal static bool MatchesStatusCondition(
         CharacterNumericCondition condition,
-        Func<StatusEffectSO, int> getStatusStackCount)
+        Func<StatusEffectSO, int> getStatusStackCount,
+        IReadOnlyList<BattleStatusSnapshot> activeStatuses = null)
     {
         if (condition == null || getStatusStackCount == null)
             return false;
+
+        if (condition.StatusSelectionScope !=
+            CharacterStatusSelectionScope.SelectedStatuses)
+        {
+            return MatchesStatusScope(
+                condition,
+                activeStatuses);
+        }
 
         CharacterStatusSelection selection = condition.StatusSelection;
         if (selection.Count == 0)
@@ -729,6 +781,75 @@ public static class CharacterConditionEvaluator
         if (selectedCount == 0)
             return false;
 
+        return MatchesStatusCount(
+            condition,
+            selectedCount,
+            matchedCount);
+    }
+
+    private static bool MatchesStatusScope(
+        CharacterNumericCondition condition,
+        IReadOnlyList<BattleStatusSnapshot> activeStatuses)
+    {
+        if (activeStatuses == null)
+            return false;
+
+        StatusEffectAlignment expectedAlignment =
+            condition.StatusSelectionScope switch
+            {
+                CharacterStatusSelectionScope.AllBuffs =>
+                    StatusEffectAlignment.Buff,
+                CharacterStatusSelectionScope.AllDebuffs =>
+                    StatusEffectAlignment.Debuff,
+                _ => (StatusEffectAlignment)(-1)
+            };
+        if (!Enum.IsDefined(
+                typeof(StatusEffectAlignment),
+                expectedAlignment))
+        {
+            return false;
+        }
+
+        int selectedCount = 0;
+        int matchedCount = 0;
+        for (int index = 0; index < activeStatuses.Count; index++)
+        {
+            BattleStatusSnapshot snapshot = activeStatuses[index];
+            StatusEffectSO status = snapshot.Definition;
+            if (!snapshot.IsValid ||
+                status.Alignment != expectedAlignment ||
+                ContainsEarlierStatus(
+                    activeStatuses,
+                    status,
+                    index))
+            {
+                continue;
+            }
+
+            selectedCount++;
+            if (Compare(
+                    snapshot.StackCount,
+                    condition.Comparison,
+                    condition.Threshold))
+            {
+                matchedCount++;
+            }
+        }
+
+        if (selectedCount == 0)
+            return false;
+
+        return MatchesStatusCount(
+            condition,
+            selectedCount,
+            matchedCount);
+    }
+
+    private static bool MatchesStatusCount(
+        CharacterNumericCondition condition,
+        int selectedCount,
+        int matchedCount)
+    {
         return condition.StatusMatchMode switch
         {
             CharacterStatusConditionMatchMode.Any =>
@@ -739,6 +860,24 @@ public static class CharacterConditionEvaluator
                 matchedCount >= condition.RequiredStatusMatchCount,
             _ => false
         };
+    }
+
+    private static bool ContainsEarlierStatus(
+        IReadOnlyList<BattleStatusSnapshot> statuses,
+        StatusEffectSO status,
+        int index)
+    {
+        for (int previous = 0; previous < index; previous++)
+        {
+            if (CharacterStatusSelection.IsSameStatus(
+                    statuses[previous].Definition,
+                    status))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private static bool IsDuplicateStatus(
@@ -1073,6 +1212,9 @@ public sealed class CharacterEffectDefinition :
     private StatusEffectSO targetStatusScalingEffect;
     [SerializeField]
     private float targetStatusStacksScale;
+    [SerializeField]
+    private List<CharacterStatusStatContributionMultiplier>
+        statusContributionMultipliers = new();
     [SerializeField, Min(0.1f)]
     private float statusDuration = 1f;
     [SerializeField, Min(0.1f)]
@@ -1164,6 +1306,12 @@ public sealed class CharacterEffectDefinition :
     public StatusEffectSO TargetStatusScalingEffect =>
         targetStatusScalingEffect;
     public float TargetStatusStacksScale => targetStatusStacksScale;
+    public IReadOnlyList<CharacterStatusStatContributionMultiplier>
+        StatusContributionMultipliers =>
+            statusContributionMultipliers != null
+                ? statusContributionMultipliers
+                : Array.Empty<
+                    CharacterStatusStatContributionMultiplier>();
     public ScalingValue AmountScaling =>
         ScalingValue.FromLegacy(damageAmountMode, damageAmount) +
         ScalingValue.SourceResource(sourceResourceScale) +
@@ -1206,7 +1354,14 @@ public sealed class CharacterEffectDefinition :
     {
         targetSelector ??= new CharacterEffectTargetSelector();
         statusRemovalEffects ??= new List<StatusEffectSO>();
+        statusContributionMultipliers ??=
+            new List<CharacterStatusStatContributionMultiplier>();
         targetSelector.Validate();
+        foreach (CharacterStatusStatContributionMultiplier modifier in
+                 statusContributionMultipliers)
+        {
+            modifier?.Validate();
+        }
         CharacterStatusRemovalPick.Normalize(
             ref statusRemovalPickMode,
             ref statusRemovalPickCount);
@@ -1451,6 +1606,8 @@ public sealed class CharacterPassiveDefinition :
     private StatusEffectSO triggerStatusEffect;
     [SerializeField]
     private List<StatusEffectSO> triggerStatusEffects = new();
+    [SerializeField]
+    private CharacterStatusSelectionScope triggerStatusScope;
     [SerializeField, Min(0.1f)]
     private float cooldown = 1f;
     [FormerlySerializedAs("detailCondition")]
@@ -1501,6 +1658,9 @@ public sealed class CharacterPassiveDefinition :
     [SerializeField]
     private CharacterStatusStackCostDefinition selfStatusCost = new();
     [SerializeField]
+    private List<CharacterStatusStatContributionMultiplier>
+        statusContributionMultipliers = new();
+    [SerializeField]
     private List<CharacterEffectDefinition> effects = new();
 
     public IReadOnlyList<CharacterPassiveSectionType> Sections => sections;
@@ -1517,6 +1677,8 @@ public sealed class CharacterPassiveDefinition :
             : Array.Empty<StatusEffectSO>();
     public CharacterStatusSelection TriggerStatusSelection =>
         new(triggerStatusEffect, triggerStatusEffects);
+    public CharacterStatusSelectionScope TriggerStatusScope =>
+        triggerStatusScope;
     public float Cooldown => TimePrecision.Normalize(
         cooldown,
         TimePrecision.Step);
@@ -1575,6 +1737,14 @@ public sealed class CharacterPassiveDefinition :
     public bool HasSelfStatusCost =>
         HasSection(CharacterPassiveSectionType.SelfStatusCost) &&
         selfStatusCost != null && selfStatusCost.IsConfigured;
+    public IReadOnlyList<CharacterStatusStatContributionMultiplier>
+        StatusContributionMultipliers =>
+            statusContributionMultipliers != null
+                ? statusContributionMultipliers
+                : Array.Empty<
+                    CharacterStatusStatContributionMultiplier>();
+    public bool HasStatusContributionSection =>
+        HasSection(CharacterPassiveSectionType.StatusContribution);
     public IReadOnlyList<CharacterEffectDefinition> Effects => effects;
     public bool HasExplicitEffects => effects != null && effects.Count > 0;
     public bool IsEmptyPlaceholder => sections != null &&
@@ -1596,9 +1766,23 @@ public sealed class CharacterPassiveDefinition :
     {
         sections ??= new List<CharacterPassiveSectionType>();
         triggerStatusEffects ??= new List<StatusEffectSO>();
+        if (!Enum.IsDefined(
+                typeof(CharacterStatusSelectionScope),
+                triggerStatusScope))
+        {
+            triggerStatusScope =
+                CharacterStatusSelectionScope.SelectedStatuses;
+        }
         numericConditions ??= new List<CharacterNumericCondition>();
         foreach (CharacterNumericCondition condition in numericConditions)
             condition?.Validate();
+        statusContributionMultipliers ??=
+            new List<CharacterStatusStatContributionMultiplier>();
+        foreach (CharacterStatusStatContributionMultiplier modifier in
+                 statusContributionMultipliers)
+        {
+            modifier?.Validate();
+        }
         if (!Enum.IsDefined(
                 typeof(CharacterPassiveAttackTargetRelation),
                 attackTargetRelation))
