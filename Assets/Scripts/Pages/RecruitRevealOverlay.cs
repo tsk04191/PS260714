@@ -117,6 +117,8 @@ public sealed class RecruitRevealOverlay
         {
             return false;
         }
+        for (int index = 0; index < _rows.Count; index++)
+            _rows[index].EnsureRewardIconSlot();
         if (!_designerBindings.HasDesignerLayout)
             _root.SetAsLastSibling();
         _designerBindings.MarkDesignerLayoutCurrent();
@@ -781,6 +783,7 @@ public sealed class RecruitRevealOverlay
         private Image _background;
         private Outline _outline;
         private Image _accent;
+        private Image _rewardIcon;
         private TextMeshProUGUI _indexLabel;
         private TextMeshProUGUI _baseLabel;
         private RectTransform _flap;
@@ -888,6 +891,12 @@ public sealed class RecruitRevealOverlay
             _indexLabel.color = style.PrimaryColor;
             _baseLabel.color = style.TextColor;
             _flapLabel.color = style.TextColor;
+            if (_rewardIcon != null)
+            {
+                _rewardIcon.sprite = entry.Icon;
+                _rewardIcon.enabled = entry.Icon != null;
+                _rewardIcon.preserveAspect = true;
+            }
 
             string grade = korean
                 ? $"{(int)entry.Grade}등급"
@@ -895,8 +904,11 @@ public sealed class RecruitRevealOverlay
             string newBadge = entry.IsNew
                 ? (korean ? "  신규" : "  NEW")
                 : string.Empty;
+            string amount = entry.RewardType == RecruitRewardType.Item
+                ? $"  ×{entry.Amount:N0}"
+                : string.Empty;
             SetLabels(
-                $"{entry.DisplayName}    {grade}{newBadge}");
+                $"{entry.DisplayName}{amount}    {grade}{newBadge}");
         }
 
         private IEnumerator FlipTo(string next, float duration)
@@ -961,6 +973,11 @@ public sealed class RecruitRevealOverlay
             _indexLabel.color = presentation.AccentColor;
             _baseLabel.color = presentation.NeutralTextColor;
             _flapLabel.color = presentation.NeutralTextColor;
+            if (_rewardIcon != null)
+            {
+                _rewardIcon.sprite = null;
+                _rewardIcon.enabled = false;
+            }
             _splitLine.color = new Color(
                 presentation.NeutralOutlineColor.r,
                 presentation.NeutralOutlineColor.g,
@@ -1001,6 +1018,8 @@ public sealed class RecruitRevealOverlay
             _outline = root.GetComponent<Outline>();
             _accent = root.Find("imgRowAccent")
                 ?.GetComponent<Image>();
+            _rewardIcon = root.Find("imgRewardIcon")
+                ?.GetComponent<Image>();
             _indexLabel = root.Find("txtRowIndex")
                 ?.GetComponent<TextMeshProUGUI>();
             _baseLabel = root.Find("txtRowBase")
@@ -1025,6 +1044,43 @@ public sealed class RecruitRevealOverlay
                    _flapImage != null &&
                    _flapLabel != null &&
                    _splitLine != null;
+        }
+
+        public void EnsureRewardIconSlot()
+        {
+            if (_root == null || _rewardIcon != null)
+                return;
+
+            GameObject iconObject = GetOrCreateUiObject(
+                _root,
+                "imgRewardIcon",
+                typeof(CanvasRenderer),
+                typeof(Image));
+            RectTransform iconRect =
+                (RectTransform)iconObject.transform;
+            iconRect.anchorMin = new Vector2(0f, 0.5f);
+            iconRect.anchorMax = new Vector2(0f, 0.5f);
+            iconRect.pivot = new Vector2(0.5f, 0.5f);
+            iconRect.anchoredPosition = new Vector2(110f, 0f);
+            iconRect.sizeDelta = new Vector2(46f, 46f);
+            iconRect.SetAsLastSibling();
+            _rewardIcon = iconObject.GetComponent<Image>();
+            _rewardIcon.raycastTarget = false;
+            _rewardIcon.preserveAspect = true;
+            _rewardIcon.enabled = false;
+
+            if (_baseLabel != null)
+            {
+                Vector2 offset = _baseLabel.rectTransform.offsetMin;
+                _baseLabel.rectTransform.offsetMin =
+                    new Vector2(Mathf.Max(offset.x, 148f), offset.y);
+            }
+            if (_flapLabel != null)
+            {
+                Vector2 offset = _flapLabel.rectTransform.offsetMin;
+                _flapLabel.rectTransform.offsetMin =
+                    new Vector2(Mathf.Max(offset.x, 70f), offset.y);
+            }
         }
 
         private void BuildLayout(
@@ -1133,6 +1189,7 @@ public sealed class RecruitRevealOverlay
             _splitLine = splitObject.GetComponent<Image>();
             _splitLine.raycastTarget = false;
 
+            EnsureRewardIconSlot();
             ApplyNeutralStyle(presentation);
         }
     }

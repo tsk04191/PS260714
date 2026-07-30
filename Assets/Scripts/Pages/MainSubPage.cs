@@ -250,6 +250,27 @@ public sealed class MainSubPage : RuntimeMenuPageBase
         RefreshRecruitBannerView();
     }
 
+    public bool EnsureRecruitRewardPoolData()
+    {
+        if (recruitBannerPages == null)
+            return false;
+
+        bool changed = false;
+        for (int index = 0;
+             index < recruitBannerPages.Length;
+             index++)
+        {
+            RecruitBannerPageDefinition banner =
+                recruitBannerPages[index];
+            if (banner != null &&
+                banner.EnsureRewardPoolData())
+            {
+                changed = true;
+            }
+        }
+        return changed;
+    }
+
 #if UNITY_EDITOR
     public bool SyncRecruitEditorPreview(
         int bannerIndex,
@@ -269,6 +290,21 @@ public sealed class MainSubPage : RuntimeMenuPageBase
         }
 
         Init();
+        if (_recruitBannerView == null ||
+            _recruitRevealOverlay == null)
+        {
+            try
+            {
+                BuildRecruitBrowser();
+            }
+            catch (Exception exception)
+            {
+                error =
+                    "모집 배너 또는 결과창 UI 재바인딩에 실패했습니다.\n" +
+                    exception.Message;
+                return false;
+            }
+        }
         if (_recruitBannerView == null ||
             _recruitRevealOverlay == null)
         {
@@ -304,9 +340,11 @@ public sealed class MainSubPage : RuntimeMenuPageBase
             {
                 previewEntries.Add(new RecruitRevealEntry(
                     $"editor.preview.{index}",
+                    RecruitRewardType.Character,
                     $"샘플 대원 {index + 1:00}",
                     (CharacterGrade)(index % 4),
                     null,
+                    1L,
                     index == 0));
             }
             _recruitRevealOverlay.ShowEditorPreview(
@@ -526,6 +564,7 @@ public sealed class MainSubPage : RuntimeMenuPageBase
 
         if (!definition.TryRecruit(
                 inventory,
+                DataManager.Current?.CharacterDatas,
                 recruitCount,
                 IsKoreanLocale,
                 out RecruitExecutionResult result,
@@ -569,7 +608,7 @@ public sealed class MainSubPage : RuntimeMenuPageBase
              index < result.Entries.Count;
              index++)
         {
-            entries.Add(RecruitRevealEntry.FromDummy(
+            entries.Add(RecruitRevealEntry.FromReward(
                 result.Entries[index],
                 index));
         }
@@ -625,16 +664,34 @@ public sealed class MainSubPage : RuntimeMenuPageBase
             return string.Empty;
 
         int[] gradeCounts = new int[4];
+        int characterCount = 0;
+        int itemCount = 0;
         for (int index = 0; index < result.Entries.Count; index++)
         {
-            RecruitDummyPoolEntry entry = result.Entries[index];
+            RecruitRewardResult entry = result.Entries[index];
             if (entry == null)
                 continue;
             int grade = Mathf.Clamp((int)entry.Grade, 0, 3);
             gradeCounts[grade]++;
+            if (entry.RewardType == RecruitRewardType.Character)
+                characterCount++;
+            else if (entry.RewardType == RecruitRewardType.Item)
+                itemCount++;
         }
 
         List<string> summaries = new();
+        if (characterCount > 0)
+        {
+            summaries.Add(korean
+                ? $"캐릭터×{characterCount}"
+                : $"CHARACTER×{characterCount}");
+        }
+        if (itemCount > 0)
+        {
+            summaries.Add(korean
+                ? $"아이템×{itemCount}"
+                : $"ITEM×{itemCount}");
+        }
         for (int grade = 0; grade < gradeCounts.Length; grade++)
         {
             if (gradeCounts[grade] <= 0)
@@ -650,8 +707,8 @@ public sealed class MainSubPage : RuntimeMenuPageBase
             (korean ? "재화" : "CURRENCY");
         string summary = string.Join(" · ", summaries);
         return korean
-            ? $"더미 모집 완료 · {paymentName} -{result.Payment.Cost:N0}\n{summary}"
-            : $"DUMMY RECRUIT COMPLETE · {paymentName} -{result.Payment.Cost:N0}\n{summary}";
+            ? $"모집 완료 · {paymentName} -{result.Payment.Cost:N0}\n{summary}"
+            : $"RECRUIT COMPLETE · {paymentName} -{result.Payment.Cost:N0}\n{summary}";
     }
 
     private static int CountOwnedRosterCharacters(

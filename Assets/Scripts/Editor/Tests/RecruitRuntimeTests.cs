@@ -8,6 +8,8 @@ public sealed class RecruitRuntimeTests
 {
     private const string InventoryPlayerPrefsKey =
         "Inventory.Collection.v1";
+    private const string CharacterPlayerPrefsKey =
+        "Characters.Collection.v1";
 
     [Test]
     public void PaymentRoute_PrefersOwnedAndAffordableResource()
@@ -56,6 +58,79 @@ public sealed class RecruitRuntimeTests
             Object.DestroyImmediate(ticket);
             Object.DestroyImmediate(credit);
         }
+    }
+
+    [Test]
+    public void LegacyRewardPool_MigratesWithoutChangingFinalProbabilities()
+    {
+        RecruitBannerPageDefinition banner = new();
+        SetPrivateField(
+            banner,
+            "rateInputMode",
+            RecruitRateInputMode.Percentage);
+        SetPrivateField(
+            banner,
+            "dummyPool",
+            new List<RecruitDummyPoolEntry>
+            {
+                CreateDummyReward(
+                    "GRADE 0",
+                    CharacterGrade.Grade0,
+                    40f),
+                CreateDummyReward(
+                    "GRADE 1-A",
+                    CharacterGrade.Grade1,
+                    30f),
+                CreateDummyReward(
+                    "GRADE 1-B",
+                    CharacterGrade.Grade1,
+                    30f),
+            });
+
+        Assert.That(banner.EnsureRewardPoolData(), Is.True);
+        Assert.That(banner.GradePools.Count, Is.EqualTo(4));
+        Assert.That(
+            RecruitGradeProbabilityTable.TryCreate(
+                banner.GradePools,
+                banner.RateInputMode,
+                out RecruitGradeProbabilityTable table,
+                out string error),
+            Is.True,
+            error);
+
+        int grade0Pool = FindGradePool(
+            banner.GradePools,
+            CharacterGrade.Grade0);
+        int grade1Pool = FindGradePool(
+            banner.GradePools,
+            CharacterGrade.Grade1);
+        Assert.That(
+            table.GetGradeProbability(grade0Pool),
+            Is.EqualTo(0.4d).Within(0.000001d));
+        Assert.That(
+            table.GetFinalProbability(grade0Pool, 0),
+            Is.EqualTo(0.4d).Within(0.000001d));
+        Assert.That(
+            table.GetGradeProbability(grade1Pool),
+            Is.EqualTo(0.6d).Within(0.000001d));
+        Assert.That(
+            table.GetFinalProbability(grade1Pool, 0),
+            Is.EqualTo(0.3d).Within(0.000001d));
+        Assert.That(
+            table.GetFinalProbability(grade1Pool, 1),
+            Is.EqualTo(0.3d).Within(0.000001d));
+        Assert.That(
+            table.SampleGrade(0.2d),
+            Is.EqualTo(grade0Pool));
+        Assert.That(
+            table.SampleGrade(0.8d),
+            Is.EqualTo(grade1Pool));
+        Assert.That(
+            table.SampleReward(grade1Pool, 0.2d),
+            Is.EqualTo(0));
+        Assert.That(
+            table.SampleReward(grade1Pool, 0.8d),
+            Is.EqualTo(1));
     }
 
     [Test]
@@ -110,6 +185,156 @@ public sealed class RecruitRuntimeTests
         }
     }
 
+    [Test]
+    public void RecruitExecution_GrantsCharacterAndMarksOnlyFirstAsNew()
+    {
+        bool hadInventorySave =
+            PlayerPrefs.HasKey(InventoryPlayerPrefsKey);
+        string previousInventorySave = hadInventorySave
+            ? PlayerPrefs.GetString(InventoryPlayerPrefsKey)
+            : string.Empty;
+        bool hadCharacterSave =
+            PlayerPrefs.HasKey(CharacterPlayerPrefsKey);
+        string previousCharacterSave = hadCharacterSave
+            ? PlayerPrefs.GetString(CharacterPlayerPrefsKey)
+            : string.Empty;
+
+        try
+        {
+            CurrencyItemSO credit =
+                Resources.Load<CurrencyItemSO>(
+                    "Items/Currency/FreeCredit");
+            CharacterSO character =
+                Resources.Load<CharacterSO>(
+                    "Characters/2_Byeolha");
+            Assert.That(credit, Is.Not.Null);
+            Assert.That(character, Is.Not.Null);
+            Assert.That(character.InitiallyOwned, Is.False);
+
+            RecruitBannerPageDefinition banner =
+                CreateBanner(CreateRoute(credit, 100L, 0));
+            SetPrivateField(
+                banner,
+                "dummyPool",
+                new List<RecruitDummyPoolEntry>
+                {
+                    CreateRewardEntry(
+                        RecruitRewardType.Character,
+                        character,
+                        null,
+                        1L),
+                });
+            InventoryData inventory = CreateInventory(
+                (credit.ItemId, 500L));
+            CharacterCollectionData characters = new();
+
+            Assert.That(
+                banner.TryRecruit(
+                    inventory,
+                    characters,
+                    1,
+                    true,
+                    out RecruitExecutionResult first,
+                    out string firstError),
+                Is.True,
+                firstError);
+            Assert.That(first.Entries[0].Character, Is.SameAs(character));
+            Assert.That(first.Entries[0].IsNew, Is.True);
+            Assert.That(
+                characters.GetOrCreate(character, false).IsOwned,
+                Is.True);
+
+            Assert.That(
+                banner.TryRecruit(
+                    inventory,
+                    characters,
+                    1,
+                    true,
+                    out RecruitExecutionResult duplicate,
+                    out string duplicateError),
+                Is.True,
+                duplicateError);
+            Assert.That(duplicate.Entries[0].IsNew, Is.False);
+        }
+        finally
+        {
+            RestorePlayerPrefs(
+                InventoryPlayerPrefsKey,
+                hadInventorySave,
+                previousInventorySave);
+            RestorePlayerPrefs(
+                CharacterPlayerPrefsKey,
+                hadCharacterSave,
+                previousCharacterSave);
+            PlayerPrefs.Save();
+        }
+    }
+
+    [Test]
+    public void RecruitExecution_GrantsConfiguredItemAmount()
+    {
+        bool hadSave = PlayerPrefs.HasKey(
+            InventoryPlayerPrefsKey);
+        string previousSave = hadSave
+            ? PlayerPrefs.GetString(InventoryPlayerPrefsKey)
+            : string.Empty;
+
+        try
+        {
+            CurrencyItemSO credit =
+                Resources.Load<CurrencyItemSO>(
+                    "Items/Currency/FreeCredit");
+            ItemDefinitionSO material =
+                Resources.Load<ItemDefinitionSO>(
+                    "Items/Material/BasicUpgradeMaterial");
+            Assert.That(credit, Is.Not.Null);
+            Assert.That(material, Is.Not.Null);
+
+            RecruitBannerPageDefinition banner =
+                CreateBanner(CreateRoute(credit, 100L, 0));
+            SetPrivateField(
+                banner,
+                "dummyPool",
+                new List<RecruitDummyPoolEntry>
+                {
+                    CreateRewardEntry(
+                        RecruitRewardType.Item,
+                        null,
+                        material,
+                        7L),
+                });
+            InventoryData inventory = CreateInventory(
+                (credit.ItemId, 500L),
+                (material.ItemId, 3L));
+
+            Assert.That(
+                banner.TryRecruit(
+                    inventory,
+                    new CharacterCollectionData(),
+                    1,
+                    true,
+                    out RecruitExecutionResult result,
+                    out string error),
+                Is.True,
+                error);
+            Assert.That(inventory.GetAmount(credit), Is.EqualTo(400L));
+            Assert.That(inventory.GetAmount(material), Is.EqualTo(10L));
+            Assert.That(
+                result.Entries[0].RewardType,
+                Is.EqualTo(RecruitRewardType.Item));
+            Assert.That(result.Entries[0].Item, Is.SameAs(material));
+            Assert.That(result.Entries[0].Amount, Is.EqualTo(7L));
+        }
+        finally
+        {
+            RestorePlayerPrefs(
+                InventoryPlayerPrefsKey,
+                hadSave,
+                previousSave);
+            PlayerPrefs.Save();
+        }
+    }
+
     private static RecruitBannerPageDefinition CreateBanner(
         params RecruitPaymentRouteDefinition[] routes)
     {
@@ -138,6 +363,48 @@ public sealed class RecruitRuntimeTests
         SetPrivateField(route, "singleCost", singleCost);
         SetPrivateField(route, "priority", priority);
         return route;
+    }
+
+    private static RecruitDummyPoolEntry CreateRewardEntry(
+        RecruitRewardType rewardType,
+        CharacterSO character,
+        ItemDefinitionSO item,
+        long itemAmount)
+    {
+        RecruitDummyPoolEntry entry = new();
+        SetPrivateField(entry, "rewardType", rewardType);
+        SetPrivateField(entry, "character", character);
+        SetPrivateField(entry, "item", item);
+        SetPrivateField(entry, "itemAmount", itemAmount);
+        return entry;
+    }
+
+    private static RecruitDummyPoolEntry CreateDummyReward(
+        string displayName,
+        CharacterGrade grade,
+        float rate)
+    {
+        RecruitDummyPoolEntry entry = new();
+        SetPrivateField(entry, "displayName", displayName);
+        SetPrivateField(entry, "grade", grade);
+        SetPrivateField(entry, "rate", rate);
+        return entry;
+    }
+
+    private static int FindGradePool(
+        IReadOnlyList<RecruitGradePoolDefinition> pools,
+        CharacterGrade grade)
+    {
+        for (int index = 0; index < pools.Count; index++)
+        {
+            if (pools[index] != null &&
+                pools[index].Grade == grade)
+            {
+                return index;
+            }
+        }
+        Assert.Fail($"{(int)grade}등급 풀을 찾지 못했습니다.");
+        return -1;
     }
 
     private static InventoryData CreateInventory(
@@ -180,5 +447,16 @@ public sealed class RecruitRuntimeTests
             Is.Not.Null,
             $"Field '{fieldName}' was not found.");
         field.SetValue(target, value);
+    }
+
+    private static void RestorePlayerPrefs(
+        string key,
+        bool hadValue,
+        string previousValue)
+    {
+        if (hadValue)
+            PlayerPrefs.SetString(key, previousValue);
+        else
+            PlayerPrefs.DeleteKey(key);
     }
 }

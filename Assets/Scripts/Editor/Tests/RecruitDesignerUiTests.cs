@@ -1,3 +1,4 @@
+using System.Reflection;
 using NUnit.Framework;
 using UnityEditor;
 using UnityEngine;
@@ -31,6 +32,46 @@ public sealed class RecruitDesignerUiTests
             Assert.That(reveal.HasDesignerLayout, Is.True);
             Assert.That(reveal.HasRequiredReferences, Is.True);
             Assert.That(reveal.ResultRows.Count, Is.EqualTo(10));
+            for (int index = 0;
+                 index < reveal.ResultRows.Count;
+                 index++)
+            {
+                Assert.That(
+                    reveal.ResultRows[index].Find("imgRewardIcon"),
+                    Is.Not.Null);
+            }
+        }
+        finally
+        {
+            Object.DestroyImmediate(pageObject);
+        }
+    }
+
+    [Test]
+    public void RecruitPreview_RebindsRuntimeWrappersAfterScriptReload()
+    {
+        GameObject pageObject = CreateRecruitPage(
+            out MainSubPage page);
+        try
+        {
+            Assert.That(
+                page.SyncRecruitEditorPreview(
+                    0,
+                    0,
+                    out string firstError),
+                Is.True,
+                firstError);
+
+            SetPrivateField(page, "_recruitBannerView", null);
+            SetPrivateField(page, "_recruitRevealOverlay", null);
+
+            Assert.That(
+                page.SyncRecruitEditorPreview(
+                    0,
+                    0,
+                    out string rebindError),
+                Is.True,
+                rebindError);
         }
         finally
         {
@@ -133,5 +174,17 @@ public sealed class RecruitDesignerUiTests
         pageObject.SetActive(true);
         pageObject.SetActive(false);
         return pageObject;
+    }
+
+    private static void SetPrivateField(
+        object target,
+        string fieldName,
+        object value)
+    {
+        FieldInfo field = target.GetType().GetField(
+            fieldName,
+            BindingFlags.Instance | BindingFlags.NonPublic);
+        Assert.That(field, Is.Not.Null);
+        field.SetValue(target, value);
     }
 }

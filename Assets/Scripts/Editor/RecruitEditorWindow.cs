@@ -18,6 +18,8 @@ public sealed class RecruitEditorWindow : EditorWindow
     private Vector2 _detailsScroll;
     private bool _basicExpanded = true;
     private bool _poolExpanded = true;
+    private readonly bool[] _gradePoolExpanded =
+        { true, true, true, true };
     private bool _paymentExpanded = true;
     private bool _validationExpanded = true;
     private bool _useFixedSeed = true;
@@ -87,6 +89,14 @@ public sealed class RecruitEditorWindow : EditorWindow
         }
 
         DrawScenePreviewToolbar();
+        if (_targetPage.EnsureRecruitRewardPoolData())
+        {
+            EditorUtility.SetDirty(_targetPage);
+            EditorSceneManager.MarkSceneDirty(
+                _targetPage.gameObject.scene);
+            _serializedTarget =
+                new SerializedObject(_targetPage);
+        }
         EnsureSerializedTarget();
         if (_serializedTarget == null || !IsRecruitPage(_targetPage))
         {
@@ -401,7 +411,7 @@ public sealed class RecruitEditorWindow : EditorWindow
     {
         _poolExpanded = EditorGUILayout.BeginFoldoutHeaderGroup(
             _poolExpanded,
-            "2. 더미 모집 풀 및 확률 시뮬레이션");
+            "2. 등급별 모집 보상 풀 및 확률 시뮬레이션");
         if (!_poolExpanded)
         {
             EditorGUILayout.EndFoldoutHeaderGroup();
@@ -411,16 +421,17 @@ public sealed class RecruitEditorWindow : EditorWindow
         using (new EditorGUILayout.VerticalScope(EditorStyles.helpBox))
         {
             EditorGUILayout.HelpBox(
-                "시뮬레이션 전용 데이터입니다. 캐릭터를 지급하거나 재화를 차감하지 않습니다.",
+                "먼저 0~3등급 확률을 결정한 뒤, 선택된 등급 안에서 실제 보상을 추첨합니다. " +
+                "각 등급에는 캐릭터와 아이템을 여러 개 넣을 수 있습니다.",
                 MessageType.Info);
 
             SerializedProperty mode =
                 banner.FindPropertyRelative("rateInputMode");
-            SerializedProperty pool =
-                banner.FindPropertyRelative("dummyPool");
+            SerializedProperty gradePools =
+                banner.FindPropertyRelative("gradePools");
             EditorGUILayout.PropertyField(
                 mode,
-                new GUIContent("입력 방식"));
+                new GUIContent("등급 확률 입력 방식"));
 
             bool valid = TryBuildProbabilityRows(
                 banner,
@@ -431,89 +442,116 @@ public sealed class RecruitEditorWindow : EditorWindow
                                 (int)RecruitRateInputMode.Percentage
                 ? $"{inputTotal:0.####}%"
                 : $"{inputTotal:0.####}";
-            EditorGUILayout.LabelField("입력 합계", totalLabel);
+            EditorGUILayout.LabelField(
+                "등급 확률 합계",
+                totalLabel,
+                EditorStyles.boldLabel);
 
-            int removeIndex = -1;
-            int moveFrom = -1;
-            int moveTo = -1;
-            for (int index = 0; index < pool.arraySize; index++)
+            EditorGUILayout.Space(5f);
+            EditorGUILayout.LabelField(
+                "등급 확률",
+                EditorStyles.boldLabel);
+            for (int poolIndex = 0;
+                 poolIndex < gradePools.arraySize;
+                 poolIndex++)
             {
-                SerializedProperty entry =
-                    pool.GetArrayElementAtIndex(index);
-                using (new EditorGUILayout.VerticalScope(GUI.skin.box))
+                SerializedProperty gradePool =
+                    gradePools.GetArrayElementAtIndex(poolIndex);
+                CharacterGrade grade = GetGradePoolGrade(
+                    gradePool,
+                    poolIndex);
+                using (new EditorGUILayout.HorizontalScope(
+                           EditorStyles.helpBox))
                 {
-                    using (new EditorGUILayout.HorizontalScope())
-                    {
-                        EditorGUILayout.LabelField(
-                            $"더미 항목 {index + 1}",
-                            EditorStyles.boldLabel);
-                        GUILayout.FlexibleSpace();
-                        using (new EditorGUI.DisabledScope(index == 0))
-                        {
-                            if (GUILayout.Button("↑", GUILayout.Width(28f)))
-                            {
-                                moveFrom = index;
-                                moveTo = index - 1;
-                            }
-                        }
-                        using (new EditorGUI.DisabledScope(
-                                   index >= pool.arraySize - 1))
-                        {
-                            if (GUILayout.Button("↓", GUILayout.Width(28f)))
-                            {
-                                moveFrom = index;
-                                moveTo = index + 1;
-                            }
-                        }
-                        if (GUILayout.Button("삭제", GUILayout.Width(48f)))
-                            removeIndex = index;
-                    }
-
-                    DrawProperty(entry, "displayName", "표시 이름");
-                    SerializedProperty grade =
-                        entry.FindPropertyRelative("grade");
-                    grade.enumValueIndex = EditorGUILayout.IntSlider(
-                        "등급",
-                        grade.enumValueIndex,
-                        0,
-                        3);
-                    DrawGradePalettePreview(
-                        (CharacterGrade)grade.enumValueIndex);
-                    DrawProperty(
-                        entry,
-                        "rate",
-                        mode.enumValueIndex ==
-                        (int)RecruitRateInputMode.Percentage
-                            ? "확률 (%)"
-                            : "가중치");
-                    DrawProperty(entry, "pickup", "픽업");
-
-                    if (valid && index < probabilityRows.Count)
-                    {
-                        EditorGUILayout.LabelField(
-                            "정규화 확률",
-                            $"{probabilityRows[index].Probability * 100d:0.####}%");
-                    }
+                    DrawGradeSwatch(grade);
+                    EditorGUILayout.LabelField(
+                        $"{(int)grade}등급",
+                        EditorStyles.boldLabel,
+                        GUILayout.Width(70f));
+                    EditorGUILayout.PropertyField(
+                        gradePool.FindPropertyRelative("rate"),
+                        GUIContent.none);
+                    float gradeRate = Mathf.Max(
+                        0f,
+                        gradePool.FindPropertyRelative("rate").floatValue);
+                    EditorGUILayout.LabelField(
+                        inputTotal > 0d
+                            ? $"실제 {gradeRate / inputTotal * 100d:0.####}%"
+                            : "실제 0%",
+                        GUILayout.Width(105f));
+                    SerializedProperty rewards =
+                        gradePool.FindPropertyRelative("rewards");
+                    EditorGUILayout.LabelField(
+                        $"{rewards.arraySize}개 보상",
+                        GUILayout.Width(80f));
                 }
             }
 
-            if (removeIndex >= 0)
-                RemovePoolEntry(pool, removeIndex);
-            if (moveFrom >= 0)
-                MoveArrayElement(pool, moveFrom, moveTo, "더미 항목 순서 변경");
-
-            using (new EditorGUILayout.HorizontalScope())
+            int probabilityCursor = 0;
+            for (int poolIndex = 0;
+                 poolIndex < gradePools.arraySize;
+                 poolIndex++)
             {
-                if (GUILayout.Button("더미 항목 추가"))
+                SerializedProperty gradePool =
+                    gradePools.GetArrayElementAtIndex(poolIndex);
+                CharacterGrade grade = GetGradePoolGrade(
+                    gradePool,
+                    poolIndex);
+                SerializedProperty rewards =
+                    gradePool.FindPropertyRelative("rewards");
+                int gradeIndex = Mathf.Clamp((int)grade, 0, 3);
+
+                EditorGUILayout.Space(7f);
+                CharacterGradeStyle style =
+                    CharacterGradePresentation.GetStyle(grade);
+                Color previousColor = GUI.backgroundColor;
+                GUI.backgroundColor = style.PrimaryColor;
+                using (new EditorGUILayout.VerticalScope(GUI.skin.box))
                 {
-                    AddPoolEntry(
-                        pool,
-                        "더미 항목",
-                        CharacterGrade.Grade0,
-                        1f);
+                    GUI.backgroundColor = previousColor;
+                    _gradePoolExpanded[gradeIndex] =
+                        EditorGUILayout.Foldout(
+                            _gradePoolExpanded[gradeIndex],
+                            $"{gradeIndex}등급 보상 ({rewards.arraySize})",
+                            true,
+                            EditorStyles.foldoutHeader);
+                    if (_gradePoolExpanded[gradeIndex])
+                    {
+                        DrawGradePalettePreview(grade);
+                        EditorGUILayout.PropertyField(
+                            gradePool.FindPropertyRelative(
+                                "selectionMode"),
+                            new GUIContent("등급 내부 선택 방식"));
+
+                        RecruitRewardSelectionMode selectionMode =
+                            (RecruitRewardSelectionMode)gradePool
+                                .FindPropertyRelative("selectionMode")
+                                .enumValueIndex;
+                        EditorGUILayout.HelpBox(
+                            selectionMode ==
+                            RecruitRewardSelectionMode.Equal
+                                ? "이 등급의 모든 보상을 같은 확률로 추첨합니다."
+                                : "각 보상의 개별 가중치 비율로 추첨합니다.",
+                            MessageType.None);
+
+                        DrawGradePoolRewards(
+                            gradePools,
+                            poolIndex,
+                            grade,
+                            selectionMode,
+                            valid,
+                            probabilityRows,
+                            ref probabilityCursor);
+                        DrawBulkRewardControls(
+                            gradePools,
+                            poolIndex,
+                            grade);
+                    }
+                    else
+                    {
+                        probabilityCursor += rewards.arraySize;
+                    }
                 }
-                if (GUILayout.Button("샘플 확률 4종 채우기"))
-                    FillSamplePool(pool);
             }
 
             if (!valid)
@@ -530,6 +568,261 @@ public sealed class RecruitEditorWindow : EditorWindow
         }
 
         EditorGUILayout.EndFoldoutHeaderGroup();
+    }
+
+    private void DrawGradePoolRewards(
+        SerializedProperty gradePools,
+        int poolIndex,
+        CharacterGrade grade,
+        RecruitRewardSelectionMode selectionMode,
+        bool probabilitiesValid,
+        IReadOnlyList<ProbabilityRow> probabilityRows,
+        ref int probabilityCursor)
+    {
+        SerializedProperty gradePool =
+            gradePools.GetArrayElementAtIndex(poolIndex);
+        SerializedProperty rewards =
+            gradePool.FindPropertyRelative("rewards");
+        int removeIndex = -1;
+        int moveFrom = -1;
+        int moveTo = -1;
+
+        if (rewards.arraySize == 0)
+        {
+            EditorGUILayout.HelpBox(
+                "등록된 보상이 없습니다. 아래에서 여러 SO를 한 번에 추가할 수 있습니다.",
+                MessageType.Warning);
+        }
+
+        for (int rewardIndex = 0;
+             rewardIndex < rewards.arraySize;
+             rewardIndex++)
+        {
+            SerializedProperty reward =
+                rewards.GetArrayElementAtIndex(rewardIndex);
+            reward.FindPropertyRelative("grade").enumValueIndex =
+                (int)grade;
+            using (new EditorGUILayout.VerticalScope(
+                       EditorStyles.helpBox))
+            {
+                using (new EditorGUILayout.HorizontalScope())
+                {
+                    EditorGUILayout.LabelField(
+                        GetPoolEntryLabel(reward, rewardIndex),
+                        EditorStyles.boldLabel);
+                    GUILayout.FlexibleSpace();
+                    using (new EditorGUI.DisabledScope(rewardIndex == 0))
+                    {
+                        if (GUILayout.Button("↑", GUILayout.Width(28f)))
+                        {
+                            moveFrom = rewardIndex;
+                            moveTo = rewardIndex - 1;
+                        }
+                    }
+                    using (new EditorGUI.DisabledScope(
+                               rewardIndex >= rewards.arraySize - 1))
+                    {
+                        if (GUILayout.Button("↓", GUILayout.Width(28f)))
+                        {
+                            moveFrom = rewardIndex;
+                            moveTo = rewardIndex + 1;
+                        }
+                    }
+                    if (GUILayout.Button("삭제", GUILayout.Width(48f)))
+                        removeIndex = rewardIndex;
+                }
+
+                DrawRewardEntryFields(reward, grade);
+                if (selectionMode ==
+                    RecruitRewardSelectionMode.IndividualWeight)
+                {
+                    DrawProperty(reward, "rate", "등급 내부 가중치");
+                }
+                DrawProperty(reward, "pickup", "픽업");
+
+                if (probabilitiesValid &&
+                    probabilityCursor < probabilityRows.Count)
+                {
+                    EditorGUILayout.LabelField(
+                        "최종 개별 확률",
+                        $"{probabilityRows[probabilityCursor].Probability * 100d:0.####}%");
+                }
+            }
+            probabilityCursor++;
+        }
+
+        if (removeIndex >= 0)
+            RemovePoolEntry(rewards, removeIndex);
+        if (moveFrom >= 0)
+        {
+            MoveArrayElement(
+                rewards,
+                moveFrom,
+                moveTo,
+                $"{(int)grade}등급 보상 순서 변경");
+        }
+    }
+
+    private static void DrawRewardEntryFields(
+        SerializedProperty reward,
+        CharacterGrade poolGrade)
+    {
+        SerializedProperty rewardType =
+            reward.FindPropertyRelative("rewardType");
+        EditorGUILayout.PropertyField(
+            rewardType,
+            new GUIContent("보상 종류"));
+        RecruitRewardType type =
+            (RecruitRewardType)rewardType.enumValueIndex;
+
+        switch (type)
+        {
+            case RecruitRewardType.Character:
+            {
+                DrawProperty(reward, "character", "캐릭터 SO");
+                CharacterSO character = reward
+                    .FindPropertyRelative("character")
+                    .objectReferenceValue as CharacterSO;
+                if (character != null)
+                {
+                    EditorGUILayout.LabelField(
+                        "캐릭터 정보",
+                        $"{character.CharacterName} · " +
+                        $"{(int)character.Grade}등급 · " +
+                        $"{character.CharacterId}");
+                    if (character.Grade != poolGrade)
+                    {
+                        EditorGUILayout.HelpBox(
+                            $"이 캐릭터는 {(int)character.Grade}등급이므로 " +
+                            $"{(int)poolGrade}등급 풀에서 추첨할 수 없습니다.",
+                            MessageType.Error);
+                    }
+                }
+                break;
+            }
+
+            case RecruitRewardType.Item:
+            {
+                DrawProperty(reward, "item", "아이템 SO");
+                DrawProperty(reward, "itemAmount", "지급 수량");
+                ItemDefinitionSO item = reward
+                    .FindPropertyRelative("item")
+                    .objectReferenceValue as ItemDefinitionSO;
+                if (item != null)
+                {
+                    EditorGUILayout.LabelField(
+                        "아이템 정보",
+                        $"{item.GetDisplayName(true)} · " +
+                        $"{item.Category} · {item.ItemId}");
+                }
+                break;
+            }
+
+            default:
+                DrawProperty(reward, "displayName", "표시 이름");
+                break;
+        }
+    }
+
+    private void DrawBulkRewardControls(
+        SerializedProperty gradePools,
+        int poolIndex,
+        CharacterGrade grade)
+    {
+        EditorGUILayout.Space(5f);
+        using (new EditorGUILayout.HorizontalScope())
+        {
+            if (GUILayout.Button("캐릭터 다중 선택"))
+            {
+                RecruitRewardMultiSelectWindow.Open(
+                    grade,
+                    RecruitRewardType.Character,
+                    selected => AddRewardsToGradePool(
+                        poolIndex,
+                        grade,
+                        selected));
+            }
+            if (GUILayout.Button("아이템 다중 선택"))
+            {
+                RecruitRewardMultiSelectWindow.Open(
+                    grade,
+                    RecruitRewardType.Item,
+                    selected => AddRewardsToGradePool(
+                        poolIndex,
+                        grade,
+                        selected));
+            }
+            if (GUILayout.Button("Project 선택 추가"))
+            {
+                AddRewardsToGradePool(
+                    poolIndex,
+                    grade,
+                    Selection.objects);
+            }
+        }
+
+        Rect dropArea = GUILayoutUtility.GetRect(
+            0f,
+            42f,
+            GUILayout.ExpandWidth(true));
+        GUI.Box(
+            dropArea,
+            "여기에 여러 CharacterSO / ItemDefinitionSO 드래그",
+            EditorStyles.helpBox);
+        Event current = Event.current;
+        if (!dropArea.Contains(current.mousePosition) ||
+            (current.type != EventType.DragUpdated &&
+             current.type != EventType.DragPerform))
+        {
+            return;
+        }
+
+        bool hasSupportedObject = false;
+        foreach (UnityEngine.Object dragged in
+                 DragAndDrop.objectReferences)
+        {
+            if (dragged is CharacterSO || dragged is ItemDefinitionSO)
+            {
+                hasSupportedObject = true;
+                break;
+            }
+        }
+        DragAndDrop.visualMode = hasSupportedObject
+            ? DragAndDropVisualMode.Copy
+            : DragAndDropVisualMode.Rejected;
+        if (current.type == EventType.DragPerform &&
+            hasSupportedObject)
+        {
+            DragAndDrop.AcceptDrag();
+            AddRewardsToGradePool(
+                poolIndex,
+                grade,
+                DragAndDrop.objectReferences);
+        }
+        current.Use();
+    }
+
+    private static CharacterGrade GetGradePoolGrade(
+        SerializedProperty gradePool,
+        int fallbackIndex)
+    {
+        SerializedProperty grade =
+            gradePool.FindPropertyRelative("grade");
+        return CharacterGradePresentation.Clamp(
+            grade != null
+                ? (CharacterGrade)grade.enumValueIndex
+                : (CharacterGrade)Mathf.Clamp(fallbackIndex, 0, 3));
+    }
+
+    private static void DrawGradeSwatch(CharacterGrade grade)
+    {
+        CharacterGradeStyle style =
+            CharacterGradePresentation.GetStyle(grade);
+        Rect rect = GUILayoutUtility.GetRect(
+            18f,
+            18f,
+            GUILayout.Width(18f));
+        EditorGUI.DrawRect(rect, style.PrimaryColor);
     }
 
     private void DrawSimulationControls(
@@ -643,6 +936,25 @@ public sealed class RecruitEditorWindow : EditorWindow
                 }
             }
             counts[selected]++;
+        }
+
+        int[] gradeCounts = new int[4];
+        double[] gradeProbabilities = new double[4];
+        for (int index = 0; index < rows.Count; index++)
+        {
+            int grade = Mathf.Clamp((int)rows[index].Grade, 0, 3);
+            gradeCounts[grade] += counts[index];
+            gradeProbabilities[grade] += rows[index].Probability;
+        }
+        for (int grade = 0; grade < gradeCounts.Length; grade++)
+        {
+            if (gradeProbabilities[grade] <= 0d)
+                continue;
+            _simulationResults.Add(new SimulationResult(
+                $"[{grade}등급 합계]",
+                gradeCounts[grade],
+                gradeCounts[grade] * 100d / count,
+                gradeProbabilities[grade] * 100d));
         }
 
         for (int index = 0; index < rows.Count; index++)
@@ -1072,34 +1384,140 @@ public sealed class RecruitEditorWindow : EditorWindow
         rows = new List<ProbabilityRow>();
         error = string.Empty;
         inputTotal = 0d;
-        SerializedProperty pool =
-            banner.FindPropertyRelative("dummyPool");
-        if (pool == null || pool.arraySize == 0)
+        SerializedProperty gradePools =
+            banner.FindPropertyRelative("gradePools");
+        if (gradePools == null || gradePools.arraySize == 0)
         {
-            error = "더미 모집 풀이 비어 있습니다.";
+            error = "등급별 모집 보상 풀이 비어 있습니다.";
             return false;
         }
 
-        double[] rates = new double[pool.arraySize];
-        for (int index = 0; index < pool.arraySize; index++)
+        bool[] registeredGrades = new bool[4];
+        HashSet<string> registeredRewards =
+            new(StringComparer.Ordinal);
+        double[] gradeRates =
+            new double[gradePools.arraySize];
+        List<double[]> innerRates = new();
+        List<double> innerTotals = new();
+        for (int poolIndex = 0;
+             poolIndex < gradePools.arraySize;
+             poolIndex++)
         {
-            SerializedProperty entry =
-                pool.GetArrayElementAtIndex(index);
-            float rate = entry.FindPropertyRelative("rate").floatValue;
-            if (float.IsNaN(rate) ||
-                float.IsInfinity(rate) ||
-                rate < 0f)
+            SerializedProperty gradePool =
+                gradePools.GetArrayElementAtIndex(poolIndex);
+            CharacterGrade grade = GetGradePoolGrade(
+                gradePool,
+                poolIndex);
+            int gradeIndex = Mathf.Clamp((int)grade, 0, 3);
+            if (registeredGrades[gradeIndex])
             {
-                error = $"{index + 1}번 더미 항목의 확률 값이 올바르지 않습니다.";
+                error = $"{gradeIndex}등급 풀이 중복되었습니다.";
                 return false;
             }
-            rates[index] = rate;
-            inputTotal += rate;
+            registeredGrades[gradeIndex] = true;
+
+            float gradeRate = gradePool
+                .FindPropertyRelative("rate")
+                .floatValue;
+            if (float.IsNaN(gradeRate) ||
+                float.IsInfinity(gradeRate) ||
+                gradeRate < 0f)
+            {
+                error = $"{gradeIndex}등급 확률 값이 올바르지 않습니다.";
+                return false;
+            }
+            gradeRates[poolIndex] = gradeRate;
+            inputTotal += gradeRate;
+
+            SerializedProperty rewards =
+                gradePool.FindPropertyRelative("rewards");
+            if (gradeRate > 0f && rewards.arraySize == 0)
+            {
+                error =
+                    $"{gradeIndex}등급 확률이 설정되었지만 보상이 없습니다.";
+                return false;
+            }
+
+            RecruitRewardSelectionMode selectionMode =
+                (RecruitRewardSelectionMode)gradePool
+                    .FindPropertyRelative("selectionMode")
+                    .enumValueIndex;
+            double[] rewardRates = new double[rewards.arraySize];
+            double innerTotal = 0d;
+            for (int rewardIndex = 0;
+                 rewardIndex < rewards.arraySize;
+                 rewardIndex++)
+            {
+                SerializedProperty reward =
+                    rewards.GetArrayElementAtIndex(rewardIndex);
+                if (!TryValidatePoolEntry(
+                        reward,
+                        rewardIndex,
+                        out error))
+                {
+                    error =
+                        $"{gradeIndex}등급: {error}";
+                    return false;
+                }
+
+                RecruitRewardType type =
+                    (RecruitRewardType)reward
+                        .FindPropertyRelative("rewardType")
+                        .enumValueIndex;
+                if (type == RecruitRewardType.Character)
+                {
+                    CharacterSO character = reward
+                        .FindPropertyRelative("character")
+                        .objectReferenceValue as CharacterSO;
+                    if (character != null &&
+                        character.Grade != grade)
+                    {
+                        error =
+                            $"{character.CharacterName} 캐릭터의 등급이 " +
+                            $"{gradeIndex}등급 풀과 일치하지 않습니다.";
+                        return false;
+                    }
+                }
+
+                string rewardKey = GetRewardKey(reward);
+                if (!string.IsNullOrWhiteSpace(rewardKey) &&
+                    !registeredRewards.Add(rewardKey))
+                {
+                    error =
+                        $"{GetPoolEntryLabel(reward, rewardIndex)} 보상이 중복 등록되었습니다.";
+                    return false;
+                }
+
+                float innerRate = selectionMode ==
+                                  RecruitRewardSelectionMode.Equal
+                    ? 1f
+                    : reward.FindPropertyRelative("rate").floatValue;
+                if (float.IsNaN(innerRate) ||
+                    float.IsInfinity(innerRate) ||
+                    innerRate < 0f)
+                {
+                    error =
+                        $"{gradeIndex}등급 {rewardIndex + 1}번 보상의 가중치가 올바르지 않습니다.";
+                    return false;
+                }
+                rewardRates[rewardIndex] = innerRate;
+                innerTotal += innerRate;
+            }
+            if (gradeRate > 0f &&
+                rewards.arraySize > 0 &&
+                innerTotal <= 0d)
+            {
+                error =
+                    $"{gradeIndex}등급 내부 가중치 합계는 0보다 커야 합니다.";
+                return false;
+            }
+            innerRates.Add(rewardRates);
+            innerTotals.Add(innerTotal);
         }
 
         if (inputTotal <= 0d)
         {
-            error = "확률 값 중 하나 이상은 0보다 커야 합니다.";
+            error = "등급 확률 중 하나 이상은 0보다 커야 합니다.";
             return false;
         }
 
@@ -1110,20 +1528,164 @@ public sealed class RecruitEditorWindow : EditorWindow
             Math.Abs(inputTotal - 100d) > 0.01d)
         {
             error =
-                $"직접 확률의 합계가 100%가 아닙니다. 현재 {inputTotal:0.####}%입니다.";
+                $"등급 확률 합계가 100%가 아닙니다. 현재 {inputTotal:0.####}%입니다.";
             return false;
         }
 
-        for (int index = 0; index < pool.arraySize; index++)
+        for (int poolIndex = 0;
+             poolIndex < gradePools.arraySize;
+             poolIndex++)
         {
-            SerializedProperty entry =
-                pool.GetArrayElementAtIndex(index);
-            string label = GetTrimmedString(entry, "displayName");
-            rows.Add(new ProbabilityRow(
-                Fallback(label, $"더미 항목 {index + 1}"),
-                rates[index] / inputTotal));
+            SerializedProperty gradePool =
+                gradePools.GetArrayElementAtIndex(poolIndex);
+            CharacterGrade grade = GetGradePoolGrade(
+                gradePool,
+                poolIndex);
+            SerializedProperty rewards =
+                gradePool.FindPropertyRelative("rewards");
+            for (int rewardIndex = 0;
+                 rewardIndex < rewards.arraySize;
+                 rewardIndex++)
+            {
+                double innerProbability =
+                    innerTotals[poolIndex] > 0d
+                        ? innerRates[poolIndex][rewardIndex] /
+                          innerTotals[poolIndex]
+                        : 0d;
+                SerializedProperty reward =
+                    rewards.GetArrayElementAtIndex(rewardIndex);
+                rows.Add(new ProbabilityRow(
+                    $"{(int)grade}등급 · " +
+                    GetPoolEntryLabel(reward, rewardIndex),
+                    grade,
+                    gradeRates[poolIndex] /
+                    inputTotal *
+                    innerProbability));
+            }
         }
         return true;
+    }
+
+    private static bool TryValidatePoolEntry(
+        SerializedProperty entry,
+        int index,
+        out string error)
+    {
+        error = string.Empty;
+        RecruitRewardType type = (RecruitRewardType)entry
+            .FindPropertyRelative("rewardType")
+            .enumValueIndex;
+        switch (type)
+        {
+            case RecruitRewardType.Character:
+            {
+                CharacterSO character = entry
+                    .FindPropertyRelative("character")
+                    .objectReferenceValue as CharacterSO;
+                if (character == null)
+                {
+                    error =
+                        $"{index + 1}번 캐릭터 보상에 CharacterSO가 지정되지 않았습니다.";
+                    return false;
+                }
+                if (string.IsNullOrWhiteSpace(character.CharacterId))
+                {
+                    error =
+                        $"{index + 1}번 캐릭터 보상의 ID가 비어 있습니다.";
+                    return false;
+                }
+                break;
+            }
+
+            case RecruitRewardType.Item:
+            {
+                ItemDefinitionSO item = entry
+                    .FindPropertyRelative("item")
+                    .objectReferenceValue as ItemDefinitionSO;
+                if (item == null)
+                {
+                    error =
+                        $"{index + 1}번 아이템 보상에 ItemDefinitionSO가 지정되지 않았습니다.";
+                    return false;
+                }
+                if (string.IsNullOrWhiteSpace(item.ItemId))
+                {
+                    error =
+                        $"{index + 1}번 아이템 보상의 ID가 비어 있습니다.";
+                    return false;
+                }
+                if (entry.FindPropertyRelative("itemAmount").longValue <= 0L)
+                {
+                    error =
+                        $"{index + 1}번 아이템 보상 수량은 1 이상이어야 합니다.";
+                    return false;
+                }
+                break;
+            }
+        }
+        return true;
+    }
+
+    private static string GetRewardKey(SerializedProperty entry)
+    {
+        RecruitRewardType type = (RecruitRewardType)entry
+            .FindPropertyRelative("rewardType")
+            .enumValueIndex;
+        return type switch
+        {
+            RecruitRewardType.Character =>
+                entry.FindPropertyRelative("character")
+                    .objectReferenceValue is CharacterSO character
+                    ? $"character:{character.CharacterId}"
+                    : string.Empty,
+            RecruitRewardType.Item =>
+                entry.FindPropertyRelative("item")
+                    .objectReferenceValue is ItemDefinitionSO item
+                    ? $"item:{item.ItemId}"
+                    : string.Empty,
+            _ => string.Empty,
+        };
+    }
+
+    private static string GetPoolEntryLabel(
+        SerializedProperty entry,
+        int index)
+    {
+        RecruitRewardType type = (RecruitRewardType)entry
+            .FindPropertyRelative("rewardType")
+            .enumValueIndex;
+        switch (type)
+        {
+            case RecruitRewardType.Character:
+            {
+                CharacterSO character = entry
+                    .FindPropertyRelative("character")
+                    .objectReferenceValue as CharacterSO;
+                if (character == null)
+                    return $"미지정 캐릭터 {index + 1}";
+                return !string.IsNullOrWhiteSpace(character.CharacterName)
+                    ? character.CharacterName
+                    : character.name;
+            }
+
+            case RecruitRewardType.Item:
+            {
+                ItemDefinitionSO item = entry
+                    .FindPropertyRelative("item")
+                    .objectReferenceValue as ItemDefinitionSO;
+                if (item == null)
+                    return $"미지정 아이템 {index + 1}";
+                long amount = Math.Max(
+                    1L,
+                    entry.FindPropertyRelative("itemAmount").longValue);
+                return $"{item.GetDisplayName(true)} ×{amount:N0}";
+            }
+
+            default:
+                return Fallback(
+                    GetTrimmedString(entry, "displayName"),
+                    $"더미 항목 {index + 1}");
+        }
     }
 
     private void AddBanner(SerializedProperty pages)
@@ -1217,27 +1779,190 @@ public sealed class RecruitEditorWindow : EditorWindow
         banner.FindPropertyRelative("rateInputMode").enumValueIndex =
             (int)RecruitRateInputMode.Percentage;
         banner.FindPropertyRelative("dummyPool").arraySize = 0;
+        SerializedProperty gradePools =
+            banner.FindPropertyRelative("gradePools");
+        gradePools.arraySize = 4;
+        float[] defaultRates = { 40f, 50f, 8f, 2f };
+        for (int grade = 0; grade < gradePools.arraySize; grade++)
+        {
+            SerializedProperty gradePool =
+                gradePools.GetArrayElementAtIndex(grade);
+            gradePool.FindPropertyRelative("grade").enumValueIndex = grade;
+            gradePool.FindPropertyRelative("rate").floatValue =
+                defaultRates[grade];
+            gradePool.FindPropertyRelative("selectionMode").enumValueIndex =
+                (int)RecruitRewardSelectionMode.Equal;
+            gradePool.FindPropertyRelative("rewards").arraySize = 0;
+        }
+        banner.FindPropertyRelative("rewardPoolDataVersion").intValue = 1;
         banner.FindPropertyRelative("paymentRoutes").arraySize = 0;
         banner.FindPropertyRelative("defaultPaymentRouteIndex").intValue = 0;
         banner.FindPropertyRelative("interactionEnabled").boolValue = true;
     }
 
-    private void AddPoolEntry(
-        SerializedProperty pool,
-        string displayName,
+    private void AddRewardsToGradePool(
+        int requestedPoolIndex,
         CharacterGrade grade,
-        float rate)
+        IEnumerable<UnityEngine.Object> assets)
     {
-        RecordUndo("더미 모집 항목 추가");
-        int index = pool.arraySize;
-        pool.InsertArrayElementAtIndex(index);
-        InitializePoolEntry(
-            pool.GetArrayElementAtIndex(index),
-            displayName,
-            grade,
-            rate);
-        ClearSimulation();
-        ApplyAndExit();
+        List<UnityEngine.Object> queued = new();
+        if (assets != null)
+        {
+            foreach (UnityEngine.Object asset in assets)
+            {
+                if (asset is CharacterSO || asset is ItemDefinitionSO)
+                    queued.Add(asset);
+            }
+        }
+
+        EditorApplication.delayCall += () =>
+        {
+            if (this == null || _targetPage == null)
+                return;
+            EnsureSerializedTarget();
+            _serializedTarget.UpdateIfRequiredOrScript();
+            SerializedProperty pages =
+                _serializedTarget.FindProperty("recruitBannerPages");
+            if (pages == null || pages.arraySize == 0)
+                return;
+
+            int bannerIndex = Mathf.Clamp(
+                _selectedBannerIndex,
+                0,
+                pages.arraySize - 1);
+            SerializedProperty banner =
+                pages.GetArrayElementAtIndex(bannerIndex);
+            SerializedProperty gradePools =
+                banner.FindPropertyRelative("gradePools");
+            int poolIndex = FindGradePoolIndex(
+                gradePools,
+                grade,
+                requestedPoolIndex);
+            if (poolIndex < 0)
+                return;
+
+            SerializedProperty rewards = gradePools
+                .GetArrayElementAtIndex(poolIndex)
+                .FindPropertyRelative("rewards");
+            HashSet<string> registered = new(StringComparer.Ordinal);
+            for (int existingPoolIndex = 0;
+                 existingPoolIndex < gradePools.arraySize;
+                 existingPoolIndex++)
+            {
+                SerializedProperty existingRewards = gradePools
+                    .GetArrayElementAtIndex(existingPoolIndex)
+                    .FindPropertyRelative("rewards");
+                for (int rewardIndex = 0;
+                     rewardIndex < existingRewards.arraySize;
+                     rewardIndex++)
+                {
+                    string key = GetRewardKey(
+                        existingRewards.GetArrayElementAtIndex(
+                            rewardIndex));
+                    if (!string.IsNullOrWhiteSpace(key))
+                        registered.Add(key);
+                }
+            }
+
+            int added = 0;
+            int skipped = 0;
+            RecordUndo($"{(int)grade}등급 보상 일괄 추가");
+            foreach (UnityEngine.Object asset in queued)
+            {
+                if (asset is CharacterSO character)
+                {
+                    if (character.Grade != grade)
+                    {
+                        skipped++;
+                        continue;
+                    }
+
+                    string key =
+                        $"character:{character.CharacterId}";
+                    if (!registered.Add(key))
+                    {
+                        skipped++;
+                        continue;
+                    }
+
+                    int index = rewards.arraySize;
+                    rewards.InsertArrayElementAtIndex(index);
+                    SerializedProperty reward =
+                        rewards.GetArrayElementAtIndex(index);
+                    InitializePoolEntry(
+                        reward,
+                        character.CharacterName,
+                        grade,
+                        1f);
+                    reward.FindPropertyRelative("rewardType")
+                        .enumValueIndex =
+                        (int)RecruitRewardType.Character;
+                    reward.FindPropertyRelative("character")
+                        .objectReferenceValue = character;
+                    added++;
+                }
+                else if (asset is ItemDefinitionSO item)
+                {
+                    string key = $"item:{item.ItemId}";
+                    if (!registered.Add(key))
+                    {
+                        skipped++;
+                        continue;
+                    }
+
+                    int index = rewards.arraySize;
+                    rewards.InsertArrayElementAtIndex(index);
+                    SerializedProperty reward =
+                        rewards.GetArrayElementAtIndex(index);
+                    InitializePoolEntry(
+                        reward,
+                        item.GetDisplayName(true),
+                        grade,
+                        1f);
+                    reward.FindPropertyRelative("rewardType")
+                        .enumValueIndex =
+                        (int)RecruitRewardType.Item;
+                    reward.FindPropertyRelative("item")
+                        .objectReferenceValue = item;
+                    added++;
+                }
+            }
+
+            _serializedTarget.ApplyModifiedProperties();
+            ClearSimulation();
+            MarkTargetDirty();
+            Repaint();
+            string message = added > 0
+                ? $"{(int)grade}등급에 {added}개 보상을 추가했습니다."
+                : "추가할 수 있는 새 보상이 없습니다.";
+            if (skipped > 0)
+                message += $" 중복/등급 불일치 {skipped}개 제외.";
+            ShowNotification(new GUIContent(message));
+        };
+    }
+
+    private static int FindGradePoolIndex(
+        SerializedProperty gradePools,
+        CharacterGrade grade,
+        int fallbackIndex)
+    {
+        if (gradePools == null)
+            return -1;
+        for (int index = 0;
+             index < gradePools.arraySize;
+             index++)
+        {
+            if (GetGradePoolGrade(
+                    gradePools.GetArrayElementAtIndex(index),
+                    index) == grade)
+            {
+                return index;
+            }
+        }
+        return fallbackIndex >= 0 &&
+               fallbackIndex < gradePools.arraySize
+            ? fallbackIndex
+            : -1;
     }
 
     private void RemovePoolEntry(
@@ -1250,50 +1975,6 @@ public sealed class RecruitEditorWindow : EditorWindow
         ApplyAndExit();
     }
 
-    private void FillSamplePool(SerializedProperty pool)
-    {
-        if (pool.arraySize > 0 &&
-            !EditorUtility.DisplayDialog(
-                "샘플 확률 채우기",
-                "현재 더미 풀을 0등급 40%, 1등급 50%, " +
-                "2등급 8%, 3등급 2%로 교체하시겠습니까?",
-                "교체",
-                "취소"))
-        {
-            return;
-        }
-
-        RecordUndo("더미 모집 샘플 확률 채우기");
-        pool.arraySize = 4;
-        InitializePoolEntry(
-            pool.GetArrayElementAtIndex(0),
-            "더미 0등급",
-            CharacterGrade.Grade0,
-            40f);
-        InitializePoolEntry(
-            pool.GetArrayElementAtIndex(1),
-            "더미 1등급",
-            CharacterGrade.Grade1,
-            50f);
-        InitializePoolEntry(
-            pool.GetArrayElementAtIndex(2),
-            "더미 2등급",
-            CharacterGrade.Grade2,
-            8f);
-        InitializePoolEntry(
-            pool.GetArrayElementAtIndex(3),
-            "더미 3등급",
-            CharacterGrade.Grade3,
-            2f);
-        SerializedProperty mode = pool.serializedObject
-            .FindProperty("recruitBannerPages")
-            .GetArrayElementAtIndex(_selectedBannerIndex)
-            .FindPropertyRelative("rateInputMode");
-        mode.enumValueIndex = (int)RecruitRateInputMode.Percentage;
-        ClearSimulation();
-        ApplyAndExit();
-    }
-
     private static void InitializePoolEntry(
         SerializedProperty entry,
         string displayName,
@@ -1301,6 +1982,11 @@ public sealed class RecruitEditorWindow : EditorWindow
         float rate)
     {
         SetString(entry, "displayName", displayName);
+        entry.FindPropertyRelative("rewardType").enumValueIndex =
+            (int)RecruitRewardType.Dummy;
+        entry.FindPropertyRelative("character").objectReferenceValue = null;
+        entry.FindPropertyRelative("item").objectReferenceValue = null;
+        entry.FindPropertyRelative("itemAmount").longValue = 1L;
         entry.FindPropertyRelative("grade").enumValueIndex =
             (int)CharacterGradePresentation.Clamp(grade);
         entry.FindPropertyRelative("rate").floatValue =
@@ -1612,11 +2298,16 @@ public sealed class RecruitEditorWindow : EditorWindow
     private readonly struct ProbabilityRow
     {
         public string Label { get; }
+        public CharacterGrade Grade { get; }
         public double Probability { get; }
 
-        public ProbabilityRow(string label, double probability)
+        public ProbabilityRow(
+            string label,
+            CharacterGrade grade,
+            double probability)
         {
             Label = label ?? string.Empty;
+            Grade = CharacterGradePresentation.Clamp(grade);
             Probability = Math.Max(0d, probability);
         }
     }
@@ -1653,5 +2344,196 @@ public sealed class RecruitEditorWindow : EditorWindow
             Message = message ?? string.Empty;
             Type = type;
         }
+    }
+}
+
+internal sealed class RecruitRewardMultiSelectWindow : EditorWindow
+{
+    private readonly List<UnityEngine.Object> _candidates = new();
+    private readonly HashSet<int> _selectedIds = new();
+    private CharacterGrade _grade;
+    private RecruitRewardType _rewardType;
+    private Action<IReadOnlyList<UnityEngine.Object>> _completed;
+    private string _search = string.Empty;
+    private Vector2 _scroll;
+
+    public static void Open(
+        CharacterGrade grade,
+        RecruitRewardType rewardType,
+        Action<IReadOnlyList<UnityEngine.Object>> completed)
+    {
+        RecruitRewardMultiSelectWindow window =
+            CreateInstance<RecruitRewardMultiSelectWindow>();
+        window.titleContent = new GUIContent(
+            rewardType == RecruitRewardType.Character
+                ? $"{(int)grade}등급 캐릭터 선택"
+                : $"{(int)grade}등급 아이템 선택");
+        window._grade = grade;
+        window._rewardType = rewardType;
+        window._completed = completed;
+        window.BuildCandidates();
+        window.minSize = new Vector2(520f, 520f);
+        window.position = new Rect(
+            GUIUtility.GUIToScreenPoint(new Vector2(120f, 100f)),
+            new Vector2(600f, 650f));
+        window.ShowUtility();
+        window.Focus();
+    }
+
+    private void BuildCandidates()
+    {
+        _candidates.Clear();
+        if (_rewardType == RecruitRewardType.Character)
+        {
+            foreach (CharacterSO character in
+                     CharacterDefinitionCatalog.GetAll())
+            {
+                if (character != null && character.Grade == _grade)
+                    _candidates.Add(character);
+            }
+        }
+        else
+        {
+            foreach (ItemDefinitionSO item in
+                     ItemDefinitionCatalog.GetAll())
+            {
+                if (item != null)
+                    _candidates.Add(item);
+            }
+        }
+
+        _candidates.Sort((left, right) =>
+            string.Compare(
+                GetName(left),
+                GetName(right),
+                StringComparison.OrdinalIgnoreCase));
+    }
+
+    private void OnGUI()
+    {
+        EditorGUILayout.LabelField(
+            $"{(int)_grade}등급에 추가할 " +
+            (_rewardType == RecruitRewardType.Character
+                ? "캐릭터"
+                : "아이템"),
+            EditorStyles.boldLabel);
+        _search = EditorGUILayout.TextField("검색", _search);
+
+        using (new EditorGUILayout.HorizontalScope())
+        {
+            if (GUILayout.Button("검색 결과 전체 선택"))
+            {
+                foreach (UnityEngine.Object candidate in
+                         GetFilteredCandidates())
+                {
+                    _selectedIds.Add(candidate.GetInstanceID());
+                }
+            }
+            if (GUILayout.Button("선택 해제"))
+                _selectedIds.Clear();
+        }
+
+        EditorGUILayout.Space(4f);
+        _scroll = EditorGUILayout.BeginScrollView(
+            _scroll,
+            EditorStyles.helpBox);
+        foreach (UnityEngine.Object candidate in GetFilteredCandidates())
+        {
+            using (new EditorGUILayout.HorizontalScope())
+            {
+                int id = candidate.GetInstanceID();
+                bool selected = _selectedIds.Contains(id);
+                bool next = EditorGUILayout.Toggle(
+                    selected,
+                    GUILayout.Width(22f));
+                if (next != selected)
+                {
+                    if (next)
+                        _selectedIds.Add(id);
+                    else
+                        _selectedIds.Remove(id);
+                }
+
+                Texture icon = AssetPreview.GetMiniThumbnail(candidate);
+                GUILayout.Label(
+                    icon,
+                    GUILayout.Width(24f),
+                    GUILayout.Height(24f));
+                EditorGUILayout.LabelField(
+                    GetName(candidate),
+                    GUILayout.MinWidth(180f));
+                EditorGUILayout.ObjectField(
+                    candidate,
+                    candidate.GetType(),
+                    false,
+                    GUILayout.Width(220f));
+            }
+        }
+        EditorGUILayout.EndScrollView();
+
+        EditorGUILayout.Space(6f);
+        using (new EditorGUILayout.HorizontalScope())
+        {
+            EditorGUILayout.LabelField(
+                $"{_selectedIds.Count}개 선택",
+                EditorStyles.boldLabel);
+            using (new EditorGUI.DisabledScope(_selectedIds.Count == 0))
+            {
+                if (GUILayout.Button("선택 항목 추가", GUILayout.Height(30f)))
+                    Complete();
+            }
+            if (GUILayout.Button("취소", GUILayout.Height(30f)))
+                Close();
+        }
+    }
+
+    private IEnumerable<UnityEngine.Object> GetFilteredCandidates()
+    {
+        string query = _search?.Trim() ?? string.Empty;
+        for (int index = 0; index < _candidates.Count; index++)
+        {
+            UnityEngine.Object candidate = _candidates[index];
+            if (candidate == null)
+                continue;
+            if (query.Length == 0 ||
+                GetName(candidate).IndexOf(
+                    query,
+                    StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                yield return candidate;
+            }
+        }
+    }
+
+    private void Complete()
+    {
+        List<UnityEngine.Object> selected = new();
+        for (int index = 0; index < _candidates.Count; index++)
+        {
+            UnityEngine.Object candidate = _candidates[index];
+            if (candidate != null &&
+                _selectedIds.Contains(candidate.GetInstanceID()))
+            {
+                selected.Add(candidate);
+            }
+        }
+
+        Action<IReadOnlyList<UnityEngine.Object>> completed =
+            _completed;
+        Close();
+        completed?.Invoke(selected);
+    }
+
+    private static string GetName(UnityEngine.Object candidate)
+    {
+        return candidate switch
+        {
+            CharacterSO character =>
+                !string.IsNullOrWhiteSpace(character.CharacterName)
+                    ? character.CharacterName
+                    : character.name,
+            ItemDefinitionSO item => item.GetDisplayName(true),
+            _ => candidate != null ? candidate.name : string.Empty,
+        };
     }
 }
