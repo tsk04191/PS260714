@@ -1,7 +1,9 @@
 using System.Collections.Generic;
 using System.Reflection;
 using NUnit.Framework;
+using UnityEditor;
 using UnityEngine;
+using UnityEngine.Audio;
 
 public sealed class BattleVfxCompositeTimelineTests
 {
@@ -253,6 +255,174 @@ public sealed class BattleVfxCompositeTimelineTests
             Is.EqualTo(new Vector3(2f, 3f, 4f)));
     }
 
+    [Test]
+    public void CompositeCue_RoutesEmbeddedAudioAndPreservesItsSettings()
+    {
+        AudioMixerGroup sfxGroup = LoadSfxMixerGroup();
+        GameObject prefab = CreatePrefab("EmbeddedAudioVfx");
+        AudioSource authoredSource = prefab.AddComponent<AudioSource>();
+        AudioClip authoredClip = AudioClip.Create(
+            "EmbeddedAudio",
+            64,
+            1,
+            44100,
+            false);
+        _createdObjects.Add(authoredClip);
+        authoredSource.clip = authoredClip;
+        authoredSource.playOnAwake = true;
+        authoredSource.loop = true;
+        authoredSource.volume = 0.35f;
+        authoredSource.pitch = 0.8f;
+        authoredSource.spatialBlend = 0.65f;
+        authoredSource.dopplerLevel = 2f;
+        BattleVfxClipDefinition clip = CreateClip(
+            "embedded-audio",
+            prefab,
+            BattleVfxPlacementArea.Target,
+            new Vector2(5f, 5f),
+            0f,
+            1f);
+        BattleVfxCueSO cue = CreateCompositeCue(
+            "EmbeddedAudioCue",
+            clip);
+        BattleVfxPlayer player = CreatePlayer();
+        player.ConfigureAudioMixerGroup(sfxGroup);
+        BattleVfxRequest firstRequest = CreateRequest(
+            cue,
+            WorldFrame(Vector3.zero),
+            WorldFrame(Vector3.zero));
+
+        player.Enqueue(firstRequest);
+
+        Assert.That(
+            player.TryGetActiveInstance(
+                cue,
+                firstRequest.Target.Handle,
+                clip.ClipId,
+                out GameObject firstInstance),
+            Is.True);
+        AudioSource firstSource = firstInstance.GetComponent<AudioSource>();
+        Assert.That(firstSource.outputAudioMixerGroup, Is.SameAs(sfxGroup));
+        Assert.That(firstSource.clip, Is.SameAs(authoredClip));
+        Assert.That(firstSource.playOnAwake, Is.True);
+        Assert.That(firstSource.loop, Is.True);
+        Assert.That(firstSource.volume, Is.EqualTo(0.35f));
+        Assert.That(firstSource.pitch, Is.EqualTo(0.8f));
+        Assert.That(firstSource.spatialBlend, Is.EqualTo(0.65f));
+        Assert.That(firstSource.dopplerLevel, Is.EqualTo(2f));
+
+        player.Advance(1.1f, 1.1f);
+        BattleVfxRequest secondRequest = CreateRequest(
+            cue,
+            WorldFrame(Vector3.zero),
+            WorldFrame(Vector3.zero));
+        player.Enqueue(secondRequest);
+
+        Assert.That(
+            player.TryGetActiveInstance(
+                cue,
+                secondRequest.Target.Handle,
+                clip.ClipId,
+                out GameObject reusedInstance),
+            Is.True);
+        Assert.That(reusedInstance, Is.SameAs(firstInstance));
+        Assert.That(
+            reusedInstance.GetComponent<AudioSource>()
+                .outputAudioMixerGroup,
+            Is.SameAs(sfxGroup));
+    }
+
+    [Test]
+    public void AudioOnlyCue_RoutesThePlayerAudioSourceToSfx()
+    {
+        AudioMixerGroup sfxGroup = LoadSfxMixerGroup();
+        AudioClip audioClip = AudioClip.Create(
+            "CueAudio",
+            64,
+            1,
+            44100,
+            false);
+        _createdObjects.Add(audioClip);
+        BattleVfxCueSO cue =
+            ScriptableObject.CreateInstance<BattleVfxCueSO>();
+        cue.name = "AudioOnly";
+        cue.RegenerateCueId();
+        SetField(cue, "audioClip", audioClip);
+        cue.ValidateDefinition();
+        _createdObjects.Add(cue);
+        BattleVfxPlayer player = CreatePlayer();
+        player.ConfigureAudioMixerGroup(sfxGroup);
+
+        player.Enqueue(CreateRequest(
+            cue,
+            WorldFrame(Vector3.zero),
+            WorldFrame(Vector3.zero)));
+
+        AudioSource source = player.GetComponent<AudioSource>();
+        Assert.That(source, Is.Not.Null);
+        Assert.That(source.outputAudioMixerGroup, Is.SameAs(sfxGroup));
+        Assert.That(source.playOnAwake, Is.False);
+        Assert.That(source.loop, Is.False);
+        Assert.That(source.spatialBlend, Is.Zero);
+        Assert.That(source.dopplerLevel, Is.Zero);
+    }
+
+    [Test]
+    public void AudioManager_RoutesWithoutChangingAuthoredPlaybackSettings()
+    {
+        AudioMixerGroup sfxGroup = LoadSfxMixerGroup();
+        GameObject managerObject = new("AudioManager");
+        GameObject templateObject = new("SfxTemplate");
+        GameObject targetObject = new("VfxAudioSource");
+        _createdObjects.Add(managerObject);
+        _createdObjects.Add(templateObject);
+        _createdObjects.Add(targetObject);
+        AudioManager manager = managerObject.AddComponent<AudioManager>();
+        AudioSource template = templateObject.AddComponent<AudioSource>();
+        AudioSource target = targetObject.AddComponent<AudioSource>();
+        template.outputAudioMixerGroup = sfxGroup;
+        manager.main_speakers = new Speakers
+        {
+            MainSFX = template
+        };
+        target.playOnAwake = true;
+        target.loop = true;
+        target.volume = 0.4f;
+        target.pitch = 0.75f;
+        target.spatialBlend = 0.8f;
+        target.dopplerLevel = 2.5f;
+
+        bool routed = manager.TryRouteToSfx(target);
+
+        Assert.That(routed, Is.True);
+        Assert.That(target.outputAudioMixerGroup, Is.SameAs(sfxGroup));
+        Assert.That(target.playOnAwake, Is.True);
+        Assert.That(target.loop, Is.True);
+        Assert.That(target.volume, Is.EqualTo(0.4f));
+        Assert.That(target.pitch, Is.EqualTo(0.75f));
+        Assert.That(target.spatialBlend, Is.EqualTo(0.8f));
+        Assert.That(target.dopplerLevel, Is.EqualTo(2.5f));
+    }
+
+    [TestCase(0, -80f)]
+    [TestCase(1, -39.6f)]
+    [TestCase(50, -20f)]
+    [TestCase(100, 0f)]
+    public void AudioVolumeMapping_MutesAtZeroAndUsesTheAudibleRangeAboveIt(
+        int sliderValue,
+        float expectedDecibels)
+    {
+        MethodInfo method = typeof(AudioData).GetMethod(
+            "ToMixerVolume",
+            BindingFlags.Instance | BindingFlags.NonPublic);
+        Assert.That(method, Is.Not.Null);
+        float actual = (float)method.Invoke(
+            new AudioData(),
+            new object[] { sliderValue });
+
+        Assert.That(actual, Is.EqualTo(expectedDecibels).Within(0.0001f));
+    }
+
     private BattleVfxPlayer CreatePlayer()
     {
         GameObject gameObject = new("BattleVfxPlayer");
@@ -345,6 +515,22 @@ public sealed class BattleVfxCompositeTimelineTests
             Quaternion.identity,
             Vector3.right,
             Vector3.up);
+    }
+
+    private static AudioMixerGroup LoadSfxMixerGroup()
+    {
+        AudioMixer mixer = AssetDatabase.LoadAssetAtPath<AudioMixer>(
+            "Assets/Settings/MainAudioMixer.mixer");
+        if (mixer == null)
+        {
+            Assert.Ignore(
+                "MainAudioMixer is not available in this script-only checkout.");
+            return null;
+        }
+
+        AudioMixerGroup[] groups = mixer.FindMatchingGroups("SFX");
+        Assert.That(groups, Is.Not.Empty);
+        return groups[0];
     }
 
     private static void SetField(

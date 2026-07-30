@@ -10,7 +10,8 @@ public class AudioData
 
     public bool mute_in_bg = false;
 
-    private const float MinVolume = -80f;
+    private const float MutedVolume = -80f;
+    private const float MinVolume = -40f;
     private const float MaxVolume = 0f;
 
     public void Init()
@@ -77,6 +78,9 @@ public class AudioData
 
     private float ToMixerVolume(int volume)
     {
+        if (volume <= 0)
+            return MutedVolume;
+
         return Mathf.Lerp(MinVolume, MaxVolume, Mathf.Clamp01(volume / 100f));
     }
 

@@ -10,6 +10,19 @@ public class AudioManager : MonoBehaviour
     public AudioMixer mixer;
     [SerializeField] public Speakers main_speakers;
 
+    public AudioMixerGroup SfxMixerGroup
+    {
+        get
+        {
+            AudioSource speaker = main_speakers != null
+                ? main_speakers.MainSFX
+                : null;
+            return speaker != null
+                ? speaker.outputAudioMixerGroup
+                : null;
+        }
+    }
+
     private GameManager _manager;
     private GameEventManager _events;
     private bool _hasFocus = true;
@@ -173,6 +186,19 @@ public class AudioManager : MonoBehaviour
         PlayOneShot(targetSpeaker, clip);
     }
 
+    public bool TryRouteToSfx(AudioSource speaker)
+    {
+        if (speaker == null)
+            return false;
+
+        AudioMixerGroup group = SfxMixerGroup;
+        if (group == null)
+            return false;
+
+        speaker.outputAudioMixerGroup = group;
+        return true;
+    }
+
     public void PlayUiSound(string clipName)
     {
         PlayUiSound(FindUiClip(clipName));
@@ -193,7 +219,7 @@ public class AudioManager : MonoBehaviour
         speaker.PlayOneShot(clip);
     }
 
-    private static void ConfigureSfxSpeaker(
+    private void ConfigureSfxSpeaker(
         AudioSource speaker,
         AudioSource template)
     {
@@ -208,7 +234,7 @@ public class AudioManager : MonoBehaviour
         if (template == null || ReferenceEquals(speaker, template))
             return;
 
-        speaker.outputAudioMixerGroup = template.outputAudioMixerGroup;
+        TryRouteToSfx(speaker);
         speaker.priority = template.priority;
     }
 

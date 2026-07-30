@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using UnityEngine;
+using UnityEngine.Audio;
 
 [DisallowMultipleComponent]
 public sealed class BattleVfxPlayer : MonoBehaviour, IBattleVfxRequestSink
@@ -20,6 +21,8 @@ public sealed class BattleVfxPlayer : MonoBehaviour, IBattleVfxRequestSink
     [Header("Audio")]
     [SerializeField]
     private AudioSource audioSource;
+    [SerializeField]
+    private AudioMixerGroup sfxMixerGroup;
 
     [Header("Quality And Budget")]
     [SerializeField]
@@ -37,6 +40,7 @@ public sealed class BattleVfxPlayer : MonoBehaviour, IBattleVfxRequestSink
     private readonly HashSet<BattleVfxCueSO> _prewarmedCues = new();
     private IBattleVfxTargetResolver _targetResolver;
     private Transform _ownedSpawnRoot;
+    private Transform _inactiveSpawnRoot;
     private long _nextSequence;
     private int _skippedByQualityCount;
     private int _skippedByActiveBudgetCount;
@@ -80,7 +84,17 @@ public sealed class BattleVfxPlayer : MonoBehaviour, IBattleVfxRequestSink
         worldCamera = playbackCamera;
         spawnRoot = playbackRoot;
         if (playbackAudioSource != null)
+        {
             audioSource = playbackAudioSource;
+            RouteAudioSourceToSfx(audioSource);
+        }
+    }
+
+    public void ConfigureAudioMixerGroup(AudioMixerGroup mixerGroup)
+    {
+        sfxMixerGroup = mixerGroup;
+        RouteAudioSourceToSfx(audioSource);
+        RouteAllPooledAudioToSfx();
     }
 
     public void BindTargetResolver(IBattleVfxTargetResolver resolver)
@@ -411,6 +425,9 @@ public sealed class BattleVfxPlayer : MonoBehaviour, IBattleVfxRequestSink
     {
         ClearActive();
         ClearPool();
+        if (_inactiveSpawnRoot != null)
+            DestroySafely(_inactiveSpawnRoot.gameObject);
+        _inactiveSpawnRoot = null;
         if (_ownedSpawnRoot != null)
             DestroySafely(_ownedSpawnRoot.gameObject);
         _ownedSpawnRoot = null;
@@ -1207,11 +1224,15 @@ public sealed class BattleVfxPlayer : MonoBehaviour, IBattleVfxRequestSink
         if (prefab == null)
             return null;
 
-        GameObject instance = Instantiate(prefab, GetOrCreateSpawnRoot());
+        GameObject instance = Instantiate(
+            prefab,
+            GetOrCreateInactiveSpawnRoot());
         instance.name = $"{prefab.name} (Battle VFX)";
         PooledVfx pooled = new(instance, prefab);
+        RoutePooledAudioToSfx(pooled);
         StopAndClear(pooled);
         instance.SetActive(false);
+        instance.transform.SetParent(GetOrCreateSpawnRoot(), false);
         return pooled;
     }
 
@@ -1222,6 +1243,7 @@ public sealed class BattleVfxPlayer : MonoBehaviour, IBattleVfxRequestSink
     {
         pooled.Instance.transform.SetParent(GetOrCreateSpawnRoot(), false);
         ApplyTransform(pooled, cue, anchor);
+        RoutePooledAudioToSfx(pooled);
         pooled.Instance.SetActive(true);
         Restart(pooled);
     }
@@ -1234,6 +1256,7 @@ public sealed class BattleVfxPlayer : MonoBehaviour, IBattleVfxRequestSink
         pooled.Instance.transform.SetParent(GetOrCreateSpawnRoot(), false);
         RestorePlaybackSettings(pooled);
         ApplyClipTransform(pooled, clip, anchor);
+        RoutePooledAudioToSfx(pooled);
         pooled.Instance.SetActive(true);
     }
 
@@ -1852,6 +1875,8 @@ public sealed class BattleVfxPlayer : MonoBehaviour, IBattleVfxRequestSink
     {
         if (pooled == null)
             return;
+        foreach (AudioSource source in pooled.AudioSources)
+            source?.Stop();
         foreach (ParticleSystem particle in pooled.Particles)
         {
             particle?.Stop(
@@ -1893,6 +1918,17 @@ public sealed class BattleVfxPlayer : MonoBehaviour, IBattleVfxRequestSink
         return _ownedSpawnRoot;
     }
 
+    private Transform GetOrCreateInactiveSpawnRoot()
+    {
+        if (_inactiveSpawnRoot != null)
+            return _inactiveSpawnRoot;
+
+        GameObject root = new("Battle VFX Inactive Staging Root");
+        root.SetActive(false);
+        _inactiveSpawnRoot = root.transform;
+        return _inactiveSpawnRoot;
+    }
+
     private void PlayAudio(BattleVfxCueSO cue)
     {
         if (cue == null)
@@ -1916,8 +1952,50 @@ public sealed class BattleVfxPlayer : MonoBehaviour, IBattleVfxRequestSink
         if (audioSource == null)
             audioSource = gameObject.AddComponent<AudioSource>();
         audioSource.playOnAwake = false;
+        audioSource.loop = false;
         audioSource.spatialBlend = 0f;
+        audioSource.dopplerLevel = 0f;
+        RouteAudioSourceToSfx(audioSource);
         audioSource.PlayOneShot(clip);
+    }
+
+    private void RouteAllPooledAudioToSfx()
+    {
+        foreach (ActiveVfx active in _active)
+            RoutePooledAudioToSfx(active?.Pooled);
+        foreach (Stack<PooledVfx> pool in _pools.Values)
+        {
+            foreach (PooledVfx pooled in pool)
+                RoutePooledAudioToSfx(pooled);
+        }
+    }
+
+    private void RoutePooledAudioToSfx(PooledVfx pooled)
+    {
+        if (pooled == null)
+            return;
+        foreach (AudioSource source in pooled.AudioSources)
+            RouteAudioSourceToSfx(source);
+    }
+
+    private bool RouteAudioSourceToSfx(AudioSource source)
+    {
+        if (source == null)
+            return false;
+
+        AudioMixerGroup group = sfxMixerGroup;
+        if (group == null)
+        {
+            AudioManager manager = GameManager.Instance != null
+                ? GameManager.Instance.Audio
+                : null;
+            if (manager != null)
+                return manager.TryRouteToSfx(source);
+            return false;
+        }
+
+        source.outputAudioMixerGroup = group;
+        return true;
     }
 
     private void LogSkipped(BattleVfxCueSO cue, string reason)
@@ -2061,6 +2139,7 @@ public sealed class BattleVfxPlayer : MonoBehaviour, IBattleVfxRequestSink
         public TrailRenderer[] Trails { get; }
         public Animator[] Animators { get; }
         public float[] AnimatorSpeeds { get; }
+        public AudioSource[] AudioSources { get; }
 
         public PooledVfx(GameObject instance, GameObject prefab)
         {
@@ -2099,6 +2178,9 @@ public sealed class BattleVfxPlayer : MonoBehaviour, IBattleVfxRequestSink
                     ? Animators[index].speed
                     : 1f;
             }
+            AudioSources = instance != null
+                ? instance.GetComponentsInChildren<AudioSource>(true)
+                : Array.Empty<AudioSource>();
         }
     }
 }

@@ -151,6 +151,31 @@ public sealed class BattleVfxP2Tests
         Assert.That(PS260714AssetEditorList.RowHeight, Is.EqualTo(42f));
     }
 
+    [Test]
+    public void TimelineClipDelete_AppliesTheSerializedChange()
+    {
+        BattleVfxCueSO cue = CreateCue("Timeline");
+        BattleVfxClipDefinition first = new();
+        BattleVfxClipDefinition second = new();
+        first.RegenerateClipId();
+        second.RegenerateClipId();
+        SetField(
+            cue,
+            "clips",
+            new List<BattleVfxClipDefinition> { first, second });
+        BattleVfxEditorWindow window =
+            ScriptableObject.CreateInstance<BattleVfxEditorWindow>();
+        _createdObjects.Add(window);
+        InvokeMethod(window, "SelectCue", cue);
+        SetField(window, "_selectedClipIndex", 1);
+
+        InvokeMethod(window, "DeleteTimelineClip", 0);
+
+        Assert.That(cue.Clips, Has.Count.EqualTo(1));
+        Assert.That(cue.Clips[0].ClipId, Is.EqualTo(second.ClipId));
+        Assert.That(GetField<int>(window, "_selectedClipIndex"), Is.Zero);
+    }
+
     private BattleVfxCueSO CreateCue(string objectName)
     {
         BattleVfxCueSO cue =
@@ -195,5 +220,26 @@ public sealed class BattleVfxP2Tests
             BindingFlags.Instance | BindingFlags.NonPublic);
         Assert.That(field, Is.Not.Null, $"Missing field: {fieldName}");
         field.SetValue(target, value);
+    }
+
+    private static T GetField<T>(object target, string fieldName)
+    {
+        FieldInfo field = target.GetType().GetField(
+            fieldName,
+            BindingFlags.Instance | BindingFlags.NonPublic);
+        Assert.That(field, Is.Not.Null, $"Missing field: {fieldName}");
+        return (T)field.GetValue(target);
+    }
+
+    private static void InvokeMethod(
+        object target,
+        string methodName,
+        params object[] arguments)
+    {
+        MethodInfo method = target.GetType().GetMethod(
+            methodName,
+            BindingFlags.Instance | BindingFlags.NonPublic);
+        Assert.That(method, Is.Not.Null, $"Missing method: {methodName}");
+        method.Invoke(target, arguments);
     }
 }

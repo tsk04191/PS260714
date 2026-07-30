@@ -539,14 +539,40 @@ public sealed class BattleVfxEditorWindow : EditorWindow
                     GUILayout.Width(55f));
                 if (GUILayout.Button("삭제", GUILayout.Width(42f)))
                 {
-                    clips.DeleteArrayElementAtIndex(index);
-                    _selectedClipIndex = Mathf.Clamp(
-                        _selectedClipIndex,
-                        0,
-                        clips.arraySize - 1);
+                    DeleteTimelineClip(index);
                     GUIUtility.ExitGUI();
                 }
             }
+        }
+    }
+
+    private void DeleteTimelineClip(int index)
+    {
+        if (_selected == null || _serialized == null)
+            return;
+
+        SerializedProperty clips = Find("clips");
+        if (clips == null || index < 0 || index >= clips.arraySize)
+            return;
+
+        clips.DeleteArrayElementAtIndex(index);
+        int remainingCount = clips.arraySize;
+        _serialized.ApplyModifiedProperties();
+        _selected.ValidateDefinition();
+        EditorUtility.SetDirty(_selected);
+        _serialized.Update();
+
+        if (remainingCount == 0)
+        {
+            _selectedClipIndex = -1;
+        }
+        else if (_selectedClipIndex > index)
+        {
+            _selectedClipIndex--;
+        }
+        else if (_selectedClipIndex == index)
+        {
+            _selectedClipIndex = Mathf.Min(index, remainingCount - 1);
         }
     }
 
