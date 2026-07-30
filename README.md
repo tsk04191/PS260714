@@ -89,28 +89,31 @@ Font/Markup Catalog는 Unity 에셋 참조를 담으므로 이 스크립트 전�
 
 ## 페이지 구성
 
-- `TitlePage`는 `START`, `SETTINGS`, `QUIT` 버튼을 제공합니다.
-  `START`는 `MainPage`로 이동하고, `SETTINGS`는 설정 페이지를 연 뒤 뒤로
-  가기 시 다시 타이틀로 돌아옵니다. `QUIT`은 빌드에서는 게임을 종료하고
-  Unity 에디터에서는 플레이 모드를 종료합니다.
-- `MainPage`는 `PLAY`, `CODEX`, `ROSTER`, `SHOP`, `QUEST`, `STORAGE` 버튼을
-  제공합니다. `PLAY`는 `DungeonPage`를 새 런 모드로 열고, 우측 상단의
-  `SETTINGS`는 메인으로 돌아오는 경로를 기억한 채 설정 페이지를 엽니다.
-- `pagCodex`는 적·캐릭터·아이템·이벤트, `pagRoster`는 보유 캐릭터,
-  `pagShop`은 던전 클리어 재화 상점, `pagQuest`는 퀘스트, `pagStorage`는
-  자원·소모형 아이템·티켓을 표시할 페이지 골격입니다. 실제 데이터와 구매·보상
-  규칙이 정해지기 전까지 각 화면은 카테고리 또는 빈 상태를 표시합니다.
-- `pagCodex`의 `ENEMIES`는 `pagEnemyCodex`로 이동합니다. 적 코덱스는 현재
+- `TitlePage`는 화면 전체 클릭·터치로 `MainPage`를 열고, 좌측 상단
+  `공지`와 우측 상단 `설정`을 별도 입력 영역으로 제공합니다. 공지나 설정을
+  누르면 전체 화면 시작 입력이 실행되지 않습니다. 게임 종료는 설정 페이지의
+  확인 팝업을 통해서만 실행되며, 설정에서 뒤로 가면 타이틀로 돌아옵니다.
+- `MainPage`는 캐릭터 중심 로비에서 `작전`, `대원`, `상점`, `모집`,
+  `거점`, `창고`를 제공합니다. `작전`은 `DungeonPage`를 새 런 모드로
+  열고, 우측 상단의 `설정`은 메인으로 돌아오는 경로를 기억한 채 설정 페이지를
+  엽니다. 상단 재화 바는 인게임·무료·유료 크레딧의 향후 연결 위치를 미리
+  확보하며, 데이터가 구현되기 전에는 잔액 대신 대시를 표시합니다.
+- `pagBase`는 거점 시설과 기존 도감 진입점, `pagRoster`는 보유 대원,
+  `pagShop`은 던전 클리어 재화 상점, `pagRecruit`는 모집,
+  `pagStorage`는 자원·소모형 아이템·티켓을 표시합니다. 실제 데이터와
+  구매·보상 규칙이 정해지기 전까지 각 화면은 카테고리 또는 빈 상태를
+  표시합니다.
+- `pagBase`의 `ENEMIES`는 `pagEnemyCodex`로 이동합니다. 적 코덱스는 현재
   연결된 `EnemySO`와 구현된 적 타입을 수집해 적별 가로 스크롤 탭을 만들고,
   기본 체력·등급·위협도·생성 간격·타겟 우선순위·특수 능력을 표시합니다.
   현재 기본 제공 타입은 Basic, Assault, Heavy, Medic, Mechanic, Pointman,
   Shield Bearer, Infiltrator입니다.
-- `pagCodex`의 `CHARACTERS`는 `pagCharacterCodex`로 이동합니다. 캐릭터
+- `pagBase`의 `CHARACTERS`는 `pagCharacterCodex`로 이동합니다. 캐릭터
   코덱스는 프로젝트의 모든 `CharacterSO`를 수집해 캐릭터별 가로 스크롤 탭을
   만들고, 공격 방식·최종 공격력·공격 주기·화염 수치·기술 코스트와 실제 기술
   효과를 표시합니다. 현재 캐릭터는 CharacterSO의 조립식 공격·패시브·기술
   정의를 기준으로 표시합니다.
-- `pagCodex`의 `SKILLS`와 `ITEMS`는 각각 `pagSkillCodex`와
+- `pagBase`의 `SKILLS`와 `ITEMS`는 각각 `pagSkillCodex`와
   `pagItemCodex`로 이동합니다. 기술 코덱스에는 재사용 기술 Focus, 아이템
   코덱스에는 소모형 아이템 Molotov, Precision Shot, Over Supply, Overheat가
   표시됩니다. 각 항목은 에너지 코스트·대상·쿨타임 또는 소모 여부와 실제 전투

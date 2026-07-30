@@ -2063,6 +2063,7 @@ public sealed class CharacterSO : ScriptableObject,
     [SerializeField] private bool initiallyOwned = true;
 
     [Header("Profile")]
+    [SerializeField] private CharacterGrade grade;
     [SerializeField] private Sprite standingSprite;
     [SerializeField] private Sprite iconSprite;
     [FormerlySerializedAs("idleSdSprite")]
@@ -2122,6 +2123,8 @@ public sealed class CharacterSO : ScriptableObject,
         ? characterId
         : name;
     public bool InitiallyOwned => initiallyOwned;
+    public CharacterGrade Grade =>
+        CharacterGradePresentation.Clamp(grade);
     public string NameLocalizationKey => nameLocalizationKey;
     public string DescriptionLocalizationKey => descriptionLocalizationKey;
     public string CharacterName => characterName;
@@ -2176,6 +2179,7 @@ public sealed class CharacterSO : ScriptableObject,
     {
         if (string.IsNullOrWhiteSpace(characterId))
             RegenerateCharacterId();
+        grade = CharacterGradePresentation.Clamp(grade);
 
         passiveDefinitions ??= new List<CharacterPassiveDefinition>();
         foreach (CharacterPassiveDefinition definition in passiveDefinitions)

@@ -248,10 +248,19 @@ namespace PS260714.Localization
             int sourceId = source.GetInstanceID();
             if (fallbackClones.TryGetValue(
                 sourceId,
-                out TMP_FontAsset cached) &&
-                cached != null)
+                out TMP_FontAsset cached))
             {
-                return cached;
+                if (HasUsableAtlas(cached))
+                    return cached;
+
+                fallbackClones.Remove(sourceId);
+                if (cached != null)
+                {
+                    int cachedId = cached.GetInstanceID();
+                    bool ownsResources =
+                        detachedDynamicFontIds.Remove(cachedId);
+                    DestroyRuntimeFont(cached, ownsResources);
+                }
             }
 
             TMP_FontAsset clone = needsDetachedDynamicFont
@@ -281,6 +290,17 @@ namespace PS260714.Localization
 
             fallbackClones[sourceId] = clone;
             return clone;
+        }
+
+        private static bool HasUsableAtlas(TMP_FontAsset font)
+        {
+            if (font == null || font.material == null)
+                return false;
+
+            Texture2D[] atlases = font.atlasTextures;
+            return atlases != null &&
+                   atlases.Length > 0 &&
+                   atlases[0] != null;
         }
 
         private void OnDisable()

@@ -15,6 +15,7 @@ public class DataManager : MonoBehaviour
     [HideInInspector] public DisplayData DisplayDatas;
     [HideInInspector] public AudioData AudioDatas;
     [HideInInspector] public CharacterCollectionData CharacterDatas;
+    [HideInInspector] public InventoryData InventoryDatas;
 
     [Header("Audio Clip")]
     public AudioClipList MusicList = new AudioClipList();
@@ -37,7 +38,9 @@ public class DataManager : MonoBehaviour
 
         IsSetupDone = false;
         CharacterDatas ??= new CharacterCollectionData();
+        InventoryDatas ??= new InventoryData();
         CharacterDatas.Load();
+        InventoryDatas.Load();
         LocalizationFontResolver.RefreshAllClientText();
     }
 
@@ -48,6 +51,7 @@ public class DataManager : MonoBehaviour
         DisplayDatas ??= new DisplayData();
         AudioDatas ??= new AudioData();
         CharacterDatas ??= new CharacterCollectionData();
+        InventoryDatas ??= new InventoryData();
 
         LoadAll(loadCharacters: false);
         SaveALL();
@@ -109,12 +113,17 @@ public class DataManager : MonoBehaviour
 
     public void SaveALL()
     {
+        if (LocalDataResetService.IsResetInProgress)
+            return;
+
         DisplayDatas ??= new DisplayData();
         AudioDatas ??= new AudioData();
         CharacterDatas ??= new CharacterCollectionData();
+        InventoryDatas ??= new InventoryData();
         DisplayDatas.Save(false);
         AudioDatas.Save(false);
         CharacterDatas.Save(false);
+        InventoryDatas.Save(false);
         PlayerPrefs.Save();
 
         _events?.NotifyDataSaved();
@@ -130,10 +139,14 @@ public class DataManager : MonoBehaviour
         DisplayDatas ??= new DisplayData();
         AudioDatas ??= new AudioData();
         CharacterDatas ??= new CharacterCollectionData();
+        InventoryDatas ??= new InventoryData();
         DisplayDatas.Load();
         AudioDatas.Load();
         if (loadCharacters)
+        {
             CharacterDatas.Load();
+            InventoryDatas.Load();
+        }
         
         NotifyCurrentSettings();
         _events?.NotifyDataLoaded();

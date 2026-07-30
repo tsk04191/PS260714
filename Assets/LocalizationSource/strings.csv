@@ -46,12 +46,14 @@ ui.common.quit,공통 버튼,body,,종료,QUIT
 ui.common.back,공통 버튼,body,,뒤로,BACK
 ui.common.ok,공통 버튼,body,,확인,OK
 ui.common.cancel,공통 버튼,body,,취소,CANCEL
-ui.common.play,공통 버튼,body,,플레이,PLAY
+ui.common.play,공통 버튼,body,,작전,OPERATION
 ui.common.codex,공통 버튼,body,,도감,CODEX
-ui.common.roster,공통 버튼,body,,목록,ROSTER
+ui.common.roster,공통 버튼,body,,대원,OPERATORS
 ui.common.shop,공통 버튼,body,,상점,SHOP
-ui.common.quest,공통 버튼,body,,퀘스트,QUEST
-ui.common.storage,공통 버튼,body,,보관함,STORAGE
+ui.common.quest,공통 버튼,body,,임무,MISSIONS
+ui.common.storage,공통 버튼,body,,창고,STORAGE
+ui.common.base,공통 버튼,body,,거점,BASE
+ui.common.recruit,공통 버튼,body,,모집,RECRUIT
 ui.common.enemies,공통 버튼,body,,적,ENEMIES
 ui.common.characters,공통 버튼,body,,캐릭터,CHARACTERS
 ui.common.skills,공통 버튼,body,,기술,SKILLS
@@ -62,8 +64,14 @@ ui.common.consumable_items,공통 버튼,body,,소모형 아이템,CONSUMABLE IT
 ui.common.tickets,공통 버튼,body,,티켓,TICKETS
 ui.title.title,타이틀 페이지 제목,title,,타이틀,TITLE
 ui.title.description,타이틀 페이지 설명,body,,PS260714,PS260714
+ui.title.click_to_start,타이틀 시작 안내,body,,화면을 클릭하여 시작,CLICK ANYWHERE TO START
+ui.title.notice,타이틀 공지 버튼,title,,공지,NOTICE
+ui.title.notice_empty,타이틀 공지 빈 상태,body,,현재 등록된 공지가 없습니다,NO NOTICES AVAILABLE
 ui.main.title,메인 페이지 제목,title,,메인,MAIN
-ui.main.description,메인 페이지 설명,body,,이동할 메뉴를 선택하세요,CHOOSE A DESTINATION
+ui.main.description,메인 페이지 설명,body,,로비 메뉴를 선택하세요,SELECT A LOBBY MENU
+ui.currency.soft,재화 이름,body,,인게임 크레딧,CREDITS
+ui.currency.free,재화 이름,body,,무료 크레딧,FREE CREDIT
+ui.currency.paid,재화 이름,body,,유료 크레딧,PAID CREDIT
 ui.stage_select.title,스테이지 선택 페이지 제목,title,,던전 스테이지,DUNGEON STAGE
 ui.stage_select.description,스테이지 선택 페이지 설명,body,,스테이지를 선택하세요.,SELECT A STAGE
 ui.stage_select.test_field,스테이지 선택 버튼,body,,0 스테이지 · 테스트 필드,STAGE 0 · TEST FIELD
@@ -80,9 +88,9 @@ ui.tutorial.return,튜토리얼 버튼,body,,스테이지 선택으로,RETURN TO
 ui.tutorial.start_battle,튜토리얼 버튼,body,,전투 시작,START BATTLE
 ui.codex.title,도감 허브 제목,title,,도감,CODEX
 ui.codex.description,도감 허브 설명,body,,적 | 캐릭터 | 기술 | 아이템,ENEMIES | CHARACTERS | SKILLS | ITEMS
-ui.roster.title,목록 페이지 제목,title,,목록,ROSTER
-ui.roster.description,목록 페이지 설명,body,,보유 캐릭터,OWNED CHARACTERS
-ui.roster.empty,목록 빈 상태,body,,보유 캐릭터 없음,OWNED CHARACTERS - EMPTY
+ui.roster.title,대원 페이지 제목,title,,대원,OPERATORS
+ui.roster.description,대원 페이지 설명,body,,보유 대원,OWNED OPERATORS
+ui.roster.empty,대원 빈 상태,body,,보유 대원 없음,OWNED OPERATORS - EMPTY
 ui.roster.search_placeholder,목록 검색 입력,body,,이름 또는 ID,NAME OR ID
 ui.roster.search,목록 검색 버튼,body,,검색,SEARCH
 ui.roster.filter_owned,목록 보유 필터,body,,보유만,OWNED
@@ -92,15 +100,30 @@ ui.shop.title,상점 페이지 제목,title,,상점,SHOP
 ui.shop.description,상점 페이지 설명,body,,던전 클리어 재화 상점,DUNGEON CLEAR CURRENCY SHOP
 ui.shop.currency,상점 재화 표시,number,,던전 재화 - 0,DUNGEON CURRENCY - 0
 ui.shop.coming_soon,상점 빈 상태,body,,상점 상품 - 준비 중,SHOP ITEMS - COMING SOON
-ui.quest.title,퀘스트 페이지 제목,title,,퀘스트,QUEST
-ui.quest.description,퀘스트 페이지 설명,body,,퀘스트 진행도,QUEST PROGRESS
-ui.quest.empty,퀘스트 빈 상태,body,,퀘스트 목록 - 비어 있음,QUEST LIST - EMPTY
-ui.storage.title,보관함 페이지 제목,title,,보관함,STORAGE
-ui.storage.description,보관함 페이지 설명,body,,자원 | 소모형 아이템 | 티켓,RESOURCES | CONSUMABLE ITEMS | TICKETS
+ui.quest.title,임무 페이지 제목,title,,임무,MISSIONS
+ui.quest.description,임무 페이지 설명,body,,임무 진행도,MISSION PROGRESS
+ui.quest.empty,임무 빈 상태,body,,임무 목록 - 비어 있음,MISSION LIST - EMPTY
+ui.storage.title,창고 페이지 제목,title,,창고,STORAGE
+ui.storage.description,창고 페이지 설명,body,,자원 | 소모형 아이템 | 티켓,RESOURCES | CONSUMABLE ITEMS | TICKETS
+ui.base.title,거점 페이지 제목,title,,거점,BASE
+ui.base.description,거점 페이지 설명,body,,거점 관리 | 임무 | 기록,BASE MANAGEMENT | MISSIONS | RECORDS
+ui.base.facilities_coming_soon,거점 빈 상태,body,,거점 시설 - 준비 중,BASE FACILITIES - COMING SOON
+ui.recruit.title,모집 페이지 제목,title,,모집,RECRUIT
+ui.recruit.description,모집 페이지 설명,body,,새로운 대원을 모집합니다,RECRUIT NEW OPERATORS
+ui.recruit.coming_soon,모집 빈 상태,body,,모집 시스템 - 준비 중,RECRUITMENT - COMING SOON
 ui.settings.title,설정 페이지 제목,title,,설정,SETTINGS
 ui.settings.quit_game,설정 종료 버튼,body,,게임 종료,QUIT GAME
 ui.settings.quit_confirm_title,종료 확인 제목,title,,게임을 종료하시겠습니까?,QUIT GAME?
 ui.settings.quit_confirm_message,종료 확인 설명,body,,정말 게임을 종료하시겠습니까?,Are you sure you want to quit?
+ui.settings.local_data.title,로컬 데이터 관리 제목,title,,캐시 데이터 삭제,DELETE LOCAL DATA
+ui.settings.local_data.description,로컬 데이터 관리 설명,body,,대원 보유 정보와 재화 및 아이템 그리고 모든 설정을 삭제합니다.,Deletes all locally saved operators currencies items and settings.
+ui.settings.local_data.delete,로컬 데이터 삭제 버튼,body,,삭제,DELETE
+ui.settings.local_data.confirm_first_title,로컬 데이터 1차 확인 제목,title,,로컬 데이터 삭제,DELETE LOCAL DATA?
+ui.settings.local_data.confirm_first_message,로컬 데이터 1차 확인 설명,body,,대원 보유 정보와 재화 및 아이템 그리고 모든 설정이 삭제됩니다.,All locally saved operators currencies items and settings will be deleted.
+ui.settings.local_data.continue,로컬 데이터 확인 계속 버튼,body,,계속,CONTINUE
+ui.settings.local_data.confirm_final_title,로컬 데이터 2차 확인 제목,title,,정말 삭제하시겠습니까?,DELETE EVERYTHING?
+ui.settings.local_data.confirm_final_message,로컬 데이터 2차 확인 설명,body,,삭제한 데이터는 복구할 수 없습니다. 삭제 후 게임이 종료됩니다.,Deleted data cannot be recovered. The game will close after deletion.
+ui.settings.local_data.delete_all,로컬 데이터 최종 삭제 버튼,body,,모두 삭제,DELETE ALL
 ui.settings.tab.display,설정 탭,body,,화면,DISPLAY
 ui.settings.tab.sound,설정 탭,body,,소리,SOUND
 ui.settings.tab.game,설정 탭,body,,게임,GAME

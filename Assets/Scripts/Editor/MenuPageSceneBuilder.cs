@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using TMPro;
 using UnityEditor;
 using UnityEditor.SceneManagement;
 using UnityEngine;
@@ -11,10 +12,10 @@ public static class MenuPageSceneBuilder
     private static readonly string[] MainMenuButtonNames =
     {
         "btnPLAY",
-        "btnCODEX",
         "btnROSTER",
         "btnSHOP",
-        "btnQUEST",
+        "btnRECRUIT",
+        "btnBASE",
         "btnSTORAGE",
     };
     private const string ValidateDesignerUiMenuPath =
@@ -104,6 +105,8 @@ public static class MenuPageSceneBuilder
         }
 
         int migratedCount = MigrateStaticMenuPages(layClient);
+        if (EnsureRecruitDesignerUi(layClient))
+            migratedCount++;
         string[] pageNames =
         {
             "pagEnemyCodex",
@@ -138,6 +141,45 @@ public static class MenuPageSceneBuilder
         }
     }
 
+    private static bool EnsureRecruitDesignerUi(GameObject layClient)
+    {
+        GameObject recruitObject =
+            FindDirectChild(layClient, "pagRecruit");
+        MainSubPage recruitPage = recruitObject != null
+            ? recruitObject.GetComponent<MainSubPage>()
+            : null;
+        if (recruitPage == null)
+            return false;
+
+        RecruitBannerDesignerBindings bannerBindings =
+            recruitObject.GetComponentInChildren<
+                RecruitBannerDesignerBindings>(true);
+        RecruitRevealDesignerBindings revealBindings =
+            recruitObject.GetComponentInChildren<
+                RecruitRevealDesignerBindings>(true);
+        bool alreadyValid =
+            bannerBindings != null &&
+            bannerBindings.HasDesignerLayout &&
+            bannerBindings.HasRequiredReferences &&
+            revealBindings != null &&
+            revealBindings.HasDesignerLayout &&
+            revealBindings.HasRequiredReferences;
+        if (alreadyValid)
+            return false;
+
+        if (!recruitPage.SyncRecruitEditorPreview(
+                0,
+                0,
+                out string error))
+        {
+            Debug.LogError(
+                "Recruit designer UI migration failed: " + error,
+                recruitPage);
+            return false;
+        }
+        return true;
+    }
+
     private static int MigrateStaticMenuPages(GameObject layClient)
     {
         string[] pageNames =
@@ -145,10 +187,10 @@ public static class MenuPageSceneBuilder
             "pagTitle",
             "pagMain",
             "pagStageSelect",
-            "pagCodex",
+            "pagBase",
             "pagRoster",
             "pagShop",
-            "pagQuest",
+            "pagRecruit",
             "pagStorage",
         };
         int migratedCount = 0;
@@ -230,11 +272,52 @@ public static class MenuPageSceneBuilder
             EditorSceneManager.MarkSceneDirty(scene);
     }
 
+    internal static void RestoreTitleMenuDefaultLayout(TitlePage page)
+    {
+        if (page == null || Application.isPlaying)
+            return;
+
+        if (!TryGetTitleMenuLayout(
+                page,
+                out RectTransform panel,
+                out RectTransform title,
+                out RectTransform description,
+                out RectTransform buttonRoot,
+                out RectTransform startButton,
+                out RectTransform noticeButton,
+                out RectTransform settingsButton))
+        {
+            Debug.LogWarning(
+                "Title menu hierarchy is incomplete. Rebuild its editor " +
+                "preview before restoring the layout.",
+                page);
+            return;
+        }
+
+        ApplyTitleMenuDefaultLayout(
+            panel,
+            title,
+            description,
+            buttonRoot,
+            startButton,
+            noticeButton,
+            settingsButton);
+        Scene scene = page.gameObject.scene;
+        if (scene.IsValid() && scene.isLoaded)
+            EditorSceneManager.MarkSceneDirty(scene);
+    }
+
     internal static void RestoreStaticMenuDefaultLayout(
         RuntimeMenuPageBase page)
     {
         if (page == null || Application.isPlaying)
             return;
+
+        if (page is TitlePage titlePage)
+        {
+            RestoreTitleMenuDefaultLayout(titlePage);
+            return;
+        }
 
         if (page is MainPage mainPage)
         {
@@ -655,6 +738,9 @@ public static class MenuPageSceneBuilder
     private static bool RepairCollapsedStaticMenuLayout(
         RuntimeMenuPageBase page)
     {
+        if (page is TitlePage titlePage)
+            return RepairCollapsedTitleMenuLayout(titlePage);
+
         if (page is MainPage mainPage)
             return RepairCollapsedMainMenuLayout(mainPage);
 
@@ -677,6 +763,229 @@ public static class MenuPageSceneBuilder
             buttonRoot,
             buttons);
         return true;
+    }
+
+    private static bool RepairCollapsedTitleMenuLayout(TitlePage page)
+    {
+        if (!TryGetTitleMenuLayout(
+                page,
+                out RectTransform panel,
+                out RectTransform title,
+                out RectTransform description,
+                out RectTransform buttonRoot,
+                out RectTransform startButton,
+                out RectTransform noticeButton,
+                out RectTransform settingsButton))
+        {
+            return false;
+        }
+
+        bool startIsFullScreen =
+            startButton.anchorMin == Vector2.zero &&
+            startButton.anchorMax == Vector2.one &&
+            startButton.offsetMin.sqrMagnitude < 0.01f &&
+            startButton.offsetMax.sqrMagnitude < 0.01f;
+        if (startIsFullScreen)
+            return false;
+
+        ApplyTitleMenuDefaultLayout(
+            panel,
+            title,
+            description,
+            buttonRoot,
+            startButton,
+            noticeButton,
+            settingsButton);
+        return true;
+    }
+
+    private static bool TryGetTitleMenuLayout(
+        TitlePage page,
+        out RectTransform panel,
+        out RectTransform title,
+        out RectTransform description,
+        out RectTransform buttonRoot,
+        out RectTransform startButton,
+        out RectTransform noticeButton,
+        out RectTransform settingsButton)
+    {
+        panel = null;
+        title = null;
+        description = null;
+        buttonRoot = null;
+        startButton = null;
+        noticeButton = null;
+        settingsButton = null;
+        if (page == null)
+            return false;
+
+        Transform runtimeRoot = page.transform.Find(
+            RuntimeMenuPageBase.RuntimeRootObjectName);
+        panel = runtimeRoot != null
+            ? runtimeRoot.Find("grpMenuPanel") as RectTransform
+            : null;
+        title = panel != null
+            ? panel.Find("txtPageTitle") as RectTransform
+            : null;
+        description = panel != null
+            ? panel.Find("txtPageDescription") as RectTransform
+            : null;
+        buttonRoot = panel != null
+            ? panel.Find("grpMenuButtons") as RectTransform
+            : null;
+        startButton = buttonRoot != null
+            ? buttonRoot.Find("btnSTARTFullscreen") as RectTransform
+            : null;
+        noticeButton = runtimeRoot != null
+            ? runtimeRoot.Find("btnNOTICEOverlay") as RectTransform
+            : null;
+        settingsButton = runtimeRoot != null
+            ? runtimeRoot.Find("btnSETTINGSOverlay") as RectTransform
+            : null;
+
+        return panel != null && title != null &&
+               description != null && buttonRoot != null &&
+               startButton != null && noticeButton != null &&
+               settingsButton != null;
+    }
+
+    private static void ApplyTitleMenuDefaultLayout(
+        RectTransform panel,
+        RectTransform title,
+        RectTransform description,
+        RectTransform buttonRoot,
+        RectTransform startButton,
+        RectTransform noticeButton,
+        RectTransform settingsButton)
+    {
+        SetStretch(panel, 0f, 0f, 0f, 0f);
+        SetCentered(
+            title,
+            0f,
+            88f,
+            900f,
+            120f,
+            "Restore Title Heading");
+        SetCentered(
+            description,
+            0f,
+            8f,
+            900f,
+            54f,
+            "Restore Title Description");
+        SetStretch(buttonRoot, 0f, 0f, 0f, 0f);
+        SetStretch(startButton, 0f, 0f, 0f, 0f);
+
+        Image panelImage = panel.GetComponent<Image>();
+        if (panelImage != null)
+        {
+            Undo.RecordObject(panelImage, "Restore Title Panel");
+            panelImage.color = Color.clear;
+            panelImage.raycastTarget = false;
+            EditorUtility.SetDirty(panelImage);
+        }
+
+        Image startImage = startButton.GetComponent<Image>();
+        Button start = startButton.GetComponent<Button>();
+        if (startImage != null)
+        {
+            Undo.RecordObject(startImage, "Restore Title Start Area");
+            startImage.color = Color.clear;
+            startImage.raycastTarget = true;
+            EditorUtility.SetDirty(startImage);
+        }
+        if (start != null)
+        {
+            Undo.RecordObject(start, "Restore Title Start Area");
+            ColorBlock colors = start.colors;
+            colors.normalColor = Color.clear;
+            colors.highlightedColor =
+                new Color(1f, 1f, 1f, 0.035f);
+            colors.pressedColor =
+                new Color(0f, 0f, 0f, 0.08f);
+            colors.selectedColor = Color.clear;
+            colors.disabledColor = Color.clear;
+            start.colors = colors;
+            EditorUtility.SetDirty(start);
+        }
+
+        RectTransform prompt = startButton.Find("txtLabel")
+            as RectTransform;
+        if (prompt != null)
+        {
+            Undo.RecordObject(prompt, "Restore Title Start Prompt");
+            prompt.anchorMin = new Vector2(0.5f, 0f);
+            prompt.anchorMax = new Vector2(0.5f, 0f);
+            prompt.pivot = new Vector2(0.5f, 0f);
+            prompt.anchoredPosition = new Vector2(0f, 64f);
+            prompt.sizeDelta = new Vector2(760f, 52f);
+            TextMeshProUGUI promptText =
+                prompt.GetComponent<TextMeshProUGUI>();
+            if (promptText != null)
+            {
+                promptText.fontSize = 22f;
+                promptText.fontSizeMax = 22f;
+                promptText.fontSizeMin = 15f;
+                promptText.fontStyle = FontStyles.Normal;
+            }
+            EditorUtility.SetDirty(prompt);
+        }
+
+        SetTopCorner(
+            noticeButton,
+            false,
+            48f,
+            32f,
+            220f,
+            64f,
+            "Restore Title Notice Button");
+        SetTopCorner(
+            settingsButton,
+            true,
+            48f,
+            32f,
+            80f,
+            64f,
+            "Restore Title Settings Button");
+
+        DisableLayoutGroup(buttonRoot);
+        DisableLayoutGroup(panel);
+        Transform titleBackdrop = panel.parent.Find("imgTitleBackdrop");
+        if (titleBackdrop != null)
+        {
+            titleBackdrop.SetAsFirstSibling();
+            panel.SetSiblingIndex(1);
+        }
+        else
+        {
+            panel.SetAsFirstSibling();
+        }
+        noticeButton.SetAsLastSibling();
+        settingsButton.SetAsLastSibling();
+        Transform noticePopup = panel.parent.Find("grpNoticePopup");
+        if (noticePopup != null)
+            noticePopup.SetAsLastSibling();
+    }
+
+    private static void SetTopCorner(
+        RectTransform rect,
+        bool right,
+        float horizontal,
+        float top,
+        float width,
+        float height,
+        string undoName)
+    {
+        Undo.RecordObject(rect, undoName);
+        Vector2 anchor = new(right ? 1f : 0f, 1f);
+        rect.anchorMin = anchor;
+        rect.anchorMax = anchor;
+        rect.pivot = anchor;
+        rect.anchoredPosition = new Vector2(
+            right ? -horizontal : horizontal,
+            -top);
+        rect.sizeDelta = new Vector2(width, height);
+        EditorUtility.SetDirty(rect);
     }
 
     private static bool TryGetStaticMenuLayout(
@@ -1013,12 +1322,12 @@ public static class MenuPageSceneBuilder
         RectTransform buttonRoot,
         IReadOnlyList<RectTransform> buttons)
     {
-        SetCentered(
+        SetRightMiddle(
             panel,
-            0f,
-            0f,
-            620f,
-            820f,
+            48f,
+            -20f,
+            720f,
+            638f,
             "Restore Main Menu Panel");
         SetCentered(
             title,
@@ -1037,26 +1346,75 @@ public static class MenuPageSceneBuilder
         SetCentered(
             buttonRoot,
             0f,
-            -93f,
-            540f,
-            554f,
+            0f,
+            720f,
+            638f,
             "Restore Main Menu Button Area");
 
-        const float firstButtonY = 215f;
-        const float buttonStep = 86f;
-        for (int index = 0; index < buttons.Count; index++)
-        {
-            SetCentered(
-                buttons[index],
-                0f,
-                firstButtonY - index * buttonStep,
-                540f,
-                72f,
-                "Restore Main Menu Button");
-        }
+        SetCentered(
+            buttons[0],
+            0f,
+            214f,
+            720f,
+            210f,
+            "Restore Main Operation Button");
+        SetCentered(
+            buttons[1],
+            0f,
+            28f,
+            720f,
+            130f,
+            "Restore Main Operator Button");
+        SetCentered(
+            buttons[2],
+            -184f,
+            -118f,
+            352f,
+            130f,
+            "Restore Main Shop Button");
+        SetCentered(
+            buttons[3],
+            184f,
+            -118f,
+            352f,
+            130f,
+            "Restore Main Recruit Button");
+        SetCentered(
+            buttons[4],
+            -96f,
+            -259f,
+            528f,
+            120f,
+            "Restore Main Base Button");
+        SetCentered(
+            buttons[5],
+            272f,
+            -259f,
+            176f,
+            120f,
+            "Restore Main Storage Button");
+        title.gameObject.SetActive(false);
+        description.gameObject.SetActive(false);
 
         DisableLayoutGroup(buttonRoot);
         DisableLayoutGroup(panel);
+    }
+
+    private static void SetRightMiddle(
+        RectTransform rect,
+        float right,
+        float y,
+        float width,
+        float height,
+        string undoName)
+    {
+        Undo.RecordObject(rect, undoName);
+        rect.anchorMin = new Vector2(1f, 0.5f);
+        rect.anchorMax = new Vector2(1f, 0.5f);
+        rect.pivot = new Vector2(1f, 0.5f);
+        rect.anchoredPosition = new Vector2(-right, y);
+        rect.sizeDelta = new Vector2(width, height);
+        EditorUtility.SetDirty(rect);
     }
 
     private static void SetRightStretch(
@@ -1087,10 +1445,10 @@ public static class MenuPageSceneBuilder
             "pagTitle",
             "pagMain",
             "pagStageSelect",
-            "pagCodex",
+            "pagBase",
             "pagRoster",
             "pagShop",
-            "pagQuest",
+            "pagRecruit",
             "pagStorage",
         };
         foreach (string pageName in staticPageNames)
@@ -1112,6 +1470,34 @@ public static class MenuPageSceneBuilder
                      IsCollapsedStaticMenuLayout(buttonRoot, buttons))
                 issues.Add(
                     $"{pageName} menu buttons overlap at the same position.");
+        }
+
+        GameObject recruitObject =
+            FindDirectChild(layClient, "pagRecruit");
+        RecruitBannerDesignerBindings bannerBindings =
+            recruitObject != null
+                ? recruitObject.GetComponentInChildren<
+                    RecruitBannerDesignerBindings>(true)
+                : null;
+        RecruitRevealDesignerBindings revealBindings =
+            recruitObject != null
+                ? recruitObject.GetComponentInChildren<
+                    RecruitRevealDesignerBindings>(true)
+                : null;
+        if (bannerBindings == null ||
+            !bannerBindings.HasDesignerLayout ||
+            !bannerBindings.HasRequiredReferences)
+        {
+            issues.Add(
+                "pagRecruit banner is not bound to designer-owned scene UI.");
+        }
+        if (revealBindings == null ||
+            !revealBindings.HasDesignerLayout ||
+            !revealBindings.HasRequiredReferences)
+        {
+            issues.Add(
+                "pagRecruit reveal overlay is not bound to designer-owned " +
+                "scene UI.");
         }
 
         string[] pageNames =
@@ -1176,11 +1562,19 @@ public static class MenuPageSceneBuilder
             return;
         }
 
-        GameObject codexObject = FindDirectChild(layClient, "pagCodex");
+        GameObject codexObject =
+            FindDirectChild(layClient, "pagBase") ??
+            FindDirectChild(layClient, "pagCodex");
         GameObject rosterObject = FindDirectChild(layClient, "pagRoster");
         GameObject shopObject = FindDirectChild(layClient, "pagShop");
-        GameObject questObject = FindDirectChild(layClient, "pagQuest");
+        GameObject questObject =
+            FindDirectChild(layClient, "pagRecruit") ??
+            FindDirectChild(layClient, "pagQuest");
         GameObject storageObject = FindDirectChild(layClient, "pagStorage");
+        if (codexObject != null)
+            codexObject.name = "pagBase";
+        if (questObject != null)
+            questObject.name = "pagRecruit";
         GameObject enemyCodexObject =
             FindDirectChild(layClient, "pagEnemyCodex");
         GameObject characterCodexObject =
@@ -1282,10 +1676,10 @@ public static class MenuPageSceneBuilder
             layClient,
             "pagStageSelect",
             undoName);
-        codexObject ??= CreatePageObject(layClient, "pagCodex", undoName);
+        codexObject ??= CreatePageObject(layClient, "pagBase", undoName);
         rosterObject ??= CreatePageObject(layClient, "pagRoster", undoName);
         shopObject ??= CreatePageObject(layClient, "pagShop", undoName);
-        questObject ??= CreatePageObject(layClient, "pagQuest", undoName);
+        questObject ??= CreatePageObject(layClient, "pagRecruit", undoName);
         storageObject ??= CreatePageObject(layClient, "pagStorage", undoName);
         enemyCodexObject ??= CreatePageObject(
             layClient,
@@ -1341,10 +1735,10 @@ public static class MenuPageSceneBuilder
         SetObjectReference(titlePage, "mainPage", mainObject);
         SetObjectReference(titlePage, "settingPage", settingObject);
         SetObjectReference(mainPage, "stageSelectPage", stageSelectObject);
-        SetObjectReference(mainPage, "codexPage", codexObject);
+        SetObjectReference(mainPage, "basePage", codexObject);
         SetObjectReference(mainPage, "rosterPage", rosterObject);
         SetObjectReference(mainPage, "shopPage", shopObject);
-        SetObjectReference(mainPage, "questPage", questObject);
+        SetObjectReference(mainPage, "recruitPage", questObject);
         SetObjectReference(mainPage, "storagePage", storageObject);
         SetObjectReference(mainPage, "settingPage", settingObject);
         SetObjectReference(stageSelectPage, "mainPage", mainObject);
@@ -1386,7 +1780,7 @@ public static class MenuPageSceneBuilder
 
         ConfigureSubPage(
             codexPage,
-            EMainSubPageType.Codex,
+            EMainSubPageType.Base,
             mainObject);
         ConfigureSubPage(
             rosterPage,
@@ -1398,7 +1792,7 @@ public static class MenuPageSceneBuilder
             mainObject);
         ConfigureSubPage(
             questPage,
-            EMainSubPageType.Quest,
+            EMainSubPageType.Recruit,
             mainObject);
         ConfigureSubPage(
             storagePage,

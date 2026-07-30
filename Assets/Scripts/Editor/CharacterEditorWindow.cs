@@ -740,6 +740,7 @@ public sealed class CharacterEditorWindow : EditorWindow
     {
         bool selected = character == _selectedCharacter;
         string label = character.name + "\n" +
+                       $"G{(int)character.Grade} / " +
                        $"A{character.AttackDefinitions.Count} / " +
                        $"P{character.PassiveDefinitions.Count} / " +
                        $"S{character.SkillDefinitions.Count}";
@@ -908,6 +909,8 @@ public sealed class CharacterEditorWindow : EditorWindow
         }
         EditorGUILayout.Space(8f);
         DrawProfileProperty("characterName", "이름");
+        EditorGUILayout.Space(4f);
+        DrawCharacterGradeProperty();
         EditorGUILayout.Space(4f);
         DrawProfileProperty("initiallyOwned", "기본 보유");
         EditorGUILayout.Space(6f);
@@ -1151,6 +1154,62 @@ public sealed class CharacterEditorWindow : EditorWindow
         EditorGUILayout.HelpBox(
             $"Property '{propertyName}' was not found.",
             MessageType.Error);
+    }
+
+    private void DrawCharacterGradeProperty()
+    {
+        SerializedProperty gradeProperty =
+            _serializedCharacter.FindProperty("grade");
+        if (gradeProperty == null)
+        {
+            EditorGUILayout.HelpBox(
+                "Property 'grade' was not found.",
+                MessageType.Error);
+            return;
+        }
+
+        using (new EditorGUILayout.HorizontalScope())
+        {
+            EditorGUILayout.PropertyField(
+                gradeProperty,
+                new GUIContent("캐릭터 등급 (0~3)"));
+            CharacterGradePaletteSO palette =
+                CharacterGradePresentation.Palette;
+            using (new EditorGUI.DisabledScope(palette == null))
+            {
+                if (GUILayout.Button("공통 팔레트", GUILayout.Width(92f)))
+                {
+                    Selection.activeObject = palette;
+                    EditorGUIUtility.PingObject(palette);
+                }
+            }
+        }
+
+        CharacterGrade grade = CharacterGradePresentation.Clamp(
+            (CharacterGrade)gradeProperty.enumValueIndex);
+        CharacterGradeStyle style =
+            CharacterGradePresentation.GetStyle(grade);
+        Rect preview = EditorGUILayout.GetControlRect(false, 24f);
+        EditorGUI.DrawRect(preview, style.BackgroundColor);
+        EditorGUI.DrawRect(
+            new Rect(preview.x, preview.y, 8f, preview.height),
+            style.PrimaryColor);
+        Handles.DrawSolidRectangleWithOutline(
+            preview,
+            Color.clear,
+            style.OutlineColor);
+
+        GUIStyle labelStyle = new(EditorStyles.boldLabel);
+        labelStyle.normal.textColor = style.TextColor;
+        EditorGUI.LabelField(
+            new Rect(
+                preview.x + 16f,
+                preview.y,
+                preview.width - 20f,
+                preview.height),
+            $"공통 등급 색상 · " +
+            $"{CharacterGradePresentation.GetLabel(grade)}",
+            labelStyle);
     }
 
     private void DrawCharacterReferenceStats()

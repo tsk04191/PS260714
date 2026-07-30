@@ -12,6 +12,12 @@ public sealed class SettingPage : MonoBehaviour, IPage
         new(0.18f, 0.36f, 0.32f, 1f);
     private static readonly Color UnselectedTabColor =
         new(0.08f, 0.16f, 0.15f, 1f);
+    private static readonly Color DataManagementCardColor =
+        new(0.075f, 0.14f, 0.13f, 1f);
+    private static readonly Color DestructiveButtonColor =
+        new(0.52f, 0.12f, 0.1f, 1f);
+    private static readonly Color ContinueButtonColor =
+        new(0.18f, 0.36f, 0.32f, 1f);
     private static readonly string[] DisplayModeLocalizationKeys =
     {
         LocalizationKeys.UiSettingsModeFullscreen,
@@ -69,6 +75,14 @@ public sealed class SettingPage : MonoBehaviour, IPage
     [SerializeField] private Button quitOkButton;
     [SerializeField] private Button quitCancelButton;
 
+    private Button _deleteLocalDataButton;
+    private GameObject _localDataResetPopup;
+    private Button _localDataResetConfirmButton;
+    private Button _localDataResetCancelButton;
+    private TextMeshProUGUI _localDataResetTitleText;
+    private TextMeshProUGUI _localDataResetMessageText;
+    private TextMeshProUGUI _localDataResetConfirmText;
+    private int _localDataResetConfirmationStep;
     private bool _initialized;
     private bool _eventsBound;
     private bool _isRefreshingControls;
@@ -98,6 +112,7 @@ public sealed class SettingPage : MonoBehaviour, IPage
         SelectTab(_selectedTabIndex);
         RefreshSettingsControls();
         HideQuitConfirmation();
+        HideLocalDataResetConfirmation();
         RefreshQuitButtonAvailability();
     }
 
@@ -105,6 +120,7 @@ public sealed class SettingPage : MonoBehaviour, IPage
     {
         UnbindEvents();
         HideQuitConfirmation();
+        HideLocalDataResetConfirmation();
     }
 
     private void OnDestroy()
@@ -128,6 +144,7 @@ public sealed class SettingPage : MonoBehaviour, IPage
         SelectTab(_selectedTabIndex);
         RefreshSettingsControls();
         HideQuitConfirmation();
+        HideLocalDataResetConfirmation();
         RefreshQuitButtonAvailability();
     }
 
@@ -155,6 +172,7 @@ public sealed class SettingPage : MonoBehaviour, IPage
         SaveSettings();
         UnbindEvents();
         HideQuitConfirmation();
+        HideLocalDataResetConfirmation();
         gameObject.SetActive(false);
     }
 
@@ -167,6 +185,7 @@ public sealed class SettingPage : MonoBehaviour, IPage
         if (!ValidateReferences())
             return;
 
+        EnsureLocalDataResetControls();
         BindSceneLocalizedTexts();
 
         ResolveSettingManagers();
@@ -177,6 +196,7 @@ public sealed class SettingPage : MonoBehaviour, IPage
         SelectTab(_selectedTabIndex);
         RefreshSettingsControls();
         HideQuitConfirmation();
+        HideLocalDataResetConfirmation();
         RefreshQuitButtonAvailability();
 
         if (isActiveAndEnabled)
@@ -233,6 +253,12 @@ public sealed class SettingPage : MonoBehaviour, IPage
         quitButton.onClick.AddListener(HandleQuitClicked);
         quitOkButton.onClick.AddListener(HandleQuitOkClicked);
         quitCancelButton.onClick.AddListener(HideQuitConfirmation);
+        _deleteLocalDataButton?.onClick.AddListener(
+            HandleDeleteLocalDataClicked);
+        _localDataResetConfirmButton?.onClick.AddListener(
+            HandleLocalDataResetConfirmClicked);
+        _localDataResetCancelButton?.onClick.AddListener(
+            HideLocalDataResetConfirmation);
 
         if (_gameEvents != null)
         {
@@ -292,6 +318,21 @@ public sealed class SettingPage : MonoBehaviour, IPage
             quitOkButton.onClick.RemoveListener(HandleQuitOkClicked);
         if (quitCancelButton != null)
             quitCancelButton.onClick.RemoveListener(HideQuitConfirmation);
+        if (_deleteLocalDataButton != null)
+        {
+            _deleteLocalDataButton.onClick.RemoveListener(
+                HandleDeleteLocalDataClicked);
+        }
+        if (_localDataResetConfirmButton != null)
+        {
+            _localDataResetConfirmButton.onClick.RemoveListener(
+                HandleLocalDataResetConfirmClicked);
+        }
+        if (_localDataResetCancelButton != null)
+        {
+            _localDataResetCancelButton.onClick.RemoveListener(
+                HideLocalDataResetConfirmation);
+        }
 
         if (_gameEvents != null)
         {
@@ -310,6 +351,20 @@ public sealed class SettingPage : MonoBehaviour, IPage
 
     private void HandleBackClicked()
     {
+        if (_localDataResetPopup != null &&
+            _localDataResetPopup.activeSelf)
+        {
+            HideLocalDataResetConfirmation();
+            return;
+        }
+
+        if (quitConfirmationPopup != null &&
+            quitConfirmationPopup.activeSelf)
+        {
+            HideQuitConfirmation();
+            return;
+        }
+
         GameObject targetPage = _returnPage != null
             ? _returnPage
             : dungeonPage;
@@ -451,7 +506,9 @@ public sealed class SettingPage : MonoBehaviour, IPage
 
     private void HandleQuitClicked()
     {
+        HideLocalDataResetConfirmation();
         quitConfirmationPopup.SetActive(true);
+        quitConfirmationPopup.transform.SetAsLastSibling();
     }
 
     private void HandleQuitOkClicked()
@@ -476,6 +533,81 @@ public sealed class SettingPage : MonoBehaviour, IPage
     {
         if (quitConfirmationPopup != null)
             quitConfirmationPopup.SetActive(false);
+    }
+
+    private void HandleDeleteLocalDataClicked()
+    {
+        HideQuitConfirmation();
+        ShowLocalDataResetConfirmation(1);
+    }
+
+    private void HandleLocalDataResetConfirmClicked()
+    {
+        if (_localDataResetConfirmationStep == 1)
+        {
+            ShowLocalDataResetConfirmation(2);
+            return;
+        }
+
+        if (_localDataResetConfirmationStep != 2 ||
+            !LocalDataResetService.TryDeleteAllLocalData())
+        {
+            return;
+        }
+
+        UnbindEvents();
+        if (_localDataResetPopup != null)
+            _localDataResetPopup.SetActive(false);
+        LocalDataResetService.ExitWithoutSaving();
+    }
+
+    private void ShowLocalDataResetConfirmation(int step)
+    {
+        if (_localDataResetPopup == null)
+            return;
+
+        _localDataResetConfirmationStep =
+            Mathf.Clamp(step, 1, 2);
+        bool isFinal = _localDataResetConfirmationStep == 2;
+
+        SetLocalizedTextKey(
+            _localDataResetTitleText,
+            isFinal
+                ? LocalizationKeys
+                    .UiSettingsLocalDataConfirmFinalTitle
+                : LocalizationKeys
+                    .UiSettingsLocalDataConfirmFirstTitle);
+        SetLocalizedTextKey(
+            _localDataResetMessageText,
+            isFinal
+                ? LocalizationKeys
+                    .UiSettingsLocalDataConfirmFinalMessage
+                : LocalizationKeys
+                    .UiSettingsLocalDataConfirmFirstMessage);
+        SetLocalizedTextKey(
+            _localDataResetConfirmText,
+            isFinal
+                ? LocalizationKeys.UiSettingsLocalDataDeleteAll
+                : LocalizationKeys.UiSettingsLocalDataContinue);
+
+        if (_localDataResetConfirmButton != null &&
+            _localDataResetConfirmButton.targetGraphic != null)
+        {
+            _localDataResetConfirmButton.targetGraphic.color =
+                isFinal
+                    ? DestructiveButtonColor
+                    : ContinueButtonColor;
+        }
+
+        _localDataResetPopup.SetActive(true);
+        _localDataResetPopup.transform.SetAsLastSibling();
+    }
+
+    private void HideLocalDataResetConfirmation()
+    {
+        _localDataResetConfirmationStep = 0;
+        if (_localDataResetPopup != null)
+            _localDataResetPopup.SetActive(false);
     }
 
     private void RefreshQuitButtonAvailability()
@@ -788,6 +920,253 @@ public sealed class SettingPage : MonoBehaviour, IPage
             Destroy(legacyControl.gameObject);
         else
             DestroyImmediate(legacyControl.gameObject);
+    }
+
+    private void EnsureLocalDataResetControls()
+    {
+        if (miscTab == null || quitButton == null ||
+            quitConfirmationPopup == null)
+        {
+            return;
+        }
+
+        TextMeshProUGUI miscHeading =
+            FindDescendantByName(
+                miscTab.transform,
+                "txtMiscPlaceholder")
+            ?.GetComponent<TextMeshProUGUI>();
+        if (miscHeading == null)
+            return;
+
+        RectTransform headingRect = miscHeading.rectTransform;
+        headingRect.anchorMin = new Vector2(0.06f, 0.78f);
+        headingRect.anchorMax = new Vector2(0.94f, 0.94f);
+        headingRect.anchoredPosition = Vector2.zero;
+        headingRect.sizeDelta = Vector2.zero;
+        miscHeading.alignment = TextAlignmentOptions.MidlineLeft;
+
+        GameObject cardObject = new(
+            "grpLocalDataManagement",
+            typeof(RectTransform),
+            typeof(CanvasRenderer),
+            typeof(Image));
+        cardObject.layer = miscTab.layer;
+        cardObject.transform.SetParent(miscTab.transform, false);
+
+        RectTransform cardRect =
+            cardObject.GetComponent<RectTransform>();
+        cardRect.anchorMin = new Vector2(0.06f, 0.42f);
+        cardRect.anchorMax = new Vector2(0.94f, 0.72f);
+        cardRect.anchoredPosition = Vector2.zero;
+        cardRect.sizeDelta = Vector2.zero;
+
+        Image cardImage = cardObject.GetComponent<Image>();
+        cardImage.color = DataManagementCardColor;
+        cardImage.raycastTarget = false;
+
+        CreateRuntimeLocalizedText(
+            miscHeading,
+            cardObject.transform,
+            "txtLocalDataTitle",
+            LocalizationKeys.UiSettingsLocalDataTitle,
+            new Vector2(0.04f, 0.52f),
+            new Vector2(0.7f, 0.9f),
+            28f,
+            TextAlignmentOptions.MidlineLeft,
+            FontStyles.Bold);
+        TextMeshProUGUI description =
+            CreateRuntimeLocalizedText(
+                miscHeading,
+                cardObject.transform,
+                "txtLocalDataDescription",
+                LocalizationKeys.UiSettingsLocalDataDescription,
+                new Vector2(0.04f, 0.1f),
+                new Vector2(0.7f, 0.52f),
+                20f,
+                TextAlignmentOptions.MidlineLeft,
+                FontStyles.Normal);
+        description.color = new Color(0.78f, 0.82f, 0.79f, 1f);
+        description.enableAutoSizing = true;
+        description.fontSizeMin = 16f;
+        description.fontSizeMax = 20f;
+
+        _deleteLocalDataButton = Instantiate(
+            quitButton,
+            cardObject.transform,
+            false);
+        _deleteLocalDataButton.name = "btnDeleteLocalData";
+        _deleteLocalDataButton.onClick.RemoveAllListeners();
+        _deleteLocalDataButton.gameObject.SetActive(true);
+        if (_deleteLocalDataButton.targetGraphic != null)
+        {
+            _deleteLocalDataButton.targetGraphic.color =
+                DestructiveButtonColor;
+        }
+
+        RectTransform deleteButtonRect =
+            _deleteLocalDataButton.transform as RectTransform;
+        if (deleteButtonRect != null)
+        {
+            deleteButtonRect.anchorMin = new Vector2(0.84f, 0.5f);
+            deleteButtonRect.anchorMax = new Vector2(0.84f, 0.5f);
+            deleteButtonRect.pivot = new Vector2(0.5f, 0.5f);
+            deleteButtonRect.anchoredPosition = Vector2.zero;
+            deleteButtonRect.sizeDelta = new Vector2(260f, 64f);
+            deleteButtonRect.localScale = Vector3.one;
+        }
+
+        TextMeshProUGUI deleteButtonText =
+            _deleteLocalDataButton.GetComponentInChildren<
+                TextMeshProUGUI>(true);
+        if (deleteButtonText != null)
+        {
+            deleteButtonText.name = "txtDeleteLocalData";
+            SetLocalizedTextKey(
+                deleteButtonText,
+                LocalizationKeys.UiSettingsLocalDataDelete);
+        }
+
+        CreateLocalDataResetPopup();
+    }
+
+    private void CreateLocalDataResetPopup()
+    {
+        _localDataResetPopup = Instantiate(
+            quitConfirmationPopup,
+            quitConfirmationPopup.transform.parent,
+            false);
+        _localDataResetPopup.name = "grpLocalDataResetPopup";
+
+        Transform titleTransform = FindDescendantByName(
+            _localDataResetPopup.transform,
+            "txtQuitConfirmationTitle");
+        Transform messageTransform = FindDescendantByName(
+            _localDataResetPopup.transform,
+            "txtQuitConfirmationMessage");
+        Transform confirmTransform = FindDescendantByName(
+            _localDataResetPopup.transform,
+            "btnQuitOk");
+        Transform cancelTransform = FindDescendantByName(
+            _localDataResetPopup.transform,
+            "btnQuitCancel");
+
+        _localDataResetTitleText =
+            titleTransform?.GetComponent<TextMeshProUGUI>();
+        _localDataResetMessageText =
+            messageTransform?.GetComponent<TextMeshProUGUI>();
+        _localDataResetConfirmButton =
+            confirmTransform?.GetComponent<Button>();
+        _localDataResetCancelButton =
+            cancelTransform?.GetComponent<Button>();
+
+        if (titleTransform != null)
+            titleTransform.name = "txtLocalDataConfirmationTitle";
+        if (messageTransform != null)
+            messageTransform.name = "txtLocalDataConfirmationMessage";
+        if (confirmTransform != null)
+            confirmTransform.name = "btnLocalDataConfirm";
+        if (cancelTransform != null)
+            cancelTransform.name = "btnLocalDataCancel";
+
+        _localDataResetConfirmButton?.onClick.RemoveAllListeners();
+        _localDataResetCancelButton?.onClick.RemoveAllListeners();
+
+        _localDataResetConfirmText =
+            _localDataResetConfirmButton
+                ?.GetComponentInChildren<TextMeshProUGUI>(true);
+        if (_localDataResetConfirmText != null)
+            _localDataResetConfirmText.name = "txtLocalDataConfirm";
+
+        TextMeshProUGUI cancelText =
+            _localDataResetCancelButton
+                ?.GetComponentInChildren<TextMeshProUGUI>(true);
+        if (cancelText != null)
+        {
+            cancelText.name = "txtLocalDataCancel";
+            SetLocalizedTextKey(
+                cancelText,
+                LocalizationKeys.UiCommonCancel);
+        }
+
+        if (_localDataResetMessageText != null)
+        {
+            _localDataResetMessageText.enableAutoSizing = true;
+            _localDataResetMessageText.fontSizeMin = 17f;
+            _localDataResetMessageText.fontSizeMax = 24f;
+        }
+
+        _localDataResetPopup.SetActive(false);
+    }
+
+    private static TextMeshProUGUI CreateRuntimeLocalizedText(
+        TextMeshProUGUI template,
+        Transform parent,
+        string objectName,
+        string localizationKey,
+        Vector2 anchorMin,
+        Vector2 anchorMax,
+        float fontSize,
+        TextAlignmentOptions alignment,
+        FontStyles fontStyle)
+    {
+        TextMeshProUGUI text = Instantiate(
+            template,
+            parent,
+            false);
+        text.name = objectName;
+        text.raycastTarget = false;
+        text.fontSize = fontSize;
+        text.fontSizeMax = fontSize;
+        text.fontStyle = fontStyle;
+        text.alignment = alignment;
+
+        RectTransform rect = text.rectTransform;
+        rect.anchorMin = anchorMin;
+        rect.anchorMax = anchorMax;
+        rect.pivot = new Vector2(0.5f, 0.5f);
+        rect.anchoredPosition = Vector2.zero;
+        rect.sizeDelta = Vector2.zero;
+        rect.localScale = Vector3.one;
+
+        SetLocalizedTextKey(text, localizationKey);
+        return text;
+    }
+
+    private static void SetLocalizedTextKey(
+        TextMeshProUGUI text,
+        string localizationKey)
+    {
+        if (text == null)
+            return;
+
+        LocalizedText localizedText =
+            text.GetComponent<LocalizedText>();
+        if (localizedText == null)
+            localizedText = text.gameObject.AddComponent<LocalizedText>();
+        localizedText.SetKey(localizationKey);
+    }
+
+    private static Transform FindDescendantByName(
+        Transform root,
+        string objectName)
+    {
+        if (root == null || string.IsNullOrWhiteSpace(objectName))
+            return null;
+
+        Transform[] descendants =
+            root.GetComponentsInChildren<Transform>(true);
+        for (int index = 0; index < descendants.Length; index++)
+        {
+            if (string.Equals(
+                descendants[index].name,
+                objectName,
+                StringComparison.Ordinal))
+            {
+                return descendants[index];
+            }
+        }
+
+        return null;
     }
 
     private void BindSceneLocalizedTexts()

@@ -11,6 +11,19 @@ public class GameManager : MonoBehaviour
     public DataManager Data;
     public AudioManager Audio;
 
+    [Header("Main Lobby")]
+    [SerializeField] private CharacterSO defaultLobbyRepresentative;
+    [SerializeField] private ToggleSliderController
+        lobbyRepresentativeTogglePrefab;
+
+    public CharacterSO DefaultLobbyRepresentative =>
+        IsEligibleDefaultLobbyRepresentative(
+            defaultLobbyRepresentative)
+            ? defaultLobbyRepresentative
+            : null;
+    public ToggleSliderController LobbyRepresentativeTogglePrefab =>
+        lobbyRepresentativeTogglePrefab;
+
     private void Awake()
     {
         if (Instance != null && Instance != this)
@@ -45,6 +58,26 @@ public class GameManager : MonoBehaviour
             Audio.Teardown();
 
         Instance = null;
+    }
+
+    private void OnValidate()
+    {
+        if (defaultLobbyRepresentative != null &&
+            !IsEligibleDefaultLobbyRepresentative(
+                defaultLobbyRepresentative))
+        {
+            Debug.LogWarning(
+                "The default lobby representative must be a " +
+                "CharacterSO marked as initially owned.",
+                this);
+            defaultLobbyRepresentative = null;
+        }
+    }
+
+    public static bool IsEligibleDefaultLobbyRepresentative(
+        CharacterSO definition)
+    {
+        return definition != null && definition.InitiallyOwned;
     }
 
     private void SubscribeEvents()

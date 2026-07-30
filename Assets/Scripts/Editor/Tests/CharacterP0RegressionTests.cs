@@ -647,7 +647,71 @@ public sealed class CharacterP0RegressionTests
     }
 
     [Test]
-    public void MainMenuDesignerLayout_RestoresVerticalButtonsWithoutLocking()
+    public void TitleMenuDesignerLayout_UsesFullScreenStartWithCornerActions()
+    {
+        GameObject pageObject = new(
+            "TitleMenuDesignerLayoutTest",
+            typeof(RectTransform),
+            typeof(TitlePage));
+        _createdObjects.Add(pageObject);
+        pageObject.GetComponent<RectTransform>().sizeDelta =
+            new Vector2(1920f, 1080f);
+        TitlePage page = pageObject.GetComponent<TitlePage>();
+        page.RebuildEditorPreview();
+
+        MenuPageSceneBuilder.RestoreTitleMenuDefaultLayout(page);
+
+        RectTransform runtimeRoot = pageObject.transform.Find(
+                RuntimeMenuPageBase.RuntimeRootObjectName)
+            .GetComponent<RectTransform>();
+        RectTransform panel = runtimeRoot.Find("grpMenuPanel")
+            .GetComponent<RectTransform>();
+        RectTransform buttonRoot = panel.Find("grpMenuButtons")
+            .GetComponent<RectTransform>();
+        RectTransform start = buttonRoot.Find("btnSTARTFullscreen")
+            .GetComponent<RectTransform>();
+        RectTransform notice = runtimeRoot.Find("btnNOTICEOverlay")
+            .GetComponent<RectTransform>();
+        RectTransform settings = runtimeRoot.Find("btnSETTINGSOverlay")
+            .GetComponent<RectTransform>();
+
+        Assert.That(panel.anchorMin, Is.EqualTo(Vector2.zero));
+        Assert.That(panel.anchorMax, Is.EqualTo(Vector2.one));
+        Assert.That(panel.offsetMin, Is.EqualTo(Vector2.zero));
+        Assert.That(panel.offsetMax, Is.EqualTo(Vector2.zero));
+        Assert.That(start.anchorMin, Is.EqualTo(Vector2.zero));
+        Assert.That(start.anchorMax, Is.EqualTo(Vector2.one));
+        Assert.That(start.offsetMin, Is.EqualTo(Vector2.zero));
+        Assert.That(start.offsetMax, Is.EqualTo(Vector2.zero));
+        Assert.That(start.GetComponent<Image>().raycastTarget, Is.True);
+        Assert.That(start.GetComponent<Image>().color.a, Is.EqualTo(0f));
+
+        Assert.That(
+            notice.anchoredPosition,
+            Is.EqualTo(new Vector2(48f, -32f)));
+        Assert.That(
+            notice.sizeDelta,
+            Is.EqualTo(new Vector2(220f, 64f)));
+        Assert.That(
+            settings.anchoredPosition,
+            Is.EqualTo(new Vector2(-48f, -32f)));
+        Assert.That(
+            settings.sizeDelta,
+            Is.EqualTo(new Vector2(80f, 64f)));
+        Assert.That(
+            buttonRoot.Find("btnQUIT"),
+            Is.Null,
+            "Game quit must remain inside the settings page.");
+        Assert.That(
+            buttonRoot.GetComponent<VerticalLayoutGroup>().enabled,
+            Is.False);
+        Assert.That(
+            panel.GetComponent<VerticalLayoutGroup>().enabled,
+            Is.False);
+    }
+
+    [Test]
+    public void MainMenuDesignerLayout_RestoresLobbyTilesWithoutLocking()
     {
         GameObject pageObject = new(
             "MainMenuDesignerLayoutTest",
@@ -675,11 +739,29 @@ public sealed class CharacterP0RegressionTests
         string[] buttonNames =
         {
             "btnPLAY",
-            "btnCODEX",
             "btnROSTER",
             "btnSHOP",
-            "btnQUEST",
+            "btnRECRUIT",
+            "btnBASE",
             "btnSTORAGE",
+        };
+        Vector2[] expectedPositions =
+        {
+            new(0f, 214f),
+            new(0f, 28f),
+            new(-184f, -118f),
+            new(184f, -118f),
+            new(-96f, -259f),
+            new(272f, -259f),
+        };
+        Vector2[] expectedSizes =
+        {
+            new(720f, 210f),
+            new(720f, 130f),
+            new(352f, 130f),
+            new(352f, 130f),
+            new(528f, 120f),
+            new(176f, 120f),
         };
         for (int index = 0; index < buttonNames.Length; index++)
         {
@@ -687,15 +769,15 @@ public sealed class CharacterP0RegressionTests
                 .GetComponent<RectTransform>();
             Assert.That(
                 button.anchoredPosition,
-                Is.EqualTo(new Vector2(0f, 215f - index * 86f)));
+                Is.EqualTo(expectedPositions[index]));
             Assert.That(
                 button.sizeDelta,
-                Is.EqualTo(new Vector2(540f, 72f)));
+                Is.EqualTo(expectedSizes[index]));
         }
 
         Assert.That(
             buttonRoot.sizeDelta,
-            Is.EqualTo(new Vector2(540f, 554f)));
+            Is.EqualTo(new Vector2(720f, 638f)));
         Assert.That(
             buttonRoot.GetComponent<VerticalLayoutGroup>().enabled,
             Is.False,

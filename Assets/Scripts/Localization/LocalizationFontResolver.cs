@@ -221,7 +221,7 @@ namespace PS260714.Localization
             TMP_FontAsset font = catalog != null
                 ? catalog.ResolveGlobalDefault()
                 : TMP_Settings.defaultFontAsset;
-            if (catalog != null)
+            if (catalog != null && Application.isPlaying)
                 font = catalog.PrepareFallbacks(font);
             font = EnableDynamicAtlasGrowth(font);
             if (LocalizationSystemFontFallback.NeedsKoreanFallback(

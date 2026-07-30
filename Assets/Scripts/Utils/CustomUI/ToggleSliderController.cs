@@ -135,6 +135,19 @@ public class ToggleSliderController : MonoBehaviour
         ToggleAniRun().Forget();
     }
 
+    public void SetValueWithoutNotify(bool newValue)
+    {
+        if (isAniRun)
+            return;
+
+        value = newValue;
+        if (!isInitialized)
+            return;
+
+        RefreshLayout();
+        ApplyVisualImmediately(value);
+    }
+
     private async UniTask ToggleAniRun()
     {
         if (!CacheRectTransforms())

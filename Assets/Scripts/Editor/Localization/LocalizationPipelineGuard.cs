@@ -1,8 +1,12 @@
 using System;
+using System.Collections.Generic;
+using TMPro;
 using UnityEditor;
 using UnityEditor.Build;
 using UnityEditor.Build.Reporting;
+using UnityEditor.SceneManagement;
 using UnityEngine;
+using UnityEngine.SceneManagement;
 
 namespace PS260714.Localization.Editor
 {
@@ -108,10 +112,13 @@ namespace PS260714.Localization.Editor
     [InitializeOnLoad]
     internal static class LocalizationPlayModeGuard
     {
+        private static bool fontRestoreQueued;
+
         static LocalizationPlayModeGuard()
         {
             EditorApplication.playModeStateChanged -= HandlePlayModeChanged;
             EditorApplication.playModeStateChanged += HandlePlayModeChanged;
+            QueueEditorTextFontRestore();
         }
 
         [MenuItem(PS260714EditorMenu.ValidateLocalization)]
@@ -133,6 +140,12 @@ namespace PS260714.Localization.Editor
         private static void HandlePlayModeChanged(
             PlayModeStateChange state)
         {
+            if (state == PlayModeStateChange.EnteredEditMode)
+            {
+                RestoreEditorTextFonts();
+                return;
+            }
+
             if (state != PlayModeStateChange.ExitingEditMode)
             {
                 return;
@@ -161,6 +174,94 @@ namespace PS260714.Localization.Editor
                 Debug.LogWarning(
                     "[Localization] Play mode cancelled once because CSV " +
                     "changes generated new C#. Enter Play again after compile.");
+            }
+        }
+
+        private static void QueueEditorTextFontRestore()
+        {
+            if (fontRestoreQueued)
+                return;
+
+            fontRestoreQueued = true;
+            EditorApplication.delayCall += RestoreEditorTextFontsWhenReady;
+        }
+
+        private static void RestoreEditorTextFontsWhenReady()
+        {
+            fontRestoreQueued = false;
+            if (EditorApplication.isPlayingOrWillChangePlaymode)
+                return;
+            if (EditorApplication.isCompiling ||
+                EditorApplication.isUpdating)
+            {
+                QueueEditorTextFontRestore();
+                return;
+            }
+
+            RestoreEditorTextFonts();
+        }
+
+        private static void RestoreEditorTextFonts()
+        {
+            LocalizationService.Initialize();
+            LocalizationFontCatalog catalog =
+                LocalizationService.FontCatalog;
+            LocalizationMarkupCatalog markupCatalog =
+                LocalizationService.MarkupCatalog;
+            TMP_Text[] texts =
+                UnityEngine.Object.FindObjectsByType<TMP_Text>(
+                    FindObjectsInactive.Include,
+                    FindObjectsSortMode.None);
+            HashSet<Scene> changedScenes = new();
+            for (int index = 0; index < texts.Length; index++)
+            {
+                TMP_Text text = texts[index];
+                if (text == null ||
+                    EditorUtility.IsPersistent(text))
+                {
+                    continue;
+                }
+
+                TMP_FontAsset previousFont = text.font;
+                TMP_SpriteAsset previousSprite = text.spriteAsset;
+                LocalizedText localized =
+                    text.GetComponent<LocalizedText>();
+                string fontRole = localized != null
+                    ? localized.FontRoleOverride
+                    : null;
+                TMP_FontAsset editorFont = catalog != null
+                    ? catalog.Resolve(
+                        LocalizationService.CurrentLocale,
+                        fontRole,
+                        LocalizationService.CurrentFontId)
+                    : TMP_Settings.defaultFontAsset;
+                if (editorFont != null)
+                    text.font = editorFont;
+                if (markupCatalog != null &&
+                    markupCatalog.SpriteAsset != null)
+                {
+                    text.spriteAsset = markupCatalog.SpriteAsset;
+                }
+
+                if (text.font == previousFont &&
+                    text.spriteAsset == previousSprite)
+                {
+                    continue;
+                }
+
+                EditorUtility.SetDirty(text);
+                Scene scene = text.gameObject.scene;
+                if (scene.IsValid() && scene.isLoaded)
+                    changedScenes.Add(scene);
+            }
+
+            foreach (Scene scene in changedScenes)
+                EditorSceneManager.MarkSceneDirty(scene);
+
+            if (changedScenes.Count > 0)
+            {
+                Canvas.ForceUpdateCanvases();
+                SceneView.RepaintAll();
             }
         }
     }

@@ -610,6 +610,9 @@ public sealed class CharacterData
     public CharacterSO Definition => _definition;
     public CharacterProgressData Progress => _progress;
     public string CharacterId { get; }
+    public CharacterGrade Grade => _definition != null
+        ? _definition.Grade
+        : CharacterGrade.Grade0;
     public bool IsOwned => _progress?.IsOwned ?? false;
     public IReadOnlyList<CharacterCumulativeUpgradeProgress>
         CumulativeUpgrades => _progress?.CumulativeUpgrades ??
