@@ -9,6 +9,8 @@ internal static class PS260714EditorMenu
 
     public const string CharacterEditor =
         Root + "Character Editor";
+    public const string CommonSettings =
+        Root + "Common Settings";
     public const string RecruitEditor =
         Root + "Recruit Editor";
     public const string ItemEditor =

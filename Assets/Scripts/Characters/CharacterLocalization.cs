@@ -320,11 +320,27 @@ public static class CharacterLocalization
     {
         StringBuilder builder = new();
         int index = 1;
-        foreach (CharacterPassiveDefinition definition in
-                 data.PassiveDefinitions)
+        foreach (CharacterResolvedPassive resolved in
+                 data.ResolvedPassives)
         {
+            CharacterPassiveDefinition definition =
+                resolved.Definition;
             if (definition == null || definition.IsEmptyPlaceholder)
                 continue;
+
+            string passiveLabel = resolved.IsRolePassive
+                ? resolved.RolePassive.GetDisplayName()
+                : (UsesKoreanLocale ? "패시브" : "PASSIVE");
+            string roleDescription = resolved.IsRolePassive
+                ? resolved.RolePassive.GetDescription()
+                : string.Empty;
+            if (!string.IsNullOrWhiteSpace(roleDescription))
+            {
+                AppendCodexLine(
+                    builder,
+                    $"{passiveLabel} {index++}: {roleDescription}");
+                continue;
+            }
 
             if (definition.HasStatusContributionSection &&
                 !definition.HasSection(
@@ -332,7 +348,7 @@ public static class CharacterLocalization
             {
                 AppendCodexLine(
                     builder,
-                    $"{(UsesKoreanLocale ? "패시브" : "PASSIVE")} " +
+                    $"{passiveLabel} " +
                     $"{index++}: " +
                     FormatStatusContributionMultipliers(
                         definition.StatusContributionMultipliers));
@@ -391,7 +407,7 @@ public static class CharacterLocalization
                         definition.StatusRemovalPickCount);
             AppendCodexLine(
                 builder,
-                $"{(UsesKoreanLocale ? "패시브" : "PASSIVE")} {index++}: " +
+                $"{passiveLabel} {index++}: " +
                 FormatPassiveTrigger(definition) +
                 (definition.Trigger == CharacterPassiveTrigger.OnAttack
                     ? FormatLinkage(

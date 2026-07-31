@@ -1,7 +1,18 @@
 using UnityEngine;
 
-public class CommonDef
+public static class CommonDef
 {
+    /// <summary>
+    /// Test-build switch. Keep enabled while save compatibility is not
+    /// guaranteed, and set to false before creating a release build.
+    /// </summary>
+    public const bool ResetLocalDataOnNewBuild = true;
+
+    public const string CharacterGradePaletteResourcePath =
+        "Presentation/CharacterGradePalette";
+
+    public const string CharacterRoleCatalogResourcePath =
+        "Presentation/CharacterRoleCatalog";
 }
 
 public static class BattleStatusColors

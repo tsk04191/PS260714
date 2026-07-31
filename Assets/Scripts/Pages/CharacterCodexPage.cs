@@ -198,26 +198,35 @@ public sealed class CharacterCodexPage : RuntimeMenuPageBase
                 $"{data.AttackCooldown:0.##}s"),
             new(
                 korean ? "직군" : "CLASS",
-                korean ? "준비 중" : "PENDING"),
+                CharacterRolePresentation.GetRoleName(data.Role)),
             new(
                 korean ? "세부 직군" : "ARCHETYPE",
-                korean ? "준비 중" : "PENDING"),
+                CharacterRolePresentation.GetArchetypeName(
+                    data.Archetype)),
         };
 
         List<OperatorAbilityIconModel> passives = new();
         int passiveIndex = 1;
-        foreach (CharacterPassiveDefinition passive in
-                 data.PassiveDefinitions)
+        foreach (CharacterResolvedPassive resolved in
+                 data.ResolvedPassives)
         {
+            CharacterPassiveDefinition passive =
+                resolved.Definition;
             if (passive == null || passive.IsEmptyPlaceholder)
                 continue;
 
-            passives.Add(new OperatorAbilityIconModel(
-                passive.IconSprite,
-                korean
+            string label = resolved.IsRolePassive
+                ? resolved.RolePassive.GetDisplayName()
+                : (korean
                     ? $"패시브 {passiveIndex}"
-                    : $"PASSIVE {passiveIndex}",
-                string.Empty));
+                    : $"PASSIVE {passiveIndex}");
+            string badge = resolved.IsRolePassive
+                ? resolved.Role.GetDisplayName()
+                : string.Empty;
+            passives.Add(new OperatorAbilityIconModel(
+                resolved.IconSprite,
+                label,
+                badge));
             passiveIndex++;
         }
 
@@ -244,6 +253,7 @@ public sealed class CharacterCodexPage : RuntimeMenuPageBase
             data.StandingSprite != null
                 ? data.StandingSprite
                 : data.IconSprite,
+            data.Grade,
             korean ? "전투 스탯" : "COMBAT STATS",
             stats,
             CharacterLocalization.GetNormalAttackTitle(data),
@@ -719,15 +729,18 @@ public sealed class CharacterCodexPage : RuntimeMenuPageBase
         _visibleEntries.Sort(CompareEntries);
         List<CodexBrowserItemModel> items =
             new(_visibleEntries.Count);
-        Color accentColor = new(0.22f, 0.48f, 0.68f, 1f);
         foreach (CharacterCodexEntry entry in _visibleEntries)
         {
+            CharacterGradeStyle gradeStyle =
+                CharacterGradePresentation.GetStyle(entry.Data.Grade);
             items.Add(new CodexBrowserItemModel(
                 entry.Id,
                 CharacterLocalization.GetName(entry.Data),
-                entry.Data.IconSprite,
+                entry.Data.IconSprite != null
+                    ? entry.Data.IconSprite
+                    : gradeStyle.GradeIcon,
                 !entry.Data.IsOwned,
-                accentColor));
+                gradeStyle.PrimaryColor));
         }
 
         bool selectionVisible = _visibleEntries.Exists(entry =>
@@ -835,7 +848,9 @@ public sealed class CharacterCodexPage : RuntimeMenuPageBase
         _browser?.SetSelected(characterId);
         CharacterCodexEntry entry = _visibleEntries[index];
         CharacterData data = entry.Data;
-        Color accentColor = new(0.22f, 0.48f, 0.68f, 1f);
+        CharacterGradeStyle gradeStyle =
+            CharacterGradePresentation.GetStyle(data.Grade);
+        Color accentColor = gradeStyle.PrimaryColor;
 
         if (_detailPanelImage != null)
         {
@@ -1190,6 +1205,7 @@ public sealed class OperatorDetailModel
     public string Name { get; }
     public string CharacterId { get; }
     public Sprite StandingSprite { get; }
+    public CharacterGrade Grade { get; }
     public string StatsTitle { get; }
     public IReadOnlyList<OperatorStatModel> Stats { get; }
     public string BasicAttackTitle { get; }
@@ -1211,6 +1227,7 @@ public sealed class OperatorDetailModel
         string name,
         string characterId,
         Sprite standingSprite,
+        CharacterGrade grade,
         string statsTitle,
         IReadOnlyList<OperatorStatModel> stats,
         string basicAttackTitle,
@@ -1231,6 +1248,7 @@ public sealed class OperatorDetailModel
         Name = name ?? string.Empty;
         CharacterId = characterId ?? string.Empty;
         StandingSprite = standingSprite;
+        Grade = CharacterGradePresentation.Clamp(grade);
         StatsTitle = statsTitle ?? string.Empty;
         Stats = stats ?? Array.Empty<OperatorStatModel>();
         BasicAttackTitle = basicAttackTitle ?? string.Empty;
@@ -1323,6 +1341,7 @@ public sealed class OperatorDetailView
     private Image _standingImage;
     private TextMeshProUGUI _standingFallback;
     private TextMeshProUGUI _nameText;
+    private CharacterGradeIconStrip _gradeIcons;
     private TextMeshProUGUI _idText;
     private TextMeshProUGUI _positionText;
     private TextMeshProUGUI _statsTitle;
@@ -1364,6 +1383,7 @@ public sealed class OperatorDetailView
 
         SetNavigationLabel(view._previousButton, "<");
         SetNavigationLabel(view._nextButton, ">");
+        view.EnsureGradeIconStrip();
         view.ApplyHeaderLayout();
         view._root.SetAsLastSibling();
         view.SetVisible(false);
@@ -1440,6 +1460,8 @@ public sealed class OperatorDetailView
             return;
 
         _nameText.text = model.Name;
+        _gradeIcons.SetGrade(model.Grade);
+        ApplyNameGradeLayout();
         _idText.text = string.IsNullOrWhiteSpace(model.CharacterId)
             ? string.Empty
             : $"ID  {model.CharacterId}";
@@ -1504,6 +1526,8 @@ public sealed class OperatorDetailView
     public void ShowEmpty(string message)
     {
         _nameText.text = message ?? string.Empty;
+        _gradeIcons.SetGrade(CharacterGrade.Grade0);
+        ApplyNameGradeLayout();
         _idText.text = string.Empty;
         _positionText.text = string.Empty;
         _standingImage.sprite = null;
@@ -2597,6 +2621,54 @@ public sealed class OperatorDetailView
             text.text = label ?? string.Empty;
     }
 
+    private void EnsureGradeIconStrip()
+    {
+        Transform header = _root != null
+            ? _root.Find("grpOperatorDetailHeader")
+            : null;
+        if (header == null)
+            return;
+
+        _gradeIcons = CharacterGradeIconStrip.GetOrCreate(
+            header,
+            "grpOperatorDetailGradeIcons",
+            28f,
+            6f);
+        _gradeIcons.SetGrade(CharacterGrade.Grade0);
+    }
+
+    private void ApplyNameGradeLayout()
+    {
+        if (_nameText == null || _gradeIcons == null)
+            return;
+
+        const float nameLeft = 200f;
+        const float maximumRowWidth = 1050f;
+        const float nameIconGap = 12f;
+
+        float iconWidth = _gradeIcons.PreferredWidth;
+        float gap = iconWidth > 0f ? nameIconGap : 0f;
+        float maximumNameWidth = Mathf.Max(
+            180f,
+            maximumRowWidth - iconWidth - gap);
+        float preferredNameWidth =
+            _nameText.GetPreferredValues(_nameText.text).x + 4f;
+        float nameWidth = Mathf.Clamp(
+            preferredNameWidth,
+            80f,
+            maximumNameWidth);
+        ConfigureTopLeft(
+            _nameText.rectTransform,
+            new Vector2(nameLeft, -12f),
+            new Vector2(nameWidth, 50f));
+        _nameText.overflowMode = TextOverflowModes.Ellipsis;
+
+        ConfigureTopLeft(
+            _gradeIcons.RectTransform,
+            new Vector2(nameLeft + nameWidth + gap, -23f),
+            new Vector2(iconWidth, 28f));
+    }
+
     private void ApplyHeaderLayout()
     {
         Transform header = _root != null
@@ -2613,13 +2685,7 @@ public sealed class OperatorDetailView
                 new Vector2(6f, 66f));
         }
 
-        if (_nameText != null)
-        {
-            ConfigureTopLeft(
-                _nameText.rectTransform,
-                new Vector2(200f, -12f),
-                new Vector2(1050f, 50f));
-        }
+        ApplyNameGradeLayout();
 
         if (_idText != null)
         {

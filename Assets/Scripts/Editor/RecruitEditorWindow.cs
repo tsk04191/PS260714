@@ -2090,7 +2090,7 @@ public sealed class RecruitEditorWindow : EditorWindow
     {
         CharacterGradeStyle style =
             CharacterGradePresentation.GetStyle(grade);
-        Rect preview = EditorGUILayout.GetControlRect(false, 20f);
+        Rect preview = EditorGUILayout.GetControlRect(false, 24f);
         EditorGUI.DrawRect(preview, style.BackgroundColor);
         EditorGUI.DrawRect(
             new Rect(preview.x, preview.y, 8f, preview.height),
@@ -2100,13 +2100,35 @@ public sealed class RecruitEditorWindow : EditorWindow
             Color.clear,
             style.OutlineColor);
 
+        float labelOffset = 14f;
+        if (style.GradeIcon != null)
+        {
+            Rect iconRect = new(
+                preview.x + 10f,
+                preview.y + 3f,
+                18f,
+                18f);
+            Texture icon =
+                AssetPreview.GetAssetPreview(style.GradeIcon) ??
+                AssetPreview.GetMiniThumbnail(style.GradeIcon);
+            if (icon != null)
+            {
+                GUI.DrawTexture(
+                    iconRect,
+                    icon,
+                    ScaleMode.ScaleToFit,
+                    true);
+                labelOffset = 34f;
+            }
+        }
+
         GUIStyle labelStyle = new(EditorStyles.miniBoldLabel);
         labelStyle.normal.textColor = style.TextColor;
         EditorGUI.LabelField(
             new Rect(
-                preview.x + 14f,
+                preview.x + labelOffset,
                 preview.y,
-                preview.width - 18f,
+                preview.width - labelOffset - 4f,
                 preview.height),
             $"공통 팔레트 · {CharacterGradePresentation.GetLabel(grade)}",
             labelStyle);

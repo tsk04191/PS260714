@@ -42,6 +42,7 @@ public sealed class MainSubPage : RuntimeMenuPageBase
     private CharacterCollectionData _boundCharacterCollection;
     private InventoryData _boundRecruitInventory;
     private string _rosterSearchQuery = string.Empty;
+    private CharacterRoleSO _rosterRoleFilter;
     private bool _rosterDescending;
     private bool _rosterEventsBound;
     private bool _recruitLocaleEventBound;
@@ -221,7 +222,7 @@ public sealed class MainSubPage : RuntimeMenuPageBase
                 _rosterSearchQuery = (query ?? string.Empty).Trim();
                 RefreshRosterBrowser();
             },
-            RefreshRosterBrowser,
+            CycleRosterRoleFilter,
             () =>
             {
                 _rosterDescending = !_rosterDescending;
@@ -451,6 +452,7 @@ public sealed class MainSubPage : RuntimeMenuPageBase
                     definition.CharacterId,
                     definition.InitiallyOwned));
             if (data == null || !data.IsOwned ||
+                !MatchesRosterRoleFilter(data) ||
                 !MatchesRosterSearch(data))
             {
                 continue;
@@ -464,13 +466,20 @@ public sealed class MainSubPage : RuntimeMenuPageBase
             new(_rosterEntries.Count);
         foreach (CharacterData data in _rosterEntries)
         {
+            CharacterGradeStyle gradeStyle =
+                CharacterGradePresentation.GetStyle(data.Grade);
             items.Add(new OperatorRosterItemModel(
                 data.CharacterId,
                 CharacterLocalization.GetName(data),
                 data.StandingSprite != null
                     ? data.StandingSprite
                     : data.IconSprite,
-                data.ActiveAbilityIconSprite));
+                data.ActiveAbilityIconSprite,
+                data.Grade,
+                gradeStyle.BackgroundColor,
+                gradeStyle.PrimaryColor,
+                gradeStyle.OutlineColor,
+                gradeStyle.TextColor));
         }
 
         int totalCount = CharacterDefinitionCatalog.GetAll().Count;
@@ -494,8 +503,12 @@ public sealed class MainSubPage : RuntimeMenuPageBase
             korean ? "레벨" : "LEVEL",
             korean ? "희귀도" : "RARITY",
             korean ? "신뢰도" : "TRUST",
-            korean ? "전체" : "ALL",
-            korean ? "직군 필터\n데이터 준비 중" : "ROLE FILTER\nDATA PENDING",
+            _rosterRoleFilter != null
+                ? _rosterRoleFilter.GetDisplayName()
+                : (korean ? "전체" : "ALL"),
+            korean
+                ? "직군 필터\n버튼을 눌러 순환"
+                : "ROLE FILTER\nCLICK TO CYCLE",
             LocalizationService.Get(LocalizationKeys.UiRosterEmpty));
         _rosterBrowser.SetItems(items);
     }
@@ -696,9 +709,11 @@ public sealed class MainSubPage : RuntimeMenuPageBase
         {
             if (gradeCounts[grade] <= 0)
                 continue;
+            string gradeLabel = CharacterGradePresentation.GetLabel(
+                (CharacterGrade)grade);
             summaries.Add(
                 korean
-                    ? $"{grade}등급×{gradeCounts[grade]}"
+                    ? $"{gradeLabel}×{gradeCounts[grade]}"
                     : $"GRADE {grade}×{gradeCounts[grade]}");
         }
 
@@ -776,7 +791,50 @@ public sealed class MainSubPage : RuntimeMenuPageBase
                    _rosterSearchQuery) ||
                ContainsIgnoreCase(
                    data.CharacterId,
+                   _rosterSearchQuery) ||
+               ContainsIgnoreCase(
+                   CharacterRolePresentation.GetRoleName(data.Role),
+                   _rosterSearchQuery) ||
+               ContainsIgnoreCase(
+                   CharacterRolePresentation.GetArchetypeName(
+                       data.Archetype),
                    _rosterSearchQuery);
+    }
+
+    private bool MatchesRosterRoleFilter(CharacterData data)
+    {
+        return _rosterRoleFilter == null ||
+               data?.Role == _rosterRoleFilter;
+    }
+
+    private void CycleRosterRoleFilter()
+    {
+        IReadOnlyList<CharacterRoleSO> roles =
+            CharacterRolePresentation.Roles;
+        int currentIndex = -1;
+        for (int index = 0; index < roles.Count; index++)
+        {
+            if (roles[index] == _rosterRoleFilter)
+            {
+                currentIndex = index;
+                break;
+            }
+        }
+
+        _rosterRoleFilter = null;
+        for (int offset = 1; offset <= roles.Count; offset++)
+        {
+            int nextIndex = currentIndex + offset;
+            if (nextIndex >= roles.Count)
+                break;
+            if (roles[nextIndex] != null)
+            {
+                _rosterRoleFilter = roles[nextIndex];
+                break;
+            }
+        }
+
+        RefreshRosterBrowser();
     }
 
     private int CompareRosterEntries(
@@ -952,17 +1010,32 @@ public readonly struct OperatorRosterItemModel
     public string DisplayName { get; }
     public Sprite Portrait { get; }
     public Sprite SkillIcon { get; }
+    public CharacterGrade Grade { get; }
+    public Color CardColor { get; }
+    public Color AccentColor { get; }
+    public Color OutlineColor { get; }
+    public Color TextColor { get; }
 
     public OperatorRosterItemModel(
         string id,
         string displayName,
         Sprite portrait,
-        Sprite skillIcon)
+        Sprite skillIcon,
+        CharacterGrade grade,
+        Color cardColor,
+        Color accentColor,
+        Color outlineColor,
+        Color textColor)
     {
         Id = id ?? string.Empty;
         DisplayName = displayName ?? string.Empty;
         Portrait = portrait;
         SkillIcon = skillIcon;
+        Grade = CharacterGradePresentation.Clamp(grade);
+        CardColor = cardColor;
+        AccentColor = accentColor;
+        OutlineColor = outlineColor;
+        TextColor = textColor;
     }
 }
 
@@ -1003,6 +1076,8 @@ public sealed class OperatorRosterView
         public TextMeshProUGUI Name { get; }
         public GameObject SkillRoot { get; }
         public Image SkillIcon { get; }
+        public CharacterGradeIconStrip GradeIcons { get; }
+        public Image Accent { get; }
         public Outline SelectionOutline { get; }
         public Button Button { get; }
         public OperatorRosterCardHighlight Highlight { get; }
@@ -1016,6 +1091,8 @@ public sealed class OperatorRosterView
             TextMeshProUGUI name,
             GameObject skillRoot,
             Image skillIcon,
+            CharacterGradeIconStrip gradeIcons,
+            Image accent,
             Outline selectionOutline,
             Button button,
             OperatorRosterCardHighlight highlight)
@@ -1027,6 +1104,8 @@ public sealed class OperatorRosterView
             Name = name;
             SkillRoot = skillRoot;
             SkillIcon = skillIcon;
+            GradeIcons = gradeIcons;
+            Accent = accent;
             SelectionOutline = selectionOutline;
             Button = button;
             Highlight = highlight;
@@ -1076,6 +1155,7 @@ public sealed class OperatorRosterView
             }
         }
 
+        view.ApplyRosterGridFlow();
         view.ApplyHeaderLayout();
         view._root.gameObject.SetActive(true);
         view._root.SetAsLastSibling();
@@ -1155,6 +1235,7 @@ public sealed class OperatorRosterView
             CardView card = GetOrCreateCard(cardCount);
             BindCard(card, item);
             card.Root.SetActive(true);
+            card.Root.transform.SetSiblingIndex(cardCount);
             cardCount++;
         }
 
@@ -1547,7 +1628,7 @@ public sealed class OperatorRosterView
         grid.spacing = new Vector2(16f, 18f);
         grid.startCorner = GridLayoutGroup.Corner.UpperLeft;
         grid.startAxis = GridLayoutGroup.Axis.Horizontal;
-        grid.childAlignment = TextAnchor.UpperCenter;
+        grid.childAlignment = TextAnchor.UpperLeft;
         grid.constraint =
             GridLayoutGroup.Constraint.FixedColumnCount;
         grid.constraintCount = 7;
@@ -1754,6 +1835,14 @@ public sealed class OperatorRosterView
         name.rectTransform.offsetMax = new Vector2(-62f, -5f);
         name.fontStyle = FontStyles.Bold;
         name.textWrappingMode = TextWrappingModes.NoWrap;
+        name.overflowMode = TextOverflowModes.Ellipsis;
+
+        CharacterGradeIconStrip gradeIcons =
+            CharacterGradeIconStrip.GetOrCreate(
+                plate,
+                "grpOperatorGradeIcons",
+                14f,
+                3f);
 
         GameObject skillRoot = CreateUiObject(
             plate,
@@ -1794,6 +1883,8 @@ public sealed class OperatorRosterView
             name,
             skillRoot,
             skillIcon,
+            gradeIcons,
+            accentImage,
             outline,
             button,
             highlight);
@@ -1806,6 +1897,8 @@ public sealed class OperatorRosterView
     {
         Image background = cardObject.GetComponent<Image>();
         Outline outline = cardObject.GetComponent<Outline>();
+        Transform namePlate =
+            cardObject.transform.Find("imgOperatorNamePlate");
         OperatorRosterCardHighlight highlight =
             cardObject.GetComponent<OperatorRosterCardHighlight>();
         if (highlight == null)
@@ -1834,6 +1927,14 @@ public sealed class OperatorRosterView
                 .Find(
                     "imgOperatorNamePlate/grpOperatorSkill/" +
                     "imgOperatorSkillIcon")
+                ?.GetComponent<Image>(),
+            CharacterGradeIconStrip.GetOrCreate(
+                namePlate,
+                "grpOperatorGradeIcons",
+                14f,
+                3f),
+            cardObject.transform
+                .Find("imgOperatorNamePlate/imgOperatorAccent")
                 ?.GetComponent<Image>(),
             outline,
             button,
@@ -1875,8 +1976,54 @@ public sealed class OperatorRosterView
             item.Portrait == null);
         card.PortraitFallback.text = CreateFallbackLabel(
             item.DisplayName);
+        card.PortraitFallback.color = item.AccentColor;
+        card.Name.color = item.TextColor;
+        card.GradeIcons.SetGrade(item.Grade);
+        ApplyCardNameGradeLayout(card);
         card.SkillRoot.SetActive(item.SkillIcon != null);
         card.SkillIcon.sprite = item.SkillIcon;
+        if (card.Accent != null)
+            card.Accent.color = item.AccentColor;
+        card.SelectionOutline.effectColor = item.OutlineColor;
+        card.Highlight.SetPalette(
+            item.CardColor,
+            item.AccentColor,
+            item.OutlineColor);
+    }
+
+    private static void ApplyCardNameGradeLayout(CardView card)
+    {
+        const float nameLeft = 14f;
+        const float skillReserve = 62f;
+        const float nameIconGap = 6f;
+
+        float iconWidth = card.GradeIcons.PreferredWidth;
+        float gap = iconWidth > 0f ? nameIconGap : 0f;
+        float maximumNameWidth = Mathf.Max(
+            36f,
+            CardWidth - nameLeft - skillReserve -
+            iconWidth - gap);
+        float preferredNameWidth =
+            card.Name.GetPreferredValues(card.Name.text).x + 2f;
+        float nameWidth = Mathf.Clamp(
+            preferredNameWidth,
+            36f,
+            maximumNameWidth);
+
+        RectTransform nameRect = card.Name.rectTransform;
+        nameRect.anchorMin = new Vector2(0f, 0f);
+        nameRect.anchorMax = new Vector2(0f, 1f);
+        nameRect.pivot = new Vector2(0f, 0.5f);
+        nameRect.anchoredPosition = new Vector2(nameLeft, 0f);
+        nameRect.sizeDelta = new Vector2(nameWidth, -12f);
+
+        RectTransform icons = card.GradeIcons.RectTransform;
+        icons.anchorMin = new Vector2(0f, 0.5f);
+        icons.anchorMax = new Vector2(0f, 0.5f);
+        icons.pivot = new Vector2(0f, 0.5f);
+        icons.anchoredPosition = new Vector2(
+            nameLeft + nameWidth + gap,
+            0f);
     }
 
     private static string CreateFallbackLabel(string displayName)
@@ -1928,6 +2075,19 @@ public sealed class OperatorRosterView
                 new Vector2(200f, -70f),
                 new Vector2(236f, 28f));
         }
+    }
+
+    private void ApplyRosterGridFlow()
+    {
+        GridLayoutGroup grid = _cardContent != null
+            ? _cardContent.GetComponent<GridLayoutGroup>()
+            : null;
+        if (grid == null)
+            return;
+
+        grid.startCorner = GridLayoutGroup.Corner.UpperLeft;
+        grid.startAxis = GridLayoutGroup.Axis.Horizontal;
+        grid.childAlignment = TextAnchor.UpperLeft;
     }
 
     private static GameObject CreateUiObject(
@@ -2036,6 +2196,9 @@ public sealed class OperatorRosterCardHighlight :
 
     private Image _background;
     private Outline _outline;
+    private Color _normalColor = NormalColor;
+    private Color _hoverColor = HoverColor;
+    private Color _outlineColor = HoverOutlineColor;
     private bool _hovered;
     private bool _pressed;
 
@@ -2043,6 +2206,17 @@ public sealed class OperatorRosterCardHighlight :
     {
         _background = background;
         _outline = outline;
+        ApplyVisualState();
+    }
+
+    public void SetPalette(
+        Color normalColor,
+        Color accentColor,
+        Color outlineColor)
+    {
+        _normalColor = normalColor;
+        _hoverColor = Color.Lerp(normalColor, accentColor, 0.32f);
+        _outlineColor = outlineColor;
         ApplyVisualState();
     }
 
@@ -2089,8 +2263,8 @@ public sealed class OperatorRosterCardHighlight :
         if (_background != null)
         {
             Color color = _hovered
-                ? HoverColor
-                : NormalColor;
+                ? _hoverColor
+                : _normalColor;
             if (_pressed)
                 color = Color.Lerp(color, Color.black, 0.22f);
             _background.color = color;
@@ -2100,7 +2274,7 @@ public sealed class OperatorRosterCardHighlight :
             return;
 
         _outline.enabled = _hovered;
-        _outline.effectColor = HoverOutlineColor;
+        _outline.effectColor = _outlineColor;
         _outline.effectDistance = new Vector2(4f, -4f);
     }
 }

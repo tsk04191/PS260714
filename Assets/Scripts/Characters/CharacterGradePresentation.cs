@@ -2,11 +2,10 @@ using UnityEngine;
 
 public static class CharacterGradePresentation
 {
-    private const string ResourcePath =
-        "Presentation/CharacterGradePalette";
-
     private static CharacterGradePaletteSO _palette;
     private static bool _loadAttempted;
+
+    public static Color GradeIconColor => Color.white;
 
     public static CharacterGradePaletteSO Palette
     {
@@ -44,6 +43,16 @@ public static class CharacterGradePresentation
     public static Color GetPrimaryColor(CharacterGrade grade)
     {
         return GetStyle(grade).PrimaryColor;
+    }
+
+    public static Sprite GetIcon(CharacterGrade grade)
+    {
+        return GetStyle(grade).GradeIcon;
+    }
+
+    public static int GetIconCount(CharacterGrade grade)
+    {
+        return (int)Clamp(grade);
     }
 
     public static Color GetBackgroundColor(CharacterGrade grade)
@@ -104,7 +113,8 @@ public static class CharacterGradePresentation
     {
         if (_loadAttempted)
             return;
-        _palette = Resources.Load<CharacterGradePaletteSO>(ResourcePath);
+        _palette = Resources.Load<CharacterGradePaletteSO>(
+            CommonDef.CharacterGradePaletteResourcePath);
         _loadAttempted = true;
     }
 }

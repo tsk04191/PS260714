@@ -271,6 +271,29 @@ namespace PS260714.Localization
             return Resolve(key, arguments).Text;
         }
 
+        public static bool TryGet(string key, out string text)
+        {
+            EnsureInitialized();
+            string normalizedKey = (key ?? string.Empty).Trim();
+            if (string.IsNullOrEmpty(normalizedKey) ||
+                !TryResolveEntry(
+                    currentLocale,
+                    normalizedKey,
+                    out string resolvedLocale,
+                    out LocalizationEntry entry))
+            {
+                text = string.Empty;
+                return false;
+            }
+
+            text = FormatNamed(
+                normalizedKey,
+                entry.Text,
+                resolvedLocale,
+                new LocalizationArgumentMap());
+            return true;
+        }
+
         public static string Format(
             string key,
             params LocalizationArgument[] arguments)

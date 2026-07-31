@@ -912,6 +912,8 @@ public sealed class CharacterEditorWindow : EditorWindow
         EditorGUILayout.Space(4f);
         DrawCharacterGradeProperty();
         EditorGUILayout.Space(4f);
+        DrawCharacterRoleProperties();
+        EditorGUILayout.Space(4f);
         DrawProfileProperty("initiallyOwned", "기본 보유");
         EditorGUILayout.Space(6f);
         EditorGUILayout.LabelField("설명");
@@ -1189,7 +1191,7 @@ public sealed class CharacterEditorWindow : EditorWindow
             (CharacterGrade)gradeProperty.enumValueIndex);
         CharacterGradeStyle style =
             CharacterGradePresentation.GetStyle(grade);
-        Rect preview = EditorGUILayout.GetControlRect(false, 24f);
+        Rect preview = EditorGUILayout.GetControlRect(false, 28f);
         EditorGUI.DrawRect(preview, style.BackgroundColor);
         EditorGUI.DrawRect(
             new Rect(preview.x, preview.y, 8f, preview.height),
@@ -1199,17 +1201,143 @@ public sealed class CharacterEditorWindow : EditorWindow
             Color.clear,
             style.OutlineColor);
 
+        float labelOffset = 16f;
+        if (style.GradeIcon != null)
+        {
+            Rect iconRect = new(
+                preview.x + 12f,
+                preview.y + 3f,
+                22f,
+                22f);
+            Texture icon =
+                AssetPreview.GetAssetPreview(style.GradeIcon) ??
+                AssetPreview.GetMiniThumbnail(style.GradeIcon);
+            if (icon != null)
+            {
+                GUI.DrawTexture(
+                    iconRect,
+                    icon,
+                    ScaleMode.ScaleToFit,
+                    true);
+                labelOffset = 40f;
+            }
+        }
+
         GUIStyle labelStyle = new(EditorStyles.boldLabel);
         labelStyle.normal.textColor = style.TextColor;
         EditorGUI.LabelField(
             new Rect(
-                preview.x + 16f,
+                preview.x + labelOffset,
                 preview.y,
-                preview.width - 20f,
+                preview.width - labelOffset - 4f,
                 preview.height),
-            $"공통 등급 색상 · " +
+            $"공통 등급 스타일 · " +
             $"{CharacterGradePresentation.GetLabel(grade)}",
             labelStyle);
+    }
+
+    private void DrawCharacterRoleProperties()
+    {
+        SerializedProperty roleProperty =
+            _serializedCharacter.FindProperty("role");
+        SerializedProperty archetypeProperty =
+            _serializedCharacter.FindProperty("archetype");
+        if (roleProperty == null || archetypeProperty == null)
+        {
+            EditorGUILayout.HelpBox(
+                "직군 직렬화 속성을 찾을 수 없습니다.",
+                MessageType.Error);
+            return;
+        }
+
+        IReadOnlyList<CharacterRoleSO> catalogRoles =
+            CharacterRolePresentation.Roles;
+        List<CharacterRoleSO> roles = new();
+        foreach (CharacterRoleSO role in catalogRoles)
+        {
+            if (role != null)
+                roles.Add(role);
+        }
+
+        using (new EditorGUILayout.HorizontalScope())
+        {
+            DrawRolePopup(roleProperty, archetypeProperty, roles);
+            if (GUILayout.Button("공통 직군 설정", GUILayout.Width(108f)))
+                CommonSettingsProjectProvider.Open();
+        }
+
+        CharacterRoleSO selectedRole =
+            roleProperty.objectReferenceValue as CharacterRoleSO;
+        List<CharacterArchetypeSO> archetypes = new();
+        foreach (CharacterArchetypeSO archetype in
+                 CharacterRolePresentation.Archetypes)
+        {
+            if (archetype != null &&
+                archetype.ParentRole == selectedRole)
+            {
+                archetypes.Add(archetype);
+            }
+        }
+        DrawArchetypePopup(archetypeProperty, archetypes);
+
+        if (CharacterRolePresentation.Catalog == null)
+        {
+            EditorGUILayout.HelpBox(
+                "공통 직군 카탈로그가 없습니다. 공통 직군 설정에서 생성하세요.",
+                MessageType.Warning);
+        }
+    }
+
+    private static void DrawRolePopup(
+        SerializedProperty roleProperty,
+        SerializedProperty archetypeProperty,
+        IReadOnlyList<CharacterRoleSO> roles)
+    {
+        string[] labels = new string[roles.Count + 1];
+        labels[0] = "미지정";
+        int selectedIndex = 0;
+        for (int index = 0; index < roles.Count; index++)
+        {
+            CharacterRoleSO role = roles[index];
+            labels[index + 1] = role.GetDisplayName();
+            if (roleProperty.objectReferenceValue == role)
+                selectedIndex = index + 1;
+        }
+
+        EditorGUI.BeginChangeCheck();
+        int nextIndex = EditorGUILayout.Popup(
+            new GUIContent("직군"),
+            selectedIndex,
+            labels);
+        if (!EditorGUI.EndChangeCheck())
+            return;
+
+        roleProperty.objectReferenceValue =
+            nextIndex > 0 ? roles[nextIndex - 1] : null;
+        archetypeProperty.objectReferenceValue = null;
+    }
+
+    private static void DrawArchetypePopup(
+        SerializedProperty archetypeProperty,
+        IReadOnlyList<CharacterArchetypeSO> archetypes)
+    {
+        string[] labels = new string[archetypes.Count + 1];
+        labels[0] = "미지정";
+        int selectedIndex = 0;
+        for (int index = 0; index < archetypes.Count; index++)
+        {
+            CharacterArchetypeSO archetype = archetypes[index];
+            labels[index + 1] = archetype.GetDisplayName();
+            if (archetypeProperty.objectReferenceValue == archetype)
+                selectedIndex = index + 1;
+        }
+
+        int nextIndex = EditorGUILayout.Popup(
+            new GUIContent("세부 직군"),
+            selectedIndex,
+            labels);
+        archetypeProperty.objectReferenceValue =
+            nextIndex > 0 ? archetypes[nextIndex - 1] : null;
     }
 
     private void DrawCharacterReferenceStats()

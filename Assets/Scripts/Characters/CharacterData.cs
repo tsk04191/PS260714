@@ -581,11 +581,48 @@ public readonly struct CharacterActionConditionData
     }
 }
 
+public enum CharacterPassiveOrigin
+{
+    Role,
+    Character
+}
+
+public sealed class CharacterResolvedPassive
+{
+    public CharacterPassiveDefinition Definition { get; }
+    public CharacterPassiveOrigin Origin { get; }
+    public CharacterRoleSO Role { get; }
+    public CharacterRolePassiveDefinition RolePassive { get; }
+    public bool IsRolePassive => Origin == CharacterPassiveOrigin.Role;
+    public Sprite IconSprite =>
+        RolePassive?.IconSprite != null
+            ? RolePassive.IconSprite
+            : Definition?.IconSprite != null
+                ? Definition.IconSprite
+                : Role?.IconSprite;
+
+    public CharacterResolvedPassive(
+        CharacterPassiveDefinition definition,
+        CharacterPassiveOrigin origin,
+        CharacterRoleSO role = null,
+        CharacterRolePassiveDefinition rolePassive = null)
+    {
+        Definition = definition;
+        Origin = origin;
+        Role = role;
+        RolePassive = rolePassive;
+    }
+}
+
 public sealed class CharacterData
 {
     private const int DungeonUpgradeTypeCount = 6;
 
     private readonly CharacterSO _definition;
+    private readonly List<CharacterPassiveDefinition>
+        _effectivePassiveDefinitions = new();
+    private readonly List<CharacterResolvedPassive>
+        _resolvedPassives = new();
     private CharacterProgressData _progress;
     private readonly int _baseMaximumHealth;
     private readonly float _baseAttackPower;
@@ -613,6 +650,8 @@ public sealed class CharacterData
     public CharacterGrade Grade => _definition != null
         ? _definition.Grade
         : CharacterGrade.Grade0;
+    public CharacterRoleSO Role => _definition?.Role;
+    public CharacterArchetypeSO Archetype => _definition?.Archetype;
     public bool IsOwned => _progress?.IsOwned ?? false;
     public IReadOnlyList<CharacterCumulativeUpgradeProgress>
         CumulativeUpgrades => _progress?.CumulativeUpgrades ??
@@ -664,8 +703,9 @@ public sealed class CharacterData
     public IReadOnlyList<CharacterAttackDefinition> AttackDefinitions =>
         _definition?.AttackDefinitions ?? Array.Empty<CharacterAttackDefinition>();
     public IReadOnlyList<CharacterPassiveDefinition> PassiveDefinitions =>
-        _definition?.PassiveDefinitions ??
-        Array.Empty<CharacterPassiveDefinition>();
+        _effectivePassiveDefinitions;
+    public IReadOnlyList<CharacterResolvedPassive> ResolvedPassives =>
+        _resolvedPassives;
     public IReadOnlyList<CharacterSkillDefinition> SkillDefinitions =>
         _definition?.SkillDefinitions ?? Array.Empty<CharacterSkillDefinition>();
     public CharacterSkillExecutionPolicy SkillExecutionPolicy =>
@@ -813,7 +853,55 @@ public sealed class CharacterData
         ActiveSkillRecoveryDuration = original != null
             ? original.ActiveSkillRecoveryDuration
             : 0f;
+        BuildEffectivePassives();
         RecalculateCumulativeUpgradeModifiers();
+    }
+
+    private void BuildEffectivePassives()
+    {
+        _effectivePassiveDefinitions.Clear();
+        _resolvedPassives.Clear();
+
+        CharacterRoleSO role = Role;
+        if (role != null)
+        {
+            foreach (CharacterRolePassiveDefinition rolePassive in
+                     role.PassiveDefinitions)
+            {
+                CharacterPassiveDefinition definition =
+                    rolePassive?.Ability;
+                if (definition == null ||
+                    definition.IsEmptyPlaceholder)
+                {
+                    continue;
+                }
+
+                _effectivePassiveDefinitions.Add(definition);
+                _resolvedPassives.Add(new CharacterResolvedPassive(
+                    definition,
+                    CharacterPassiveOrigin.Role,
+                    role,
+                    rolePassive));
+            }
+        }
+
+        IReadOnlyList<CharacterPassiveDefinition> personalPassives =
+            _definition?.PassiveDefinitions ??
+            Array.Empty<CharacterPassiveDefinition>();
+        foreach (CharacterPassiveDefinition definition in
+                 personalPassives)
+        {
+            if (definition == null)
+                continue;
+
+            _effectivePassiveDefinitions.Add(definition);
+            if (!definition.IsEmptyPlaceholder)
+            {
+                _resolvedPassives.Add(new CharacterResolvedPassive(
+                    definition,
+                    CharacterPassiveOrigin.Character));
+            }
+        }
     }
 
     public void SetOwned(bool value)

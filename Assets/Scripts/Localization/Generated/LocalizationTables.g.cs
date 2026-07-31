@@ -9,7 +9,7 @@ namespace PS260714.Localization
 {
     public static class GeneratedLocalizationTables
     {
-        public const string SourceHash = "d60087be746aa69e9c363f41e1ae500874350441f7ae46c1af083d9481a1c1bf";
+        public const string SourceHash = "5878af551ee9a424953693186878a4ddca1174fb32de4eb59052b5361edd9018";
         public const string ReferenceLocale = "en-US";
 
         private static readonly LocalizationLocaleInfo[] LocaleData =
@@ -328,6 +328,12 @@ namespace PS260714.Localization
                 { "character.isana.description", new LocalizationEntry("\uC544\uCE74\uB370\uBBF8 \uAE30\uC0AC\uB2E8 \uAD50\uD658\uD559\uC0DD", "body") },
                 { "status.dualside.name", new LocalizationEntry("\uB4C0\uC5BC\uC0AC\uC774\uB4DC", "title") },
                 { "status.dualside.description", new LocalizationEntry("\uB4C0\uC5BC\uC0AC\uC774\uB4DC", "tooltip") },
+                { "roll.vanguard.name", new LocalizationEntry("\uCC99\uD6C4", "title") },
+                { "roll.vanguard.description", new LocalizationEntry("\uCC99\uD6C4", "body") },
+                { "roll.shooter.name", new LocalizationEntry("\uC0AC\uC218", "title") },
+                { "roll.shooter.description", new LocalizationEntry("\uC0AC\uC218", "body") },
+                { "roll.support.name", new LocalizationEntry("\uC9C0\uC6D0", "title") },
+                { "roll.support.description", new LocalizationEntry("\uC9C0\uC6D0", "body") },
             };
 
         private static readonly Dictionary<string, LocalizationEntry>
@@ -637,6 +643,12 @@ namespace PS260714.Localization
                 { "character.isana.description", new LocalizationEntry("exchange student of Order", "body") },
                 { "status.dualside.name", new LocalizationEntry("DualSide", "title") },
                 { "status.dualside.description", new LocalizationEntry("DualSide", "tooltip") },
+                { "roll.vanguard.name", new LocalizationEntry("Vanguard", "title") },
+                { "roll.vanguard.description", new LocalizationEntry("Vanguard", "body") },
+                { "roll.shooter.name", new LocalizationEntry("Shooter", "title") },
+                { "roll.shooter.description", new LocalizationEntry("Shooter", "body") },
+                { "roll.support.name", new LocalizationEntry("Support", "title") },
+                { "roll.support.description", new LocalizationEntry("Support", "body") },
             };
 
         private static readonly IReadOnlyDictionary<string, LocalizationEntry>

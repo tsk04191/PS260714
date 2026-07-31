@@ -893,13 +893,16 @@ public sealed class RecruitRevealOverlay
             _flapLabel.color = style.TextColor;
             if (_rewardIcon != null)
             {
-                _rewardIcon.sprite = entry.Icon;
-                _rewardIcon.enabled = entry.Icon != null;
+                Sprite displayIcon = entry.Icon != null
+                    ? entry.Icon
+                    : style.GradeIcon;
+                _rewardIcon.sprite = displayIcon;
+                _rewardIcon.enabled = displayIcon != null;
                 _rewardIcon.preserveAspect = true;
             }
 
             string grade = korean
-                ? $"{(int)entry.Grade}등급"
+                ? CharacterGradePresentation.GetLabel(entry.Grade)
                 : $"GRADE {(int)entry.Grade}";
             string newBadge = entry.IsNew
                 ? (korean ? "  신규" : "  NEW")
