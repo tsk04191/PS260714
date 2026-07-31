@@ -6,7 +6,7 @@ using UnityEngine;
 [CustomEditor(typeof(DungeonBattleTab))]
 public sealed class DungeonBattleTabEditor : Editor
 {
-    private const string BattleFolder = "Assets/Data/Battles";
+    private const string BattleFolder = "Assets/Resources/Battles";
     private const string FirstBattlePath = BattleFolder + "/FirstBattle.asset";
 
     private SerializedProperty _dungeonPageProperty;
@@ -92,7 +92,7 @@ public sealed class DungeonBattleTabEditor : Editor
 
     private static BattleSO CreateOrLoadFirstBattleAsset()
     {
-        EnsureFolder("Assets/Data");
+        EnsureFolder("Assets/Resources");
         EnsureFolder(BattleFolder);
 
         BattleSO battle = AssetDatabase.LoadAssetAtPath<BattleSO>(
@@ -114,7 +114,7 @@ public sealed class DungeonBattleTabEditor : Editor
         SerializedObject battleObject = new(battle);
         string[] enemyGuids = AssetDatabase.FindAssets(
             "t:EnemySO",
-            new[] { "Assets/Data/Enemies" });
+            new[] { "Assets/Resources/Enemies" });
         Array.Sort(enemyGuids, StringComparer.Ordinal);
 
         foreach (string enemyGuid in enemyGuids)

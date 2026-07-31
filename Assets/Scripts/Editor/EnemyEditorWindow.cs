@@ -7,7 +7,7 @@ public sealed class EnemyEditorWindow : EditorWindow
 {
     public const string MenuPath = PS260714EditorMenu.EnemyEditor;
 
-    private const string AssetFolder = "Assets/Data/Enemies";
+    private const string AssetFolder = "Assets/Resources/Enemies";
     private const string RenameControlName = "EnemyAssetRenameField";
     private readonly List<EnemySO> _definitions = new();
 
@@ -1537,9 +1537,9 @@ public sealed class EnemyEditorWindow : EditorWindow
 
     private static void EnsureAssetFolder()
     {
-        if (!AssetDatabase.IsValidFolder("Assets/Data"))
-            AssetDatabase.CreateFolder("Assets", "Data");
+        if (!AssetDatabase.IsValidFolder("Assets/Resources"))
+            AssetDatabase.CreateFolder("Assets", "Resources");
         if (!AssetDatabase.IsValidFolder(AssetFolder))
-            AssetDatabase.CreateFolder("Assets/Data", "Enemies");
+            AssetDatabase.CreateFolder("Assets/Resources", "Enemies");
     }
 }

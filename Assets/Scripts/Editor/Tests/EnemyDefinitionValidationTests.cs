@@ -26,7 +26,7 @@ public sealed class EnemyDefinitionValidationTests
     {
         string[] guids = AssetDatabase.FindAssets(
             "t:EnemySO",
-            new[] { "Assets/Data/Enemies" });
+            new[] { "Assets/Resources/Enemies" });
         List<EnemySO> definitions = new();
         foreach (string guid in guids)
         {
@@ -684,7 +684,7 @@ public sealed class EnemyDefinitionValidationTests
     private EnemySO CreateAssetClone(string assetName)
     {
         EnemySO source = AssetDatabase.LoadAssetAtPath<EnemySO>(
-            $"Assets/Data/Enemies/{assetName}.asset");
+            $"Assets/Resources/Enemies/{assetName}.asset");
         Assert.That(
             source,
             Is.Not.Null,

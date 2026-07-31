@@ -7,7 +7,7 @@ using UnityEngine;
 
 public sealed class EnemyP0RegressionTests
 {
-    private const string EnemyAssetFolder = "Assets/Data/Enemies/";
+    private const string EnemyAssetFolder = "Assets/Resources/Enemies/";
     private const string FireStatusPath =
         "Assets/Resources/StatusEffects/Fire.asset";
     private const string StunStatusPath =
