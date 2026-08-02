@@ -58,7 +58,7 @@ public sealed class EnemyCard : MonoBehaviour, IPointerClickHandler
         {
             string typeCode = Runtime.Definition.CardCode;
             string displayName = EnemyLocalization.GetName(
-                Runtime.Definition.Type);
+                Runtime.Definition);
             string health = Runtime.Health.ToString();
             if (Runtime.Armor > 0)
                 health += $" A{Runtime.Armor}";
@@ -79,6 +79,8 @@ public sealed class EnemyCard : MonoBehaviour, IPointerClickHandler
         if (_tileFaceImage == null || Runtime == null)
             return;
 
+        if (Runtime.Definition.BoardSprite != null)
+            _tileFaceImage.sprite = Runtime.Definition.BoardSprite;
         _tileFaceImage.color = _defaultFaceColor;
     }
 

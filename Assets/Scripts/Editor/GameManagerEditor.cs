@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using PS260714.Localization;
+using PS260714.Localization.Editor;
 using UnityEditor;
 using UnityEditor.Build;
 using UnityEditor.Build.Reporting;
@@ -313,9 +315,12 @@ internal static class CommonSettingsEditorGUI
     }
 
     public static void DrawRoleCatalog(
-        CharacterRoleCatalogSO catalog)
+        CharacterRoleCatalogSO catalog,
+        bool drawCreateButtons = true)
     {
-        CommonSettingsEditorUtility.DrawRoleCatalogEditor(catalog);
+        CommonSettingsEditorUtility.DrawRoleCatalogEditor(
+            catalog,
+            drawCreateButtons);
     }
 
     public static void DrawRoleDefinition(CharacterRoleSO role)
@@ -325,13 +330,35 @@ internal static class CommonSettingsEditorGUI
         EditorGUILayout.LabelField(
             "직군 및 직군 패시브",
             EditorStyles.boldLabel);
-        DrawSerializedDefinition(
-            role,
-            CharacterRolePresentation.Invalidate);
+        DrawLocalizationControls();
+
+        SerializedObject serialized = new(role);
+        serialized.UpdateIfRequiredOrScript();
+        DrawReadOnlyProperty(serialized, "roleId", "직군 ID");
+        PS260714LocalizationKeyPicker.DrawNameKey(
+            serialized.FindProperty("nameLocalizationKey"),
+            "이름 Localization 키");
+        DrawProperty(serialized, "fallbackName", "이름 fallback");
+        PS260714LocalizationKeyPicker.DrawDescriptionKey(
+            serialized.FindProperty("descriptionLocalizationKey"),
+            "설명 Localization 키");
+        DrawProperty(
+            serialized,
+            "fallbackDescription",
+            "설명 fallback");
+        DrawProperty(serialized, "iconSprite", "직군 아이콘");
+        DrawRolePassives(
+            serialized.FindProperty("passiveDefinitions"));
+        ApplyDefinition(serialized, role);
+
         DrawLocalizationPreview(
             "직군 이름",
             role.NameLocalizationKey,
             role.GetDisplayName());
+        DrawOptionalLocalizationPreview(
+            "직군 설명",
+            role.DescriptionLocalizationKey,
+            role.GetDescription());
         int passiveIndex = 1;
         foreach (CharacterRolePassiveDefinition passive in
                  role.PassiveDefinitions)
@@ -352,6 +379,7 @@ internal static class CommonSettingsEditorGUI
             }
             passiveIndex++;
         }
+        DrawDefinitionFooter(role);
     }
 
     public static void DrawArchetypeDefinition(
@@ -362,37 +390,65 @@ internal static class CommonSettingsEditorGUI
         EditorGUILayout.LabelField(
             "세부 직군",
             EditorStyles.boldLabel);
-        DrawSerializedDefinition(
-            archetype,
-            CharacterRolePresentation.Invalidate);
+        DrawLocalizationControls();
+
+        SerializedObject serialized = new(archetype);
+        serialized.UpdateIfRequiredOrScript();
+        DrawReadOnlyProperty(serialized, "archetypeId", "세부 직군 ID");
+        DrawProperty(serialized, "parentRole", "상위 직군");
+        PS260714LocalizationKeyPicker.DrawNameKey(
+            serialized.FindProperty("nameLocalizationKey"),
+            "이름 Localization 키");
+        DrawProperty(serialized, "fallbackName", "이름 fallback");
+        PS260714LocalizationKeyPicker.DrawDescriptionKey(
+            serialized.FindProperty("descriptionLocalizationKey"),
+            "설명 Localization 키");
+        DrawProperty(
+            serialized,
+            "fallbackDescription",
+            "설명 fallback");
+        DrawProperty(serialized, "iconSprite", "세부 직군 아이콘");
+        ApplyDefinition(serialized, archetype);
+
         DrawLocalizationPreview(
             "세부 직군 이름",
             archetype.NameLocalizationKey,
             archetype.GetDisplayName());
+        DrawOptionalLocalizationPreview(
+            "세부 직군 설명",
+            archetype.DescriptionLocalizationKey,
+            archetype.GetDescription());
+        DrawDefinitionFooter(archetype);
     }
 
-    private static void DrawSerializedDefinition(
-        UnityEngine.Object asset,
-        Action invalidate)
+    private static void DrawLocalizationControls()
     {
-        SerializedObject serialized = new(asset);
-        serialized.UpdateIfRequiredOrScript();
-        SerializedProperty iterator = serialized.GetIterator();
-        bool enterChildren = true;
-        while (iterator.NextVisible(enterChildren))
+        using (new EditorGUILayout.HorizontalScope())
         {
-            enterChildren = false;
-            if (iterator.propertyPath == "m_Script")
-                continue;
-            EditorGUILayout.PropertyField(iterator, true);
+            EditorGUILayout.LabelField(
+                "roll.* 키를 strings.csv에서 선택합니다.",
+                EditorStyles.miniLabel);
+            if (GUILayout.Button("키 새로고침", GUILayout.Width(86f)))
+                PS260714LocalizationKeyPicker.Refresh();
+            if (GUILayout.Button("Localization 편집", GUILayout.Width(112f)))
+                LocalizationEditorWindow.Open();
         }
+        PS260714LocalizationKeyPicker.DrawLoadError();
+    }
 
+    private static void ApplyDefinition(
+        SerializedObject serialized,
+        UnityEngine.Object asset)
+    {
         if (serialized.ApplyModifiedProperties())
         {
             EditorUtility.SetDirty(asset);
-            invalidate?.Invoke();
+            CharacterRolePresentation.Invalidate();
         }
+    }
 
+    private static void DrawDefinitionFooter(UnityEngine.Object asset)
+    {
         using (new EditorGUILayout.HorizontalScope())
         {
             if (GUILayout.Button("Project에서 선택"))
@@ -400,6 +456,124 @@ internal static class CommonSettingsEditorGUI
             if (GUILayout.Button("공통 설정 열기"))
                 CommonSettingsProjectProvider.Open();
         }
+    }
+
+    private static void DrawRolePassives(SerializedProperty passives)
+    {
+        if (passives == null)
+            return;
+
+        EditorGUILayout.Space(6f);
+        passives.isExpanded = EditorGUILayout.Foldout(
+            passives.isExpanded,
+            $"직군 패시브 ({passives.arraySize})",
+            true,
+            EditorStyles.foldoutHeader);
+        if (!passives.isExpanded)
+            return;
+
+        int removeIndex = -1;
+        for (int index = 0; index < passives.arraySize; index++)
+        {
+            SerializedProperty passive =
+                passives.GetArrayElementAtIndex(index);
+            using (new EditorGUILayout.VerticalScope(EditorStyles.helpBox))
+            {
+                using (new EditorGUILayout.HorizontalScope())
+                {
+                    EditorGUILayout.LabelField(
+                        $"패시브 {index + 1}",
+                        EditorStyles.miniBoldLabel);
+                    if (GUILayout.Button("삭제", GUILayout.Width(48f)))
+                        removeIndex = index;
+                }
+
+                DrawRelativeProperty(passive, "passiveId", "패시브 ID");
+                PS260714LocalizationKeyPicker.DrawNameKey(
+                    passive.FindPropertyRelative("nameLocalizationKey"),
+                    "이름 Localization 키");
+                DrawRelativeProperty(
+                    passive,
+                    "fallbackName",
+                    "이름 fallback");
+                PS260714LocalizationKeyPicker.DrawDescriptionKey(
+                    passive.FindPropertyRelative(
+                        "descriptionLocalizationKey"),
+                    "설명 Localization 키");
+                DrawRelativeProperty(
+                    passive,
+                    "fallbackDescription",
+                    "설명 fallback");
+                DrawRelativeProperty(passive, "iconSprite", "패시브 아이콘");
+                DrawRelativeProperty(passive, "ability", "패시브 능력");
+            }
+        }
+
+        if (removeIndex >= 0)
+            passives.DeleteArrayElementAtIndex(removeIndex);
+
+        if (GUILayout.Button("직군 패시브 추가"))
+        {
+            int newIndex = passives.arraySize;
+            passives.arraySize++;
+            SerializedProperty added =
+                passives.GetArrayElementAtIndex(newIndex);
+            ClearRelativeString(added, "passiveId");
+            ClearRelativeString(added, "nameLocalizationKey");
+            ClearRelativeString(added, "descriptionLocalizationKey");
+            ClearRelativeString(added, "fallbackName");
+            ClearRelativeString(added, "fallbackDescription");
+            SerializedProperty icon =
+                added.FindPropertyRelative("iconSprite");
+            if (icon != null)
+                icon.objectReferenceValue = null;
+        }
+    }
+
+    private static void ClearRelativeString(
+        SerializedProperty parent,
+        string propertyName)
+    {
+        SerializedProperty property =
+            parent.FindPropertyRelative(propertyName);
+        if (property != null)
+            property.stringValue = string.Empty;
+    }
+
+    private static void DrawRelativeProperty(
+        SerializedProperty parent,
+        string propertyName,
+        string label)
+    {
+        SerializedProperty property =
+            parent.FindPropertyRelative(propertyName);
+        if (property != null)
+            EditorGUILayout.PropertyField(
+                property,
+                new GUIContent(label),
+                true);
+    }
+
+    private static void DrawProperty(
+        SerializedObject serialized,
+        string propertyName,
+        string label)
+    {
+        SerializedProperty property = serialized.FindProperty(propertyName);
+        if (property != null)
+            EditorGUILayout.PropertyField(
+                property,
+                new GUIContent(label),
+                true);
+    }
+
+    private static void DrawReadOnlyProperty(
+        SerializedObject serialized,
+        string propertyName,
+        string label)
+    {
+        using (new EditorGUI.DisabledScope(true))
+            DrawProperty(serialized, propertyName, label);
     }
 
     private static void DrawLocalizationPreview(
@@ -416,17 +590,249 @@ internal static class CommonSettingsEditorGUI
                 : "Localization 키를 찾지 못해 fallback을 표시합니다."),
             localized ? MessageType.Info : MessageType.Warning);
     }
+
+    private static void DrawOptionalLocalizationPreview(
+        string label,
+        string localizationKey,
+        string resolvedText)
+    {
+        if (string.IsNullOrWhiteSpace(localizationKey) &&
+            string.IsNullOrWhiteSpace(resolvedText))
+        {
+            return;
+        }
+        DrawLocalizationPreview(label, localizationKey, resolvedText);
+    }
+}
+
+internal static class PS260714LocalizationKeyPicker
+{
+    private const string Prefix = "roll.";
+    private static readonly List<LocalizationKeyOption> NameOptions = new();
+    private static readonly List<LocalizationKeyOption> DescriptionOptions =
+        new();
+    private static bool _loaded;
+    private static string _loadError = string.Empty;
+
+    private readonly struct LocalizationKeyOption
+    {
+        public string Key { get; }
+        public string Label { get; }
+
+        public LocalizationKeyOption(string key, string label)
+        {
+            Key = key;
+            Label = label;
+        }
+    }
+
+    public static void Refresh()
+    {
+        NameOptions.Clear();
+        DescriptionOptions.Clear();
+        _loadError = string.Empty;
+        _loaded = true;
+
+        try
+        {
+            LocalizationSourceModel source =
+                LocalizationCodeGenerator.LoadSource();
+            foreach (LocalizationSourceString entry in source.Strings)
+            {
+                string key = (entry.Key ?? string.Empty).Trim();
+                if (!key.StartsWith(
+                        Prefix,
+                        StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                LocalizationKeyOption option = new(
+                    key,
+                    BuildLabel(entry, key));
+                if (key.EndsWith(
+                        ".name",
+                        StringComparison.OrdinalIgnoreCase))
+                {
+                    NameOptions.Add(option);
+                }
+                else if (key.EndsWith(
+                             ".description",
+                             StringComparison.OrdinalIgnoreCase))
+                {
+                    DescriptionOptions.Add(option);
+                }
+            }
+
+            NameOptions.Sort(CompareOptions);
+            DescriptionOptions.Sort(CompareOptions);
+        }
+        catch (Exception exception)
+        {
+            _loadError =
+                "Localization 키를 불러오지 못했습니다: " +
+                exception.Message;
+        }
+    }
+
+    public static void DrawNameKey(
+        SerializedProperty property,
+        string label)
+    {
+        Draw(property, label, NameOptions, ".name");
+    }
+
+    public static void DrawDescriptionKey(
+        SerializedProperty property,
+        string label)
+    {
+        Draw(property, label, DescriptionOptions, ".description");
+    }
+
+    public static void DrawLoadError()
+    {
+        EnsureLoaded();
+        if (!string.IsNullOrWhiteSpace(_loadError))
+            EditorGUILayout.HelpBox(_loadError, MessageType.Error);
+    }
+
+    internal static IReadOnlyList<string> GetKeys(string suffix)
+    {
+        EnsureLoaded();
+        List<LocalizationKeyOption> options = string.Equals(
+            suffix,
+            ".description",
+            StringComparison.OrdinalIgnoreCase)
+            ? DescriptionOptions
+            : NameOptions;
+        List<string> keys = new(options.Count);
+        foreach (LocalizationKeyOption option in options)
+            keys.Add(option.Key);
+        return keys;
+    }
+
+    private static void Draw(
+        SerializedProperty property,
+        string label,
+        List<LocalizationKeyOption> options,
+        string suffix)
+    {
+        EnsureLoaded();
+        if (property == null)
+        {
+            EditorGUILayout.HelpBox(
+                $"{label} 속성을 찾을 수 없습니다.",
+                MessageType.Error);
+            return;
+        }
+
+        string currentKey = (property.stringValue ?? string.Empty).Trim();
+        int currentIndex = 0;
+        string[] labels = new string[options.Count + 1];
+        labels[0] = "(선택 없음)";
+        for (int index = 0; index < options.Count; index++)
+        {
+            LocalizationKeyOption option = options[index];
+            labels[index + 1] = option.Label;
+            if (string.Equals(
+                    option.Key,
+                    currentKey,
+                    StringComparison.Ordinal))
+            {
+                currentIndex = index + 1;
+            }
+        }
+
+        EditorGUI.BeginChangeCheck();
+        int selectedIndex = EditorGUILayout.Popup(
+            label,
+            currentIndex,
+            labels);
+        if (EditorGUI.EndChangeCheck())
+        {
+            property.stringValue = selectedIndex <= 0
+                ? string.Empty
+                : options[selectedIndex - 1].Key;
+            currentKey = property.stringValue;
+            currentIndex = selectedIndex;
+        }
+
+        if (!string.IsNullOrEmpty(currentKey) && currentIndex == 0)
+        {
+            using (new EditorGUILayout.HorizontalScope())
+            {
+                EditorGUILayout.HelpBox(
+                    $"현재 키 '{currentKey}'는 {Prefix}*{suffix} " +
+                    "목록에 없습니다.",
+                    MessageType.Warning);
+                if (GUILayout.Button("키 지우기", GUILayout.Width(72f)))
+                    property.stringValue = string.Empty;
+            }
+        }
+        else if (options.Count == 0 &&
+                 string.IsNullOrWhiteSpace(_loadError))
+        {
+            EditorGUILayout.HelpBox(
+                $"{Prefix}*{suffix} 형식의 Localization 키가 없습니다.",
+                MessageType.Info);
+        }
+    }
+
+    private static void EnsureLoaded()
+    {
+        if (!_loaded)
+            Refresh();
+    }
+
+    private static int CompareOptions(
+        LocalizationKeyOption left,
+        LocalizationKeyOption right)
+    {
+        return string.Compare(
+            left.Key,
+            right.Key,
+            StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string BuildLabel(
+        LocalizationSourceString entry,
+        string key)
+    {
+        entry.Translations.TryGetValue("ko-KR", out string korean);
+        entry.Translations.TryGetValue("en-US", out string english);
+        korean = (korean ?? string.Empty).Trim();
+        english = (english ?? string.Empty).Trim();
+        if (!string.IsNullOrEmpty(korean) &&
+            !string.IsNullOrEmpty(english))
+        {
+            return $"{key}  |  {korean} / {english}";
+        }
+        if (!string.IsNullOrEmpty(korean))
+            return $"{key}  |  {korean}";
+        if (!string.IsNullOrEmpty(english))
+            return $"{key}  |  {english}";
+        return key;
+    }
 }
 
 public sealed class CommonSettingsProjectProvider : SettingsProvider
 {
     public const string SettingsPath =
         "Project/PS260714/Common Settings";
+    private const string RoleRenameControlName =
+        "CommonSettingsRoleRenameField";
 
     private CharacterGradePaletteSO _palette;
     private CharacterRoleCatalogSO _roleCatalog;
     private UnityEngine.Object _selectedRoleDefinition;
     private Vector2 _scroll;
+    private Vector2 _roleListScroll;
+    private string _roleSearchText = string.Empty;
+    private string _renameAssetName = string.Empty;
+    private bool _isRenamingRoleDefinition;
+    private bool _focusRenameField;
+    private bool _rolesExpanded = true;
+    private bool _archetypesExpanded = true;
 
     private CommonSettingsProjectProvider(
         string path,
@@ -566,9 +972,414 @@ public sealed class CommonSettingsProjectProvider : SettingsProvider
         }
 
         DrawAssetHeader("카탈로그", _roleCatalog);
-        CommonSettingsEditorGUI.DrawRoleCatalog(_roleCatalog);
         EnsureRoleSelection();
+        DrawRoleToolbar();
+        if (_isRenamingRoleDefinition)
+            DrawRoleRenameField();
+        CommonSettingsEditorGUI.DrawRoleCatalog(
+            _roleCatalog,
+            false);
         DrawRoleWorkspace();
+    }
+
+    private void DrawRoleToolbar()
+    {
+        int definitionCount = 0;
+        foreach (CharacterRoleSO role in _roleCatalog.Roles)
+        {
+            if (role != null)
+                definitionCount++;
+        }
+        foreach (CharacterArchetypeSO archetype in
+                 _roleCatalog.Archetypes)
+        {
+            if (archetype != null)
+                definitionCount++;
+        }
+
+        PS260714AssetEditorToolbar.Draw(
+            $"Role Assets: {definitionCount}",
+            _selectedRoleDefinition != null,
+            ShowCreateRoleMenu,
+            SaveSelectedRoleDefinition,
+            DuplicateSelectedRoleDefinition,
+            BeginRenameSelectedRoleDefinition,
+            DeleteSelectedRoleDefinition,
+            () => PS260714AssetEditorList.Ping(
+                _selectedRoleDefinition),
+            () =>
+            {
+                PS260714LocalizationKeyPicker.Refresh();
+                ReloadAssets();
+                EnsureRoleSelection();
+            });
+    }
+
+    private void ShowCreateRoleMenu()
+    {
+        GenericMenu menu = new();
+        menu.AddItem(
+            new GUIContent("직군"),
+            false,
+            () =>
+            {
+                _selectedRoleDefinition =
+                    CommonSettingsEditorUtility.CreateRole(
+                        _roleCatalog);
+                CancelRenameSelectedRoleDefinition();
+            });
+        menu.AddItem(
+            new GUIContent("세부 직군"),
+            false,
+            () =>
+            {
+                _selectedRoleDefinition =
+                    CommonSettingsEditorUtility.CreateArchetype(
+                        _roleCatalog);
+                CancelRenameSelectedRoleDefinition();
+            });
+        menu.ShowAsContext();
+    }
+
+    private void SaveSelectedRoleDefinition()
+    {
+        if (_selectedRoleDefinition == null)
+            return;
+
+        EditorUtility.SetDirty(_selectedRoleDefinition);
+        AssetDatabase.SaveAssetIfDirty(_selectedRoleDefinition);
+        EditorUtility.SetDirty(_roleCatalog);
+        AssetDatabase.SaveAssetIfDirty(_roleCatalog);
+        CharacterRolePresentation.Invalidate();
+    }
+
+    private void DuplicateSelectedRoleDefinition()
+    {
+        UnityEngine.Object source = _selectedRoleDefinition;
+        if (source == null)
+            return;
+
+        string sourcePath = AssetDatabase.GetAssetPath(source);
+        if (string.IsNullOrWhiteSpace(sourcePath))
+            return;
+
+        string directory = Path.GetDirectoryName(sourcePath)
+            ?.Replace('\\', '/');
+        string fileName = Path.GetFileNameWithoutExtension(sourcePath);
+        string destinationPath = AssetDatabase.GenerateUniqueAssetPath(
+            $"{directory}/{fileName} Copy.asset");
+        if (!AssetDatabase.CopyAsset(sourcePath, destinationPath))
+        {
+            EditorUtility.DisplayDialog(
+                "직군 에셋 복제",
+                "에셋을 복제하지 못했습니다.",
+                "확인");
+            return;
+        }
+
+        AssetDatabase.ImportAsset(destinationPath);
+        UnityEngine.Object duplicate = null;
+        if (source is CharacterRoleSO)
+        {
+            CharacterRoleSO role =
+                AssetDatabase.LoadAssetAtPath<CharacterRoleSO>(
+                    destinationPath);
+            role?.RegenerateRoleId();
+            duplicate = role;
+            if (role != null)
+            {
+                CommonSettingsEditorUtility.AppendAssetReference(
+                    _roleCatalog,
+                    "roles",
+                    role);
+            }
+        }
+        else if (source is CharacterArchetypeSO)
+        {
+            CharacterArchetypeSO archetype =
+                AssetDatabase.LoadAssetAtPath<CharacterArchetypeSO>(
+                    destinationPath);
+            archetype?.RegenerateArchetypeId();
+            duplicate = archetype;
+            if (archetype != null)
+            {
+                CommonSettingsEditorUtility.AppendAssetReference(
+                    _roleCatalog,
+                    "archetypes",
+                    archetype);
+            }
+        }
+
+        if (duplicate == null)
+        {
+            EditorUtility.DisplayDialog(
+                "직군 에셋 복제",
+                "복제한 에셋을 불러오지 못했습니다.",
+                "확인");
+            return;
+        }
+
+        EditorUtility.SetDirty(duplicate);
+        AssetDatabase.SaveAssetIfDirty(duplicate);
+        AssetDatabase.SaveAssetIfDirty(_roleCatalog);
+        CharacterRolePresentation.Invalidate();
+        _selectedRoleDefinition = duplicate;
+        CancelRenameSelectedRoleDefinition();
+        EditorGUIUtility.PingObject(duplicate);
+    }
+
+    private void BeginRenameSelectedRoleDefinition()
+    {
+        if (_selectedRoleDefinition == null)
+            return;
+        string path = AssetDatabase.GetAssetPath(
+            _selectedRoleDefinition);
+        if (string.IsNullOrWhiteSpace(path))
+            return;
+
+        _renameAssetName = Path.GetFileNameWithoutExtension(path);
+        _isRenamingRoleDefinition = true;
+        _focusRenameField = true;
+    }
+
+    private void DrawRoleRenameField()
+    {
+        using (new EditorGUILayout.HorizontalScope(
+                   EditorStyles.helpBox))
+        {
+            EditorGUILayout.LabelField(
+                "SO 파일명",
+                GUILayout.Width(70f));
+            GUI.SetNextControlName(RoleRenameControlName);
+            _renameAssetName =
+                EditorGUILayout.TextField(_renameAssetName);
+            if (_focusRenameField)
+            {
+                EditorGUI.FocusTextInControl(RoleRenameControlName);
+                _focusRenameField = false;
+            }
+
+            bool apply = GUILayout.Button("적용", GUILayout.Width(52f));
+            bool cancel = GUILayout.Button("취소", GUILayout.Width(52f));
+            Event current = Event.current;
+            if (current.type == EventType.KeyDown &&
+                GUI.GetNameOfFocusedControl() == RoleRenameControlName)
+            {
+                if (current.keyCode == KeyCode.Return ||
+                    current.keyCode == KeyCode.KeypadEnter)
+                {
+                    apply = true;
+                    current.Use();
+                }
+                else if (current.keyCode == KeyCode.Escape)
+                {
+                    cancel = true;
+                    current.Use();
+                }
+            }
+
+            if (cancel)
+                CancelRenameSelectedRoleDefinition();
+            else if (apply)
+                RenameSelectedRoleDefinition();
+        }
+    }
+
+    private void RenameSelectedRoleDefinition()
+    {
+        UnityEngine.Object selected = _selectedRoleDefinition;
+        if (selected == null)
+        {
+            CancelRenameSelectedRoleDefinition();
+            return;
+        }
+
+        string sourcePath = AssetDatabase.GetAssetPath(selected);
+        string requestedName = (_renameAssetName ?? string.Empty).Trim();
+        if (requestedName.EndsWith(
+                ".asset",
+                StringComparison.OrdinalIgnoreCase))
+        {
+            requestedName = requestedName.Substring(
+                0,
+                requestedName.Length - ".asset".Length).Trim();
+        }
+
+        if (!IsValidAssetFileName(
+                requestedName,
+                out string validationError))
+        {
+            EditorUtility.DisplayDialog(
+                "직군 에셋 이름 변경",
+                validationError,
+                "확인");
+            _focusRenameField = true;
+            return;
+        }
+
+        string currentName = Path.GetFileNameWithoutExtension(sourcePath);
+        if (string.Equals(
+                currentName,
+                requestedName,
+                StringComparison.Ordinal))
+        {
+            CancelRenameSelectedRoleDefinition();
+            return;
+        }
+
+        string error = AssetDatabase.RenameAsset(
+            sourcePath,
+            requestedName);
+        if (!string.IsNullOrWhiteSpace(error))
+        {
+            EditorUtility.DisplayDialog(
+                "직군 에셋 이름 변경",
+                error,
+                "확인");
+            _focusRenameField = true;
+            return;
+        }
+
+        AssetDatabase.SaveAssets();
+        CancelRenameSelectedRoleDefinition();
+        EditorGUIUtility.PingObject(selected);
+    }
+
+    private void CancelRenameSelectedRoleDefinition()
+    {
+        _isRenamingRoleDefinition = false;
+        _focusRenameField = false;
+        _renameAssetName = string.Empty;
+    }
+
+    private static bool IsValidAssetFileName(
+        string fileName,
+        out string validationError)
+    {
+        if (string.IsNullOrWhiteSpace(fileName))
+        {
+            validationError = "파일명을 입력하세요.";
+            return false;
+        }
+        if (fileName == "." || fileName == ".." ||
+            fileName.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0 ||
+            fileName.IndexOf('/') >= 0 ||
+            fileName.IndexOf('\\') >= 0 ||
+            fileName.EndsWith(".", StringComparison.Ordinal) ||
+            fileName.EndsWith(" ", StringComparison.Ordinal))
+        {
+            validationError = "파일명에 사용할 수 없는 문자가 있습니다.";
+            return false;
+        }
+
+        validationError = string.Empty;
+        return true;
+    }
+
+    private void DeleteSelectedRoleDefinition()
+    {
+        UnityEngine.Object selected = _selectedRoleDefinition;
+        if (selected == null)
+            return;
+
+        List<string> references = FindDefinitionReferences(selected);
+        if (references.Count > 0)
+        {
+            int visibleCount = Math.Min(references.Count, 8);
+            string message =
+                "다음 에셋이 선택한 정의를 참조하므로 삭제할 수 " +
+                "없습니다.\n\n";
+            for (int index = 0; index < visibleCount; index++)
+                message += $"• {references[index]}\n";
+            if (references.Count > visibleCount)
+            {
+                message +=
+                    $"• 그 외 {references.Count - visibleCount}개";
+            }
+            EditorUtility.DisplayDialog(
+                "직군 에셋 삭제 차단",
+                message,
+                "확인");
+            return;
+        }
+
+        string path = AssetDatabase.GetAssetPath(selected);
+        if (string.IsNullOrWhiteSpace(path))
+            return;
+        bool confirmed = EditorUtility.DisplayDialog(
+            "직군 에셋 삭제",
+            $"'{selected.name}' 에셋을 삭제합니다.\n\n{path}\n\n" +
+            "이 작업은 Unity Undo로 복구할 수 없습니다.",
+            "삭제",
+            "취소");
+        if (!confirmed)
+            return;
+
+        bool wasRole = selected is CharacterRoleSO;
+        if (!AssetDatabase.DeleteAsset(path))
+        {
+            EditorUtility.DisplayDialog(
+                "직군 에셋 삭제",
+                "에셋을 삭제하지 못했습니다.",
+                "확인");
+            return;
+        }
+
+        CommonSettingsEditorUtility.RemoveMissingAssetReferences(
+            _roleCatalog,
+            wasRole ? "roles" : "archetypes");
+        AssetDatabase.SaveAssetIfDirty(_roleCatalog);
+        CharacterRolePresentation.Invalidate();
+        _selectedRoleDefinition = null;
+        CancelRenameSelectedRoleDefinition();
+        ReloadAssets();
+        EnsureRoleSelection();
+    }
+
+    private static List<string> FindDefinitionReferences(
+        UnityEngine.Object definition)
+    {
+        List<string> references = new();
+        HashSet<string> uniquePaths =
+            new(StringComparer.OrdinalIgnoreCase);
+
+        foreach (string guid in AssetDatabase.FindAssets("t:CharacterSO"))
+        {
+            string path = AssetDatabase.GUIDToAssetPath(guid);
+            CharacterSO character =
+                AssetDatabase.LoadAssetAtPath<CharacterSO>(path);
+            bool usesDefinition = definition switch
+            {
+                CharacterRoleSO role => character != null &&
+                                        character.Role == role,
+                CharacterArchetypeSO archetype => character != null &&
+                    character.Archetype == archetype,
+                _ => false
+            };
+            if (usesDefinition && uniquePaths.Add(path))
+                references.Add($"CharacterSO: {path}");
+        }
+
+        if (definition is CharacterRoleSO selectedRole)
+        {
+            foreach (string guid in AssetDatabase.FindAssets(
+                         "t:CharacterArchetypeSO"))
+            {
+                string path = AssetDatabase.GUIDToAssetPath(guid);
+                CharacterArchetypeSO archetype =
+                    AssetDatabase.LoadAssetAtPath<CharacterArchetypeSO>(
+                        path);
+                if (archetype != null &&
+                    archetype.ParentRole == selectedRole &&
+                    uniquePaths.Add(path))
+                {
+                    references.Add($"세부 직군: {path}");
+                }
+            }
+        }
+
+        references.Sort(StringComparer.OrdinalIgnoreCase);
+        return references;
     }
 
     private static void DrawAssetHeader(
@@ -625,32 +1436,57 @@ public sealed class CommonSettingsProjectProvider : SettingsProvider
         {
             using (new EditorGUILayout.VerticalScope(
                        EditorStyles.helpBox,
-                       GUILayout.Width(220f)))
+                       GUILayout.Width(PS260714AssetEditorList.Width)))
             {
-                EditorGUILayout.LabelField(
+                _roleSearchText =
+                    PS260714AssetEditorList.DrawSearchField(
+                        _roleSearchText);
+                using EditorGUILayout.ScrollViewScope listScroll = new(
+                    _roleListScroll,
+                    GUILayout.MinHeight(240f),
+                    GUILayout.MaxHeight(520f));
+                _roleListScroll = listScroll.scrollPosition;
+                _rolesExpanded = EditorGUILayout.Foldout(
+                    _rolesExpanded,
                     "직군",
-                    EditorStyles.miniBoldLabel);
-                foreach (CharacterRoleSO role in _roleCatalog.Roles)
+                    true,
+                    EditorStyles.foldoutHeader);
+                if (_rolesExpanded)
                 {
-                    DrawSelectionButton(
-                        role,
-                        role != null
-                            ? role.GetDisplayName()
-                            : "(비어 있는 직군 참조)");
+                    foreach (CharacterRoleSO role in _roleCatalog.Roles)
+                    {
+                        if (role != null && !MatchesRoleSearch(role))
+                            continue;
+                        DrawSelectionButton(
+                            role,
+                            role != null
+                                ? role.GetDisplayName()
+                                : "(비어 있는 직군 참조)");
+                    }
                 }
 
                 EditorGUILayout.Space(6f);
-                EditorGUILayout.LabelField(
+                _archetypesExpanded = EditorGUILayout.Foldout(
+                    _archetypesExpanded,
                     "세부 직군",
-                    EditorStyles.miniBoldLabel);
-                foreach (CharacterArchetypeSO archetype in
-                         _roleCatalog.Archetypes)
+                    true,
+                    EditorStyles.foldoutHeader);
+                if (_archetypesExpanded)
                 {
-                    DrawSelectionButton(
-                        archetype,
-                        archetype != null
-                            ? archetype.GetDisplayName()
-                            : "(비어 있는 세부 직군 참조)");
+                    foreach (CharacterArchetypeSO archetype in
+                             _roleCatalog.Archetypes)
+                    {
+                        if (archetype != null &&
+                            !MatchesRoleSearch(archetype))
+                        {
+                            continue;
+                        }
+                        DrawSelectionButton(
+                            archetype,
+                            archetype != null
+                                ? archetype.GetDisplayName()
+                                : "(비어 있는 세부 직군 참조)");
+                    }
                 }
             }
 
@@ -687,12 +1523,64 @@ public sealed class CommonSettingsProjectProvider : SettingsProvider
         {
             bool selected = asset != null &&
                             _selectedRoleDefinition == asset;
-            if (GUILayout.Toggle(selected, label, "Button") &&
-                !selected)
+            Texture preview = asset switch
+            {
+                CharacterRoleSO role =>
+                    PS260714AssetEditorList.GetAssetPreview(
+                        role.IconSprite),
+                CharacterArchetypeSO archetype =>
+                    PS260714AssetEditorList.GetAssetPreview(
+                        archetype.IconSprite),
+                _ => null
+            };
+            bool clicked = PS260714AssetEditorList.DrawRow(
+                selected,
+                new GUIContent(label, preview));
+            if (clicked && !selected)
             {
                 _selectedRoleDefinition = asset;
+                CancelRenameSelectedRoleDefinition();
             }
         }
+    }
+
+    private bool MatchesRoleSearch(UnityEngine.Object definition)
+    {
+        if (string.IsNullOrWhiteSpace(_roleSearchText))
+            return true;
+
+        string search = _roleSearchText.Trim();
+        string displayName;
+        string localizationKey;
+        string stableId;
+        if (definition is CharacterRoleSO role)
+        {
+            displayName = role.GetDisplayName();
+            localizationKey = role.NameLocalizationKey;
+            stableId = role.RoleId;
+        }
+        else if (definition is CharacterArchetypeSO archetype)
+        {
+            displayName = archetype.GetDisplayName();
+            localizationKey = archetype.NameLocalizationKey;
+            stableId = archetype.ArchetypeId;
+        }
+        else
+        {
+            return false;
+        }
+
+        return ContainsIgnoreCase(definition.name, search) ||
+               ContainsIgnoreCase(displayName, search) ||
+               ContainsIgnoreCase(localizationKey, search) ||
+               ContainsIgnoreCase(stableId, search);
+    }
+
+    private static bool ContainsIgnoreCase(string value, string search)
+    {
+        return (value ?? string.Empty).IndexOf(
+            search,
+            StringComparison.OrdinalIgnoreCase) >= 0;
     }
 
     private void ReloadAssets()
@@ -701,6 +1589,7 @@ public sealed class CommonSettingsProjectProvider : SettingsProvider
             CommonSettingsEditorUtility.LoadGradePalette();
         _roleCatalog =
             CommonSettingsEditorUtility.LoadRoleCatalog();
+        PS260714LocalizationKeyPicker.Refresh();
         if (_selectedRoleDefinition != null &&
             (_roleCatalog == null ||
              !ContainsDefinition(
@@ -850,7 +1739,8 @@ internal static class CommonSettingsEditorUtility
     }
 
     public static void DrawRoleCatalogEditor(
-        CharacterRoleCatalogSO catalog)
+        CharacterRoleCatalogSO catalog,
+        bool drawCreateButtons = true)
     {
         if (catalog == null)
             return;
@@ -869,16 +1759,19 @@ internal static class CommonSettingsEditorUtility
         foreach (string issue in issues)
             EditorGUILayout.HelpBox(issue, MessageType.Warning);
 
-        using (new EditorGUILayout.HorizontalScope())
+        if (drawCreateButtons)
         {
-            if (GUILayout.Button("직군 생성"))
-                CreateRole(catalog);
-            if (GUILayout.Button("세부 직군 생성"))
-                CreateArchetype(catalog);
+            using (new EditorGUILayout.HorizontalScope())
+            {
+                if (GUILayout.Button("직군 생성"))
+                    CreateRole(catalog);
+                if (GUILayout.Button("세부 직군 생성"))
+                    CreateArchetype(catalog);
+            }
         }
     }
 
-    private static CharacterRoleSO CreateRole(
+    public static CharacterRoleSO CreateRole(
         CharacterRoleCatalogSO catalog)
     {
         EnsureFolder(RoleAssetFolder);
@@ -894,7 +1787,7 @@ internal static class CommonSettingsEditorUtility
         return role;
     }
 
-    private static CharacterArchetypeSO CreateArchetype(
+    public static CharacterArchetypeSO CreateArchetype(
         CharacterRoleCatalogSO catalog)
     {
         EnsureFolder(ArchetypeAssetFolder);
@@ -922,16 +1815,53 @@ internal static class CommonSettingsEditorUtility
         return archetype;
     }
 
-    private static void AppendAssetReference(
+    public static void AppendAssetReference(
         CharacterRoleCatalogSO catalog,
         string propertyName,
         UnityEngine.Object asset)
     {
         SerializedObject serialized = new(catalog);
         SerializedProperty list = serialized.FindProperty(propertyName);
-        int index = list.arraySize;
-        list.InsertArrayElementAtIndex(index);
-        list.GetArrayElementAtIndex(index).objectReferenceValue = asset;
+        for (int index = 0; index < list.arraySize; index++)
+        {
+            if (list.GetArrayElementAtIndex(index).objectReferenceValue ==
+                asset)
+            {
+                return;
+            }
+        }
+        int appendIndex = list.arraySize;
+        list.InsertArrayElementAtIndex(appendIndex);
+        list.GetArrayElementAtIndex(appendIndex).objectReferenceValue = asset;
+        serialized.ApplyModifiedPropertiesWithoutUndo();
+        EditorUtility.SetDirty(catalog);
+    }
+
+    public static void RemoveMissingAssetReferences(
+        CharacterRoleCatalogSO catalog,
+        string propertyName)
+    {
+        if (catalog == null)
+            return;
+
+        SerializedObject serialized = new(catalog);
+        SerializedProperty list = serialized.FindProperty(propertyName);
+        if (list == null || !list.isArray)
+            return;
+
+        for (int index = list.arraySize - 1; index >= 0; index--)
+        {
+            SerializedProperty element =
+                list.GetArrayElementAtIndex(index);
+            if (element.objectReferenceValue != null)
+                continue;
+
+            int previousSize = list.arraySize;
+            list.DeleteArrayElementAtIndex(index);
+            if (list.arraySize == previousSize)
+                list.DeleteArrayElementAtIndex(index);
+        }
+
         serialized.ApplyModifiedPropertiesWithoutUndo();
         EditorUtility.SetDirty(catalog);
     }

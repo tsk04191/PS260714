@@ -43,6 +43,8 @@ public sealed class BattleManager : MonoBehaviour, IActiveSkillResource
     private IBattleManualTargetSelectionService
         _manualTargetSelectionService;
     private bool _boardFull;
+    private bool _spawnRetryRequested;
+    private bool _processingSpawnQueue;
     private bool _controlsGameTime;
     private int _activeSkillResource;
     private int _maximumActiveSkillResource = DefaultMaximumEnergy;
@@ -160,6 +162,7 @@ public sealed class BattleManager : MonoBehaviour, IActiveSkillResource
 
         ReleaseSession();
         _board = board;
+        _board.OccupancyChanged += HandleBoardOccupancyChanged;
         _manualTargetSelectionService =
             board as IBattleManualTargetSelectionService;
         if (_manualTargetSelectionService != null)
@@ -322,6 +325,8 @@ public sealed class BattleManager : MonoBehaviour, IActiveSkillResource
         _maximumEnemyCount++;
         if (wasEmpty)
             ResetSpawnTimerForNextEnemy();
+        if (_boardFull)
+            _spawnRetryRequested = true;
 
         NotifyQueueAndTimerChanged();
         return true;
@@ -329,13 +334,7 @@ public sealed class BattleManager : MonoBehaviour, IActiveSkillResource
 
     public void NotifyBoardChanged()
     {
-        if (!HasSession)
-            return;
-
-        _boardFull = false;
-        SpawnTimerChanged?.Invoke();
-
-        CheckForCompletion();
+        HandleBoardOccupancyChanged();
     }
 
     public bool EndBattle(IBattleBoard board)
@@ -386,7 +385,16 @@ public sealed class BattleManager : MonoBehaviour, IActiveSkillResource
     {
         if (_spawnQueue.Count == 0)
         {
-            SpawnTimerChanged?.Invoke();
+            return;
+        }
+
+        if (_boardFull && !_spawnRetryRequested)
+            return;
+
+        if (_spawnRetryRequested)
+        {
+            _spawnRetryRequested = false;
+            TrySpawnNextQueuedEnemy();
             return;
         }
 
@@ -401,46 +409,69 @@ public sealed class BattleManager : MonoBehaviour, IActiveSkillResource
 
     private bool TrySpawnNextQueuedEnemy()
     {
-        if (_spawnQueue.Count == 0 || _board == null)
+        if (_spawnQueue.Count == 0 || _board == null ||
+            _processingSpawnQueue)
+        {
             return false;
-
-        EnemyRuntime queueSource = _spawnQueue[0];
-        int queueCount = _spawnQueue.Count;
-        EvaluateSpawnQueueAbilities(
-            queueSource,
-            queueCount,
-            out _,
-            out int expandedCount);
-        int spawnCount = (int)Math.Min(
-            queueCount,
-            1L + expandedCount);
-        bool spawned;
-        if (spawnCount > 1)
-        {
-            List<EnemyRuntime> spawnGroup = _spawnQueue.GetRange(
-                0,
-                spawnCount);
-            spawned = _board.TryAddEnemiesToDistinctTiles(spawnGroup);
-        }
-        else
-        {
-            spawned = _board.TryAddEnemy(_spawnQueue[0]);
         }
 
-        if (!spawned)
+        _processingSpawnQueue = true;
+        _spawnRetryRequested = false;
+        try
         {
+            for (int queueIndex = 0;
+                 queueIndex < _spawnQueue.Count;)
+            {
+                EnemyRuntime queueSource = _spawnQueue[queueIndex];
+                int remainingQueueCount =
+                    _spawnQueue.Count - queueIndex;
+                EvaluateSpawnQueueAbilities(
+                    queueSource,
+                    remainingQueueCount,
+                    out _,
+                    out int expandedCount);
+                int spawnCount = (int)Math.Min(
+                    remainingQueueCount,
+                    1L + expandedCount);
+                bool spawned;
+                if (spawnCount > 1)
+                {
+                    List<EnemyRuntime> spawnGroup =
+                        _spawnQueue.GetRange(queueIndex, spawnCount);
+                    spawned = _board.TryAddEnemiesToDistinctTiles(
+                        spawnGroup);
+                }
+                else
+                {
+                    spawned = _board.TryAddEnemy(queueSource);
+                }
+
+                if (!spawned)
+                {
+                    queueIndex += spawnCount;
+                    continue;
+                }
+
+                CommitSpawnQueueAbilities(
+                    queueSource,
+                    remainingQueueCount);
+                _spawnQueue.RemoveRange(queueIndex, spawnCount);
+                _spawnedEnemyCount += spawnCount;
+                ResetSpawnTimerForNextEnemy();
+                _boardFull = false;
+                NotifyQueueAndTimerChanged();
+                return true;
+            }
+
+            _spawnTimeRemaining = 0f;
             _boardFull = true;
             SpawnTimerChanged?.Invoke();
             return false;
         }
-
-        CommitSpawnQueueAbilities(queueSource, queueCount);
-        _spawnQueue.RemoveRange(0, spawnCount);
-        _spawnedEnemyCount += spawnCount;
-        ResetSpawnTimerForNextEnemy();
-        _boardFull = false;
-        NotifyQueueAndTimerChanged();
-        return true;
+        finally
+        {
+            _processingSpawnQueue = false;
+        }
     }
 
     private void FillInitialBoard(int initialEnemyCount)
@@ -507,6 +538,8 @@ public sealed class BattleManager : MonoBehaviour, IActiveSkillResource
     private void ReleaseSession()
     {
         RestoreDefaultTimeScale();
+        if (_board != null)
+            _board.OccupancyChanged -= HandleBoardOccupancyChanged;
         if (_manualTargetSelectionService != null)
         {
             _manualTargetSelectionService
@@ -531,6 +564,8 @@ public sealed class BattleManager : MonoBehaviour, IActiveSkillResource
         _battleDuration = 0f;
         _battleTimeRemaining = 0f;
         _boardFull = false;
+        _spawnRetryRequested = false;
+        _processingSpawnQueue = false;
         Result = EBattleResult.None;
         SetActiveSkillResource(0);
         SetActiveSkillRechargeRemaining(0f);
@@ -561,6 +596,23 @@ public sealed class BattleManager : MonoBehaviour, IActiveSkillResource
         if (HasSession && State != EBattleState.Completed)
             ApplyBattleTimeScale();
         TimeControlChanged?.Invoke();
+    }
+
+    private void HandleBoardOccupancyChanged()
+    {
+        if (!HasSession)
+            return;
+
+        bool wasWaiting = _boardFull;
+        _boardFull = false;
+        if (wasWaiting && _spawnQueue.Count > 0 &&
+            !_processingSpawnQueue)
+        {
+            _spawnRetryRequested = true;
+        }
+
+        SpawnTimerChanged?.Invoke();
+        CheckForCompletion();
     }
 
     private void RestoreDefaultTimeScale()

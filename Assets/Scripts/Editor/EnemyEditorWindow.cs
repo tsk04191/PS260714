@@ -382,6 +382,7 @@ public sealed class EnemyEditorWindow : EditorWindow
             DrawProperty("cardCode", "Card Code");
             DrawProperty("grade", "Grade");
             DrawProperty("type", "Type");
+            DrawProperty("sortOrder", "Sort Order");
         }
     }
 
@@ -398,10 +399,32 @@ public sealed class EnemyEditorWindow : EditorWindow
         using (new EditorGUILayout.VerticalScope(EditorStyles.helpBox))
         {
             DrawProperty("baseHealth", "Base Health");
+            DrawProperty("healthScale", "Health Scale");
+            DrawProperty("initialArmor", "Initial Armor");
+            DrawProperty("initialShield", "Initial Shield");
             DrawProperty(
                 "spawnIntervalMultiplier",
                 "Base Spawn Interval Multiplier");
             DrawProperty("threatCost", "Threat Cost (0 = Type Default)");
+            DrawProperty(
+                "unlockDifficulty",
+                "Unlock Difficulty (-1 = Type Default)");
+            EditorGUILayout.Space(6f);
+            EditorGUILayout.LabelField(
+                "Board Footprint",
+                EditorStyles.boldLabel);
+            DrawProperty("footprintWidth", "Width");
+            DrawProperty("footprintHeight", "Height");
+            DrawProperty("stackingPolicy", "Stacking Policy");
+            SerializedProperty width = Find("footprintWidth");
+            SerializedProperty height = Find("footprintHeight");
+            if (width != null && height != null &&
+                (width.intValue > 1 || height.intValue > 1))
+            {
+                EditorGUILayout.HelpBox(
+                    "Footprints larger than 1x1 always use exclusive board occupancy.",
+                    MessageType.Info);
+            }
         }
     }
 
@@ -468,7 +491,7 @@ public sealed class EnemyEditorWindow : EditorWindow
     {
         _presentationExpanded = EditorGUILayout.Foldout(
             _presentationExpanded,
-            "Battle Lifecycle 3D VFX",
+            "Presentation and Battle Lifecycle VFX",
             true,
             EditorStyles.foldoutHeader);
         if (!_presentationExpanded)
@@ -476,6 +499,8 @@ public sealed class EnemyEditorWindow : EditorWindow
 
         using (new EditorGUILayout.VerticalScope(EditorStyles.helpBox))
         {
+            DrawProperty("iconSprite", "Codex Icon");
+            DrawProperty("boardSprite", "Board Sprite");
             DrawProperty("spawnVfxCue", "Spawn VFX Cue");
             DrawProperty("deathVfxCue", "Death VFX Cue");
             EditorGUILayout.HelpBox(

@@ -170,7 +170,8 @@ public class DungeonPage : MonoBehaviour, IPage
         new CharacterSO[MaximumPartySize];
     private DungeonBattlePlan[] _battlePlans = Array.Empty<DungeonBattlePlan>();
     private readonly List<EnemySO> _fallbackEnemyPool = new();
-    private readonly Dictionary<EBattleItemType, int> _consumableItems = new();
+    private readonly Dictionary<string, BattleItemRunState> _battleItems =
+        new(StringComparer.Ordinal);
     private int _maximumEnergy = BattleManager.DefaultMaximumEnergy;
     private float _energyRechargeDuration =
         BattleManager.DefaultEnergyRechargeDuration;
@@ -272,6 +273,13 @@ public class DungeonPage : MonoBehaviour, IPage
 
     private void Update()
     {
+        if (_session.IsActive &&
+            _battleManager != null &&
+            _battleManager.State == EBattleState.Running)
+        {
+            TickBattleItemCooldowns(Time.deltaTime);
+        }
+
         if (!_session.IsActive || _session.Definition == null ||
             _session.Definition.Modifiers.Count == 0 ||
             _battleManager == null ||
@@ -769,75 +777,102 @@ public class DungeonPage : MonoBehaviour, IPage
         return true;
     }
 
-    public int GetBattleItemCount(EBattleItemType itemType)
+    public bool IsBattleItemOwned(BattleItemSO item)
     {
-        if (BattleItemCatalog.Get(itemType).IsReusable)
-            return 1;
-
-        return _consumableItems.TryGetValue(itemType, out int count)
-            ? Mathf.Max(0, count)
-            : 0;
+        return TryGetBattleItemState(item, out BattleItemRunState state) &&
+               state.IsOwned;
     }
 
-    public bool TryAcquireBattleItem(EBattleItemType itemType)
+    public int GetBattleItemCount(BattleItemSO item)
     {
-        if (!_eventRewardPending || !BattleItemCatalog.IsConsumable(itemType))
+        if (!TryGetBattleItemState(item, out BattleItemRunState state) ||
+            !state.IsOwned)
+        {
+            return 0;
+        }
+
+        return item.HasUnlimitedUses ? 1 : state.RemainingUses;
+    }
+
+    public float GetBattleItemCooldown(BattleItemSO item)
+    {
+        return TryGetBattleItemState(item, out BattleItemRunState state)
+            ? state.CooldownRemaining
+            : 0f;
+    }
+
+    public bool CanAcquireBattleItem(BattleItemSO item)
+    {
+        if (item == null || !item.AvailableAsDungeonReward)
             return false;
 
-        _consumableItems.TryGetValue(itemType, out int count);
-        _consumableItems[itemType] = count + 1;
+        if (!TryGetBattleItemState(item, out BattleItemRunState state))
+            return true;
+        if (item.HasUnlimitedUses)
+            return !state.IsOwned;
+        return item.MaximumRunUses == 0 ||
+               state.RemainingUses < item.MaximumRunUses;
+    }
+
+    public bool TryAcquireBattleItem(BattleItemSO item)
+    {
+        if (!_eventRewardPending || !CanAcquireBattleItem(item))
+            return false;
+
+        BattleItemRunState state = GetOrCreateBattleItemState(item);
+        if (state == null || !state.Acquire(item))
+            return false;
+
         BattleItemsChanged?.Invoke();
         CompleteEventReward();
         return true;
     }
 
     public bool TryUseBattleItemOnEnemy(
-        EBattleItemType itemType,
+        BattleItemSO item,
         EnemyRuntime enemy)
     {
-        BattleItemDefinition definition = BattleItemCatalog.Get(itemType);
-        bool targetTypeMatches =
-            definition.TargetType == EBattleItemTargetType.Enemy;
-        bool canUse = CanUseBattleItem(definition);
-        bool targetable = board != null &&
-                          board.ContainsTargetableEnemy(enemy);
-        if (!targetTypeMatches || !canUse || !targetable)
-            return false;
-
-        bool applied = itemType switch
-        {
-            EBattleItemType.Focus =>
-                board.TryForcePriorityTarget(enemy, 5f),
-            EBattleItemType.Molotov =>
-                board.TryApplyFireToEnemy(enemy, 3f, 1f, 1),
-            EBattleItemType.PrecisionShot =>
-                board.TryDamageEnemy(enemy, 5) > 0,
-            _ => false,
-        };
-        return applied && CompleteBattleItemUse(definition);
-    }
-
-    public bool TryUseBattleItemOnTurret(
-        EBattleItemType itemType,
-        CharacterRuntime turret)
-    {
-        BattleItemDefinition definition = BattleItemCatalog.Get(itemType);
-        if (definition.TargetType != EBattleItemTargetType.Turret ||
-            !CanUseBattleItem(definition) || turret == null ||
-            !_ownedTurrets.Contains(turret))
+        if (item == null ||
+            item.TargetType != BattleItemTargetType.Enemy ||
+            !CanUseBattleItem(item) ||
+            board == null ||
+            !board.ContainsTargetableEnemy(enemy) ||
+            _battleManager == null ||
+            !_battleManager.TrySpend(item.EnergyCost))
         {
             return false;
         }
 
-        bool applied = itemType switch
+        if (!BattleItemUseExecutor.TryApplyToEnemy(item, board, enemy))
         {
-            EBattleItemType.OverSupply =>
-                turret.ApplyAttackSpeedBoost(2f, 5f),
-            EBattleItemType.Overheat =>
-                turret.ApplyPowerBoost(2f, 3f),
-            _ => false,
-        };
-        return applied && CompleteBattleItemUse(definition);
+            _battleManager.TryGain(item.EnergyCost);
+            return false;
+        }
+
+        return CompleteBattleItemUse(item);
+    }
+
+    public bool TryUseBattleItemOnTurret(
+        BattleItemSO item,
+        CharacterRuntime turret)
+    {
+        if (item == null ||
+            item.TargetType != BattleItemTargetType.Turret ||
+            !CanUseBattleItem(item) || turret == null ||
+            !_ownedTurrets.Contains(turret) ||
+            _battleManager == null ||
+            !_battleManager.TrySpend(item.EnergyCost))
+        {
+            return false;
+        }
+
+        if (!BattleItemUseExecutor.TryApplyToTurret(item, turret))
+        {
+            _battleManager.TryGain(item.EnergyCost);
+            return false;
+        }
+
+        return CompleteBattleItemUse(item);
     }
 
     public int GetBattleDifficultyScale(int battleNumber)
@@ -1063,6 +1098,7 @@ public class DungeonPage : MonoBehaviour, IPage
         }
 
         board.Initialize(setup.FieldSize, setup.MaximumStackSize);
+        ResetBattleItemCooldowns();
         _battleManager.ConfigureActiveSkillResource(
             _maximumEnergy,
             _energyRechargeDuration);
@@ -1167,7 +1203,7 @@ public class DungeonPage : MonoBehaviour, IPage
         foreach (EnemySO definition in allDefinitions)
         {
             if (definition != null &&
-                plan.DifficultyScale >= GetEnemyUnlockScale(definition.Type))
+                plan.DifficultyScale >= definition.UnlockDifficulty)
             {
                 eligibleDefinitions.Add(definition);
             }
@@ -1525,21 +1561,6 @@ public class DungeonPage : MonoBehaviour, IPage
         return healthValues;
     }
 
-    private static int GetEnemyUnlockScale(EEnemyType type)
-    {
-        return type switch
-        {
-            EEnemyType.Assault => 10,
-            EEnemyType.Heavy => 20,
-            EEnemyType.Medic => 30,
-            EEnemyType.Infiltrator => 40,
-            EEnemyType.Mechanic => 45,
-            EEnemyType.Pointman => 55,
-            EEnemyType.ShieldBearer => 70,
-            _ => 0,
-        };
-    }
-
     private bool TryResolveBattleManager()
     {
         if (_battleManager == null)
@@ -1584,6 +1605,11 @@ public class DungeonPage : MonoBehaviour, IPage
             }
         }
 
+        IReadOnlyList<EnemySO> catalogEnemies =
+            EnemyDefinitionCatalog.GetAll();
+        if (catalogEnemies.Count > 0)
+            return catalogEnemies[0];
+
         EnsureFallbackEnemyDefinitions();
         return _fallbackEnemyPool.Count > 0
             ? _fallbackEnemyPool[0]
@@ -1604,6 +1630,11 @@ public class DungeonPage : MonoBehaviour, IPage
 
         if (configuredEnemies.Count > 0)
             return configuredEnemies;
+
+        IReadOnlyList<EnemySO> catalogEnemies =
+            EnemyDefinitionCatalog.GetAll();
+        if (catalogEnemies.Count > 0)
+            return catalogEnemies;
 
         EnsureFallbackEnemyDefinitions();
         return _fallbackEnemyPool;
@@ -1777,36 +1808,66 @@ public class DungeonPage : MonoBehaviour, IPage
         flowController?.TryAdvance();
     }
 
-    private bool CanUseBattleItem(BattleItemDefinition definition)
+    private bool CanUseBattleItem(BattleItemSO item)
     {
-        return _session.IsActive &&
+        return item != null &&
+               _session.IsActive &&
                _session.Activity == EDungeonRunActivity.Battle &&
-               (definition.IsReusable || GetBattleItemCount(definition.Type) > 0) &&
+               TryGetBattleItemState(item, out BattleItemRunState state) &&
+               state.CanUse(item) &&
                _battleManager != null &&
-               _battleManager.CanSpend(definition.EnergyCost);
+               _battleManager.CanSpend(item.EnergyCost);
     }
 
-    private bool CompleteBattleItemUse(BattleItemDefinition definition)
+    private bool CompleteBattleItemUse(BattleItemSO item)
     {
-        if (_battleManager == null ||
-            !_battleManager.TrySpend(definition.EnergyCost))
+        if (!TryGetBattleItemState(item, out BattleItemRunState state) ||
+            !state.CompleteSuccessfulUse(item))
         {
             return false;
         }
 
-        if (!definition.IsReusable)
+        BattleItemsChanged?.Invoke();
+        return true;
+    }
+
+    private BattleItemRunState GetOrCreateBattleItemState(BattleItemSO item)
+    {
+        if (item == null || string.IsNullOrWhiteSpace(item.ItemId))
+            return null;
+
+        if (_battleItems.TryGetValue(
+                item.ItemId,
+                out BattleItemRunState state))
         {
-            int remainingCount = Mathf.Max(
-                0,
-                GetBattleItemCount(definition.Type) - 1);
-            if (remainingCount > 0)
-                _consumableItems[definition.Type] = remainingCount;
-            else
-                _consumableItems.Remove(definition.Type);
-            BattleItemsChanged?.Invoke();
+            return state;
         }
 
-        return true;
+        state = new BattleItemRunState(item);
+        _battleItems.Add(item.ItemId, state);
+        return state;
+    }
+
+    private bool TryGetBattleItemState(
+        BattleItemSO item,
+        out BattleItemRunState state)
+    {
+        state = null;
+        return item != null &&
+               !string.IsNullOrWhiteSpace(item.ItemId) &&
+               _battleItems.TryGetValue(item.ItemId, out state);
+    }
+
+    private void TickBattleItemCooldowns(float deltaTime)
+    {
+        foreach (BattleItemRunState state in _battleItems.Values)
+            state.TickCooldown(deltaTime);
+    }
+
+    private void ResetBattleItemCooldowns()
+    {
+        foreach (BattleItemRunState state in _battleItems.Values)
+            state.ResetCooldown();
     }
 
     private void ResetRunResourcesAndItems(bool includeStartingConsumable)
@@ -1814,16 +1875,24 @@ public class DungeonPage : MonoBehaviour, IPage
         _maximumEnergy = BattleManager.DefaultMaximumEnergy;
         _energyRechargeDuration =
             BattleManager.DefaultEnergyRechargeDuration;
-        _consumableItems.Clear();
-        if (includeStartingConsumable &&
-            BattleItemCatalog.Consumables.Count > 0)
+        _battleItems.Clear();
+        if (includeStartingConsumable)
         {
-            int randomIndex = UnityEngine.Random.Range(
-                0,
-                BattleItemCatalog.Consumables.Count);
-            EBattleItemType startingItem =
-                BattleItemCatalog.Consumables[randomIndex];
-            _consumableItems[startingItem] = 1;
+            List<BattleItemSO> startingItems = new();
+            foreach (BattleItemSO item in BattleItemCatalog.GetAll())
+            {
+                if (item != null && item.AvailableAsStartingItem)
+                    startingItems.Add(item);
+            }
+
+            if (startingItems.Count > 0)
+            {
+                int randomIndex = UnityEngine.Random.Range(
+                    0,
+                    startingItems.Count);
+                BattleItemSO startingItem = startingItems[randomIndex];
+                GetOrCreateBattleItemState(startingItem)?.Acquire(startingItem);
+            }
         }
         _battleManager?.ConfigureActiveSkillResource(
             _maximumEnergy,
@@ -2330,7 +2399,7 @@ public sealed class DungeonEventTab
         public CharacterDungeonUpgradeType DungeonUpgradeType { get; }
         public CharacterSO TurretDefinition { get; }
         public EDungeonEnergyUpgradeType EnergyUpgradeType { get; }
-        public EBattleItemType BattleItemType { get; }
+        public BattleItemSO BattleItem { get; }
 
         private RewardOption(
             ERewardOptionType type,
@@ -2339,7 +2408,7 @@ public sealed class DungeonEventTab
             CharacterDungeonUpgradeType dungeonUpgradeType,
             CharacterSO turretDefinition,
             EDungeonEnergyUpgradeType energyUpgradeType,
-            EBattleItemType battleItemType)
+            BattleItemSO battleItem)
         {
             Type = type;
             TurretSlotIndex = turretSlotIndex;
@@ -2347,7 +2416,7 @@ public sealed class DungeonEventTab
             DungeonUpgradeType = dungeonUpgradeType;
             TurretDefinition = turretDefinition;
             EnergyUpgradeType = energyUpgradeType;
-            BattleItemType = battleItemType;
+            BattleItem = battleItem;
         }
 
         public static RewardOption CreateDungeonUpgrade(
@@ -2390,7 +2459,7 @@ public sealed class DungeonEventTab
                 default);
         }
 
-        public static RewardOption CreateBattleItem(EBattleItemType itemType)
+        public static RewardOption CreateBattleItem(BattleItemSO item)
         {
             return new RewardOption(
                 ERewardOptionType.BattleItem,
@@ -2399,7 +2468,7 @@ public sealed class DungeonEventTab
                 default,
                 null,
                 default,
-                itemType);
+                item);
         }
     }
 
@@ -2673,8 +2742,11 @@ public sealed class DungeonEventTab
                 EDungeonEnergyUpgradeType.RechargeSpeed));
         }
 
-        foreach (EBattleItemType itemType in BattleItemCatalog.Consumables)
-            candidates.Add(RewardOption.CreateBattleItem(itemType));
+        foreach (BattleItemSO item in BattleItemCatalog.GetAll())
+        {
+            if (item != null && _page.CanAcquireBattleItem(item))
+                candidates.Add(RewardOption.CreateBattleItem(item));
+        }
 
         _currentRewardOptions.Clear();
         int choiceCount = Mathf.Min(RewardChoiceCount, candidates.Count);
@@ -2764,18 +2836,28 @@ public sealed class DungeonEventTab
 
         if (option.Type == ERewardOptionType.BattleItem)
         {
-            BattleItemDefinition item = BattleItemCatalog.Get(
-                option.BattleItemType);
-            return new RewardCardContent(
-                LocalizationService.Get(
-                    LocalizationKeys.UiDungeonRewardCategoryItem),
-                item.DisplayName,
-                item.Description,
-                LocalizationService.Get(
+            BattleItemSO item = option.BattleItem;
+            int ownedUses = _page.GetBattleItemCount(item);
+            int grantedUses = item != null && !item.HasUnlimitedUses
+                ? item.UsesPerAcquisition
+                : 0;
+            string footer = item != null && item.HasUnlimitedUses
+                ? "∞"
+                : LocalizationService.Get(
                     LocalizationKeys.UiDungeonRewardItemFooter,
                     LocalizationService.Arg(
                         "owned",
-                        _page.GetBattleItemCount(item.Type))),
+                        ownedUses + grantedUses));
+            return new RewardCardContent(
+                LocalizationService.Get(
+                    LocalizationKeys.UiDungeonRewardCategoryItem),
+                item != null
+                    ? item.GetLocalizedDisplayName()
+                    : string.Empty,
+                item != null
+                    ? item.GetLocalizedDescription()
+                    : string.Empty,
+                footer,
                 new Color(0.8f, 0.35f, 0.22f, 1f));
         }
 
@@ -2896,7 +2978,7 @@ public sealed class DungeonEventTab
 
         if (option.Type == ERewardOptionType.BattleItem)
         {
-            _page.TryAcquireBattleItem(option.BattleItemType);
+            _page.TryAcquireBattleItem(option.BattleItem);
             return;
         }
 

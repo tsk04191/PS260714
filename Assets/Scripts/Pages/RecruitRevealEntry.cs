@@ -53,6 +53,7 @@ public readonly struct RecruitRevealEntry
     {
         return entry != null
             ? new RecruitRevealEntry(
+                entry.RewardType == RecruitRewardType.Dummy ||
                 string.IsNullOrWhiteSpace(entry.RewardId)
                     ? $"dummy.{index}"
                     : entry.RewardId,

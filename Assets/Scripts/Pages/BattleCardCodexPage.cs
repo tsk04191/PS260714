@@ -20,8 +20,8 @@ public sealed class BattleCardCodexPage : RuntimeMenuPageBase
     [Header("Catalog Category")]
     [SerializeField] private EBattleCardCodexCategory category;
 
-    private readonly List<BattleItemDefinition> _entries = new();
-    private readonly List<BattleItemDefinition> _visibleEntries = new();
+    private readonly List<BattleItemSO> _entries = new();
+    private readonly List<BattleItemSO> _visibleEntries = new();
     private CodexBrowserView _browser;
     private Image _detailPanelImage;
     private TextMeshProUGUI _detailTitle;
@@ -66,21 +66,18 @@ public sealed class BattleCardCodexPage : RuntimeMenuPageBase
     private void RefreshEntries()
     {
         _entries.Clear();
-        Array values = Enum.GetValues(typeof(EBattleItemType));
-        foreach (EBattleItemType type in values)
+        if (category == EBattleCardCodexCategory.Skills)
+            return;
+
+        foreach (BattleItemSO item in BattleItemCatalog.GetAll())
         {
-            BattleItemDefinition definition = BattleItemCatalog.Get(type);
-            bool categoryMatches = category ==
-                EBattleCardCodexCategory.Skills
-                    ? definition.IsReusable
-                    : !definition.IsReusable;
-            if (categoryMatches)
-                _entries.Add(definition);
+            if (item != null)
+                _entries.Add(item);
         }
 
         _entries.Sort((left, right) => string.Compare(
-            left.DisplayName,
-            right.DisplayName,
+            left.GetLocalizedDisplayName(),
+            right.GetLocalizedDisplayName(),
             StringComparison.OrdinalIgnoreCase));
     }
 
@@ -191,7 +188,7 @@ public sealed class BattleCardCodexPage : RuntimeMenuPageBase
 
         RefreshBrowserToolbar();
         _visibleEntries.Clear();
-        foreach (BattleItemDefinition entry in _entries)
+        foreach (BattleItemSO entry in _entries)
         {
             if (!MatchesSearch(entry) || !MatchesFilter(entry))
                 continue;
@@ -202,15 +199,15 @@ public sealed class BattleCardCodexPage : RuntimeMenuPageBase
         _visibleEntries.Sort(CompareEntries);
         List<CodexBrowserItemModel> items =
             new(_visibleEntries.Count);
-        foreach (BattleItemDefinition entry in _visibleEntries)
+        foreach (BattleItemSO entry in _visibleEntries)
         {
-            Color accent = entry.IsReusable
+            Color accent = entry.HasUnlimitedUses
                 ? new Color(0.24f, 0.52f, 0.7f, 1f)
                 : new Color(0.72f, 0.4f, 0.18f, 1f);
             items.Add(new CodexBrowserItemModel(
                 GetEntryId(entry),
-                entry.DisplayName,
-                null,
+                entry.GetLocalizedDisplayName(),
+                entry.Icon,
                 false,
                 accent));
         }
@@ -234,29 +231,33 @@ public sealed class BattleCardCodexPage : RuntimeMenuPageBase
             ShowEmptyState();
     }
 
-    private bool MatchesSearch(BattleItemDefinition entry)
+    private bool MatchesSearch(BattleItemSO entry)
     {
         if (string.IsNullOrWhiteSpace(_searchQuery))
             return true;
 
-        return ContainsIgnoreCase(entry.DisplayName, _searchQuery) ||
-               ContainsIgnoreCase(entry.Type.ToString(), _searchQuery) ||
-               ContainsIgnoreCase(entry.Description, _searchQuery);
+        return ContainsIgnoreCase(
+                   entry.GetLocalizedDisplayName(),
+                   _searchQuery) ||
+               ContainsIgnoreCase(entry.ItemId, _searchQuery) ||
+               ContainsIgnoreCase(
+                   entry.GetLocalizedDescription(),
+                   _searchQuery);
     }
 
-    private bool MatchesFilter(BattleItemDefinition entry)
+    private bool MatchesFilter(BattleItemSO entry)
     {
         return _filterIndex switch
         {
-            1 => entry.TargetType == EBattleItemTargetType.Enemy,
-            2 => entry.TargetType != EBattleItemTargetType.Enemy,
+            1 => entry.TargetType == BattleItemTargetType.Enemy,
+            2 => entry.TargetType != BattleItemTargetType.Enemy,
             _ => true
         };
     }
 
     private int CompareEntries(
-        BattleItemDefinition left,
-        BattleItemDefinition right)
+        BattleItemSO left,
+        BattleItemSO right)
     {
         int primary;
         if (_sortIndex == 2)
@@ -266,8 +267,8 @@ public sealed class BattleCardCodexPage : RuntimeMenuPageBase
         else
         {
             primary = string.Compare(
-                left.DisplayName,
-                right.DisplayName,
+                left.GetLocalizedDisplayName(),
+                right.GetLocalizedDisplayName(),
                 StringComparison.OrdinalIgnoreCase);
             if (_sortIndex == 1)
                 primary = -primary;
@@ -275,7 +276,10 @@ public sealed class BattleCardCodexPage : RuntimeMenuPageBase
 
         return primary != 0
             ? primary
-            : left.Type.CompareTo(right.Type);
+            : string.Compare(
+                left.ItemId,
+                right.ItemId,
+                StringComparison.Ordinal);
     }
 
     private void RefreshBrowserToolbar()
@@ -314,8 +318,8 @@ public sealed class BattleCardCodexPage : RuntimeMenuPageBase
 
         _selectedEntryId = entryId;
         _browser?.SetSelected(entryId);
-        BattleItemDefinition definition = _visibleEntries[index];
-        Color accentColor = definition.IsReusable
+        BattleItemSO definition = _visibleEntries[index];
+        Color accentColor = definition.HasUnlimitedUses
             ? new Color(0.24f, 0.52f, 0.7f, 1f)
             : new Color(0.72f, 0.4f, 0.18f, 1f);
 
@@ -327,9 +331,9 @@ public sealed class BattleCardCodexPage : RuntimeMenuPageBase
                 0.18f);
         }
 
-        _detailTitle.text = definition.DisplayName;
+        _detailTitle.text = definition.GetLocalizedDisplayName();
         _classificationText.text = LocalizationService.Get(
-            definition.IsReusable
+            definition.HasUnlimitedUses
                 ? LocalizationKeys.CodexBattleClassificationReusable
                 : LocalizationKeys.CodexBattleClassificationConsumable);
 
@@ -339,7 +343,7 @@ public sealed class BattleCardCodexPage : RuntimeMenuPageBase
         LocalizationArgument target = LocalizationService.Arg(
             "target",
             GetTargetName(definition.TargetType));
-        _resourceText.text = definition.IsReusable
+        _resourceText.text = definition.HasUnlimitedUses
             ? LocalizationService.Get(
                 LocalizationKeys.CodexBattleResourceReusable,
                 cost,
@@ -351,11 +355,12 @@ public sealed class BattleCardCodexPage : RuntimeMenuPageBase
                 LocalizationKeys.CodexBattleResourceConsumable,
                 cost,
                 target);
-        _effectText.text = definition.Description;
-        _usageText.text = LocalizationService.Get(
-            definition.IsReusable
-                ? LocalizationKeys.CodexBattleUsageReusable
-                : LocalizationKeys.CodexBattleUsageConsumable);
+        _effectText.text = definition.GetLocalizedDescription();
+        _usageText.text = definition.HasUnlimitedUses
+            ? LocalizationService.Get(
+                LocalizationKeys.CodexBattleUsageReusable)
+            : $"{LocalizationService.Get(LocalizationKeys.CodexBattleUsageConsumable)} " +
+              $"×{definition.UsesPerAcquisition}";
 
         ApplyLocalizedFont(_detailTitle, "title");
         ApplyLocalizedFont(_classificationText, "body");
@@ -380,10 +385,10 @@ public sealed class BattleCardCodexPage : RuntimeMenuPageBase
             _usageText.text = string.Empty;
     }
 
-    private static string GetTargetName(EBattleItemTargetType targetType)
+    private static string GetTargetName(BattleItemTargetType targetType)
     {
         return LocalizationService.Get(
-            targetType == EBattleItemTargetType.Turret
+            targetType == BattleItemTargetType.Turret
                 ? LocalizationKeys.CodexBattleTargetTurret
                 : LocalizationKeys.CodexBattleTargetEnemy);
     }
@@ -466,9 +471,9 @@ public sealed class BattleCardCodexPage : RuntimeMenuPageBase
         NavigateTo(codexPage, PageOpenMode.Resume);
     }
 
-    private static string GetEntryId(BattleItemDefinition entry)
+    private static string GetEntryId(BattleItemSO entry)
     {
-        return entry.Type.ToString();
+        return entry != null ? entry.ItemId : string.Empty;
     }
 
     private static bool ContainsIgnoreCase(string source, string value)

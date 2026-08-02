@@ -12,12 +12,22 @@ public sealed class EnemyCodexPage : RuntimeMenuPageBase
     {
         public string EnemyId { get; }
         public string DisplayName { get; }
+        public string Description { get; }
         public string CardCode { get; }
+        public Sprite Icon { get; }
+        public int SortOrder { get; }
         public EEnemyGrade Grade { get; }
         public EEnemyType Type { get; }
         public int BaseHealth { get; }
+        public float HealthScale { get; }
+        public int InitialArmor { get; }
+        public int InitialShield { get; }
         public float SpawnIntervalMultiplier { get; }
         public float ThreatCost { get; }
+        public int UnlockDifficulty { get; }
+        public int FootprintWidth { get; }
+        public int FootprintHeight { get; }
+        public EnemyStackingPolicy StackingPolicy { get; }
         public bool TargetPriorityExcluded { get; }
         public string AbilityDescription { get; }
 
@@ -25,12 +35,22 @@ public sealed class EnemyCodexPage : RuntimeMenuPageBase
         {
             EnemyId = definition.EnemyId;
             DisplayName = EnemyLocalization.GetName(definition);
+            Description = EnemyLocalization.GetDescription(definition);
             CardCode = definition.CardCode;
+            Icon = definition.IconSprite;
+            SortOrder = definition.SortOrder;
             Grade = definition.Grade;
             Type = definition.Type;
             BaseHealth = definition.BaseHealth;
+            HealthScale = definition.HealthScale;
+            InitialArmor = definition.InitialArmor;
+            InitialShield = definition.InitialShield;
             SpawnIntervalMultiplier = definition.SpawnIntervalMultiplier;
             ThreatCost = definition.ThreatCost;
+            UnlockDifficulty = definition.UnlockDifficulty;
+            FootprintWidth = definition.FootprintWidth;
+            FootprintHeight = definition.FootprintHeight;
+            StackingPolicy = definition.StackingPolicy;
             TargetPriorityExcluded =
                 EnemyLocalization.HasTargetPriorityExclusion(definition);
             AbilityDescription = EnemyLocalization.GetAbility(definition);
@@ -51,6 +71,7 @@ public sealed class EnemyCodexPage : RuntimeMenuPageBase
     private Image _detailPanelImage;
     private TextMeshProUGUI _detailTitle;
     private TextMeshProUGUI _identityText;
+    private TextMeshProUGUI _enemyDescriptionText;
     private TextMeshProUGUI _statText;
     private TextMeshProUGUI _abilityTitleText;
     private TextMeshProUGUI _abilityText;
@@ -122,12 +143,12 @@ public sealed class EnemyCodexPage : RuntimeMenuPageBase
 
         _entries.Sort((left, right) =>
         {
-            int typeOrder = left.Type.CompareTo(right.Type);
-            return typeOrder != 0
-                ? typeOrder
+            int sortOrder = left.SortOrder.CompareTo(right.SortOrder);
+            return sortOrder != 0
+                ? sortOrder
                 : string.Compare(
-                    left.DisplayName,
-                    right.DisplayName,
+                    left.EnemyId,
+                    right.EnemyId,
                     StringComparison.OrdinalIgnoreCase);
         });
     }
@@ -157,11 +178,6 @@ public sealed class EnemyCodexPage : RuntimeMenuPageBase
             string enemyId = definition.EnemyId?.Trim();
             if (!string.IsNullOrWhiteSpace(enemyId) &&
                 registeredIds.Contains(enemyId))
-            {
-                continue;
-            }
-
-            if (registeredTypes.Contains(definition.Type))
             {
                 continue;
             }
@@ -245,6 +261,12 @@ public sealed class EnemyCodexPage : RuntimeMenuPageBase
             20f,
             42f,
             FontStyles.Bold);
+        _enemyDescriptionText = CreateContentText(
+            detailObject.transform,
+            "txtEnemyDescription",
+            string.Empty,
+            19f,
+            54f);
         _statText = CreateContentText(
             detailObject.transform,
             "txtEnemyStats",
@@ -289,7 +311,7 @@ public sealed class EnemyCodexPage : RuntimeMenuPageBase
             items.Add(new CodexBrowserItemModel(
                 entry.EnemyId,
                 entry.DisplayName,
-                null,
+                entry.Icon,
                 false,
                 GetGradeColor(entry.Grade)));
         }
@@ -319,6 +341,7 @@ public sealed class EnemyCodexPage : RuntimeMenuPageBase
             return true;
 
         return ContainsIgnoreCase(entry.DisplayName, _searchQuery) ||
+               ContainsIgnoreCase(entry.Description, _searchQuery) ||
                ContainsIgnoreCase(entry.EnemyId, _searchQuery) ||
                ContainsIgnoreCase(entry.CardCode, _searchQuery) ||
                ContainsIgnoreCase(entry.Type.ToString(), _searchQuery);
@@ -347,7 +370,7 @@ public sealed class EnemyCodexPage : RuntimeMenuPageBase
                 right.DisplayName,
                 StringComparison.OrdinalIgnoreCase),
             2 => left.Grade.CompareTo(right.Grade),
-            _ => left.Type.CompareTo(right.Type)
+            _ => left.SortOrder.CompareTo(right.SortOrder)
         };
         if (primary != 0)
             return primary;
@@ -425,7 +448,8 @@ public sealed class EnemyCodexPage : RuntimeMenuPageBase
             LocalizationService.Arg(
                 "type",
                 EnemyLocalization.GetName(entry.Type)));
-        _statText.text = LocalizationService.Get(
+        _enemyDescriptionText.text = entry.Description;
+        string baseStats = LocalizationService.Get(
             LocalizationKeys.CodexEnemyStats,
             LocalizationService.Arg("health", entry.BaseHealth),
             LocalizationService.Arg("threat", entry.ThreatCost),
@@ -436,10 +460,21 @@ public sealed class EnemyCodexPage : RuntimeMenuPageBase
                 "priority",
                 EnemyLocalization.GetPriority(
                     entry.TargetPriorityExcluded)));
+        string extendedStats = IsKoreanLocale
+            ? $"체력 배율 {entry.HealthScale:0.##} | 방어도 {entry.InitialArmor} | 보호막 {entry.InitialShield}\n" +
+              $"점유 크기 {entry.FootprintWidth}x{entry.FootprintHeight} | " +
+              $"배치 {(entry.StackingPolicy == EnemyStackingPolicy.Exclusive ? "독점" : "중첩 가능")} | " +
+              $"해금 난이도 {entry.UnlockDifficulty}"
+            : $"HEALTH SCALE {entry.HealthScale:0.##} | ARMOR {entry.InitialArmor} | SHIELD {entry.InitialShield}\n" +
+              $"FOOTPRINT {entry.FootprintWidth}x{entry.FootprintHeight} | " +
+              $"PLACEMENT {(entry.StackingPolicy == EnemyStackingPolicy.Exclusive ? "EXCLUSIVE" : "STACKABLE")} | " +
+              $"UNLOCK {entry.UnlockDifficulty}";
+        _statText.text = $"{baseStats}\n{extendedStats}";
         _abilityText.text = entry.AbilityDescription;
 
         ApplyLocalizedFont(_detailTitle, "title");
         ApplyLocalizedFont(_identityText, "body");
+        ApplyLocalizedFont(_enemyDescriptionText, "body");
         ApplyLocalizedFont(_statText, "number");
         ApplyLocalizedFont(_abilityTitleText, "title");
         ApplyLocalizedFont(_abilityText, "body");
@@ -452,6 +487,8 @@ public sealed class EnemyCodexPage : RuntimeMenuPageBase
                 LocalizationKeys.CodexEnemyEmptyTitle);
         if (_identityText != null)
             _identityText.text = string.Empty;
+        if (_enemyDescriptionText != null)
+            _enemyDescriptionText.text = string.Empty;
         if (_statText != null)
             _statText.text = LocalizationService.Get(
                 LocalizationKeys.CodexEnemyEmptyBody);

@@ -4,6 +4,7 @@ using System.Reflection;
 using NUnit.Framework;
 using UnityEditor;
 using UnityEngine;
+using UnityEngine.UI;
 
 public sealed class EnemyP0RegressionTests
 {
@@ -43,6 +44,27 @@ public sealed class EnemyP0RegressionTests
         Assert.That(runtime.Armor, Is.Zero);
         Assert.That(runtime.IsTargetPriorityExcluded, Is.False);
         Assert.That(runtime.AbilityCooldownRemaining, Is.Zero);
+    }
+
+    [Test]
+    public void EnemyRuntime_AppliesAuthoredHealthAndInitialDefenseStats()
+    {
+        EnemySO definition = UnityEngine.Object.Instantiate(
+            LoadEnemy("Basic"));
+        definition.hideFlags = HideFlags.HideAndDontSave;
+        _createdObjects.Add(definition);
+        SerializedObject serialized = new(definition);
+        serialized.FindProperty("healthScale").floatValue = 1.5f;
+        serialized.FindProperty("initialArmor").intValue = 3;
+        serialized.FindProperty("initialShield").intValue = 4;
+        serialized.ApplyModifiedPropertiesWithoutUndo();
+
+        EnemyRuntime runtime = definition.CreateRuntime(40);
+
+        Assert.That(runtime.MaxHealth, Is.EqualTo(60));
+        Assert.That(runtime.Health, Is.EqualTo(60));
+        Assert.That(runtime.Armor, Is.EqualTo(3));
+        Assert.That(runtime.CurrentShield, Is.EqualTo(4));
     }
 
     [Test]
@@ -112,7 +134,7 @@ public sealed class EnemyP0RegressionTests
     }
 
     [Test]
-    public void EnemyCodex_DeduplicatesDefinitionsByIdAndEnemyType()
+    public void EnemyCodex_DeduplicatesByIdButKeepsTypeVariants()
     {
         EnemySO basic = LoadEnemy("Basic");
         EnemySO duplicateId =
@@ -164,7 +186,7 @@ public sealed class EnemyP0RegressionTests
         Assert.That(
             count,
             Is.EqualTo(
-                Enum.GetValues(typeof(EEnemyType)).Length));
+                Enum.GetValues(typeof(EEnemyType)).Length + 1));
     }
 
     [Test]
@@ -379,6 +401,95 @@ public sealed class EnemyP0RegressionTests
         Assert.That(manager.SpawnQueue[0], Is.SameAs(pointman));
         Assert.That(manager.SpawnedEnemyCount, Is.Zero);
         Assert.That(manager.IsBoardFull, Is.True);
+    }
+
+    [Test]
+    public void SpawnQueue_SkipsBlockedEnemyAndSpawnsNextEligibleEnemy()
+    {
+        BattleManager manager = CreateBattleManager();
+        RecordingBattleBoard board = new();
+        SetPrivateField(manager, "_board", board);
+        EnemyRuntime blocked = LoadEnemy("Basic").CreateRuntime();
+        EnemyRuntime eligible = LoadEnemy("Assault").CreateRuntime();
+        board.SpawnEvaluator = enemy => ReferenceEquals(enemy, eligible);
+        List<EnemyRuntime> queue =
+            GetPrivateList<EnemyRuntime>(manager, "_spawnQueue");
+        queue.Add(blocked);
+        queue.Add(eligible);
+
+        Assert.That(InvokeTrySpawn(manager), Is.True);
+
+        Assert.That(board.LastSpawnGroup, Is.EqualTo(new[] { eligible }));
+        Assert.That(manager.SpawnQueue, Is.EqualTo(new[] { blocked }));
+        Assert.That(manager.SpawnedEnemyCount, Is.EqualTo(1));
+        Assert.That(manager.IsBoardFull, Is.False);
+    }
+
+    [Test]
+    public void SpawnQueue_WaitsUntilOccupancyChangeBeforeRetrying()
+    {
+        BattleManager manager = CreateBattleManager();
+        RecordingBattleBoard board = new()
+        {
+            AllowSpawn = false,
+        };
+        SetPrivateField(manager, "_board", board);
+        WireBoardOccupancyEvent(manager, board);
+        GetPrivateList<EnemyRuntime>(manager, "_spawnQueue").Add(
+            LoadEnemy("Basic").CreateRuntime());
+
+        Assert.That(InvokeTrySpawn(manager), Is.False);
+        Assert.That(manager.IsBoardFull, Is.True);
+
+        InvokeTickSpawnQueue(manager, 10f);
+        Assert.That(manager.PendingEnemyCount, Is.EqualTo(1));
+
+        board.AllowSpawn = true;
+        board.RaiseOccupancyChanged();
+        InvokeTickSpawnQueue(manager, 0f);
+
+        Assert.That(manager.PendingEnemyCount, Is.Zero);
+        Assert.That(manager.SpawnedEnemyCount, Is.EqualTo(1));
+        Assert.That(manager.IsBoardFull, Is.False);
+    }
+
+    [Test]
+    public void ExclusiveTwoByTwoEnemy_ReservesAndReleasesEveryCell()
+    {
+        DungeonBoardView board = CreatePlaceableBoard();
+        EnemySO definition = CreateFootprintDefinition(2, 2);
+        EnemyRuntime largeEnemy = definition.CreateRuntime();
+
+        Assert.That(board.TryAddEnemyCard(0, 0, largeEnemy), Is.True);
+        Assert.That(board.GetStackCount(0, 0), Is.EqualTo(1));
+        Assert.That(board.GetStackCount(0, 1), Is.EqualTo(1));
+        Assert.That(board.GetStackCount(1, 0), Is.EqualTo(1));
+        Assert.That(board.GetStackCount(1, 1), Is.EqualTo(1));
+        Assert.That(
+            board.TryAddEnemyCard(
+                1,
+                1,
+                LoadEnemy("Basic").CreateRuntime()),
+            Is.False);
+        Assert.That(board.TryRemoveTopEnemyCard(1, 1), Is.True);
+        Assert.That(board.GetStackCount(0, 0), Is.Zero);
+        Assert.That(board.GetStackCount(1, 1), Is.Zero);
+    }
+
+    [Test]
+    public void DistinctGroupPlacement_IsAtomicWhenFootprintsCannotFit()
+    {
+        DungeonBoardView board = CreatePlaceableBoard();
+        EnemyRuntime first = CreateFootprintDefinition(2, 2)
+            .CreateRuntime();
+        EnemyRuntime second = CreateFootprintDefinition(2, 2)
+            .CreateRuntime();
+
+        Assert.That(
+            board.TryAddEnemiesToDistinctTiles(new[] { first, second }),
+            Is.False);
+        Assert.That(board.LivingEnemyCount, Is.Zero);
+        Assert.That(board.GetStackCount(0, 0), Is.Zero);
     }
 
     [Test]
@@ -1686,6 +1797,47 @@ public sealed class EnemyP0RegressionTests
         return board;
     }
 
+    private DungeonBoardView CreatePlaceableBoard()
+    {
+        DungeonBoardView board = CreateBoard();
+        GameObject cardObject = new(
+            "Test_EnemyCardPrefab",
+            typeof(RectTransform),
+            typeof(EnemyCard));
+        cardObject.SetActive(false);
+        _createdObjects.Add(cardObject);
+        EnemyCard cardPrefab = cardObject.GetComponent<EnemyCard>();
+        foreach (DungeonTileView tile in
+                 GetPrivateList<DungeonTileView>(board, "_tiles"))
+        {
+            SetPrivateField(
+                tile,
+                "stackRoot",
+                tile.GetComponent<RectTransform>());
+            SetPrivateField(tile, "enemyCardPrefab", cardPrefab);
+            SetPrivateField(tile, "slotSurface", tile.GetComponent<Image>());
+        }
+
+        return board;
+    }
+
+    private EnemySO CreateFootprintDefinition(int width, int height)
+    {
+        EnemySO definition = UnityEngine.Object.Instantiate(
+            LoadEnemy("Basic"));
+        definition.hideFlags = HideFlags.HideAndDontSave;
+        _createdObjects.Add(definition);
+        SerializedObject serialized = new(definition);
+        serialized.FindProperty("enemyId").stringValue =
+            $"footprint_{width}x{height}_{Guid.NewGuid():N}";
+        serialized.FindProperty("footprintWidth").intValue = width;
+        serialized.FindProperty("footprintHeight").intValue = height;
+        serialized.FindProperty("stackingPolicy").enumValueIndex =
+            (int)EnemyStackingPolicy.Exclusive;
+        serialized.ApplyModifiedPropertiesWithoutUndo();
+        return definition;
+    }
+
     private static int TakeDamage(
         EnemyRuntime enemy,
         int damage,
@@ -1718,6 +1870,32 @@ public sealed class EnemyP0RegressionTests
             InstanceNonPublic);
         Assert.That(method, Is.Not.Null);
         return (bool)method.Invoke(manager, null);
+    }
+
+    private static void InvokeTickSpawnQueue(
+        BattleManager manager,
+        float deltaTime)
+    {
+        MethodInfo method = typeof(BattleManager).GetMethod(
+            "TickEnemySpawnQueue",
+            InstanceNonPublic);
+        Assert.That(method, Is.Not.Null);
+        method.Invoke(manager, new object[] { deltaTime });
+    }
+
+    private static void WireBoardOccupancyEvent(
+        BattleManager manager,
+        RecordingBattleBoard board)
+    {
+        MethodInfo method = typeof(BattleManager).GetMethod(
+            "HandleBoardOccupancyChanged",
+            InstanceNonPublic);
+        Assert.That(method, Is.Not.Null);
+        Action handler = (Action)Delegate.CreateDelegate(
+            typeof(Action),
+            manager,
+            method);
+        board.OccupancyChanged += handler;
     }
 
     private static bool ApplyEnemyStatus(
@@ -1870,6 +2048,7 @@ public sealed class EnemyP0RegressionTests
     private sealed class RecordingBattleBoard : IBattleBoard
     {
         public bool AllowSpawn { get; set; } = true;
+        public Func<EnemyRuntime, bool> SpawnEvaluator { get; set; }
         public int AddGroupCallCount { get; private set; }
         public IReadOnlyList<EnemyRuntime> LastSpawnGroup
             { get; private set; } = Array.Empty<EnemyRuntime>();
@@ -1879,6 +2058,8 @@ public sealed class EnemyP0RegressionTests
         public int InitialEnemyCapacity => 9;
         public int LivingEnemyCount => 0;
         public bool HasEmptyEnemyTile => true;
+
+        public event Action OccupancyChanged;
 
         public event Action<BattleEnemyDefeatedEvent> EnemyDefeated
         {
@@ -1892,12 +2073,18 @@ public sealed class EnemyP0RegressionTests
             remove { }
         }
 
+        public void RaiseOccupancyChanged()
+        {
+            OccupancyChanged?.Invoke();
+        }
+
         public bool TryAddEnemy(EnemyRuntime enemy)
         {
             LastSpawnGroup = enemy != null
                 ? new[] { enemy }
                 : Array.Empty<EnemyRuntime>();
-            return AllowSpawn && enemy != null;
+            return AllowSpawn && enemy != null &&
+                   (SpawnEvaluator?.Invoke(enemy) ?? true);
         }
 
         public bool TryAddEnemiesToDistinctTiles(

@@ -223,6 +223,180 @@ public sealed class LocalizationEditorTests
         }
     }
 
+    [Test]
+    public void FontResolver_UsesLocaleRoleAndPlayerSelection()
+    {
+        LocalizationFontCatalog sourceCatalog =
+            AssetDatabase.LoadAssetAtPath<LocalizationFontCatalog>(
+                FontCatalogPath);
+        Assert.That(sourceCatalog, Is.Not.Null);
+        Assert.That(sourceCatalog.GlobalDefaultFont, Is.Not.Null);
+
+        Font sourceFont = sourceCatalog.GlobalDefaultFont.sourceFontFile;
+        Assert.That(sourceFont, Is.Not.Null);
+        TMP_FontAsset globalFont =
+            CreateTestFont(sourceFont, "Test Global Font");
+        TMP_FontAsset localeFont =
+            CreateTestFont(sourceFont, "Test Locale Font");
+        TMP_FontAsset localeRoleFont =
+            CreateTestFont(sourceFont, "Test Locale Role Font");
+        TMP_FontAsset wildcardRoleFont =
+            CreateTestFont(sourceFont, "Test Wildcard Role Font");
+        TMP_FontAsset playerFont =
+            CreateTestFont(sourceFont, "Test Player Font");
+
+        LocalizationFontCatalog testCatalog =
+            ScriptableObject.CreateInstance<LocalizationFontCatalog>();
+        ConfigureFontCatalog(
+            testCatalog,
+            globalFont,
+            localeFont,
+            localeRoleFont,
+            wildcardRoleFont,
+            playerFont);
+
+        LocalizationFontCatalog previousCatalog =
+            LocalizationService.FontCatalog;
+        LocalizationMarkupCatalog previousMarkup =
+            LocalizationService.MarkupCatalog;
+        string previousLocale = LocalizationService.CurrentLocale;
+        string previousFontId = LocalizationService.CurrentFontId;
+        GameObject resolverObject = new("Localization Resolver Test");
+        resolverObject.SetActive(false);
+        LocalizationFontResolver resolver =
+            resolverObject.AddComponent<LocalizationFontResolver>();
+        SerializedObject resolverSerialized = new(resolver);
+        resolverSerialized.FindProperty("fontCatalog").objectReferenceValue =
+            testCatalog;
+        resolverSerialized.ApplyModifiedPropertiesWithoutUndo();
+
+        try
+        {
+            LocalizationService.Configure(testCatalog, previousMarkup);
+            Assert.That(
+                LocalizationService.SetLocale("en-US", false),
+                Is.True);
+            Assert.That(
+                LocalizationService.SetFont(
+                    LocalizationService.AutoFontId,
+                    false),
+                Is.True);
+
+            AssertResolvedFontName(
+                resolver.Resolve("title"),
+                localeRoleFont.name);
+            AssertResolvedFontName(
+                resolver.Resolve("number"),
+                wildcardRoleFont.name);
+            AssertResolvedFontName(
+                resolver.Resolve("body"),
+                localeFont.name);
+
+            Assert.That(
+                LocalizationService.SetFont("PLAYER", false),
+                Is.True);
+            AssertResolvedFontName(
+                resolver.Resolve("title"),
+                playerFont.name);
+
+            Assert.That(
+                testCatalog.Resolve(
+                    "unconfigured-locale",
+                    "body",
+                    LocalizationService.AutoFontId),
+                Is.SameAs(globalFont));
+        }
+        finally
+        {
+            LocalizationService.Configure(previousCatalog, previousMarkup);
+            LocalizationService.SetLocale(previousLocale, false);
+            LocalizationService.SetFont(previousFontId, false);
+            Object.DestroyImmediate(resolverObject);
+            Object.DestroyImmediate(testCatalog);
+            Object.DestroyImmediate(globalFont);
+            Object.DestroyImmediate(localeFont);
+            Object.DestroyImmediate(localeRoleFont);
+            Object.DestroyImmediate(wildcardRoleFont);
+            Object.DestroyImmediate(playerFont);
+        }
+    }
+
+    private static void ConfigureFontCatalog(
+        LocalizationFontCatalog catalog,
+        TMP_FontAsset globalFont,
+        TMP_FontAsset localeFont,
+        TMP_FontAsset localeRoleFont,
+        TMP_FontAsset wildcardRoleFont,
+        TMP_FontAsset playerFont)
+    {
+        SerializedObject serialized = new(catalog);
+        serialized.FindProperty("globalDefaultFont").objectReferenceValue =
+            globalFont;
+
+        SerializedProperty localeFonts =
+            serialized.FindProperty("localeFonts");
+        localeFonts.arraySize = 1;
+        SerializedProperty localeEntry =
+            localeFonts.GetArrayElementAtIndex(0);
+        localeEntry.FindPropertyRelative("locale").stringValue = "en-US";
+        localeEntry.FindPropertyRelative("font").objectReferenceValue =
+            localeFont;
+
+        SerializedProperty roleFonts = serialized.FindProperty("roleFonts");
+        roleFonts.arraySize = 2;
+        ConfigureRoleFont(
+            roleFonts.GetArrayElementAtIndex(0),
+            "en-US",
+            "title",
+            localeRoleFont);
+        ConfigureRoleFont(
+            roleFonts.GetArrayElementAtIndex(1),
+            "*",
+            "number",
+            wildcardRoleFont);
+
+        SerializedProperty selectableFonts =
+            serialized.FindProperty("selectableFonts");
+        selectableFonts.arraySize = 1;
+        SerializedProperty selectableEntry =
+            selectableFonts.GetArrayElementAtIndex(0);
+        selectableEntry.FindPropertyRelative("id").stringValue = "PLAYER";
+        selectableEntry.FindPropertyRelative("displayName").stringValue =
+            "Player Font";
+        selectableEntry.FindPropertyRelative("font").objectReferenceValue =
+            playerFont;
+        serialized.ApplyModifiedPropertiesWithoutUndo();
+    }
+
+    private static TMP_FontAsset CreateTestFont(
+        Font sourceFont,
+        string name)
+    {
+        TMP_FontAsset font = TMP_FontAsset.CreateFontAsset(sourceFont);
+        Assert.That(font, Is.Not.Null);
+        font.name = name;
+        return font;
+    }
+
+    private static void ConfigureRoleFont(
+        SerializedProperty entry,
+        string locale,
+        string role,
+        TMP_FontAsset font)
+    {
+        entry.FindPropertyRelative("locale").stringValue = locale;
+        entry.FindPropertyRelative("role").stringValue = role;
+        entry.FindPropertyRelative("font").objectReferenceValue = font;
+    }
+
+    private static void AssertResolvedFontName(
+        TMP_FontAsset resolved,
+        string expectedSourceName)
+    {
+        Assert.That(resolved, Is.Not.Null);
+        Assert.That(resolved.name, Does.StartWith(expectedSourceName));
+    }
+
     private static LocalizationCsvDocument CreateLocalesDocument()
     {
         LocalizationCsvDocument document = new();

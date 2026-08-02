@@ -119,12 +119,10 @@ public sealed class MainSubPage : RuntimeMenuPageBase
                     () => NavigateTo(
                         characterCodexPage,
                         PageOpenMode.Fresh));
-                CreateLocalizedMenuButton(
-                    "btnSKILLS",
-                    LocalizationKeys.UiCommonSkills,
-                    () => NavigateTo(
-                        skillCodexPage,
-                        PageOpenMode.Fresh));
+                Transform obsoleteSkillsButton =
+                    ButtonRoot.Find("btnSKILLS");
+                if (obsoleteSkillsButton != null)
+                    obsoleteSkillsButton.gameObject.SetActive(false);
                 CreateLocalizedMenuButton(
                     "btnITEMS",
                     LocalizationKeys.UiCommonItems,

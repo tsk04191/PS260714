@@ -92,15 +92,14 @@ namespace PS260714.Localization
         public const string ItemPrecisionShotEffect = "item.precision_shot.effect";
         public const string ItemPrecisionShotName = "item.precision_shot.name";
         public const string ItemPrecisionShotUsage = "item.precision_shot.usage";
+        public const string RollMageDescription = "roll.mage.description";
+        public const string RollMageName = "roll.mage.name";
         public const string RollShooterDescription = "roll.shooter.description";
         public const string RollShooterName = "roll.shooter.name";
         public const string RollSupportDescription = "roll.support.description";
         public const string RollSupportName = "roll.support.name";
         public const string RollVanguardDescription = "roll.vanguard.description";
         public const string RollVanguardName = "roll.vanguard.name";
-        public const string SkillFocusEffect = "skill.focus.effect";
-        public const string SkillFocusName = "skill.focus.name";
-        public const string SkillFocusUsage = "skill.focus.usage";
         public const string StatusBloodDescription = "status.blood.description";
         public const string StatusBloodName = "status.blood.name";
         public const string StatusComboDescription = "status.combo.description";

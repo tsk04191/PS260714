@@ -365,6 +365,41 @@ public sealed class ItemEditorWindow : EditorWindow
                 DrawProperty("upgradeValue", "강화 수치");
             }
         }
+
+        if (_selected is BattleItemSO)
+        {
+            EditorGUILayout.Space(6f);
+            using (new EditorGUILayout.VerticalScope(EditorStyles.helpBox))
+            {
+                EditorGUILayout.LabelField(
+                    "Battle Item Settings",
+                    EditorStyles.boldLabel);
+                DrawProperty("targetType", "Target");
+                DrawProperty("usePolicy", "Use Policy");
+                SerializedProperty usePolicy = Find("usePolicy");
+                if (usePolicy != null &&
+                    usePolicy.enumValueIndex ==
+                    (int)BattleItemUsePolicy.LimitedUse)
+                {
+                    DrawProperty("limitedUses", "Uses Per Acquisition");
+                }
+                if (usePolicy == null ||
+                    usePolicy.enumValueIndex !=
+                    (int)BattleItemUsePolicy.UnlimitedUse)
+                {
+                    DrawProperty("maximumRunUses", "Maximum Run Uses");
+                }
+                DrawProperty("energyCost", "Energy Cost");
+                DrawProperty("cooldown", "Cooldown");
+                DrawProperty(
+                    "availableAsDungeonReward",
+                    "Dungeon Reward");
+                DrawProperty(
+                    "availableAsStartingItem",
+                    "Starting Item");
+                DrawProperty("effects", "Effects");
+            }
+        }
     }
 
     private void DrawValidationMessages()
@@ -394,6 +429,39 @@ public sealed class ItemEditorWindow : EditorWindow
             EditorGUILayout.HelpBox(
                 "현재 종류와 에셋 타입이 다릅니다. 기능별 전용 설정이 필요하면 New 메뉴에서 해당 종류로 새 아이템을 생성하세요.",
                 MessageType.Warning);
+        }
+
+        if (_selected is BattleItemSO)
+        {
+            SerializedProperty effects = Find("effects");
+            if (effects == null || effects.arraySize == 0)
+            {
+                EditorGUILayout.HelpBox(
+                    "Battle items require at least one effect.",
+                    MessageType.Error);
+            }
+            else if (_selected is BattleItemSO battleItem &&
+                     !battleItem.HasCompatibleEffects)
+            {
+                EditorGUILayout.HelpBox(
+                    "One or more effects are incompatible with the selected target.",
+                    MessageType.Error);
+            }
+
+            SerializedProperty usePolicy = Find("usePolicy");
+            SerializedProperty limitedUses = Find("limitedUses");
+            SerializedProperty maximumRunUses = Find("maximumRunUses");
+            if (usePolicy != null && limitedUses != null &&
+                maximumRunUses != null &&
+                usePolicy.enumValueIndex ==
+                (int)BattleItemUsePolicy.LimitedUse &&
+                maximumRunUses.intValue > 0 &&
+                maximumRunUses.intValue < limitedUses.intValue)
+            {
+                EditorGUILayout.HelpBox(
+                    "Maximum run uses is lower than the uses granted per acquisition.",
+                    MessageType.Warning);
+            }
         }
     }
 
@@ -474,6 +542,15 @@ public sealed class ItemEditorWindow : EditorWindow
                 "Event",
                 "NewEventCurrency",
                 "새 이벤트 재화"));
+        menu.AddItem(
+            new GUIContent("Battle Item"),
+            false,
+            () => CreateItem(
+                typeof(BattleItemSO),
+                ItemCategory.Consumable,
+                "Battle",
+                "NewBattleItem",
+                "New Battle Item"));
         menu.ShowAsContext();
     }
 
@@ -820,6 +897,8 @@ public sealed class ItemEditorWindow : EditorWindow
                 category == ItemCategory.RecruitTicket,
             UpgradeMaterialItemSO =>
                 category == ItemCategory.UpgradeMaterial,
+            BattleItemSO =>
+                category == ItemCategory.Consumable,
             GeneralItemSO =>
                 category == ItemCategory.Consumable,
             _ => true,

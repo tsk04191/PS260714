@@ -508,15 +508,28 @@ public static class CharacterLocalization
             bool hasNoRequiredActionTarget =
                 subject == CharacterAttackSubject.None &&
                 CanExecuteEffectsWithoutActionTargets(definition.Effects);
-            string subjectDescription = hasNoRequiredActionTarget
-                ? (UsesKoreanLocale
+            string subjectDescription;
+            if (hasNoRequiredActionTarget)
+            {
+                subjectDescription = UsesKoreanLocale
                     ? "행동 대상 불필요"
-                    : "No action target required")
-                : FormatSubject(
+                    : "No action target required";
+            }
+            else if (subject == CharacterAttackSubject.None)
+            {
+                subjectDescription = UsesKoreanLocale
+                    ? "이전 공격 대상(없으면 기본 공격 규칙으로 재선정)"
+                    : "Previous attack target (reselect using basic " +
+                      "attack rules if unavailable)";
+            }
+            else
+            {
+                subjectDescription = FormatSubject(
                     definition.TargetFaction,
                     subject,
                     definition.SubjectMetric,
                     definition.SubjectCount);
+            }
             string cost = definition.HasSection(CharacterSkillSectionType.Cost)
                 ? (UsesKoreanLocale
                     ? $"코스트 {data.GetSkillCost(definition)}, "

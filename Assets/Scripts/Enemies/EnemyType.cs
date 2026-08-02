@@ -12,6 +12,15 @@ public enum EEnemyType
 
 public static class EnemyTypeDisplay
 {
+    public static string GetId(EEnemyType type)
+    {
+        return type switch
+        {
+            EEnemyType.ShieldBearer => "shield_bearer",
+            _ => type.ToString().ToLowerInvariant(),
+        };
+    }
+
     public static string GetName(EEnemyType type)
     {
         return type switch

@@ -97,8 +97,10 @@ namespace PS260714.Localization
         {
             if (fontCatalog != null)
             {
-                TMP_FontAsset resolved =
-                    fontCatalog.ResolveGlobalDefault();
+                TMP_FontAsset resolved = fontCatalog.Resolve(
+                    LocalizationService.CurrentLocale,
+                    fontRole,
+                    LocalizationService.CurrentFontId);
                 return PrepareResolvedFont(resolved);
             }
 
@@ -166,7 +168,12 @@ namespace PS260714.Localization
                     // Some pages copy a template font after their first
                     // initialization. Reapply the catalog-owned font so
                     // those late writes cannot split the client typography.
-                    Apply(text);
+                    LocalizedText roleAwareText =
+                        text.GetComponent<LocalizedText>();
+                    if (roleAwareText != null)
+                        roleAwareText.Refresh();
+                    else
+                        Apply(text);
                     continue;
                 }
 
@@ -219,7 +226,10 @@ namespace PS260714.Localization
             LocalizationFontCatalog catalog =
                 LocalizationService.FontCatalog;
             TMP_FontAsset font = catalog != null
-                ? catalog.ResolveGlobalDefault()
+                ? catalog.Resolve(
+                    LocalizationService.CurrentLocale,
+                    fontRole,
+                    LocalizationService.CurrentFontId)
                 : TMP_Settings.defaultFontAsset;
             if (catalog != null && Application.isPlaying)
                 font = catalog.PrepareFallbacks(font);

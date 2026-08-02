@@ -1473,7 +1473,9 @@ public sealed class CharacterP0RegressionTests
 
         Assert.That(
             board.FilterCharacterTargetCallCount,
-            Is.EqualTo(1));
+            Is.EqualTo(2),
+            "Both linked sequence steps must validate their inherited " +
+            "target before the source-gated step is rejected.");
         Assert.That(
             board.DamageTargetSnapshots,
             Has.Count.EqualTo(2),
@@ -1489,7 +1491,9 @@ public sealed class CharacterP0RegressionTests
 
         Assert.That(
             board.FilterCharacterTargetCallCount,
-            Is.EqualTo(2));
+            Is.EqualTo(4),
+            "Each activation must validate the inherited target for both " +
+            "linked sequence steps.");
         Assert.That(
             board.DamageTargetSnapshots,
             Has.Count.EqualTo(4),
@@ -2603,7 +2607,11 @@ public sealed class CharacterP0RegressionTests
         Assert.That(
             character.GetStatusStackCount(emergencyKit),
             Is.Zero);
-        Assert.That(board.CharacterTargetSelectionCallCount, Is.Zero);
+        Assert.That(
+            board.CharacterTargetSelectionCallCount,
+            Is.Zero,
+            "Without a basic-attack selector there is no valid fallback " +
+            "search policy.");
         Assert.That(board.DamageTargetSnapshots, Is.Empty);
     }
 
@@ -4293,6 +4301,7 @@ public sealed class CharacterP0RegressionTests
         collection.CharacterProgressChanged += _ => collectionChanged++;
 
         Assert.That(collection.TryImportJson("   "), Is.False);
+        Assert.That(collection.TryImportJson("{}"), Is.False);
 
         Assert.That(data.Progress, Is.SameAs(previousProgress));
         Assert.That(data.GetCumulativeUpgradeLevel("stable"), Is.EqualTo(1));
@@ -4325,7 +4334,10 @@ public sealed class CharacterP0RegressionTests
         int statsChanged = 0;
         data.StatsChanged += () => statsChanged++;
 
-        Assert.That(collection.TryImportJson("{}"), Is.True);
+        Assert.That(
+            collection.TryImportJson(
+                "{\"version\":1,\"characters\":[]}"),
+            Is.True);
 
         Assert.That(data.Progress, Is.Not.SameAs(previousProgress));
         Assert.That(data.IsOwned, Is.True);
@@ -4578,6 +4590,108 @@ public sealed class CharacterP0RegressionTests
     }
 
     [Test]
+    public void PreviousTargetSkill_BeforeBasicAttack_UsesAttackSelector()
+    {
+        CharacterRuntime aisling = CreateCharacter(
+            CreateAislingFeatureFixture());
+        EnemyRuntime target = CreateEnemyRuntime();
+        FakeActiveSkillResource resource = new(10);
+        FakeBattleBoard board = new()
+        {
+            LivingEnemyCountValue = 1,
+            SelectedEnemyTargets = new[] { target },
+            ReturnCenterTargetsForAreaExpansion = true,
+        };
+        aisling.BindBattle(resource, board);
+
+        bool activated = aisling.TryActivateActiveSkill();
+
+        Assert.That(activated, Is.True);
+        Assert.That(
+            resource.Current,
+            Is.EqualTo(10 - aisling.Data.ActiveSkillCost));
+        Assert.That(resource.TrySpendCallCount, Is.EqualTo(1));
+        Assert.That(board.CharacterTargetSelectionCallCount, Is.EqualTo(1));
+        Assert.That(
+            board.CharacterTargetSelectionSubjects,
+            Is.EqualTo(new[] { CharacterAttackSubject.LowestValue }));
+        Assert.That(
+            board.CharacterTargetSelectionMetrics,
+            Is.EqualTo(new[] { CharacterAttackSubjectMetric.Health }));
+        Assert.That(board.CharacterTargetSelectionCounts, Is.EqualTo(
+            new[] { 1 }));
+        Assert.That(board.FilterCharacterTargetCallCount, Is.Zero);
+        Assert.That(board.DamageTargetSnapshots, Has.Count.EqualTo(1));
+        Assert.That(board.DamageTargetSnapshots[0], Does.Contain(target));
+    }
+
+    [Test]
+    public void PreviousTargetSkill_InvalidPreviousTarget_ReselectsTarget()
+    {
+        CharacterRuntime aisling = CreateCharacter(
+            CreateAislingFeatureFixture());
+        EnemyRuntime previousTarget = CreateEnemyRuntime();
+        EnemyRuntime replacementTarget = CreateEnemyRuntime();
+        FakeActiveSkillResource resource = new(10);
+        FakeBattleBoard board = new()
+        {
+            LivingEnemyCountValue = 1,
+            SelectedEnemyTargets = new[] { previousTarget },
+            ReturnCenterTargetsForAreaExpansion = true,
+        };
+        aisling.BindBattle(resource, board);
+        aisling.TickBattle(aisling.Data.AttackCooldown, board);
+        board.InvalidEnemyTargets.Add(previousTarget);
+        board.SelectedEnemyTargets = new[] { replacementTarget };
+
+        bool activated = aisling.TryActivateActiveSkill();
+
+        Assert.That(activated, Is.True);
+        Assert.That(
+            resource.Current,
+            Is.EqualTo(10 - aisling.Data.ActiveSkillCost));
+        Assert.That(resource.TrySpendCallCount, Is.EqualTo(1));
+        Assert.That(board.FilterCharacterTargetCallCount, Is.EqualTo(1));
+        Assert.That(board.CharacterTargetSelectionCallCount, Is.EqualTo(2));
+        Assert.That(board.DamageTargetSnapshots, Has.Count.EqualTo(2));
+        Assert.That(
+            board.DamageTargetSnapshots[1],
+            Does.Contain(replacementTarget));
+        Assert.That(
+            board.DamageTargetSnapshots[1],
+            Has.No.Member(previousTarget));
+    }
+
+    [Test]
+    public void PreviousTargetSkill_NoReplacement_DoesNotSpendResource()
+    {
+        CharacterRuntime aisling = CreateCharacter(
+            CreateAislingFeatureFixture());
+        EnemyRuntime previousTarget = CreateEnemyRuntime();
+        FakeActiveSkillResource resource = new(10);
+        FakeBattleBoard board = new()
+        {
+            LivingEnemyCountValue = 1,
+            SelectedEnemyTargets = new[] { previousTarget },
+            ReturnCenterTargetsForAreaExpansion = true,
+        };
+        aisling.BindBattle(resource, board);
+        aisling.TickBattle(aisling.Data.AttackCooldown, board);
+        board.InvalidEnemyTargets.Add(previousTarget);
+        board.LivingEnemyCountValue = 0;
+        board.SelectedEnemyTargets = Array.Empty<EnemyRuntime>();
+
+        bool activated = aisling.TryActivateActiveSkill();
+
+        Assert.That(activated, Is.False);
+        Assert.That(resource.Current, Is.EqualTo(10));
+        Assert.That(resource.TrySpendCallCount, Is.Zero);
+        Assert.That(board.FilterCharacterTargetCallCount, Is.EqualTo(1));
+        Assert.That(board.CharacterTargetSelectionCallCount, Is.EqualTo(2));
+        Assert.That(board.DamageTargetSnapshots, Has.Count.EqualTo(1));
+    }
+
+    [Test]
     public void PreviousTargetSkill_ReusesBasicAttackTarget_AndAppliesStatus()
     {
         CharacterRuntime aisling = CreateCharacter(
@@ -4622,6 +4736,11 @@ public sealed class CharacterP0RegressionTests
             Is.EqualTo(1),
             "Subject None must reuse the normal-attack target without " +
             "selecting a new target.");
+        Assert.That(
+            board.FilterCharacterTargetCallCount,
+            Is.EqualTo(1),
+            "The inherited target must be validated against the current " +
+            "board even when the skill has no numeric conditions.");
         Assert.That(board.StatusApplyCallCount, Is.EqualTo(1));
         Assert.That(board.AppliedStatuses, Does.Contain(opening));
         Assert.That(
@@ -7409,6 +7528,13 @@ public sealed class CharacterP0RegressionTests
             7f,
             4f);
         SerializedObject serialized = new(definition);
+        SerializedProperty attack = serialized
+            .FindProperty("attackDefinitions")
+            .GetArrayElementAtIndex(0);
+        attack.FindPropertyRelative("subject").enumValueIndex =
+            (int)CharacterAttackSubject.LowestValue;
+        attack.FindPropertyRelative("subjectMetric").enumValueIndex =
+            (int)CharacterAttackSubjectMetric.Health;
         ConfigureFirstSkill(
             serialized,
             CharacterAttackSubject.None,
@@ -8740,6 +8866,11 @@ public sealed class CharacterP0RegressionTests
         public HashSet<EnemyRuntime> InvalidEnemyTargets { get; } = new();
         public List<int> SelectionNumericConditionCounts
             { get; } = new();
+        public List<CharacterAttackSubject> CharacterTargetSelectionSubjects
+            { get; } = new();
+        public List<CharacterAttackSubjectMetric>
+            CharacterTargetSelectionMetrics { get; } = new();
+        public List<int> CharacterTargetSelectionCounts { get; } = new();
         public IReadOnlyList<EnemyRuntime> SelectedEnemyTargets
             { get; set; } = Array.Empty<EnemyRuntime>();
         public IReadOnlyList<IBattleCharacter>
@@ -8761,6 +8892,11 @@ public sealed class CharacterP0RegressionTests
 
         public event Action<BattleEnemyDefeatedEvent> EnemyDefeated;
         public event Action<BattleStatusAppliedEvent> StatusApplied;
+        public event Action OccupancyChanged
+        {
+            add { }
+            remove { }
+        }
         public event Action<bool> ManualTargetSelectionPendingChanged;
         public event Action ManualTargetSelectionProgressChanged;
 
@@ -8885,6 +9021,9 @@ public sealed class CharacterP0RegressionTests
             IReadOnlyList<CharacterNumericCondition> numericConditions)
         {
             CharacterTargetSelectionCallCount++;
+            CharacterTargetSelectionSubjects.Add(subject);
+            CharacterTargetSelectionMetrics.Add(metric);
+            CharacterTargetSelectionCounts.Add(targetCount);
             SelectionNumericConditionCounts.Add(
                 numericConditions?.Count ?? 0);
             if (PlannedEnemySelections.Count > 0)

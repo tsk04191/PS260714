@@ -284,8 +284,12 @@ public sealed class CharacterRoleTests
                 Is.Null);
             roleSerialized.FindProperty("nameLocalizationKey")
                 .stringValue = "test.missing.role.name";
+            roleSerialized.FindProperty("descriptionLocalizationKey")
+                .stringValue = "test.missing.role.description";
             roleSerialized.FindProperty("fallbackName").stringValue =
                 "Fallback Role";
+            roleSerialized.FindProperty("fallbackDescription")
+                .stringValue = "Fallback Role Description";
             SerializedProperty rolePassives =
                 roleSerialized.FindProperty("passiveDefinitions");
             rolePassives.arraySize = 1;
@@ -316,13 +320,20 @@ public sealed class CharacterRoleTests
                 Is.Null);
             archetypeSerialized.FindProperty("nameLocalizationKey")
                 .stringValue = "test.missing.archetype.name";
+            archetypeSerialized.FindProperty("descriptionLocalizationKey")
+                .stringValue = "test.missing.archetype.description";
             archetypeSerialized.FindProperty("fallbackName")
                 .stringValue = "Fallback Archetype";
+            archetypeSerialized.FindProperty("fallbackDescription")
+                .stringValue = "Fallback Archetype Description";
             archetypeSerialized.ApplyModifiedPropertiesWithoutUndo();
 
             Assert.That(
                 role.GetDisplayName(),
                 Is.EqualTo("Fallback Role"));
+            Assert.That(
+                role.GetDescription(),
+                Is.EqualTo("Fallback Role Description"));
             Assert.That(
                 role.PassiveDefinitions[0].GetDisplayName(),
                 Is.EqualTo("Fallback Passive"));
@@ -332,11 +343,67 @@ public sealed class CharacterRoleTests
             Assert.That(
                 archetype.GetDisplayName(),
                 Is.EqualTo("Fallback Archetype"));
+            Assert.That(
+                archetype.GetDescription(),
+                Is.EqualTo("Fallback Archetype Description"));
         }
         finally
         {
             UnityEngine.Object.DestroyImmediate(archetype);
             UnityEngine.Object.DestroyImmediate(role);
+        }
+    }
+
+    [Test]
+    public void RoleAndArchetypeIds_CanBeRegeneratedForDuplication()
+    {
+        CharacterRoleSO role =
+            ScriptableObject.CreateInstance<CharacterRoleSO>();
+        CharacterArchetypeSO archetype =
+            ScriptableObject.CreateInstance<CharacterArchetypeSO>();
+        try
+        {
+            string originalRoleId = role.RoleId;
+            string originalArchetypeId = archetype.ArchetypeId;
+
+            role.RegenerateRoleId();
+            archetype.RegenerateArchetypeId();
+
+            Assert.That(role.RoleId, Is.Not.Empty);
+            Assert.That(role.RoleId, Is.Not.EqualTo(originalRoleId));
+            Assert.That(archetype.ArchetypeId, Is.Not.Empty);
+            Assert.That(
+                archetype.ArchetypeId,
+                Is.Not.EqualTo(originalArchetypeId));
+        }
+        finally
+        {
+            UnityEngine.Object.DestroyImmediate(archetype);
+            UnityEngine.Object.DestroyImmediate(role);
+        }
+    }
+
+    [Test]
+    public void RollLocalizationPicker_FiltersNameAndDescriptionKeys()
+    {
+        PS260714LocalizationKeyPicker.Refresh();
+        var nameKeys = PS260714LocalizationKeyPicker.GetKeys(".name");
+        var descriptionKeys =
+            PS260714LocalizationKeyPicker.GetKeys(".description");
+
+        Assert.That(nameKeys, Does.Contain("roll.vanguard.name"));
+        Assert.That(
+            descriptionKeys,
+            Does.Contain("roll.vanguard.description"));
+        foreach (string key in nameKeys)
+        {
+            Assert.That(key, Does.StartWith("roll."));
+            Assert.That(key, Does.EndWith(".name"));
+        }
+        foreach (string key in descriptionKeys)
+        {
+            Assert.That(key, Does.StartWith("roll."));
+            Assert.That(key, Does.EndWith(".description"));
         }
     }
 

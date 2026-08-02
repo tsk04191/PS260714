@@ -181,6 +181,7 @@ public static class CharacterDefinitionValidator
             definition.SkillDefinitions,
             definition.SkillExecutionPolicy,
             attackTargetFaction,
+            definition.AttackDefinitions,
             result);
         ValidateCumulativeUpgrades(
             definition.CumulativeUpgradeDefinitions,
@@ -992,6 +993,7 @@ public static class CharacterDefinitionValidator
         IReadOnlyList<CharacterSkillDefinition> definitions,
         CharacterSkillExecutionPolicy executionPolicy,
         CharacterTargetFaction? attackTargetFaction,
+        IReadOnlyList<CharacterAttackDefinition> attackDefinitions,
         CharacterDefinitionValidationResult result)
     {
         const string listPath = "skillDefinitions";
@@ -1005,6 +1007,8 @@ public static class CharacterDefinitionValidator
             return;
         }
 
+        CharacterAttackDefinition linkedTargetFallback =
+            FindLinkedSkillFallbackAttack(attackDefinitions);
         CharacterTargetFaction? previousSequenceTargetFaction =
             attackTargetFaction;
         for (int index = 0; index < definitions.Count; index++)
@@ -1054,6 +1058,31 @@ public static class CharacterDefinitionValidator
             }
             bool reusesTarget =
                 effectiveSubject == CharacterAttackSubject.None;
+            bool usesActionTargets = UsesSkillActionTargets(definition);
+            if (reusesTarget && usesActionTargets &&
+                linkedTargetFallback == null)
+            {
+                AddWarning(
+                    result,
+                    "skill.linked_target_fallback_missing",
+                    $"{path}.subject",
+                    "This skill can reuse an inherited target, but it has " +
+                    "no independent basic-attack selector to use when that " +
+                    "target is missing or invalid.");
+            }
+            else if (reusesTarget && usesActionTargets &&
+                     linkedTargetFallback.Subject ==
+                         CharacterAttackSubject.Manual &&
+                     definitions.Count > 1)
+            {
+                AddError(
+                    result,
+                    "skill.linked_manual_sequence_unsupported",
+                    $"{path}.subject",
+                    "A linked skill cannot fall back to manual basic-attack " +
+                    "targeting when multiple skill definitions are " +
+                    "configured.");
+            }
             CharacterTargetFaction? abilityTargetFaction = reusesTarget
                 ? executionPolicy ==
                   CharacterSkillExecutionPolicy.SequenceAll
@@ -1159,6 +1188,45 @@ public static class CharacterDefinitionValidator
                     "SequenceAll uses only the first definition's cost.");
             }
         }
+    }
+
+    private static CharacterAttackDefinition FindLinkedSkillFallbackAttack(
+        IReadOnlyList<CharacterAttackDefinition> definitions)
+    {
+        if (definitions == null)
+            return null;
+
+        foreach (CharacterAttackDefinition definition in definitions)
+        {
+            if (definition == null ||
+                !definition.HasSection(CharacterAttackSectionType.Subject) ||
+                !definition.HasSection(CharacterAttackSectionType.Ability) ||
+                definition.Subject == CharacterAttackSubject.None ||
+                (definition.HasLinkageSection &&
+                 definition.Linkage != CharacterActionLinkage.None))
+            {
+                continue;
+            }
+
+            return definition;
+        }
+
+        return null;
+    }
+
+    private static bool UsesSkillActionTargets(
+        CharacterSkillDefinition definition)
+    {
+        if (definition == null || !definition.HasExplicitEffects)
+            return true;
+
+        foreach (CharacterEffectDefinition effect in definition.Effects)
+        {
+            if (effect?.RequiresActionTargets == true)
+                return true;
+        }
+
+        return false;
     }
 
     private static void ValidateCumulativeUpgrades(

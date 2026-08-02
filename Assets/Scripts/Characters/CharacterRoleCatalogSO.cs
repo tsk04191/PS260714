@@ -80,6 +80,12 @@ public sealed class CharacterRoleCatalogSO : ScriptableObject
                 role.NameLocalizationKey,
                 role.FallbackName,
                 issues);
+            ValidateOptionalLocalizedDescription(
+                role.name,
+                "직군",
+                role.DescriptionLocalizationKey,
+                role.FallbackDescription,
+                issues);
 
             HashSet<string> passiveIds =
                 new(StringComparer.Ordinal);
@@ -107,6 +113,7 @@ public sealed class CharacterRoleCatalogSO : ScriptableObject
                     issues);
                 ValidateOptionalLocalizedDescription(
                     $"{role.name}/{passive.PassiveId}",
+                    "직군 패시브",
                     passive.DescriptionLocalizationKey,
                     passive.FallbackDescription,
                     issues);
@@ -138,6 +145,12 @@ public sealed class CharacterRoleCatalogSO : ScriptableObject
                 "세부 직군",
                 archetype.NameLocalizationKey,
                 archetype.FallbackName,
+                issues);
+            ValidateOptionalLocalizedDescription(
+                archetype.name,
+                "세부 직군",
+                archetype.DescriptionLocalizationKey,
+                archetype.FallbackDescription,
                 issues);
 
             if (archetype.ParentRole == null)
@@ -186,6 +199,7 @@ public sealed class CharacterRoleCatalogSO : ScriptableObject
 
     private static void ValidateOptionalLocalizedDescription(
         string owner,
+        string typeLabel,
         string localizationKey,
         string fallback,
         ICollection<string> issues)
@@ -198,7 +212,8 @@ public sealed class CharacterRoleCatalogSO : ScriptableObject
         if (!hasKey)
         {
             issues.Add(
-                $"{owner}: 패시브 설명 Localization 키가 비어 있습니다.");
+                $"{owner}: {typeLabel} 설명 Localization 키가 " +
+                "비어 있습니다.");
         }
         else if (!LocalizationService.TryGet(
                      localizationKey,
@@ -212,7 +227,7 @@ public sealed class CharacterRoleCatalogSO : ScriptableObject
         if (!hasFallback)
         {
             issues.Add(
-                $"{owner}: 패시브 설명 fallback이 비어 있습니다.");
+                $"{owner}: {typeLabel} 설명 fallback이 비어 있습니다.");
         }
     }
 

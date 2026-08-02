@@ -1988,15 +1988,10 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
         damage = Data.CalculateSkillDamage(
             definition,
             GetEffectivePowerMultiplier());
-        selectedTargets = SelectCustomAbilityTargets(
-            _board,
-            definition.TargetFaction,
+        selectedTargets = SelectSkillActionTargets(
+            definition,
             subject,
-            definition.SubjectMetric,
-            definition.SubjectCount,
-            actionCondition.HasNumericConditions,
-            actionCondition.MatchMode,
-            actionCondition.NumericConditions,
+            actionCondition,
             inheritedTargets);
         if (_manualTargetRequestPending)
             return false;
@@ -2030,6 +2025,123 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
 
         return targets.Count > 0 &&
                HasUsableAbilityValue(definition.DamageType, damage);
+    }
+
+    private AbilityTargetSelection SelectSkillActionTargets(
+        CharacterSkillDefinition definition,
+        CharacterAttackSubject subject,
+        CharacterActionConditionData actionCondition,
+        AbilityTargetSelection inheritedTargets)
+    {
+        if (subject != CharacterAttackSubject.None ||
+            !UsesActionTargets(definition))
+        {
+            return SelectCustomAbilityTargets(
+                _board,
+                definition.TargetFaction,
+                subject,
+                definition.SubjectMetric,
+                definition.SubjectCount,
+                actionCondition.HasNumericConditions,
+                actionCondition.MatchMode,
+                actionCondition.NumericConditions,
+                inheritedTargets);
+        }
+
+        AbilityTargetSelection validInheritedTargets =
+            FilterInheritedAbilityTargets(
+                _board,
+                inheritedTargets,
+                actionCondition.HasNumericConditions,
+                actionCondition.MatchMode,
+                actionCondition.NumericConditions);
+        if (validInheritedTargets.Count > 0)
+            return validInheritedTargets;
+
+        CharacterAttackDefinition fallbackAttack =
+            GetLinkedSkillFallbackAttack();
+        if (fallbackAttack == null ||
+            (fallbackAttack.Subject == CharacterAttackSubject.Manual &&
+             Data.SkillDefinitions.Count > 1))
+        {
+            return default;
+        }
+
+        return SelectCustomAbilityTargets(
+            _board,
+            fallbackAttack.TargetFaction,
+            fallbackAttack.Subject,
+            fallbackAttack.SubjectMetric,
+            fallbackAttack.SubjectCount,
+            actionCondition.HasNumericConditions,
+            actionCondition.MatchMode,
+            actionCondition.NumericConditions,
+            default);
+    }
+
+    private static bool UsesActionTargets(
+        CharacterSkillDefinition definition)
+    {
+        if (definition == null || !definition.HasExplicitEffects)
+            return true;
+
+        foreach (CharacterEffectDefinition effect in definition.Effects)
+        {
+            if (effect?.RequiresActionTargets == true)
+                return true;
+        }
+
+        return false;
+    }
+
+    private CharacterAttackDefinition GetLinkedSkillFallbackAttack()
+    {
+        foreach (CharacterAttackDefinition definition in
+                 Data.AttackDefinitions)
+        {
+            if (definition == null ||
+                !definition.HasSection(CharacterAttackSectionType.Subject) ||
+                !definition.HasSection(CharacterAttackSectionType.Ability) ||
+                definition.Subject == CharacterAttackSubject.None ||
+                (definition.HasLinkageSection &&
+                 definition.Linkage != CharacterActionLinkage.None))
+            {
+                continue;
+            }
+
+            return definition;
+        }
+
+        return null;
+    }
+
+    private AbilityTargetSelection FilterInheritedAbilityTargets(
+        IBattleBoard board,
+        AbilityTargetSelection inheritedTargets,
+        bool hasNumericConditions,
+        CharacterConditionMatchMode conditionMatchMode,
+        IReadOnlyList<CharacterNumericCondition> numericConditions)
+    {
+        if (board == null || inheritedTargets.Count == 0)
+            return default;
+
+        IReadOnlyList<CharacterNumericCondition> conditions =
+            hasNumericConditions
+                ? numericConditions
+                : System.Array.Empty<CharacterNumericCondition>();
+        return inheritedTargets.Faction == CharacterTargetFaction.Ally
+            ? AbilityTargetSelection.Allies(
+                board.FilterAlliedCharacters(
+                    this,
+                    inheritedTargets.AllyTargets,
+                    conditionMatchMode,
+                    conditions))
+            : AbilityTargetSelection.Enemies(
+                board.FilterCharacterTargets(
+                    this,
+                    inheritedTargets.EnemyTargets,
+                    conditionMatchMode,
+                    conditions));
     }
 
     private EffectCostReservation CreateEffectCostReservation()

@@ -198,7 +198,13 @@ public sealed class CharacterProgressData
 [Serializable]
 internal sealed class CharacterCollectionSaveData
 {
+    public const int CurrentVersion = 1;
+
+    [SerializeField] private int version = CurrentVersion;
     [SerializeField] private List<CharacterProgressData> characters = new();
+
+    public int Version => version;
+    public bool HasCharacters => characters != null;
 
     public List<CharacterProgressData> Characters
     {
@@ -243,22 +249,32 @@ public enum CharacterCumulativeUpgradeChangeResult
     CharacterNotOwned = 2,
     UpgradeNotFound = 3,
     InvalidAmount = 4,
-    MaxLevelReached = 5
+    MaxLevelReached = 5,
+    PersistenceBlocked = 6
 }
 
 public sealed class CharacterCollectionData
 {
     private const string PlayerPrefsKey = "Characters.Collection.v1";
+    private const string BackupPlayerPrefsKey =
+        PlayerPrefsKey + ".backup";
+    private const string CorruptPlayerPrefsKey =
+        PlayerPrefsKey + ".corrupt";
 
     private CharacterCollectionSaveData _saveData = new();
     private readonly Dictionary<string, List<WeakReference<CharacterData>>>
         _runtimeDataByCharacterId =
             new(StringComparer.Ordinal);
+    private LocalDataLoadStatus _lastLoadStatus =
+        LocalDataLoadStatus.NotLoaded;
+    private bool _saveBlocked;
 
     public event Action<CharacterSO> CharacterProgressChanged;
 
     public IReadOnlyList<CharacterProgressData> Characters =>
         _saveData.Characters;
+    public LocalDataLoadStatus LastLoadStatus => _lastLoadStatus;
+    public bool IsSaveBlocked => _saveBlocked;
 
     public CharacterProgressData GetOrCreate(CharacterSO definition)
     {
@@ -334,6 +350,12 @@ public sealed class CharacterCollectionData
             bool save = true)
     {
         newLevel = 0;
+        if (_saveBlocked)
+        {
+            return CharacterCumulativeUpgradeChangeResult
+                .PersistenceBlocked;
+        }
+
         if (definition == null)
         {
             return CharacterCumulativeUpgradeChangeResult
@@ -396,6 +418,9 @@ public sealed class CharacterCollectionData
         bool isOwned,
         bool save = true)
     {
+        if (_saveBlocked)
+            return false;
+
         if (definition == null)
             return false;
 
@@ -414,7 +439,18 @@ public sealed class CharacterCollectionData
 
     public void Save(bool flush = true)
     {
-        PlayerPrefs.SetString(PlayerPrefsKey, ExportJson());
+        if (_saveBlocked)
+        {
+            Debug.LogWarning(
+                "Character progress save was skipped because the primary " +
+                "save data could not be loaded safely. Reset or recover " +
+                "local data before saving again.");
+            return;
+        }
+
+        string json = ExportJson();
+        BackupCurrentValidSave(json);
+        PlayerPrefs.SetString(PlayerPrefsKey, json);
         if (flush)
             PlayerPrefs.Save();
     }
@@ -427,13 +463,125 @@ public sealed class CharacterCollectionData
 
     public bool TryImportJson(string json)
     {
-        if (string.IsNullOrWhiteSpace(json))
+        if (!TryDeserialize(
+                json,
+                out CharacterCollectionSaveData imported,
+                out LocalDataLoadStatus loadStatus,
+                out _))
+        {
+            return false;
+        }
+
+        imported.Normalize();
+        ApplySaveData(imported);
+        SetLoadState(loadStatus, false);
+        return true;
+    }
+
+    public LocalDataLoadStatus Load()
+    {
+        if (!PlayerPrefs.HasKey(PlayerPrefsKey))
+        {
+            ApplySaveData(new CharacterCollectionSaveData());
+            SetLoadState(LocalDataLoadStatus.MissingInitialized, false);
+            Save();
+            return _lastLoadStatus;
+        }
+
+        string json = PlayerPrefs.GetString(PlayerPrefsKey, string.Empty);
+        if (TryDeserialize(
+                json,
+                out CharacterCollectionSaveData imported,
+                out LocalDataLoadStatus loadStatus,
+                out LocalDataLoadStatus failureStatus))
+        {
+            imported.Normalize();
+            ApplySaveData(imported);
+            SetLoadState(loadStatus, false);
+            return _lastLoadStatus;
+        }
+
+        if (TryRecoverFromBackup(json))
+            return _lastLoadStatus;
+
+        ApplySaveData(new CharacterCollectionSaveData());
+        SetLoadState(failureStatus, true);
+        Debug.LogError(
+            "Character progress save data is corrupt or uses an unsupported " +
+            "version. The original PlayerPrefs value was preserved and " +
+            "character saving is blocked until local data is reset or " +
+            "recovered.");
+        return _lastLoadStatus;
+    }
+
+    private bool TryRecoverFromBackup(string corruptPrimaryJson)
+    {
+        if (!PlayerPrefs.HasKey(BackupPlayerPrefsKey))
             return false;
 
-        CharacterCollectionSaveData imported;
+        string backupJson = PlayerPrefs.GetString(
+            BackupPlayerPrefsKey,
+            string.Empty);
+        if (!TryDeserialize(
+                backupJson,
+                out CharacterCollectionSaveData backup,
+                out _,
+                out _))
+        {
+            return false;
+        }
+
+        PlayerPrefs.SetString(CorruptPlayerPrefsKey, corruptPrimaryJson);
+        PlayerPrefs.Save();
+        backup.Normalize();
+        ApplySaveData(backup);
+        SetLoadState(LocalDataLoadStatus.RecoveredFromBackup, false);
+        Debug.LogWarning(
+            "Character progress was restored from its last valid backup. " +
+            "The rejected primary value was preserved under the corrupt key.");
+        return true;
+    }
+
+    private void BackupCurrentValidSave(string replacementJson)
+    {
+        if (PlayerPrefs.HasKey(PlayerPrefsKey))
+        {
+            string currentJson = PlayerPrefs.GetString(
+                PlayerPrefsKey,
+                string.Empty);
+            if (TryDeserialize(currentJson, out _, out _, out _))
+            {
+                PlayerPrefs.SetString(BackupPlayerPrefsKey, currentJson);
+                return;
+            }
+
+            PlayerPrefs.SetString(CorruptPlayerPrefsKey, currentJson);
+        }
+
+        if (!PlayerPrefs.HasKey(BackupPlayerPrefsKey))
+            PlayerPrefs.SetString(BackupPlayerPrefsKey, replacementJson);
+    }
+
+    private static bool TryDeserialize(
+        string json,
+        out CharacterCollectionSaveData saveData,
+        out LocalDataLoadStatus loadStatus,
+        out LocalDataLoadStatus failureStatus)
+    {
+        saveData = null;
+        loadStatus = LocalDataLoadStatus.Success;
+        failureStatus = LocalDataLoadStatus.Corrupt;
+        if (string.IsNullOrWhiteSpace(json) ||
+            !LocalSaveJson.HasNonNullTopLevelProperty(json, "characters"))
+        {
+            return false;
+        }
+
+        bool hasVersion =
+            LocalSaveJson.HasTopLevelProperty(json, "version");
         try
         {
-            imported = JsonUtility.FromJson<CharacterCollectionSaveData>(
+            saveData = JsonUtility.FromJson<CharacterCollectionSaveData>(
                 json);
         }
         catch (ArgumentException)
@@ -441,25 +589,31 @@ public sealed class CharacterCollectionData
             return false;
         }
 
-        if (imported == null)
+        if (saveData == null || !saveData.HasCharacters)
             return false;
 
-        imported.Normalize();
-        ApplySaveData(imported);
+        if (!hasVersion)
+        {
+            loadStatus = LocalDataLoadStatus.Migrated;
+            return true;
+        }
+
+        if (saveData.Version != CharacterCollectionSaveData.CurrentVersion)
+        {
+            saveData = null;
+            failureStatus = LocalDataLoadStatus.UnsupportedVersion;
+            return false;
+        }
+
         return true;
     }
 
-    public void Load()
+    private void SetLoadState(
+        LocalDataLoadStatus status,
+        bool saveBlocked)
     {
-        string json = PlayerPrefs.GetString(PlayerPrefsKey, string.Empty);
-        if (string.IsNullOrWhiteSpace(json))
-        {
-            ApplySaveData(new CharacterCollectionSaveData());
-            return;
-        }
-
-        if (!TryImportJson(json))
-            ApplySaveData(new CharacterCollectionSaveData());
+        _lastLoadStatus = status;
+        _saveBlocked = saveBlocked;
     }
 
     private void RegisterRuntimeData(CharacterData data)

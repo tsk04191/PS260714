@@ -121,12 +121,15 @@ public sealed class EnemyRuntime
         Definition = definition != null
             ? definition
             : throw new ArgumentNullException(nameof(definition));
-        MaxHealth = maximumHealthOverride > 0
+        int configuredHealth = maximumHealthOverride > 0
             ? maximumHealthOverride
             : Definition.BaseHealth;
+        MaxHealth = Mathf.RoundToInt(
+            configuredHealth * Definition.HealthScale);
         MaxHealth = Mathf.Max(1, MaxHealth);
         Health = MaxHealth;
-        Armor = 0;
+        Armor = Definition.InitialArmor;
+        CurrentShield = Definition.InitialShield;
         InitializeAbilityStates();
     }
 

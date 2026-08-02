@@ -83,6 +83,36 @@ public sealed class EnemyDefinitionValidationTests
     }
 
     [Test]
+    public void InvalidAuthoredStatsAndFootprint_AreRejectedBeforeClamping()
+    {
+        EnemySO definition = CreateEnemy("invalid_authored_enemy");
+        SetPrivateField(definition, "healthScale", -2f);
+        SetPrivateField(definition, "initialArmor", -1);
+        SetPrivateField(definition, "unlockDifficulty", -2);
+        SetPrivateField(
+            definition,
+            "footprintWidth",
+            EnemySO.MaximumFootprintSize + 1);
+        SetPrivateField(definition, "footprintHeight", 2);
+        SetPrivateField(
+            definition,
+            "stackingPolicy",
+            EnemyStackingPolicy.Stackable);
+
+        EnemyDefinitionValidationResult result =
+            EnemyDefinitionValidator.Validate(definition);
+
+        Assert.That(HasCode(result, "enemy.health_scale_invalid"), Is.True);
+        Assert.That(HasCode(result, "enemy.initial_defense_invalid"), Is.True);
+        Assert.That(HasCode(result, "enemy.unlock_difficulty_invalid"), Is.True);
+        Assert.That(HasCode(result, "enemy.footprint_invalid"), Is.True);
+        Assert.That(
+            HasCode(result, "enemy.large_footprint_must_be_exclusive"),
+            Is.True,
+            BuildFailureMessage(result));
+    }
+
+    [Test]
     public void ValidCooldownAbility_PassesDefinitionValidation()
     {
         EnemySO definition = CreateEnemy("valid_cooldown_enemy");
@@ -792,6 +822,18 @@ public sealed class EnemyDefinitionValidationTests
             BindingFlags.Instance | BindingFlags.NonPublic);
         Assert.That(method, Is.Not.Null);
         method.Invoke(definition, null);
+    }
+
+    private static void SetPrivateField(
+        object target,
+        string fieldName,
+        object value)
+    {
+        FieldInfo field = target.GetType().GetField(
+            fieldName,
+            BindingFlags.Instance | BindingFlags.NonPublic);
+        Assert.That(field, Is.Not.Null, $"Missing field '{fieldName}'.");
+        field.SetValue(target, value);
     }
 
     private static bool HasCode(

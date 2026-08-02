@@ -732,34 +732,22 @@ public sealed class DungeonBattleTab : MonoBehaviour
 [DisallowMultipleComponent]
 public sealed class DungeonItemHandView : MonoBehaviour
 {
-    private static readonly EBattleItemType[] DisplayOrder =
-    {
-        EBattleItemType.Focus,
-        EBattleItemType.Molotov,
-        EBattleItemType.PrecisionShot,
-        EBattleItemType.OverSupply,
-        EBattleItemType.Overheat,
-    };
-
-    private readonly Dictionary<EBattleItemType, DungeonItemCardView> _cards =
+    private readonly Dictionary<BattleItemSO, DungeonItemCardView> _cards =
         new();
     private readonly List<CharacterRuntime> _boundTurrets = new();
     private DungeonPage _page;
     private BattleManager _battleManager;
     private TextMeshProUGUI _instructionText;
-    private EBattleItemType? _selectedItem;
-    private float _focusCooldownRemaining;
-    private EBattleState _previousBattleState;
+    private BattleItemSO _selectedItem;
     private bool _initialized;
 
     public RectTransform HighlightRect
     {
         get
         {
-            foreach (EBattleItemType itemType in DisplayOrder)
+            foreach (DungeonItemCardView card in _cards.Values)
             {
-                if (_cards.TryGetValue(itemType, out DungeonItemCardView card) &&
-                    card != null && card.gameObject.activeInHierarchy)
+                if (card != null && card.gameObject.activeInHierarchy)
                 {
                     return card.transform as RectTransform;
                 }
@@ -797,8 +785,6 @@ public sealed class DungeonItemHandView : MonoBehaviour
             _page.Board.ManualTargetSelectionProgressChanged +=
                 RefreshCards;
         }
-        _previousBattleState = _battleManager.State;
-        _focusCooldownRemaining = 0f;
         _initialized = true;
         RebuildCards();
     }
@@ -840,14 +826,6 @@ public sealed class DungeonItemHandView : MonoBehaviour
     {
         if (!_initialized || _battleManager == null)
             return;
-
-        if (_battleManager.State == EBattleState.Running &&
-            _focusCooldownRemaining > 0f)
-        {
-            _focusCooldownRemaining = Mathf.Max(
-                0f,
-                _focusCooldownRemaining - Time.deltaTime);
-        }
 
         RefreshCards();
     }
@@ -901,24 +879,21 @@ public sealed class DungeonItemHandView : MonoBehaviour
         }
         _cards.Clear();
 
-        int visibleCount = 1;
-        foreach (EBattleItemType itemType in BattleItemCatalog.Consumables)
+        int visibleCount = 0;
+        foreach (BattleItemSO item in BattleItemCatalog.GetAll())
         {
-            if (_page.GetBattleItemCount(itemType) > 0)
+            if (_page.IsBattleItemOwned(item))
                 visibleCount++;
         }
 
         int visibleIndex = 0;
-        foreach (EBattleItemType itemType in DisplayOrder)
+        foreach (BattleItemSO item in BattleItemCatalog.GetAll())
         {
-            if (itemType != EBattleItemType.Focus &&
-                _page.GetBattleItemCount(itemType) <= 0)
-            {
+            if (item == null || !_page.IsBattleItemOwned(item))
                 continue;
-            }
 
             GameObject cardObject = new(
-                $"crdBattleItem_{itemType}",
+                $"crdBattleItem_{item.ItemId.Replace('.', '_')}",
                 typeof(RectTransform),
                 typeof(CanvasRenderer),
                 typeof(Image),
@@ -937,9 +912,9 @@ public sealed class DungeonItemHandView : MonoBehaviour
             DungeonItemCardView card =
                 cardObject.GetComponent<DungeonItemCardView>();
             card.Initialize(
-                BattleItemCatalog.Get(itemType),
+                item,
                 HandleCardClicked);
-            _cards[itemType] = card;
+            _cards[item] = card;
             visibleIndex++;
         }
 
@@ -952,95 +927,85 @@ public sealed class DungeonItemHandView : MonoBehaviour
         if (_page == null || _battleManager == null)
             return;
 
-        foreach ((EBattleItemType itemType, DungeonItemCardView card) in _cards)
+        foreach ((BattleItemSO item, DungeonItemCardView card) in _cards)
         {
             if (card == null)
                 continue;
 
-            float cooldown = itemType == EBattleItemType.Focus
-                ? _focusCooldownRemaining
-                : 0f;
+            float cooldown = _page.GetBattleItemCooldown(item);
             card.Refresh(
-                _page.GetBattleItemCount(itemType),
+                _page.GetBattleItemCount(item),
                 _battleManager.ActiveSkillResource,
                 _battleManager.State == EBattleState.Running,
                 cooldown,
-                _selectedItem == itemType);
+                _selectedItem == item);
         }
 
         RefreshInstruction();
     }
 
-    private void HandleCardClicked(EBattleItemType itemType)
+    private void HandleCardClicked(BattleItemSO item)
     {
-        if (_page == null || _battleManager == null)
+        if (_page == null || _battleManager == null || item == null)
             return;
 
-        BattleItemDefinition definition = BattleItemCatalog.Get(itemType);
-        float cooldown = itemType == EBattleItemType.Focus
-            ? _focusCooldownRemaining
-            : 0f;
+        float cooldown = _page.GetBattleItemCooldown(item);
         bool canSelect = _battleManager.State == EBattleState.Running &&
-                         _battleManager.CanSpend(definition.EnergyCost) &&
+                         _battleManager.CanSpend(item.EnergyCost) &&
                          cooldown <= 0f &&
-                         (definition.IsReusable ||
-                          _page.GetBattleItemCount(itemType) > 0);
+                         _page.IsBattleItemOwned(item) &&
+                         (item.HasUnlimitedUses ||
+                          _page.GetBattleItemCount(item) > 0);
         if (!canSelect)
             return;
 
-        _selectedItem = _selectedItem == itemType
+        _selectedItem = _selectedItem == item
             ? null
-            : itemType;
+            : item;
         RefreshCards();
     }
 
     private bool HandleEnemyClicked(EnemyRuntime enemy)
     {
-        if (!_selectedItem.HasValue || enemy == null || _page == null)
+        if (_selectedItem == null || enemy == null || _page == null)
             return false;
 
-        EBattleItemType itemType = _selectedItem.Value;
-        BattleItemDefinition definition = BattleItemCatalog.Get(itemType);
-        if (definition.TargetType != EBattleItemTargetType.Enemy)
+        BattleItemSO item = _selectedItem;
+        if (item.TargetType != BattleItemTargetType.Enemy)
             return false;
 
-        bool used = _page.TryUseBattleItemOnEnemy(itemType, enemy);
+        bool used = _page.TryUseBattleItemOnEnemy(item, enemy);
         if (used)
-            CompleteSelectedItem(definition);
+            CompleteSelectedItem();
         return used;
     }
 
     private bool HandleTurretClicked(CharacterRuntime turret)
     {
-        if (!_selectedItem.HasValue || _page == null)
+        if (_selectedItem == null || _page == null)
             return false;
 
-        EBattleItemType itemType = _selectedItem.Value;
-        BattleItemDefinition definition = BattleItemCatalog.Get(itemType);
-        if (definition.TargetType == EBattleItemTargetType.Turret &&
-            _page.TryUseBattleItemOnTurret(itemType, turret))
+        BattleItemSO item = _selectedItem;
+        if (item.TargetType == BattleItemTargetType.Turret &&
+            _page.TryUseBattleItemOnTurret(item, turret))
         {
-            CompleteSelectedItem(definition);
+            CompleteSelectedItem();
         }
 
         return true;
     }
 
-    private void CompleteSelectedItem(BattleItemDefinition definition)
+    private void CompleteSelectedItem()
     {
-        if (definition.IsReusable)
-            _focusCooldownRemaining = definition.Cooldown;
         _selectedItem = null;
         RebuildCards();
     }
 
     private void HandleEnergyChanged(int _)
     {
-        if (_selectedItem.HasValue && _battleManager != null)
+        if (_selectedItem != null && _battleManager != null)
         {
-            BattleItemDefinition selected = BattleItemCatalog.Get(
-                _selectedItem.Value);
-            if (!_battleManager.CanSpend(selected.EnergyCost))
+            if (!_battleManager.CanSpend(_selectedItem.EnergyCost))
                 _selectedItem = null;
         }
         RefreshCards();
@@ -1048,14 +1013,8 @@ public sealed class DungeonItemHandView : MonoBehaviour
 
     private void HandleBattleStateChanged(EBattleState state)
     {
-        bool isNewBattle = state == EBattleState.Running &&
-                           (_previousBattleState == EBattleState.Idle ||
-                            _previousBattleState == EBattleState.Completed);
-        if (isNewBattle)
-            _focusCooldownRemaining = 0f;
         if (state != EBattleState.Running)
             _selectedItem = null;
-        _previousBattleState = state;
         RefreshTurretBindings();
         RefreshCards();
     }
@@ -1120,20 +1079,20 @@ public sealed class DungeonItemHandView : MonoBehaviour
             return;
         }
 
-        if (!_selectedItem.HasValue)
+        if (_selectedItem == null)
         {
             _instructionText.text = LocalizationService.Get(
                 LocalizationKeys.UiDungeonItemHand);
             return;
         }
 
-        BattleItemDefinition definition = BattleItemCatalog.Get(
-            _selectedItem.Value);
         _instructionText.text = LocalizationService.Get(
-            definition.TargetType == EBattleItemTargetType.Enemy
+            _selectedItem.TargetType == BattleItemTargetType.Enemy
                 ? LocalizationKeys.UiDungeonItemSelectEnemy
                 : LocalizationKeys.UiDungeonItemSelectTurret,
-            LocalizationService.Arg("item", definition.DisplayName));
+            LocalizationService.Arg(
+                "item",
+                _selectedItem.GetLocalizedDisplayName()));
     }
 }
 
@@ -1150,18 +1109,18 @@ public sealed class DungeonItemCardView : MonoBehaviour,
     private static readonly Color DisabledColor =
         new(0.08f, 0.1f, 0.09f, 0.92f);
 
-    private BattleItemDefinition _definition;
-    private System.Action<EBattleItemType> _clicked;
+    private BattleItemSO _item;
+    private System.Action<BattleItemSO> _clicked;
     private Image _background;
     private TextMeshProUGUI _summaryText;
     private GameObject _popup;
     private bool _hovered;
 
     public void Initialize(
-        BattleItemDefinition definition,
-        System.Action<EBattleItemType> clicked)
+        BattleItemSO item,
+        System.Action<BattleItemSO> clicked)
     {
-        _definition = definition;
+        _item = item;
         _clicked = clicked;
         _background = GetComponent<Image>();
         _background.color = AvailableColor;
@@ -1203,15 +1162,18 @@ public sealed class DungeonItemCardView : MonoBehaviour,
             TextAlignmentOptions.MidlineLeft);
         string header = LocalizationService.Get(
             LocalizationKeys.UiDungeonItemCardHeader,
-            LocalizationService.Arg("name", definition.DisplayName),
-            LocalizationService.Arg("cost", definition.EnergyCost));
-        string footer = definition.IsReusable
+            LocalizationService.Arg(
+                "name",
+                item.GetLocalizedDisplayName()),
+            LocalizationService.Arg("cost", item.EnergyCost));
+        string footer = item.HasUnlimitedUses
             ? LocalizationService.Get(
                 LocalizationKeys.UiDungeonItemReusable,
-                LocalizationService.Arg("cooldown", definition.Cooldown))
+                LocalizationService.Arg("cooldown", item.Cooldown))
             : LocalizationService.Get(
                 LocalizationKeys.UiDungeonItemConsumable);
-        detailText.text = $"{header}\n{definition.Description}\n{footer}";
+        detailText.text =
+            $"{header}\n{item.GetLocalizedDescription()}\n{footer}";
         _popup.SetActive(false);
     }
 
@@ -1223,9 +1185,9 @@ public sealed class DungeonItemCardView : MonoBehaviour,
         bool selected)
     {
         bool available = battleRunning &&
-                         energy >= _definition.EnergyCost &&
+                         energy >= _item.EnergyCost &&
                          cooldown <= 0f &&
-                         (_definition.IsReusable || count > 0);
+                         (_item.HasUnlimitedUses || count > 0);
         _background.color = selected
             ? SelectedColor
             : available
@@ -1238,19 +1200,17 @@ public sealed class DungeonItemCardView : MonoBehaviour,
                 LocalizationService.Arg(
                     "cooldown",
                     TimePrecision.FloorToTenth(cooldown)))
-            : _definition.IsReusable
-                ? LocalizationService.Get(
-                    LocalizationKeys.UiDungeonItemReusable,
-                    LocalizationService.Arg(
-                        "cooldown",
-                        _definition.Cooldown))
+            : _item.HasUnlimitedUses
+                ? "∞"
                 : LocalizationService.Get(
                     LocalizationKeys.UiDungeonItemCount,
                     LocalizationService.Arg("count", count));
         string header = LocalizationService.Get(
             LocalizationKeys.UiDungeonItemCardHeader,
-            LocalizationService.Arg("name", _definition.DisplayName),
-            LocalizationService.Arg("cost", _definition.EnergyCost));
+            LocalizationService.Arg(
+                "name",
+                _item.GetLocalizedDisplayName()),
+            LocalizationService.Arg("cost", _item.EnergyCost));
         _summaryText.text = $"{header}\n{state}";
     }
 
@@ -1283,7 +1243,7 @@ public sealed class DungeonItemCardView : MonoBehaviour,
         if (eventData != null &&
             eventData.button == PointerEventData.InputButton.Left)
         {
-            _clicked?.Invoke(_definition.Type);
+            _clicked?.Invoke(_item);
         }
     }
 

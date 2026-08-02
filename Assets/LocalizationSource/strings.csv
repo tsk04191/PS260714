@@ -9,9 +9,6 @@ status.opening.name,상태 이름,title,,빈틈,Opening
 status.opening.description,상태 설명,tooltip,,받는 피해가 10% 증가합니다.,Takes 10% more damage.
 ui.settings.language,설정 UI,body,,언어,Language
 ui.settings.font,설정 UI,body,,글꼴,Font
-skill.focus.name,기술 이름,title,,집중,Focus
-skill.focus.effect,기술 설명,tooltip,지속시간·쿨타임·코스트 변수,[icon=focus] [style=focus]집중[/style]: 선택한 적을 {duration:0.#}초 동안 무조건 최우선 대상으로 지정합니다. 재사용 대기시간 {cooldown:0.#}초.,[icon=focus] [style=focus]Focus[/style]: Force the selected enemy to become the highest-priority target for {duration:0.#} seconds. Cooldown: {cooldown:0.#} seconds.
-skill.focus.usage,기술 사용 정보,number,에너지 코스트,[style=energy]코스트 {cost}[/style] | 재사용 가능,[style=energy]Cost {cost}[/style] | Reusable
 item.molotov.name,아이템 이름,title,,화염병,Molotov
 item.molotov.effect,아이템 설명,tooltip,화염 지속시간,선택한 적에게 [icon=fire] [style=fire]화염[/style]을 {duration:0.#}초 부여합니다.,Apply [icon=fire] [style=fire]Fire[/style] to the selected enemy for {duration:0.#} seconds.
 item.molotov.usage,아이템 사용 정보,number,에너지 코스트,[style=energy]코스트 {cost}[/style] | 소모형,[style=energy]Cost {cost}[/style] | Consumable
@@ -308,3 +305,5 @@ roll.shooter.name,직군 이름,title,,사수,Shooter
 roll.shooter.description,직군 설명,body,,사수,Shooter
 roll.support.name,직군 이름,title,,지원,Support
 roll.support.description,직군 설명,body,,지원,Support
+roll.mage.name,직군 이름,title,,술사,Mage
+roll.mage.description,직군 설명,body,,술사,Mage

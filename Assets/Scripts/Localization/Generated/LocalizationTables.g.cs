@@ -9,7 +9,7 @@ namespace PS260714.Localization
 {
     public static class GeneratedLocalizationTables
     {
-        public const string SourceHash = "5878af551ee9a424953693186878a4ddca1174fb32de4eb59052b5361edd9018";
+        public const string SourceHash = "6a793e05e6866d011036d803631b8c2f7d0e5c4113571e1bc2eaf6a5d8e2ef90";
         public const string ReferenceLocale = "en-US";
 
         private static readonly LocalizationLocaleInfo[] LocaleData =
@@ -35,9 +35,6 @@ namespace PS260714.Localization
                 { "status.opening.description", new LocalizationEntry("\uBC1B\uB294 \uD53C\uD574\uAC00 10% \uC99D\uAC00\uD569\uB2C8\uB2E4.", "tooltip") },
                 { "ui.settings.language", new LocalizationEntry("\uC5B8\uC5B4", "body") },
                 { "ui.settings.font", new LocalizationEntry("\uAE00\uAF34", "body") },
-                { "skill.focus.name", new LocalizationEntry("\uC9D1\uC911", "title") },
-                { "skill.focus.effect", new LocalizationEntry("[icon=focus] [style=focus]\uC9D1\uC911[/style]: \uC120\uD0DD\uD55C \uC801\uC744 {duration:0.#}\uCD08 \uB3D9\uC548 \uBB34\uC870\uAC74 \uCD5C\uC6B0\uC120 \uB300\uC0C1\uC73C\uB85C \uC9C0\uC815\uD569\uB2C8\uB2E4. \uC7AC\uC0AC\uC6A9 \uB300\uAE30\uC2DC\uAC04 {cooldown:0.#}\uCD08.", "tooltip") },
-                { "skill.focus.usage", new LocalizationEntry("[style=energy]\uCF54\uC2A4\uD2B8 {cost}[/style] | \uC7AC\uC0AC\uC6A9 \uAC00\uB2A5", "number") },
                 { "item.molotov.name", new LocalizationEntry("\uD654\uC5FC\uBCD1", "title") },
                 { "item.molotov.effect", new LocalizationEntry("\uC120\uD0DD\uD55C \uC801\uC5D0\uAC8C [icon=fire] [style=fire]\uD654\uC5FC[/style]\uC744 {duration:0.#}\uCD08 \uBD80\uC5EC\uD569\uB2C8\uB2E4.", "tooltip") },
                 { "item.molotov.usage", new LocalizationEntry("[style=energy]\uCF54\uC2A4\uD2B8 {cost}[/style] | \uC18C\uBAA8\uD615", "number") },
@@ -334,6 +331,8 @@ namespace PS260714.Localization
                 { "roll.shooter.description", new LocalizationEntry("\uC0AC\uC218", "body") },
                 { "roll.support.name", new LocalizationEntry("\uC9C0\uC6D0", "title") },
                 { "roll.support.description", new LocalizationEntry("\uC9C0\uC6D0", "body") },
+                { "roll.mage.name", new LocalizationEntry("\uC220\uC0AC", "title") },
+                { "roll.mage.description", new LocalizationEntry("\uC220\uC0AC", "body") },
             };
 
         private static readonly Dictionary<string, LocalizationEntry>
@@ -350,9 +349,6 @@ namespace PS260714.Localization
                 { "status.opening.description", new LocalizationEntry("Takes 10% more damage.", "tooltip") },
                 { "ui.settings.language", new LocalizationEntry("Language", "body") },
                 { "ui.settings.font", new LocalizationEntry("Font", "body") },
-                { "skill.focus.name", new LocalizationEntry("Focus", "title") },
-                { "skill.focus.effect", new LocalizationEntry("[icon=focus] [style=focus]Focus[/style]: Force the selected enemy to become the highest-priority target for {duration:0.#} seconds. Cooldown: {cooldown:0.#} seconds.", "tooltip") },
-                { "skill.focus.usage", new LocalizationEntry("[style=energy]Cost {cost}[/style] | Reusable", "number") },
                 { "item.molotov.name", new LocalizationEntry("Molotov", "title") },
                 { "item.molotov.effect", new LocalizationEntry("Apply [icon=fire] [style=fire]Fire[/style] to the selected enemy for {duration:0.#} seconds.", "tooltip") },
                 { "item.molotov.usage", new LocalizationEntry("[style=energy]Cost {cost}[/style] | Consumable", "number") },
@@ -649,6 +645,8 @@ namespace PS260714.Localization
                 { "roll.shooter.description", new LocalizationEntry("Shooter", "body") },
                 { "roll.support.name", new LocalizationEntry("Support", "title") },
                 { "roll.support.description", new LocalizationEntry("Support", "body") },
+                { "roll.mage.name", new LocalizationEntry("Mage", "title") },
+                { "roll.mage.description", new LocalizationEntry("Mage", "body") },
             };
 
         private static readonly IReadOnlyDictionary<string, LocalizationEntry>

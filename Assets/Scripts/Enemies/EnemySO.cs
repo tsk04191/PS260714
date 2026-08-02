@@ -2,10 +2,18 @@ using System;
 using System.Collections.Generic;
 using UnityEngine;
 
+public enum EnemyStackingPolicy
+{
+    Stackable = 0,
+    Exclusive = 1,
+}
+
 [CreateAssetMenu(fileName = "Enemy", menuName = "Dungeon/Enemy")]
 public sealed class EnemySO : ScriptableObject,
     IBattlePresentationUnitDefinition
 {
+    public const int MaximumFootprintSize = 9;
+
     [Header("Identity")]
     [SerializeField] private string enemyId;
     [SerializeField] private string nameLocalizationKey;
@@ -16,15 +24,32 @@ public sealed class EnemySO : ScriptableObject,
     [SerializeField] private EEnemyGrade grade = EEnemyGrade.Normal;
     [SerializeField] private EEnemyType type = EEnemyType.Basic;
 
+    [Header("Presentation")]
+    [SerializeField] private Sprite iconSprite;
+    [SerializeField] private Sprite boardSprite;
+    [SerializeField] private int sortOrder;
+
     [Header("3D VFX")]
     [SerializeField] private BattleVfxCueSO spawnVfxCue;
     [SerializeField] private BattleVfxCueSO deathVfxCue;
 
     [Header("Base Stats")]
     [SerializeField, Min(1)] private int baseHealth = 20;
+    [SerializeField, Min(0.1f)] private float healthScale = 1f;
+    [SerializeField, Min(0)] private int initialArmor;
+    [SerializeField, Min(0)] private int initialShield;
     [SerializeField, Min(0.1f)] private float spawnIntervalMultiplier = 1f;
     [SerializeField, Min(0f), Tooltip("0 uses the default threat for this enemy type.")]
     private float threatCost;
+    [SerializeField, Range(-1, 100), Tooltip("-1 uses the default unlock difficulty for this enemy type.")]
+    private int unlockDifficulty = -1;
+
+    [Header("Board Footprint")]
+    [SerializeField, Range(1, MaximumFootprintSize)]
+    private int footprintWidth = 1;
+    [SerializeField, Range(1, MaximumFootprintSize)]
+    private int footprintHeight = 1;
+    [SerializeField] private EnemyStackingPolicy stackingPolicy;
 
     [Header("Abilities")]
     [SerializeField]
@@ -39,18 +64,48 @@ public sealed class EnemySO : ScriptableObject,
     public string CardCode => cardCode ?? string.Empty;
     public EEnemyGrade Grade => grade;
     public EEnemyType Type => type;
+    public Sprite IconSprite => iconSprite;
+    public Sprite BoardSprite => boardSprite;
+    public int SortOrder => sortOrder;
     public BattleVfxCueSO SpawnVfxCue => spawnVfxCue;
     public BattleVfxCueSO DeathVfxCue => deathVfxCue;
     public int BaseHealth => baseHealth;
+    public float HealthScale => Mathf.Max(0.1f, healthScale);
+    public int InitialArmor => Mathf.Max(0, initialArmor);
+    public int InitialShield => Mathf.Max(0, initialShield);
     public float SpawnIntervalMultiplier =>
         TimePrecision.Normalize(spawnIntervalMultiplier, 0.1f);
     public float ThreatCost => threatCost > 0f
         ? threatCost
         : GetDefaultThreatCost(type);
+    public int UnlockDifficulty => unlockDifficulty >= 0
+        ? Mathf.Clamp(unlockDifficulty, 0, 100)
+        : GetDefaultUnlockDifficulty(type);
+    public int FootprintWidth => Mathf.Clamp(
+        footprintWidth,
+        1,
+        MaximumFootprintSize);
+    public int FootprintHeight => Mathf.Clamp(
+        footprintHeight,
+        1,
+        MaximumFootprintSize);
+    public int FootprintArea => FootprintWidth * FootprintHeight;
+    public bool OccupiesMultipleCells => FootprintArea > 1;
+    public EnemyStackingPolicy StackingPolicy => OccupiesMultipleCells
+        ? EnemyStackingPolicy.Exclusive
+        : stackingPolicy;
     public IReadOnlyList<EnemyAbilityDefinition> Abilities =>
         abilities != null
             ? abilities
             : Array.Empty<EnemyAbilityDefinition>();
+
+    internal float AuthoredHealthScale => healthScale;
+    internal int AuthoredInitialArmor => initialArmor;
+    internal int AuthoredInitialShield => initialShield;
+    internal int AuthoredUnlockDifficulty => unlockDifficulty;
+    internal int AuthoredFootprintWidth => footprintWidth;
+    internal int AuthoredFootprintHeight => footprintHeight;
+    internal EnemyStackingPolicy AuthoredStackingPolicy => stackingPolicy;
 
     public EnemyRuntime CreateRuntime(int maximumHealthOverride = 0)
     {
@@ -78,9 +133,23 @@ public sealed class EnemySO : ScriptableObject,
             cardCode = cardCode.Trim();
 
         baseHealth = Mathf.Max(1, baseHealth);
+        healthScale = Mathf.Max(0.1f, healthScale);
+        initialArmor = Mathf.Max(0, initialArmor);
+        initialShield = Mathf.Max(0, initialShield);
         spawnIntervalMultiplier =
             TimePrecision.Normalize(spawnIntervalMultiplier, 0.1f);
         threatCost = Mathf.Max(0f, threatCost);
+        unlockDifficulty = Mathf.Clamp(unlockDifficulty, -1, 100);
+        footprintWidth = Mathf.Clamp(
+            footprintWidth,
+            1,
+            MaximumFootprintSize);
+        footprintHeight = Mathf.Clamp(
+            footprintHeight,
+            1,
+            MaximumFootprintSize);
+        if (footprintWidth > 1 || footprintHeight > 1)
+            stackingPolicy = EnemyStackingPolicy.Exclusive;
 
         abilities ??= new List<EnemyAbilityDefinition>();
         foreach (EnemyAbilityDefinition ability in abilities)
@@ -111,15 +180,23 @@ public sealed class EnemySO : ScriptableObject,
     private void ApplyTypeDefaults(EEnemyType enemyType, int health)
     {
         type = enemyType;
-        enemyId = enemyType.ToString().ToLowerInvariant();
+        enemyId = EnemyTypeDisplay.GetId(enemyType);
         displayName = EnemyTypeDisplay.GetName(enemyType);
         cardCode = EnemyTypeDisplay.GetCardCode(enemyType);
         grade = IsSpecialType(enemyType)
             ? EEnemyGrade.Special
             : EEnemyGrade.Normal;
         baseHealth = Mathf.Max(1, health);
+        sortOrder = (int)enemyType * 10;
+        healthScale = 1f;
+        initialArmor = 0;
+        initialShield = 0;
         spawnIntervalMultiplier = 1f;
         threatCost = 0f;
+        unlockDifficulty = -1;
+        footprintWidth = 1;
+        footprintHeight = 1;
+        stackingPolicy = EnemyStackingPolicy.Stackable;
         nameLocalizationKey = string.Empty;
         descriptionLocalizationKey = string.Empty;
         description = string.Empty;
@@ -328,6 +405,21 @@ public sealed class EnemySO : ScriptableObject,
             EEnemyType.ShieldBearer => 2.3f,
             EEnemyType.Infiltrator => 1.4f,
             _ => 1f,
+        };
+    }
+
+    private static int GetDefaultUnlockDifficulty(EEnemyType enemyType)
+    {
+        return enemyType switch
+        {
+            EEnemyType.Assault => 10,
+            EEnemyType.Heavy => 20,
+            EEnemyType.Medic => 30,
+            EEnemyType.Infiltrator => 40,
+            EEnemyType.Mechanic => 45,
+            EEnemyType.Pointman => 55,
+            EEnemyType.ShieldBearer => 70,
+            _ => 0,
         };
     }
 }

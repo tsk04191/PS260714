@@ -68,6 +68,7 @@ public sealed class SettingPage : MonoBehaviour, IPage
 
     [Header("Game Controls (Optional - generated at runtime)")]
     [SerializeField] private TMP_Dropdown localeDropdown;
+    [SerializeField] private TMP_Dropdown fontDropdown;
 
     [Header("Quit Confirmation")]
     [SerializeField] private Button quitButton;
@@ -93,7 +94,9 @@ public sealed class SettingPage : MonoBehaviour, IPage
     private DataManager _dataManager;
     private readonly List<string> _supportedResolutions = new();
     private readonly List<string> _supportedLocaleIds = new();
+    private readonly List<string> _supportedFontIds = new();
     private TextMeshProUGUI _localeLabelText;
+    private TextMeshProUGUI _fontLabelText;
     private bool _openedFromDungeon;
 
     public AudioSource Speaker { get; set; }
@@ -248,8 +251,10 @@ public sealed class SettingPage : MonoBehaviour, IPage
         uiVolumeSlider.onValueChanged.AddListener(HandleUiVolumeChanged);
         muteInBackgroundToggle.ValueChanged += HandleMuteInBackgroundChanged;
         localeDropdown?.onValueChanged.AddListener(HandleLocaleSelected);
+        fontDropdown?.onValueChanged.AddListener(HandleFontSelected);
         LocalizationService.LocaleChanged +=
             HandleLocalizationLocaleChanged;
+        LocalizationService.FontChanged += HandleLocalizationFontChanged;
         quitButton.onClick.AddListener(HandleQuitClicked);
         quitOkButton.onClick.AddListener(HandleQuitOkClicked);
         quitCancelButton.onClick.AddListener(HideQuitConfirmation);
@@ -270,6 +275,7 @@ public sealed class SettingPage : MonoBehaviour, IPage
             _gameEvents.AudioVolumeChanged += RefreshAudioVolume;
             _gameEvents.MuteInBackgroundChanged += RefreshMuteInBackground;
             _gameEvents.LocaleChanged += RefreshLocale;
+            _gameEvents.FontChanged += RefreshFont;
         }
 
         _eventsBound = true;
@@ -310,8 +316,11 @@ public sealed class SettingPage : MonoBehaviour, IPage
             muteInBackgroundToggle.ValueChanged -= HandleMuteInBackgroundChanged;
         if (localeDropdown != null)
             localeDropdown.onValueChanged.RemoveListener(HandleLocaleSelected);
+        if (fontDropdown != null)
+            fontDropdown.onValueChanged.RemoveListener(HandleFontSelected);
         LocalizationService.LocaleChanged -=
             HandleLocalizationLocaleChanged;
+        LocalizationService.FontChanged -= HandleLocalizationFontChanged;
         if (quitButton != null)
             quitButton.onClick.RemoveListener(HandleQuitClicked);
         if (quitOkButton != null)
@@ -344,6 +353,7 @@ public sealed class SettingPage : MonoBehaviour, IPage
             _gameEvents.AudioVolumeChanged -= RefreshAudioVolume;
             _gameEvents.MuteInBackgroundChanged -= RefreshMuteInBackground;
             _gameEvents.LocaleChanged -= RefreshLocale;
+            _gameEvents.FontChanged -= RefreshFont;
         }
 
         _eventsBound = false;
@@ -491,6 +501,25 @@ public sealed class SettingPage : MonoBehaviour, IPage
         }
     }
 
+    private void HandleFontSelected(int index)
+    {
+        if (_isRefreshingControls || index < 0 ||
+            index >= _supportedFontIds.Count)
+        {
+            return;
+        }
+
+        string fontId = _supportedFontIds[index];
+        if (_gameEvents != null)
+        {
+            _gameEvents.RequestFontChange(fontId);
+        }
+        else if (LocalizationService.SetFont(fontId))
+        {
+            RefreshFont(LocalizationService.CurrentFontId);
+        }
+    }
+
     private void HandleLocalizationLocaleChanged(string locale)
     {
         bool wasRefreshing = _isRefreshingControls;
@@ -498,9 +527,20 @@ public sealed class SettingPage : MonoBehaviour, IPage
 
         RebuildLocalizedDisplayOptions();
         BuildLocaleOptionList();
+        BuildFontOptionList();
         RefreshLocale(locale);
+        RefreshFont(LocalizationService.CurrentFontId);
         RefreshLocalizationPresentation();
 
+        _isRefreshingControls = wasRefreshing;
+    }
+
+    private void HandleLocalizationFontChanged(string fontId)
+    {
+        bool wasRefreshing = _isRefreshingControls;
+        _isRefreshingControls = true;
+        RefreshFont(fontId);
+        RefreshLocalizationPresentation();
         _isRefreshingControls = wasRefreshing;
     }
 
@@ -747,6 +787,33 @@ public sealed class SettingPage : MonoBehaviour, IPage
         RefreshLocale(LocalizationService.CurrentLocale);
     }
 
+    private void BuildFontOptionList()
+    {
+        _supportedFontIds.Clear();
+        List<string> fontLabels = new();
+        IReadOnlyList<LocalizationFontOption> fonts =
+            LocalizationService.SupportedFontOptions;
+        for (int index = 0; index < fonts.Count; index++)
+        {
+            LocalizationFontOption font = fonts[index];
+            if (string.IsNullOrWhiteSpace(font.Id))
+                continue;
+
+            _supportedFontIds.Add(font.Id);
+            fontLabels.Add(string.Equals(
+                    font.Id,
+                    LocalizationService.AutoFontId,
+                    StringComparison.OrdinalIgnoreCase)
+                ? LocalizationService.Get(
+                    LocalizationKeys.UiSettingsFontAuto)
+                : font.DisplayName);
+        }
+
+        fontDropdown?.ClearOptions();
+        fontDropdown?.AddOptions(fontLabels);
+        RefreshFont(LocalizationService.CurrentFontId);
+    }
+
     private void RefreshSettingsControls()
     {
         ResolveSettingManagers();
@@ -757,6 +824,7 @@ public sealed class SettingPage : MonoBehaviour, IPage
 
         _isRefreshingControls = true;
         BuildLocaleOptionList();
+        BuildFontOptionList();
         RefreshResolution(display != null ? display.resolution : DisplayData.GetCurrentResolution());
         RefreshDisplayMode(display != null ? display.displayMode : 1);
         RefreshFrameRate(display != null ? display.fps : DisplayData.DefaultFpsMode);
@@ -767,6 +835,7 @@ public sealed class SettingPage : MonoBehaviour, IPage
         RefreshAudioVolume(EAudioChannel.UI, audio != null ? audio.ui : 100);
         RefreshMuteInBackground(audio != null && audio.mute_in_bg);
         RefreshLocale(LocalizationService.CurrentLocale);
+        RefreshFont(LocalizationService.CurrentFontId);
         RefreshLocalizationPresentation();
         _isRefreshingControls = false;
     }
@@ -881,45 +950,45 @@ public sealed class SettingPage : MonoBehaviour, IPage
         localeDropdown.RefreshShownValue();
     }
 
+    private void RefreshFont(string fontId)
+    {
+        if (fontDropdown == null || _supportedFontIds.Count == 0)
+            return;
+
+        int index = IndexOfStableId(_supportedFontIds, fontId);
+        fontDropdown.SetValueWithoutNotify(Mathf.Max(0, index));
+        fontDropdown.RefreshShownValue();
+    }
+
     private void EnsureLocalizationControls()
     {
         if (gameTab == null || resolutionDropdown == null)
             return;
 
         HideGameTabPlaceholder();
-        RemoveLegacyFontControls();
         localeDropdown = ResolveOrCloneDropdown(
             localeDropdown,
             "drdLocale",
             new Vector2(0.38f, 0.64f),
             new Vector2(0.9f, 0.64f));
+        fontDropdown = ResolveOrCloneDropdown(
+            fontDropdown,
+            "drdFont",
+            new Vector2(0.38f, 0.44f),
+            new Vector2(0.9f, 0.44f));
 
         _localeLabelText = EnsureControlLabel(
             "txtLocaleLabel",
             LocalizationKeys.UiSettingsLanguage,
             new Vector2(0.08f, 0.64f),
             new Vector2(0.34f, 0.64f));
+        _fontLabelText = EnsureControlLabel(
+            "txtFontLabel",
+            LocalizationKeys.UiSettingsFont,
+            new Vector2(0.08f, 0.44f),
+            new Vector2(0.34f, 0.44f));
 
         RefreshLocalizationPresentation();
-    }
-
-    private void RemoveLegacyFontControls()
-    {
-        RemoveRuntimeControl("drdFont");
-        RemoveRuntimeControl("txtFontLabel");
-    }
-
-    private void RemoveRuntimeControl(string objectName)
-    {
-        Transform legacyControl = gameTab.transform.Find(objectName);
-        if (legacyControl == null)
-            return;
-
-        legacyControl.gameObject.SetActive(false);
-        if (Application.isPlaying)
-            Destroy(legacyControl.gameObject);
-        else
-            DestroyImmediate(legacyControl.gameObject);
     }
 
     private void EnsureLocalDataResetControls()
@@ -1367,10 +1436,12 @@ public sealed class SettingPage : MonoBehaviour, IPage
         displayModeDropdown?.RefreshShownValue();
         frameRateDropdown?.RefreshShownValue();
         localeDropdown?.RefreshShownValue();
+        fontDropdown?.RefreshShownValue();
         ApplyDropdownFont(resolutionDropdown);
         ApplyDropdownFont(displayModeDropdown);
         ApplyDropdownFont(frameRateDropdown);
         ApplyDropdownFont(localeDropdown);
+        ApplyDropdownFont(fontDropdown);
     }
 
     private static void RefreshLocalizedTextHierarchy(Transform root)

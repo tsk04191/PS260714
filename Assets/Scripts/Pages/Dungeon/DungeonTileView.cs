@@ -24,12 +24,18 @@ public sealed class DungeonTileView : MonoBehaviour, IPointerClickHandler
     private Image _manualSelectionOverlay;
     private int _maximumStackSize;
     private float _currentCellSize;
+    private Color _baseSlotColor;
+    private EnemyRuntime _exclusiveFootprintOccupant;
 
     public int Row { get; private set; }
     public int Column { get; private set; }
     public int StackCount => _enemies.Count;
     public EnemyRuntime TopEnemy =>
         _enemies.Count > 0 ? _enemies[^1] : null;
+    internal EnemyRuntime InteractionEnemy =>
+        _exclusiveFootprintOccupant != null
+            ? _exclusiveFootprintOccupant
+            : TopEnemy;
     public int TopEnemyHealth => TopEnemy != null ? TopEnemy.Health : 0;
     public bool IsFull => _enemies.Count >= _maximumStackSize;
     public event Action<EnemyRuntime> EnemyClicked;
@@ -49,14 +55,33 @@ public sealed class DungeonTileView : MonoBehaviour, IPointerClickHandler
         if (slotSurface != null)
         {
             slotSurface.raycastTarget = false;
-            slotSurface.color = (row + column) % 2 == 0
+            _baseSlotColor = (row + column) % 2 == 0
                 ? new Color(0.075f, 0.105f, 0.09f, 1f)
                 : new Color(0.09f, 0.12f, 0.105f, 1f);
+            slotSurface.color = _baseSlotColor;
         }
 
         EnsureAttackRangeOverlay();
         ClearAttackRangeIndicator();
         SetManualSelectionState(false, false);
+    }
+
+    internal void SetExclusiveFootprintOccupant(
+        EnemyRuntime enemy,
+        bool isAnchor)
+    {
+        _exclusiveFootprintOccupant = enemy;
+        if (slotSurface == null)
+            return;
+
+        slotSurface.color = enemy == null
+            ? _baseSlotColor
+            : Color.Lerp(
+                _baseSlotColor,
+                isAnchor
+                    ? new Color(0.42f, 0.26f, 0.12f, 1f)
+                    : new Color(0.24f, 0.2f, 0.1f, 1f),
+                isAnchor ? 0.55f : 0.38f);
     }
 
     private void Update()
@@ -392,7 +417,7 @@ public sealed class DungeonTileView : MonoBehaviour, IPointerClickHandler
         if (topCard != null)
         {
             topCard.Clicked -= HandleEnemyCardClicked;
-            Destroy(topCard.gameObject);
+            DestroyEnemyCardObject(topCard);
         }
 
         RefreshCardPositions();
@@ -406,7 +431,7 @@ public sealed class DungeonTileView : MonoBehaviour, IPointerClickHandler
             if (card != null)
             {
                 card.Clicked -= HandleEnemyCardClicked;
-                Destroy(card.gameObject);
+                DestroyEnemyCardObject(card);
             }
         }
 
@@ -414,6 +439,22 @@ public sealed class DungeonTileView : MonoBehaviour, IPointerClickHandler
         _cards.Clear();
         ClearAttackRangeIndicator();
         SetManualSelectionState(false, false);
+    }
+
+    private static void DestroyEnemyCardObject(EnemyCard card)
+    {
+        if (card == null)
+            return;
+
+#if UNITY_EDITOR
+        if (!Application.isPlaying)
+        {
+            UnityEngine.Object.DestroyImmediate(card.gameObject);
+            return;
+        }
+#endif
+
+        UnityEngine.Object.Destroy(card.gameObject);
     }
 
     internal List<EnemyRuntime> CopyEnemyRuntimes()
@@ -440,7 +481,7 @@ public sealed class DungeonTileView : MonoBehaviour, IPointerClickHandler
 
     private void HandleEnemyCardClicked(EnemyRuntime enemy)
     {
-        if (enemy != null && ReferenceEquals(enemy, TopEnemy))
+        if (enemy != null && ReferenceEquals(enemy, InteractionEnemy))
             NotifyEnemyClicked(enemy);
     }
 
@@ -448,9 +489,9 @@ public sealed class DungeonTileView : MonoBehaviour, IPointerClickHandler
     {
         if (eventData != null &&
             eventData.button == PointerEventData.InputButton.Left &&
-            TopEnemy != null)
+            InteractionEnemy != null)
         {
-            NotifyEnemyClicked(TopEnemy);
+            NotifyEnemyClicked(InteractionEnemy);
         }
     }
 

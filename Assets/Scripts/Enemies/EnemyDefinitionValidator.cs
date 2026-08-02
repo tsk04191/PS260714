@@ -230,6 +230,26 @@ public static class EnemyDefinitionValidator
                 "Base health must be at least one.");
         }
 
+        if (!IsFinite(definition.AuthoredHealthScale) ||
+            definition.AuthoredHealthScale < 0.1f)
+        {
+            AddError(
+                result,
+                "enemy.health_scale_invalid",
+                "healthScale",
+                "Health scale must be finite and at least 0.1.");
+        }
+
+        if (definition.AuthoredInitialArmor < 0 ||
+            definition.AuthoredInitialShield < 0)
+        {
+            AddError(
+                result,
+                "enemy.initial_defense_invalid",
+                "initialArmor",
+                "Initial armor and shield cannot be negative.");
+        }
+
         if (!IsFinite(definition.ThreatCost) ||
             definition.ThreatCost <= 0f)
         {
@@ -238,6 +258,55 @@ public static class EnemyDefinitionValidator
                 "enemy.threat_invalid",
                 "threatCost",
                 "Resolved threat cost must be finite and greater than zero.");
+        }
+
+        if (definition.AuthoredUnlockDifficulty < -1 ||
+            definition.AuthoredUnlockDifficulty > 100)
+        {
+            AddError(
+                result,
+                "enemy.unlock_difficulty_invalid",
+                "unlockDifficulty",
+                "Unlock difficulty must be -1 or between 0 and 100.");
+        }
+
+        if (definition.AuthoredFootprintWidth < 1 ||
+            definition.AuthoredFootprintWidth >
+                EnemySO.MaximumFootprintSize ||
+            definition.AuthoredFootprintHeight < 1 ||
+            definition.AuthoredFootprintHeight >
+                EnemySO.MaximumFootprintSize)
+        {
+            AddError(
+                result,
+                "enemy.footprint_invalid",
+                "footprintWidth",
+                $"Enemy footprint dimensions must be between 1 and " +
+                $"{EnemySO.MaximumFootprintSize}.");
+        }
+
+        if (!Enum.IsDefined(
+                typeof(EnemyStackingPolicy),
+                definition.AuthoredStackingPolicy))
+        {
+            AddError(
+                result,
+                "enemy.stacking_policy_invalid",
+                "stackingPolicy",
+                $"Stacking policy '{definition.AuthoredStackingPolicy}' " +
+                "is unsupported.");
+        }
+
+        if ((definition.AuthoredFootprintWidth > 1 ||
+             definition.AuthoredFootprintHeight > 1) &&
+            definition.AuthoredStackingPolicy !=
+                EnemyStackingPolicy.Exclusive)
+        {
+            AddError(
+                result,
+                "enemy.large_footprint_must_be_exclusive",
+                "stackingPolicy",
+                "Enemies larger than 1x1 must use exclusive occupancy.");
         }
     }
 

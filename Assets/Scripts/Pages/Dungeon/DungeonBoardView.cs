@@ -17,6 +17,46 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
     public const int MinimumGridSize = 3;
     public const int MaximumGridSize = 9;
 
+    private sealed class EnemyPlacement
+    {
+        public EnemyRuntime Enemy { get; }
+        public DungeonTileView Anchor { get; }
+        public IReadOnlyList<DungeonTileView> OccupiedTiles { get; }
+        public bool IsExclusive { get; }
+
+        public EnemyPlacement(
+            EnemyRuntime enemy,
+            DungeonTileView anchor,
+            IReadOnlyList<DungeonTileView> occupiedTiles,
+            bool isExclusive)
+        {
+            Enemy = enemy;
+            Anchor = anchor;
+            OccupiedTiles = occupiedTiles;
+            IsExclusive = isExclusive;
+        }
+    }
+
+    private readonly struct PendingEnemyPlacement
+    {
+        public EnemyRuntime Enemy { get; }
+        public DungeonTileView Anchor { get; }
+        public IReadOnlyList<DungeonTileView> OccupiedTiles { get; }
+        public bool IsExclusive { get; }
+
+        public PendingEnemyPlacement(
+            EnemyRuntime enemy,
+            DungeonTileView anchor,
+            IReadOnlyList<DungeonTileView> occupiedTiles,
+            bool isExclusive)
+        {
+            Enemy = enemy;
+            Anchor = anchor;
+            OccupiedTiles = occupiedTiles;
+            IsExclusive = isExclusive;
+        }
+    }
+
     [SerializeField] private RectTransform boardRect;
     [SerializeField] private GridLayoutGroup gridLayout;
     [SerializeField] private DungeonTileView tilePrefab;
@@ -27,6 +67,10 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
     private BattleVfxQualityProfileSO vfxQualityProfile;
 
     private readonly List<DungeonTileView> _tiles = new();
+    private readonly Dictionary<EnemyRuntime, EnemyPlacement>
+        _enemyPlacements = new();
+    private readonly Dictionary<DungeonTileView, EnemyRuntime>
+        _exclusiveOccupants = new();
     private readonly List<IBattleCharacter> _battleCharacters = new();
     private Func<EnemyRuntime, bool> _itemTargetHandler;
     private BattleManualTargetSelectionRequest _manualTargetRequest;
@@ -88,7 +132,9 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
         {
             foreach (DungeonTileView tile in _tiles)
             {
-                if (tile != null && tile.StackCount == 0)
+                if (tile != null &&
+                    tile.StackCount == 0 &&
+                    !_exclusiveOccupants.ContainsKey(tile))
                     return true;
             }
 
@@ -105,6 +151,7 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
             ? _manualAllyTargets.Count
             : _manualEnemyTargets.Count;
     public event Action<BattleEnemyDefeatedEvent> EnemyDefeated;
+    public event Action OccupancyChanged;
     public event Action<EnemyRuntime> EnemyClicked;
     public event Action<BattleStatusAppliedEvent> StatusApplied;
     public event Action<BattleEffectResolvedEvent> EffectResolved;
@@ -618,6 +665,8 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
         int previousSize = GridSize;
 
         ClearTileObjects();
+        _enemyPlacements.Clear();
+        _exclusiveOccupants.Clear();
         GridSize = size;
         gridLayout.constraintCount = GridSize;
 
@@ -636,6 +685,7 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
         RestoreExistingStacks(previousEnemies, previousSize);
         SynchronizeEnemyPresentationBindings();
         RefreshLayout();
+        OccupancyChanged?.Invoke();
     }
 
     public bool TryAddEnemyCard(
@@ -643,9 +693,18 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
         int column,
         EnemyRuntime enemy)
     {
-        return enemy != null &&
-               TryGetTile(row, column, out DungeonTileView tile) &&
-               TryAddEnemyToTile(tile, enemy);
+        if (enemy == null ||
+            !TryBuildPlacementAt(
+                row,
+                column,
+                enemy,
+                null,
+                out PendingEnemyPlacement placement))
+        {
+            return false;
+        }
+
+        return TryCommitPlacements(new[] { placement });
     }
 
     public bool TryAddEnemyCardToRandomTile(EnemyRuntime enemy)
@@ -653,19 +712,13 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
         if (enemy == null)
             return false;
 
-        List<DungeonTileView> availableTiles = new();
-
-        foreach (DungeonTileView tile in _tiles)
-        {
-            if (tile != null && !tile.IsFull)
-                availableTiles.Add(tile);
-        }
-
-        if (availableTiles.Count == 0)
+        List<PendingEnemyPlacement> candidates =
+            CollectPlacementCandidates(enemy, null);
+        if (candidates.Count == 0)
             return false;
 
-        int index = Random.Range(0, availableTiles.Count);
-        return TryAddEnemyToTile(availableTiles[index], enemy);
+        int index = Random.Range(0, candidates.Count);
+        return TryCommitPlacements(new[] { candidates[index] });
     }
 
     public bool TryAddEnemyCardToNextAvailableTile(EnemyRuntime enemy)
@@ -673,29 +726,28 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
         if (enemy == null)
             return false;
 
-        List<DungeonTileView> candidateTiles = new();
-        int smallestStackCount = int.MaxValue;
-
-        foreach (DungeonTileView tile in _tiles)
-        {
-            if (tile == null || tile.IsFull)
-                continue;
-
-            if (tile.StackCount < smallestStackCount)
-            {
-                smallestStackCount = tile.StackCount;
-                candidateTiles.Clear();
-            }
-
-            if (tile.StackCount == smallestStackCount)
-                candidateTiles.Add(tile);
-        }
-
-        if (candidateTiles.Count == 0)
+        List<PendingEnemyPlacement> candidates =
+            CollectPlacementCandidates(enemy, null);
+        if (candidates.Count == 0)
             return false;
 
-        int randomIndex = Random.Range(0, candidateTiles.Count);
-        return TryAddEnemyToTile(candidateTiles[randomIndex], enemy);
+        List<PendingEnemyPlacement> best = new();
+        int smallestStackCount = int.MaxValue;
+        foreach (PendingEnemyPlacement candidate in candidates)
+        {
+            int stackCount = candidate.Anchor.StackCount;
+            if (stackCount < smallestStackCount)
+            {
+                smallestStackCount = stackCount;
+                best.Clear();
+            }
+
+            if (stackCount == smallestStackCount)
+                best.Add(candidate);
+        }
+
+        int randomIndex = Random.Range(0, best.Count);
+        return TryCommitPlacements(new[] { best[randomIndex] });
     }
 
     public bool TryAddEnemy(EnemyRuntime enemy)
@@ -709,104 +761,318 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
         if (enemies == null || enemies.Count == 0)
             return false;
 
-        foreach (EnemyRuntime enemy in enemies)
-        {
-            if (enemy == null)
-                return false;
-        }
+        HashSet<DungeonTileView> reservedTiles = new();
+        List<PendingEnemyPlacement> placements = new(enemies.Count);
+        return TryBuildGroupPlacements(
+                   enemies,
+                   0,
+                   reservedTiles,
+                   placements) &&
+               TryCommitPlacements(placements);
+    }
 
-        List<DungeonTileView> availableTiles = new();
-        foreach (DungeonTileView tile in _tiles)
-        {
-            if (tile != null && tile.CanAddEnemy)
-                availableTiles.Add(tile);
-        }
+    private bool TryBuildGroupPlacements(
+        IReadOnlyList<EnemyRuntime> enemies,
+        int index,
+        HashSet<DungeonTileView> reservedTiles,
+        List<PendingEnemyPlacement> placements)
+    {
+        if (index >= enemies.Count)
+            return true;
 
-        if (availableTiles.Count < enemies.Count)
+        EnemyRuntime enemy = enemies[index];
+        if (enemy == null)
             return false;
 
-        List<DungeonTileView> selectedTiles = new(enemies.Count);
-        for (int enemyIndex = 0; enemyIndex < enemies.Count; enemyIndex++)
+        List<PendingEnemyPlacement> candidates =
+            CollectPlacementCandidates(enemy, reservedTiles);
+        foreach (PendingEnemyPlacement candidate in candidates)
         {
-            int smallestStackCount = int.MaxValue;
-            List<DungeonTileView> candidates = new();
-            foreach (DungeonTileView tile in availableTiles)
+            foreach (DungeonTileView tile in candidate.OccupiedTiles)
+                reservedTiles.Add(tile);
+            placements.Add(candidate);
+
+            if (TryBuildGroupPlacements(
+                    enemies,
+                    index + 1,
+                    reservedTiles,
+                    placements))
             {
-                if (tile.StackCount < smallestStackCount)
+                return true;
+            }
+
+            placements.RemoveAt(placements.Count - 1);
+            foreach (DungeonTileView tile in candidate.OccupiedTiles)
+                reservedTiles.Remove(tile);
+        }
+
+        return false;
+    }
+
+    private List<PendingEnemyPlacement> CollectPlacementCandidates(
+        EnemyRuntime enemy,
+        ISet<DungeonTileView> reservedTiles)
+    {
+        List<PendingEnemyPlacement> result = new();
+        if (enemy == null)
+            return result;
+
+        for (int row = 0; row < GridSize; row++)
+        {
+            for (int column = 0; column < GridSize; column++)
+            {
+                if (TryBuildPlacementAt(
+                        row,
+                        column,
+                        enemy,
+                        reservedTiles,
+                        out PendingEnemyPlacement placement))
                 {
-                    smallestStackCount = tile.StackCount;
-                    candidates.Clear();
+                    result.Add(placement);
+                }
+            }
+        }
+
+        result.Sort((left, right) =>
+        {
+            int stack = left.Anchor.StackCount.CompareTo(
+                right.Anchor.StackCount);
+            if (stack != 0)
+                return stack;
+            int row = left.Anchor.Row.CompareTo(right.Anchor.Row);
+            return row != 0
+                ? row
+                : left.Anchor.Column.CompareTo(right.Anchor.Column);
+        });
+        return result;
+    }
+
+    private bool TryBuildPlacementAt(
+        int row,
+        int column,
+        EnemyRuntime enemy,
+        ISet<DungeonTileView> reservedTiles,
+        out PendingEnemyPlacement placement)
+    {
+        placement = default;
+        if (enemy?.Definition == null ||
+            _enemyPlacements.ContainsKey(enemy))
+        {
+            return false;
+        }
+
+        EnemySO definition = enemy.Definition;
+        bool exclusive = definition.StackingPolicy ==
+                         EnemyStackingPolicy.Exclusive;
+        int width = exclusive ? definition.FootprintWidth : 1;
+        int height = exclusive ? definition.FootprintHeight : 1;
+        if (row < 0 || column < 0 ||
+            row + height > GridSize ||
+            column + width > GridSize)
+        {
+            return false;
+        }
+
+        List<DungeonTileView> occupiedTiles = new(width * height);
+        for (int rowOffset = 0; rowOffset < height; rowOffset++)
+        {
+            for (int columnOffset = 0;
+                 columnOffset < width;
+                 columnOffset++)
+            {
+                if (!TryGetTile(
+                        row + rowOffset,
+                        column + columnOffset,
+                        out DungeonTileView tile) ||
+                    tile == null ||
+                    reservedTiles?.Contains(tile) == true ||
+                    _exclusiveOccupants.ContainsKey(tile))
+                {
+                    return false;
                 }
 
-                if (tile.StackCount == smallestStackCount)
-                    candidates.Add(tile);
+                if (exclusive && tile.StackCount > 0)
+                    return false;
+                occupiedTiles.Add(tile);
             }
-
-            DungeonTileView selected = candidates[
-                Random.Range(0, candidates.Count)];
-            selectedTiles.Add(selected);
-            availableTiles.Remove(selected);
         }
 
-        for (int index = 0; index < enemies.Count; index++)
+        DungeonTileView anchor = occupiedTiles[0];
+        if (!anchor.CanAddEnemy ||
+            (!exclusive && anchor.IsFull))
         {
-            if (!TryAddEnemyToTile(
-                    selectedTiles[index],
-                    enemies[index]))
-            {
-                return false;
-            }
+            return false;
         }
 
+        placement = new PendingEnemyPlacement(
+            enemy,
+            anchor,
+            occupiedTiles,
+            exclusive);
         return true;
     }
 
-    private bool TryAddEnemyToTile(
-        DungeonTileView tile,
-        EnemyRuntime enemy)
+    private bool TryCommitPlacements(
+        IReadOnlyList<PendingEnemyPlacement> placements)
     {
-        if (tile == null || enemy == null || !tile.TryAdd(enemy))
+        if (placements == null || placements.Count == 0)
             return false;
 
-        BindPresentationEnemy(enemy);
-        PublishUnitLifecycle(new BattleUnitLifecycleEvent(
-            BattleUnitLifecycleType.Spawned,
-            BattleStatusTarget.FromEnemy(enemy),
-            enemy.Definition));
-        ExecuteSpawnAbilities(tile, enemy);
-        tile.RefreshTopEnemyCard();
+        List<PendingEnemyPlacement> added = new(placements.Count);
+        foreach (PendingEnemyPlacement placement in placements)
+        {
+            if (placement.Enemy == null ||
+                placement.Anchor == null ||
+                !placement.Anchor.TryAdd(placement.Enemy))
+            {
+                for (int index = added.Count - 1; index >= 0; index--)
+                    added[index].Anchor.TryRemoveTop();
+                return false;
+            }
+            added.Add(placement);
+        }
+
+        foreach (PendingEnemyPlacement pending in added)
+            RegisterPlacement(pending);
+
+        foreach (PendingEnemyPlacement pending in added)
+        {
+            EnemyRuntime enemy = pending.Enemy;
+            BindPresentationEnemy(enemy);
+            PublishUnitLifecycle(new BattleUnitLifecycleEvent(
+                BattleUnitLifecycleType.Spawned,
+                BattleStatusTarget.FromEnemy(enemy),
+                enemy.Definition));
+            ExecuteSpawnAbilities(pending.Anchor, enemy);
+            pending.Anchor.RefreshTopEnemyCard();
+        }
+
+        OccupancyChanged?.Invoke();
         return true;
+    }
+
+    private void RegisterPlacement(PendingEnemyPlacement pending)
+    {
+        EnemyPlacement placement = new(
+            pending.Enemy,
+            pending.Anchor,
+            pending.OccupiedTiles,
+            pending.IsExclusive);
+        _enemyPlacements[pending.Enemy] = placement;
+        if (!pending.IsExclusive)
+            return;
+
+        foreach (DungeonTileView tile in pending.OccupiedTiles)
+        {
+            _exclusiveOccupants[tile] = pending.Enemy;
+            tile.SetExclusiveFootprintOccupant(
+                pending.Enemy,
+                ReferenceEquals(tile, pending.Anchor));
+        }
+    }
+
+    private void ReleasePlacement(
+        EnemyRuntime enemy,
+        bool notify = true)
+    {
+        if (enemy == null ||
+            !_enemyPlacements.TryGetValue(
+                enemy,
+                out EnemyPlacement placement))
+        {
+            return;
+        }
+
+        _enemyPlacements.Remove(enemy);
+
+        if (placement.IsExclusive)
+        {
+            foreach (DungeonTileView tile in placement.OccupiedTiles)
+            {
+                if (tile != null &&
+                    _exclusiveOccupants.TryGetValue(
+                        tile,
+                        out EnemyRuntime occupant) &&
+                    ReferenceEquals(occupant, enemy))
+                {
+                    _exclusiveOccupants.Remove(tile);
+                    tile.SetExclusiveFootprintOccupant(null, false);
+                }
+            }
+        }
+
+        if (notify)
+            OccupancyChanged?.Invoke();
+    }
+
+    private EnemyRuntime GetEnemyAtTile(DungeonTileView tile)
+    {
+        if (tile == null)
+            return null;
+        return _exclusiveOccupants.TryGetValue(
+            tile,
+            out EnemyRuntime occupant)
+            ? occupant
+            : tile.TopEnemy;
+    }
+
+    private DungeonTileView ResolveAnchorTile(DungeonTileView tile)
+    {
+        EnemyRuntime enemy = GetEnemyAtTile(tile);
+        return enemy != null &&
+               _enemyPlacements.TryGetValue(
+                   enemy,
+                   out EnemyPlacement placement)
+            ? placement.Anchor
+            : tile;
     }
 
     public bool TryRemoveTopEnemyCard(int row, int column)
     {
-        if (!TryGetTile(row, column, out DungeonTileView tile) ||
-            tile.TopEnemy == null)
+        if (!TryGetTile(row, column, out DungeonTileView selectedTile))
+            return false;
+
+        DungeonTileView tile = ResolveAnchorTile(selectedTile);
+        EnemyRuntime enemy = GetEnemyAtTile(selectedTile);
+        if (tile == null || enemy == null ||
+            !ReferenceEquals(tile.TopEnemy, enemy))
         {
             return false;
         }
 
-        CaptureEnemyVfxAnchor(tile.TopEnemy, tile);
+        CaptureEnemyVfxAnchor(enemy, tile);
         bool removed = tile.TryRemoveTop();
         if (removed)
+        {
+            ReleasePlacement(enemy, false);
             SynchronizeEnemyPresentationBindings();
+            OccupancyChanged?.Invoke();
+        }
         return removed;
     }
 
     public int GetStackCount(int row, int column)
     {
-        return TryGetTile(row, column, out DungeonTileView tile) ? tile.StackCount : 0;
+        if (!TryGetTile(row, column, out DungeonTileView tile))
+            return 0;
+        return _exclusiveOccupants.ContainsKey(tile)
+            ? 1
+            : tile.StackCount;
     }
 
     public int GetTopEnemyHealth(int row, int column)
     {
-        return TryGetTile(row, column, out DungeonTileView tile) ? tile.TopEnemyHealth : 0;
+        return TryGetTile(row, column, out DungeonTileView tile)
+            ? GetEnemyAtTile(tile)?.Health ?? 0
+            : 0;
     }
 
     public bool TrySetTopEnemyHealth(int row, int column, int health)
     {
-        return TryGetTile(row, column, out DungeonTileView tile) &&
-               tile.TrySetTopEnemyHealth(health);
+        if (!TryGetTile(row, column, out DungeonTileView tile))
+            return false;
+        DungeonTileView anchor = ResolveAnchorTile(tile);
+        return anchor != null && anchor.TrySetTopEnemyHealth(health);
     }
 
     public bool ContainsTargetableEnemy(EnemyRuntime enemy)
@@ -1134,8 +1400,9 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
                 return;
 
             tile.ShowAttackRange();
-            if (tile.TopEnemy != null && uniqueEnemies.Add(tile.TopEnemy))
-                result.Add(tile.TopEnemy);
+            EnemyRuntime enemy = GetEnemyAtTile(tile);
+            if (enemy != null && uniqueEnemies.Add(enemy))
+                result.Add(enemy);
         }
 
         foreach (EnemyRuntime centerTarget in centerTargets)
@@ -1608,6 +1875,7 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
         float tickInterval,
         int tickDamage)
     {
+        tile = ResolveAnchorTile(tile);
         if (tile == null)
             return false;
 
@@ -2013,7 +2281,7 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
         return Mathf.Max(0, Mathf.RoundToInt((float)amount));
     }
 
-    private static bool IsWithinAbilityRange(
+    private bool IsWithinAbilityRange(
         DungeonTileView source,
         DungeonTileView target,
         int range,
@@ -2023,11 +2291,48 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
             return false;
 
         range = Mathf.Max(1, range);
-        int rowDistance = Mathf.Abs(source.Row - target.Row);
-        int columnDistance = Mathf.Abs(source.Column - target.Column);
-        return includeDiagonals
-            ? Mathf.Max(rowDistance, columnDistance) <= range
-            : rowDistance + columnDistance <= range;
+        EnemyRuntime sourceEnemy = GetEnemyAtTile(source);
+        EnemyRuntime targetEnemy = GetEnemyAtTile(target);
+        IReadOnlyList<DungeonTileView> sourceTiles =
+            GetOccupiedTiles(sourceEnemy, source);
+        IReadOnlyList<DungeonTileView> targetTiles =
+            GetOccupiedTiles(targetEnemy, target);
+
+        foreach (DungeonTileView sourceTile in sourceTiles)
+        {
+            foreach (DungeonTileView targetTile in targetTiles)
+            {
+                int rowDistance = Mathf.Abs(
+                    sourceTile.Row - targetTile.Row);
+                int columnDistance = Mathf.Abs(
+                    sourceTile.Column - targetTile.Column);
+                if (includeDiagonals
+                        ? Mathf.Max(rowDistance, columnDistance) <= range
+                        : rowDistance + columnDistance <= range)
+                {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    private IReadOnlyList<DungeonTileView> GetOccupiedTiles(
+        EnemyRuntime enemy,
+        DungeonTileView fallback)
+    {
+        if (enemy != null &&
+            _enemyPlacements.TryGetValue(
+                enemy,
+                out EnemyPlacement placement))
+        {
+            return placement.OccupiedTiles;
+        }
+
+        return fallback != null
+            ? new[] { fallback }
+            : Array.Empty<DungeonTileView>();
     }
 
     private bool TryResolveEnemyAbilityTargets(
@@ -2141,32 +2446,26 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
         if (sourceTile == null)
             return result;
 
-        range = Mathf.Max(1, range);
-        for (int row = sourceTile.Row - range;
-             row <= sourceTile.Row + range;
-             row++)
+        EnemyRuntime source = GetEnemyAtTile(sourceTile);
+        HashSet<EnemyRuntime> unique = new();
+        foreach (DungeonTileView candidateTile in _tiles)
         {
-            for (int column = sourceTile.Column - range;
-                 column <= sourceTile.Column + range;
-                 column++)
+            EnemyRuntime candidate = candidateTile?.TopEnemy;
+            if (candidate == null ||
+                ReferenceEquals(candidate, source) ||
+                candidate.Health <= 0 ||
+                !unique.Add(candidate))
             {
-                int rowDistance = Mathf.Abs(row - sourceTile.Row);
-                int columnDistance = Mathf.Abs(
-                    column - sourceTile.Column);
-                if (rowDistance == 0 && columnDistance == 0)
-                    continue;
-                if (includeDiagonals
-                        ? Mathf.Max(rowDistance, columnDistance) > range
-                        : rowDistance + columnDistance > range)
-                {
-                    continue;
-                }
-                if (TryGetTile(row, column, out DungeonTileView tile) &&
-                    tile.TopEnemy != null &&
-                    tile.TopEnemy.Health > 0)
-                {
-                    result.Add(tile.TopEnemy);
-                }
+                continue;
+            }
+
+            if (IsWithinAbilityRange(
+                    sourceTile,
+                    candidateTile,
+                    range,
+                    includeDiagonals))
+            {
+                result.Add(candidate);
             }
         }
 
@@ -2527,11 +2826,19 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
     public void ClearAllStacks()
     {
         UnbindAllPresentationEnemies();
+        foreach (DungeonTileView tile in _exclusiveOccupants.Keys)
+        {
+            if (tile != null)
+                tile.SetExclusiveFootprintOccupant(null, false);
+        }
+        _exclusiveOccupants.Clear();
+        _enemyPlacements.Clear();
         foreach (DungeonTileView tile in _tiles)
         {
             if (tile != null)
                 tile.ClearStack();
         }
+        OccupancyChanged?.Invoke();
     }
 
     public void ClearAllEnemies()
@@ -2677,6 +2984,7 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
         CharacterAttackDamageType damageType,
         IBattleCharacter source)
     {
+        targetTile = ResolveAnchorTile(targetTile);
         if (targetTile == null || targetTile.TopEnemy == null || damage <= 0)
             return 0;
 
@@ -2698,11 +3006,13 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
         int appliedDamage = damageReceiver.TryDamageTop(damage, damageType);
         if (appliedDamage > 0 && damagedEnemy.Health <= 0)
         {
+            ReleasePlacement(damagedEnemy, false);
             ExecuteDeathAbilities(damageReceiver, damagedEnemy);
             NotifyEnemyDefeated(new BattleEnemyDefeatedEvent(
                 damagedEnemy,
                 source));
             SynchronizeEnemyPresentationBindings();
+            OccupancyChanged?.Invoke();
         }
 
         return appliedDamage;
@@ -2878,6 +3188,16 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
         if (enemy == null)
             return false;
 
+        if (_enemyPlacements.TryGetValue(
+                enemy,
+                out EnemyPlacement placement) &&
+            placement?.Anchor != null &&
+            ReferenceEquals(placement.Anchor.TopEnemy, enemy))
+        {
+            targetTile = placement.Anchor;
+            return true;
+        }
+
         foreach (DungeonTileView tile in _tiles)
         {
             if (tile != null && ReferenceEquals(tile.TopEnemy, enemy))
@@ -2949,9 +3269,21 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
         {
             for (int column = 0; column < preservedSize; column++)
             {
-                DungeonTileView tile = _tiles[row * GridSize + column];
                 foreach (EnemyRuntime enemy in previousEnemies[row, column])
-                    tile.TryAdd(enemy);
+                {
+                    if (!TryBuildPlacementAt(
+                            row,
+                            column,
+                            enemy,
+                            null,
+                            out PendingEnemyPlacement pending) ||
+                        !pending.Anchor.TryAdd(enemy))
+                    {
+                        continue;
+                    }
+
+                    RegisterPlacement(pending);
+                }
             }
         }
     }

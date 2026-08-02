@@ -2,6 +2,149 @@ using System;
 using System.Collections.Generic;
 using UnityEngine;
 
+public enum LocalDataLoadStatus
+{
+    NotLoaded = 0,
+    Success = 1,
+    MissingInitialized = 2,
+    Migrated = 3,
+    RecoveredFromBackup = 4,
+    Corrupt = 5,
+    UnsupportedVersion = 6,
+}
+
+internal static class LocalSaveJson
+{
+    public static bool HasTopLevelProperty(
+        string json,
+        string propertyName)
+    {
+        return TryGetTopLevelPropertyValueStart(
+            json,
+            propertyName,
+            out _);
+    }
+
+    public static bool HasNonNullTopLevelProperty(
+        string json,
+        string propertyName)
+    {
+        if (!TryGetTopLevelPropertyValueStart(
+                json,
+                propertyName,
+                out int valueStart))
+        {
+            return false;
+        }
+
+        const string NullLiteral = "null";
+        return json.Length - valueStart < NullLiteral.Length ||
+               string.CompareOrdinal(
+                   json,
+                   valueStart,
+                   NullLiteral,
+                   0,
+                   NullLiteral.Length) != 0;
+    }
+
+    private static bool TryGetTopLevelPropertyValueStart(
+        string json,
+        string propertyName,
+        out int propertyValueStart)
+    {
+        propertyValueStart = -1;
+        if (string.IsNullOrWhiteSpace(json) ||
+            string.IsNullOrEmpty(propertyName))
+        {
+            return false;
+        }
+
+        int depth = 0;
+        for (int index = 0; index < json.Length; index++)
+        {
+            char current = json[index];
+            if (current == '{' || current == '[')
+            {
+                depth++;
+                continue;
+            }
+
+            if (current == '}' || current == ']')
+            {
+                depth--;
+                continue;
+            }
+
+            if (current != '"')
+                continue;
+
+            int valueStart = index + 1;
+            int valueEnd = FindStringEnd(json, valueStart);
+            if (valueEnd < 0)
+                return false;
+
+            if (depth == 1 &&
+                valueEnd - valueStart == propertyName.Length &&
+                string.CompareOrdinal(
+                    json,
+                    valueStart,
+                    propertyName,
+                    0,
+                    propertyName.Length) == 0)
+            {
+                int separator = valueEnd + 1;
+                while (separator < json.Length &&
+                       char.IsWhiteSpace(json[separator]))
+                {
+                    separator++;
+                }
+
+                if (separator < json.Length && json[separator] == ':')
+                {
+                    separator++;
+                    while (separator < json.Length &&
+                           char.IsWhiteSpace(json[separator]))
+                    {
+                        separator++;
+                    }
+
+                    propertyValueStart = separator;
+                    return true;
+                }
+            }
+
+            index = valueEnd;
+        }
+
+        return false;
+    }
+
+    private static int FindStringEnd(string json, int start)
+    {
+        bool escaped = false;
+        for (int index = start; index < json.Length; index++)
+        {
+            char current = json[index];
+            if (escaped)
+            {
+                escaped = false;
+                continue;
+            }
+
+            if (current == '\\')
+            {
+                escaped = true;
+                continue;
+            }
+
+            if (current == '"')
+                return index;
+        }
+
+        return -1;
+    }
+}
+
 [Serializable]
 public sealed class InventoryEntrySaveData
 {
@@ -21,11 +164,14 @@ public sealed class InventoryEntrySaveData
 [Serializable]
 internal sealed class InventorySaveData
 {
-    [SerializeField] private int version = 1;
+    public const int CurrentVersion = 1;
+
+    [SerializeField] private int version = CurrentVersion;
     [SerializeField] private List<InventoryEntrySaveData> entries =
         new();
 
     public int Version => version;
+    public bool HasEntries => entries != null;
     public List<InventoryEntrySaveData> Entries =>
         entries ??= new List<InventoryEntrySaveData>();
 }
@@ -46,11 +192,22 @@ public readonly struct InventoryDelta
 public sealed class InventoryData
 {
     private const string PlayerPrefsKey = "Inventory.Collection.v1";
+    private const string BackupPlayerPrefsKey =
+        PlayerPrefsKey + ".backup";
+    private const string CorruptPlayerPrefsKey =
+        PlayerPrefsKey + ".corrupt";
 
     [NonSerialized] private readonly Dictionary<string, long> _amounts =
         new(StringComparer.Ordinal);
 
+    [NonSerialized] private LocalDataLoadStatus _lastLoadStatus =
+        LocalDataLoadStatus.NotLoaded;
+    [NonSerialized] private bool _saveBlocked;
+
     public event Action<string, long> AmountChanged;
+
+    public LocalDataLoadStatus LastLoadStatus => _lastLoadStatus;
+    public bool IsSaveBlocked => _saveBlocked;
 
     public long GetAmount(string itemId)
     {
@@ -99,6 +256,9 @@ public sealed class InventoryData
         IReadOnlyList<InventoryDelta> deltas,
         bool save = true)
     {
+        if (_saveBlocked)
+            return false;
+
         if (deltas == null || deltas.Count == 0)
             return true;
 
@@ -158,23 +318,54 @@ public sealed class InventoryData
 
     public void Save(bool flush = true)
     {
-        PlayerPrefs.SetString(PlayerPrefsKey, ExportJson());
+        if (_saveBlocked)
+        {
+            Debug.LogWarning(
+                "Inventory save was skipped because the primary save data " +
+                "could not be loaded safely. Reset or recover local data " +
+                "before saving again.");
+            return;
+        }
+
+        string json = ExportJson();
+        BackupCurrentValidSave(json);
+        PlayerPrefs.SetString(PlayerPrefsKey, json);
         if (flush)
             PlayerPrefs.Save();
     }
 
-    public void Load()
+    public LocalDataLoadStatus Load()
     {
         if (!PlayerPrefs.HasKey(PlayerPrefsKey))
         {
             InitializeNewAccount();
+            SetLoadState(LocalDataLoadStatus.MissingInitialized, false);
             Save();
-            return;
+            return _lastLoadStatus;
         }
 
         string json =
             PlayerPrefs.GetString(PlayerPrefsKey, string.Empty);
-        ImportJson(json);
+        if (TryDeserialize(
+                json,
+                out InventorySaveData saveData,
+                out LocalDataLoadStatus failureStatus))
+        {
+            ApplySaveData(saveData);
+            SetLoadState(LocalDataLoadStatus.Success, false);
+            return _lastLoadStatus;
+        }
+
+        if (TryRecoverFromBackup(json))
+            return _lastLoadStatus;
+
+        InitializeNewAccount();
+        SetLoadState(failureStatus, true);
+        Debug.LogError(
+            "Inventory save data is corrupt or uses an unsupported version. " +
+            "The original PlayerPrefs value was preserved and inventory " +
+            "saving is blocked until local data is reset or recovered.");
+        return _lastLoadStatus;
     }
 
     private void InitializeNewAccount()
@@ -224,26 +415,24 @@ public sealed class InventoryData
         return JsonUtility.ToJson(saveData);
     }
 
-    public void ImportJson(string json)
+    public bool ImportJson(string json)
+    {
+        if (!TryDeserialize(
+                json,
+                out InventorySaveData saveData,
+                out _))
+        {
+            return false;
+        }
+
+        ApplySaveData(saveData);
+        SetLoadState(LocalDataLoadStatus.Success, false);
+        return true;
+    }
+
+    private void ApplySaveData(InventorySaveData saveData)
     {
         _amounts.Clear();
-        if (string.IsNullOrWhiteSpace(json))
-            return;
-
-        InventorySaveData saveData;
-        try
-        {
-            saveData = JsonUtility.FromJson<InventorySaveData>(json);
-        }
-        catch (Exception exception)
-        {
-            Debug.LogWarning(
-                $"Failed to load inventory data: {exception.Message}");
-            return;
-        }
-
-        if (saveData == null)
-            return;
 
         foreach (InventoryEntrySaveData entry in saveData.Entries)
         {
@@ -268,5 +457,97 @@ public sealed class InventoryData
                     ? definition.ClampAmount(amount)
                     : amount;
         }
+    }
+
+    private bool TryRecoverFromBackup(string corruptPrimaryJson)
+    {
+        if (!PlayerPrefs.HasKey(BackupPlayerPrefsKey))
+            return false;
+
+        string backupJson = PlayerPrefs.GetString(
+            BackupPlayerPrefsKey,
+            string.Empty);
+        if (!TryDeserialize(
+                backupJson,
+                out InventorySaveData backup,
+                out _))
+        {
+            return false;
+        }
+
+        PlayerPrefs.SetString(CorruptPlayerPrefsKey, corruptPrimaryJson);
+        PlayerPrefs.Save();
+        ApplySaveData(backup);
+        SetLoadState(LocalDataLoadStatus.RecoveredFromBackup, false);
+        Debug.LogWarning(
+            "Inventory save data was restored from its last valid backup. " +
+            "The rejected primary value was preserved under the corrupt key.");
+        return true;
+    }
+
+    private void BackupCurrentValidSave(string replacementJson)
+    {
+        if (PlayerPrefs.HasKey(PlayerPrefsKey))
+        {
+            string currentJson = PlayerPrefs.GetString(
+                PlayerPrefsKey,
+                string.Empty);
+            if (TryDeserialize(currentJson, out _, out _))
+            {
+                PlayerPrefs.SetString(BackupPlayerPrefsKey, currentJson);
+                return;
+            }
+
+            PlayerPrefs.SetString(CorruptPlayerPrefsKey, currentJson);
+        }
+
+        if (!PlayerPrefs.HasKey(BackupPlayerPrefsKey))
+            PlayerPrefs.SetString(BackupPlayerPrefsKey, replacementJson);
+    }
+
+    private static bool TryDeserialize(
+        string json,
+        out InventorySaveData saveData,
+        out LocalDataLoadStatus failureStatus)
+    {
+        saveData = null;
+        failureStatus = LocalDataLoadStatus.Corrupt;
+        if (string.IsNullOrWhiteSpace(json) ||
+            !LocalSaveJson.HasTopLevelProperty(json, "version") ||
+            !LocalSaveJson.HasNonNullTopLevelProperty(json, "entries"))
+        {
+            return false;
+        }
+
+        try
+        {
+            saveData = JsonUtility.FromJson<InventorySaveData>(json);
+        }
+        catch (ArgumentException exception)
+        {
+            Debug.LogWarning(
+                $"Failed to load inventory data: {exception.Message}");
+            return false;
+        }
+
+        if (saveData == null || !saveData.HasEntries)
+            return false;
+
+        if (saveData.Version != InventorySaveData.CurrentVersion)
+        {
+            saveData = null;
+            failureStatus = LocalDataLoadStatus.UnsupportedVersion;
+            return false;
+        }
+
+        return true;
+    }
+
+    private void SetLoadState(
+        LocalDataLoadStatus status,
+        bool saveBlocked)
+    {
+        _lastLoadStatus = status;
+        _saveBlocked = saveBlocked;
     }
 }

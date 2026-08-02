@@ -27,7 +27,7 @@ public sealed class DungeonSpawnQueueItemView : MonoBehaviour
                     LocalizationKeys.UiDungeonQueueEnemy,
                     LocalizationService.Arg(
                         "name",
-                        EnemyLocalization.GetName(enemy.Definition.Type)),
+                        EnemyLocalization.GetName(enemy.Definition)),
                     LocalizationService.Arg("health", enemy.Health))
                 : LocalizationService.Get(
                     LocalizationKeys.UiDungeonQueueEnemyEmpty);

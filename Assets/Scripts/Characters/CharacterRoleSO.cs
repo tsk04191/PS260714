@@ -87,8 +87,11 @@ public sealed class CharacterRoleSO : ScriptableObject
     [SerializeField] private string roleId =
         Guid.NewGuid().ToString("N");
     [SerializeField] private string nameLocalizationKey;
+    [SerializeField] private string descriptionLocalizationKey;
     [FormerlySerializedAs("koreanName")]
     [SerializeField] private string fallbackName = "ROLE";
+    [FormerlySerializedAs("koreanDescription")]
+    [SerializeField, TextArea(2, 6)] private string fallbackDescription;
     [SerializeField] private Sprite iconSprite;
     [SerializeField]
     private List<CharacterRolePassiveDefinition> passiveDefinitions = new();
@@ -96,7 +99,11 @@ public sealed class CharacterRoleSO : ScriptableObject
     public string RoleId => roleId ?? string.Empty;
     public string NameLocalizationKey =>
         nameLocalizationKey ?? string.Empty;
+    public string DescriptionLocalizationKey =>
+        descriptionLocalizationKey ?? string.Empty;
     public string FallbackName => fallbackName ?? string.Empty;
+    public string FallbackDescription =>
+        fallbackDescription ?? string.Empty;
     public Sprite IconSprite => iconSprite;
     public IReadOnlyList<CharacterRolePassiveDefinition>
         PassiveDefinitions => passiveDefinitions != null
@@ -111,6 +118,19 @@ public sealed class CharacterRoleSO : ScriptableObject
             "UNASSIGNED ROLE");
     }
 
+    public string GetDescription()
+    {
+        return CharacterRolePassiveDefinition.ResolveLocalizedText(
+            descriptionLocalizationKey,
+            fallbackDescription,
+            string.Empty);
+    }
+
+    public void RegenerateRoleId()
+    {
+        roleId = Guid.NewGuid().ToString("N");
+    }
+
     private void OnValidate()
     {
         if (string.IsNullOrWhiteSpace(roleId))
@@ -118,7 +138,11 @@ public sealed class CharacterRoleSO : ScriptableObject
         roleId = (roleId ?? string.Empty).Trim();
         nameLocalizationKey =
             (nameLocalizationKey ?? string.Empty).Trim();
+        descriptionLocalizationKey =
+            (descriptionLocalizationKey ?? string.Empty).Trim();
         fallbackName = (fallbackName ?? string.Empty).Trim();
+        fallbackDescription =
+            (fallbackDescription ?? string.Empty).Trim();
         passiveDefinitions ??=
             new List<CharacterRolePassiveDefinition>();
         foreach (CharacterRolePassiveDefinition passive in

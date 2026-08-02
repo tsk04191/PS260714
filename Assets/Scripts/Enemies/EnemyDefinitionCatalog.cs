@@ -8,7 +8,7 @@ public static class EnemyDefinitionCatalog
 
     private static readonly List<EnemySO> Definitions = new();
     private static readonly Dictionary<string, EnemySO> DefinitionsById =
-        new(StringComparer.Ordinal);
+        new(StringComparer.OrdinalIgnoreCase);
     private static bool _loaded;
 
     [RuntimeInitializeOnLoadMethod(
@@ -78,10 +78,17 @@ public static class EnemyDefinitionCatalog
             Definitions.Add(definition);
         }
 
-        Definitions.Sort((left, right) => string.Compare(
-            left != null ? left.name : string.Empty,
-            right != null ? right.name : string.Empty,
-            StringComparison.OrdinalIgnoreCase));
+        Definitions.Sort((left, right) =>
+        {
+            int sortOrder = (left?.SortOrder ?? 0).CompareTo(
+                right?.SortOrder ?? 0);
+            return sortOrder != 0
+                ? sortOrder
+                : string.Compare(
+                    left?.EnemyId ?? string.Empty,
+                    right?.EnemyId ?? string.Empty,
+                    StringComparison.OrdinalIgnoreCase);
+        });
         _loaded = true;
     }
 }
