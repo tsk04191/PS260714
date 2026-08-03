@@ -1166,14 +1166,11 @@ public sealed class DungeonItemCardView : MonoBehaviour,
                 "name",
                 item.GetLocalizedDisplayName()),
             LocalizationService.Arg("cost", item.EnergyCost));
-        string footer = item.HasUnlimitedUses
-            ? LocalizationService.Get(
-                LocalizationKeys.UiDungeonItemReusable,
-                LocalizationService.Arg("cooldown", item.Cooldown))
-            : LocalizationService.Get(
-                LocalizationKeys.UiDungeonItemConsumable);
+        string footer = GetLifecycleText(item);
+        string effectScope = GetEffectScopeText(item);
         detailText.text =
-            $"{header}\n{item.GetLocalizedDescription()}\n{footer}";
+            $"{header}\n{item.GetLocalizedDescription()}\n" +
+            $"{footer}{effectScope}";
         _popup.SetActive(false);
     }
 
@@ -1205,6 +1202,11 @@ public sealed class DungeonItemCardView : MonoBehaviour,
                 : LocalizationService.Get(
                     LocalizationKeys.UiDungeonItemCount,
                     LocalizationService.Arg("count", count));
+        if (_item.IsReusable && !_item.HasUnlimitedUses && count <= 0)
+        {
+            state += " · " + LocalizationService.Get(
+                LocalizationKeys.UiDungeonItemRestoreNextBattle);
+        }
         string header = LocalizationService.Get(
             LocalizationKeys.UiDungeonItemCardHeader,
             LocalizationService.Arg(
@@ -1212,6 +1214,49 @@ public sealed class DungeonItemCardView : MonoBehaviour,
                 _item.GetLocalizedDisplayName()),
             LocalizationService.Arg("cost", _item.EnergyCost));
         _summaryText.text = $"{header}\n{state}";
+    }
+
+    private static string GetLifecycleText(BattleItemSO item)
+    {
+        if (item.IsDisposable)
+        {
+            return LocalizationService.Get(
+                LocalizationKeys.UiDungeonItemDisposable);
+        }
+        if (item.HasUnlimitedUses)
+        {
+            return LocalizationService.Get(
+                LocalizationKeys.UiDungeonItemReusableUnlimited);
+        }
+        return LocalizationService.Get(
+            LocalizationKeys.UiDungeonItemReusableLimited,
+            LocalizationService.Arg("uses", item.UsesPerBattle));
+    }
+
+    private static string GetEffectScopeText(BattleItemSO item)
+    {
+        if (item?.Effects == null || item.Effects.Count == 0)
+            return string.Empty;
+
+        BattleItemEffectDefinition effect = item.Effects[0];
+        if (effect == null ||
+            effect.DurationMode == BattleItemEffectDurationMode.Instant)
+        {
+            return string.Empty;
+        }
+
+        string scope = effect.Scope ==
+                       BattleItemEffectScope.CurrentDungeon
+            ? LocalizationService.Get(
+                LocalizationKeys.UiDungeonItemScopeDungeon)
+            : LocalizationService.Get(
+                LocalizationKeys.UiDungeonItemScopeBattle);
+        string duration = effect.DurationMode ==
+                          BattleItemEffectDurationMode.Permanent
+            ? LocalizationService.Get(
+                LocalizationKeys.UiDungeonItemDurationPermanent)
+            : $"{effect.Duration:0.##}s";
+        return $" · {scope}/{duration}";
     }
 
     private void Update()

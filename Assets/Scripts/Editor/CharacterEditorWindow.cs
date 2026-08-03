@@ -40,8 +40,16 @@ public sealed class CharacterEditorWindow : EditorWindow
     private const string CumulativeUpgradeDefinitionsPropertyName =
         "cumulativeUpgradeDefinitions";
     private const string CumulativeUpgradeIdPropertyName = "upgradeId";
+    private const string UpgradeLocalizationPresetPropertyName =
+        "localizationPreset";
+    private const string UpgradeTitleLocalizationKeyPropertyName =
+        "titleLocalizationKey";
+    private const string UpgradeDescriptionLocalizationKeyPropertyName =
+        "descriptionLocalizationKey";
     private const string CumulativeUpgradeMaxLevelPropertyName = "maxLevel";
     private const string CumulativeUpgradeModifiersPropertyName = "modifiers";
+    private const string CumulativeUpgradeModifierModulesPropertyName =
+        "modifierModules";
     private const string CumulativeUpgradeModifierTypePropertyName = "type";
     private const string CumulativeUpgradeModifierValuePropertyName =
         "valuePerLevel";
@@ -51,6 +59,8 @@ public sealed class CharacterEditorWindow : EditorWindow
     private const string DungeonUpgradeTypePropertyName = "type";
     private const string DungeonUpgradeProbabilityPropertyName = "probability";
     private const string DungeonUpgradeLimitPropertyName = "limit";
+    private const string ActionIdPropertyName = "actionId";
+    private const string EffectIdPropertyName = "effectId";
     private const string AttackDefinitionsPropertyName = "attackDefinitions";
     private const string AttackSectionsPropertyName = "sections";
     private const string ActionLinkagePropertyName = "linkage";
@@ -1579,6 +1589,9 @@ public sealed class CharacterEditorWindow : EditorWindow
 
         if (definition.isExpanded)
         {
+            EditorGUILayout.PropertyField(
+                definition.FindPropertyRelative(ActionIdPropertyName),
+                new GUIContent("Action ID"));
             DrawActionIconSprite(definition);
             DrawActionAudioClip(definition);
             EditorGUILayout.Space(4f);
@@ -1862,6 +1875,7 @@ public sealed class CharacterEditorWindow : EditorWindow
         definitions.InsertArrayElementAtIndex(newIndex);
         SerializedProperty definition =
             definitions.GetArrayElementAtIndex(newIndex);
+        SetUniqueActionId(definitions, newIndex, "passive");
         SerializedProperty sections = definition.FindPropertyRelative(
             PassiveSectionsPropertyName);
         sections?.ClearArray();
@@ -2433,6 +2447,9 @@ public sealed class CharacterEditorWindow : EditorWindow
 
         if (definition.isExpanded)
         {
+            EditorGUILayout.PropertyField(
+                definition.FindPropertyRelative(ActionIdPropertyName),
+                new GUIContent("Action ID"));
             DrawActionIconSprite(definition);
             DrawActionAudioClip(definition);
             EditorGUILayout.Space(4f);
@@ -2565,6 +2582,7 @@ public sealed class CharacterEditorWindow : EditorWindow
         definitions.InsertArrayElementAtIndex(newIndex);
         SerializedProperty definition =
             definitions.GetArrayElementAtIndex(newIndex);
+        SetUniqueActionId(definitions, newIndex, "skill");
         SerializedProperty sections = definition.FindPropertyRelative(
             SkillSectionsPropertyName);
         sections?.ClearArray();
@@ -2889,6 +2907,9 @@ public sealed class CharacterEditorWindow : EditorWindow
 
         if (definition.isExpanded)
         {
+            EditorGUILayout.PropertyField(
+                definition.FindPropertyRelative(ActionIdPropertyName),
+                new GUIContent("Action ID"));
             DrawActionAudioClip(definition);
             EditorGUILayout.Space(4f);
             SerializedProperty sections = definition.FindPropertyRelative(
@@ -3843,6 +3864,9 @@ public sealed class CharacterEditorWindow : EditorWindow
 
     private void DrawEffect(SerializedProperty effect)
     {
+        EditorGUILayout.PropertyField(
+            effect?.FindPropertyRelative(EffectIdPropertyName),
+            new GUIContent("Effect ID"));
         SerializedProperty effectType = effect?.FindPropertyRelative(
             EffectTypePropertyName);
         if (effectType == null)
@@ -4048,6 +4072,10 @@ public sealed class CharacterEditorWindow : EditorWindow
         int newIndex = effects.arraySize;
         effects.InsertArrayElementAtIndex(newIndex);
         SerializedProperty effect = effects.GetArrayElementAtIndex(newIndex);
+        SerializedProperty effectId = effect.FindPropertyRelative(
+            EffectIdPropertyName);
+        if (effectId != null)
+            effectId.stringValue = $"effect_{newIndex + 1}";
         ResetEffectValues(effect, CharacterEffectType.Damage);
         effect.isExpanded = true;
     }
@@ -4999,6 +5027,7 @@ public sealed class CharacterEditorWindow : EditorWindow
         definitions.InsertArrayElementAtIndex(newIndex);
         SerializedProperty definition =
             definitions.GetArrayElementAtIndex(newIndex);
+        SetUniqueActionId(definitions, newIndex, "attack");
         SerializedProperty sections = definition.FindPropertyRelative(
             AttackSectionsPropertyName);
         sections?.ClearArray();
@@ -5009,6 +5038,43 @@ public sealed class CharacterEditorWindow : EditorWindow
             EditorUtility.SetDirty(_selectedCharacter);
 
         _attackExpanded = true;
+    }
+
+    private static void SetUniqueActionId(
+        SerializedProperty definitions,
+        int targetIndex,
+        string prefix)
+    {
+        if (definitions == null || targetIndex < 0 ||
+            targetIndex >= definitions.arraySize)
+        {
+            return;
+        }
+
+        HashSet<string> used = new(StringComparer.Ordinal);
+        for (int index = 0; index < definitions.arraySize; index++)
+        {
+            if (index == targetIndex)
+                continue;
+            string existing = definitions.GetArrayElementAtIndex(index)
+                .FindPropertyRelative(ActionIdPropertyName)
+                ?.stringValue?.Trim();
+            if (!string.IsNullOrEmpty(existing))
+                used.Add(existing);
+        }
+
+        int suffix = targetIndex + 1;
+        string candidate;
+        do
+        {
+            candidate = $"{prefix}_{suffix++}";
+        } while (used.Contains(candidate));
+
+        SerializedProperty actionId = definitions
+            .GetArrayElementAtIndex(targetIndex)
+            .FindPropertyRelative(ActionIdPropertyName);
+        if (actionId != null)
+            actionId.stringValue = candidate;
     }
 
     private static void ResetAttackDefinitionValues(
@@ -5359,6 +5425,8 @@ public sealed class CharacterEditorWindow : EditorWindow
             CumulativeUpgradeMaxLevelPropertyName);
         SerializedProperty modifiers = definition.FindPropertyRelative(
             CumulativeUpgradeModifiersPropertyName);
+        SerializedProperty modifierModules = definition.FindPropertyRelative(
+            CumulativeUpgradeModifierModulesPropertyName);
 
         EditorGUILayout.BeginVertical(EditorStyles.helpBox);
         EditorGUILayout.BeginHorizontal();
@@ -5394,6 +5462,8 @@ public sealed class CharacterEditorWindow : EditorWindow
                     MessageType.Error);
             }
 
+            DrawUpgradeLocalizationFields(definition);
+
             if (maxLevel != null)
             {
                 maxLevel.intValue = Mathf.Max(
@@ -5412,11 +5482,67 @@ public sealed class CharacterEditorWindow : EditorWindow
             }
 
             DrawCumulativeUpgradeModifiers(modifiers);
+            EditorGUILayout.Space(4f);
+            EditorGUILayout.PropertyField(
+                modifierModules,
+                new GUIContent("Modifier Modules"),
+                true);
             EditorGUI.indentLevel--;
         }
 
         EditorGUILayout.EndVertical();
         return remove;
+    }
+
+    private static void DrawUpgradeLocalizationFields(
+        SerializedProperty definition)
+    {
+        SerializedProperty preset = definition.FindPropertyRelative(
+            UpgradeLocalizationPresetPropertyName);
+        SerializedProperty titleKey = definition.FindPropertyRelative(
+            UpgradeTitleLocalizationKeyPropertyName);
+        SerializedProperty descriptionKey = definition.FindPropertyRelative(
+            UpgradeDescriptionLocalizationKeyPropertyName);
+        if (preset == null || titleKey == null || descriptionKey == null)
+        {
+            EditorGUILayout.HelpBox(
+                "Upgrade localization properties were not found.",
+                MessageType.Error);
+            return;
+        }
+
+        EditorGUILayout.PropertyField(
+            preset,
+            new GUIContent(
+                "Localization",
+                "Automatic uses the legacy upgrade type or ID. " +
+                "Custom enables direct localization keys."));
+
+        bool hasLegacyKeys =
+            preset.intValue ==
+                (int)CharacterUpgradeLocalizationPreset.Automatic &&
+            (!string.IsNullOrWhiteSpace(titleKey.stringValue) ||
+             !string.IsNullOrWhiteSpace(descriptionKey.stringValue));
+        bool showCustomKeys =
+            preset.intValue ==
+                (int)CharacterUpgradeLocalizationPreset.Custom ||
+            hasLegacyKeys;
+        if (!showCustomKeys)
+            return;
+
+        if (hasLegacyKeys)
+        {
+            EditorGUILayout.HelpBox(
+                "Existing localization keys are treated as Custom. " +
+                "Select Custom to make the mode explicit.",
+                MessageType.Info);
+        }
+        EditorGUILayout.PropertyField(
+            titleKey,
+            new GUIContent("Title Localization Key"));
+        EditorGUILayout.PropertyField(
+            descriptionKey,
+            new GUIContent("Description Localization Key"));
     }
 
     private static void DrawCumulativeUpgradeModifiers(
@@ -5544,6 +5670,8 @@ public sealed class CharacterEditorWindow : EditorWindow
             CumulativeUpgradeMaxLevelPropertyName);
         if (maxLevel != null)
             maxLevel.intValue = 1;
+
+        ResetUpgradeLocalization(definition);
 
         SerializedProperty modifiers = definition.FindPropertyRelative(
             CumulativeUpgradeModifiersPropertyName);
@@ -5714,77 +5842,44 @@ public sealed class CharacterEditorWindow : EditorWindow
     private static void DrawDungeonUpgradeEntries(
         SerializedProperty entries)
     {
-        if (entries == null ||
-            entries.arraySize != DungeonUpgradeOrder.Length)
+        if (entries == null)
         {
             EditorGUILayout.HelpBox(
-                "던전 업그레이드 항목 구성이 올바르지 않습니다. " +
-                "블록을 다시 생성해 주세요.",
+                "던전 업그레이드 옵션 목록을 찾을 수 없습니다.",
                 MessageType.Error);
             return;
         }
 
-        float probabilityTotal = 0f;
-        for (int index = 0; index < DungeonUpgradeOrder.Length; index++)
+        EditorGUILayout.PropertyField(
+            entries,
+            new GUIContent(
+                "업그레이드 옵션",
+                "각 옵션은 고유 ID, 가중치, 중첩 제한과 수정자 모듈을 가집니다."),
+            true);
+
+        float totalWeight = 0f;
+        for (int index = 0; index < entries.arraySize; index++)
         {
-            CharacterDungeonUpgradeType expectedType =
-                DungeonUpgradeOrder[index];
             SerializedProperty entry = entries.GetArrayElementAtIndex(index);
-            SerializedProperty type = entry.FindPropertyRelative(
-                DungeonUpgradeTypePropertyName);
             SerializedProperty probability = entry.FindPropertyRelative(
                 DungeonUpgradeProbabilityPropertyName);
-            SerializedProperty limit = entry.FindPropertyRelative(
-                DungeonUpgradeLimitPropertyName);
-
-            if (type == null || probability == null || limit == null)
-            {
-                EditorGUILayout.HelpBox(
-                    $"{GetDungeonUpgradeLabel(expectedType)} 속성을 " +
-                    "찾을 수 없습니다.",
-                    MessageType.Error);
-                continue;
-            }
-
-            type.enumValueIndex = (int)expectedType;
-            EditorGUILayout.BeginVertical(EditorStyles.helpBox);
-            EditorGUILayout.LabelField(
-                GetDungeonUpgradeLabel(expectedType),
-                EditorStyles.boldLabel);
-            probability.floatValue = Mathf.Clamp(
-                EditorGUILayout.FloatField(
-                    "확률 (%)",
-                    probability.floatValue),
-                0f,
-                100f);
-            limit.intValue = Mathf.Max(
-                0,
-                EditorGUILayout.IntField(
-                    new GUIContent(
-                        "Limit",
-                        "0이면 한 던전에서 횟수 제한 없이 등장합니다."),
-                    limit.intValue));
-            EditorGUILayout.EndVertical();
-
-            probabilityTotal += probability.floatValue;
+            if (probability != null)
+                totalWeight += Mathf.Max(0f, probability.floatValue);
         }
 
         EditorGUILayout.Space(4f);
         EditorGUILayout.LabelField(
-            "확률 총합",
-            $"{probabilityTotal:0.####}% / " +
-            $"{CharacterDungeonUpgradeDefinition.RequiredProbabilityTotal:0}%",
+            "가중치 총합",
+            totalWeight.ToString("0.####"),
             EditorStyles.boldLabel);
         EditorGUILayout.LabelField(
-            "Limit 0은 한 던전에서 무제한 등장을 의미합니다.",
+            "선택 불가능한 옵션을 제외한 뒤 가중치를 자동 정규화합니다. " +
+            "Limit 0은 무제한 중첩입니다.",
             EditorStyles.miniLabel);
-        if (Mathf.Abs(
-                probabilityTotal -
-                CharacterDungeonUpgradeDefinition.RequiredProbabilityTotal) >
-            CharacterDungeonUpgradeDefinition.ProbabilityTolerance)
+        if (entries.arraySize == 0)
         {
             EditorGUILayout.HelpBox(
-                "각 항목의 확률 총합은 반드시 100%여야 합니다.",
+                "업그레이드 옵션을 하나 이상 추가해야 합니다.",
                 MessageType.Error);
         }
     }
@@ -5810,32 +5905,55 @@ public sealed class CharacterEditorWindow : EditorWindow
             return;
 
         entries.ClearArray();
-        entries.arraySize = DungeonUpgradeOrder.Length;
-        for (int index = 0; index < DungeonUpgradeOrder.Length; index++)
-        {
-            SerializedProperty entry = entries.GetArrayElementAtIndex(index);
-            SerializedProperty type = entry.FindPropertyRelative(
-                DungeonUpgradeTypePropertyName);
-            SerializedProperty probability = entry.FindPropertyRelative(
-                DungeonUpgradeProbabilityPropertyName);
-            SerializedProperty limit = entry.FindPropertyRelative(
-                DungeonUpgradeLimitPropertyName);
-            if (type != null)
-                type.enumValueIndex = (int)DungeonUpgradeOrder[index];
-            if (probability != null)
-            {
-                probability.floatValue =
-                    DefaultDungeonUpgradeProbabilities[index];
-            }
-            if (limit != null)
-                limit.intValue = 1;
-        }
+        entries.arraySize = 1;
+        SerializedProperty entry = entries.GetArrayElementAtIndex(0);
+        SerializedProperty upgradeId =
+            entry.FindPropertyRelative("upgradeId");
+        SerializedProperty probability = entry.FindPropertyRelative(
+            DungeonUpgradeProbabilityPropertyName);
+        SerializedProperty limit = entry.FindPropertyRelative(
+            DungeonUpgradeLimitPropertyName);
+        SerializedProperty modules =
+            entry.FindPropertyRelative("modifierModules");
+        if (upgradeId != null)
+            upgradeId.stringValue = "upgrade_1";
+        ResetUpgradeLocalization(entry);
+        if (probability != null)
+            probability.floatValue = 1f;
+        if (limit != null)
+            limit.intValue = 1;
+        modules?.ClearArray();
 
         definition.isExpanded = true;
         if (_serializedCharacter.ApplyModifiedProperties())
             EditorUtility.SetDirty(_selectedCharacter);
 
         _dungeonUpgradeExpanded = true;
+    }
+
+    private static void ResetUpgradeLocalization(
+        SerializedProperty definition)
+    {
+        if (definition == null)
+            return;
+
+        SerializedProperty preset = definition.FindPropertyRelative(
+            UpgradeLocalizationPresetPropertyName);
+        if (preset != null)
+        {
+            preset.intValue =
+                (int)CharacterUpgradeLocalizationPreset.Automatic;
+        }
+
+        SerializedProperty titleKey = definition.FindPropertyRelative(
+            UpgradeTitleLocalizationKeyPropertyName);
+        if (titleKey != null)
+            titleKey.stringValue = string.Empty;
+
+        SerializedProperty descriptionKey = definition.FindPropertyRelative(
+            UpgradeDescriptionLocalizationKeyPropertyName);
+        if (descriptionKey != null)
+            descriptionKey.stringValue = string.Empty;
     }
 
     private static string GetDungeonUpgradeLabel(
@@ -6555,5 +6673,314 @@ public sealed class CharacterEditorWindow : EditorWindow
             EditorUtility.SetDirty(_character);
             editorWindow?.Repaint();
         }
+    }
+}
+
+[CustomPropertyDrawer(typeof(CharacterDungeonUpgradeEntry))]
+internal sealed class CharacterDungeonUpgradeEntryDrawer : PropertyDrawer
+{
+    private const float Spacing = 2f;
+
+    public override void OnGUI(
+        Rect position,
+        SerializedProperty property,
+        GUIContent label)
+    {
+        EditorGUI.BeginProperty(position, label, property);
+
+        float y = position.y;
+        Rect foldoutRect = new(
+            position.x,
+            y,
+            position.width,
+            EditorGUIUtility.singleLineHeight);
+        SerializedProperty upgradeId = property.FindPropertyRelative(
+            "upgradeId");
+        GUIContent foldoutLabel = !string.IsNullOrWhiteSpace(
+            upgradeId?.stringValue)
+            ? new GUIContent(upgradeId.stringValue)
+            : label;
+        property.isExpanded = EditorGUI.Foldout(
+            foldoutRect,
+            property.isExpanded,
+            foldoutLabel,
+            true);
+
+        if (property.isExpanded)
+        {
+            EditorGUI.indentLevel++;
+            y += EditorGUIUtility.singleLineHeight + Spacing;
+            DrawProperty(
+                ref y,
+                position,
+                upgradeId,
+                new GUIContent("Upgrade ID"));
+
+            SerializedProperty preset = property.FindPropertyRelative(
+                "localizationPreset");
+            DrawProperty(
+                ref y,
+                position,
+                preset,
+                new GUIContent(
+                    "Localization",
+                    "Automatic follows Legacy Type. Custom enables keys."));
+
+            if (ShowsCustomKeys(property, preset))
+            {
+                DrawProperty(
+                    ref y,
+                    position,
+                    property.FindPropertyRelative("titleLocalizationKey"),
+                    new GUIContent("Title Localization Key"));
+                DrawProperty(
+                    ref y,
+                    position,
+                    property.FindPropertyRelative(
+                        "descriptionLocalizationKey"),
+                    new GUIContent("Description Localization Key"));
+            }
+
+            DrawProperty(
+                ref y,
+                position,
+                property.FindPropertyRelative("type"),
+                new GUIContent(
+                    "Legacy Type",
+                    "Used by Automatic localization and legacy upgrades."));
+            DrawProperty(
+                ref y,
+                position,
+                property.FindPropertyRelative("probability"),
+                new GUIContent("Weight"));
+            DrawProperty(
+                ref y,
+                position,
+                property.FindPropertyRelative("limit"),
+                new GUIContent("Limit", "0 means unlimited."));
+            DrawProperty(
+                ref y,
+                position,
+                property.FindPropertyRelative("modifierModules"),
+                new GUIContent("Modifier Modules"),
+                true);
+            EditorGUI.indentLevel--;
+        }
+
+        EditorGUI.EndProperty();
+    }
+
+    public override float GetPropertyHeight(
+        SerializedProperty property,
+        GUIContent label)
+    {
+        float height = EditorGUIUtility.singleLineHeight;
+        if (!property.isExpanded)
+            return height;
+
+        height = AddHeight(
+            height,
+            property.FindPropertyRelative("upgradeId"));
+        SerializedProperty preset = property.FindPropertyRelative(
+            "localizationPreset");
+        height = AddHeight(height, preset);
+        if (ShowsCustomKeys(property, preset))
+        {
+            height = AddHeight(
+                height,
+                property.FindPropertyRelative("titleLocalizationKey"));
+            height = AddHeight(
+                height,
+                property.FindPropertyRelative("descriptionLocalizationKey"));
+        }
+        height = AddHeight(
+            height,
+            property.FindPropertyRelative("type"));
+        height = AddHeight(
+            height,
+            property.FindPropertyRelative("probability"));
+        height = AddHeight(
+            height,
+            property.FindPropertyRelative("limit"));
+        height = AddHeight(
+            height,
+            property.FindPropertyRelative("modifierModules"),
+            true);
+        return height;
+    }
+
+    private static bool ShowsCustomKeys(
+        SerializedProperty property,
+        SerializedProperty preset)
+    {
+        if (preset == null)
+            return false;
+        if (preset.intValue ==
+            (int)CharacterUpgradeLocalizationPreset.Custom)
+        {
+            return true;
+        }
+        if (preset.intValue !=
+            (int)CharacterUpgradeLocalizationPreset.Automatic)
+        {
+            return false;
+        }
+
+        SerializedProperty title = property.FindPropertyRelative(
+            "titleLocalizationKey");
+        SerializedProperty description = property.FindPropertyRelative(
+            "descriptionLocalizationKey");
+        return !string.IsNullOrWhiteSpace(title?.stringValue) ||
+               !string.IsNullOrWhiteSpace(description?.stringValue);
+    }
+
+    private static void DrawProperty(
+        ref float y,
+        Rect position,
+        SerializedProperty property,
+        GUIContent label,
+        bool includeChildren = false)
+    {
+        if (property == null)
+            return;
+
+        float height = EditorGUI.GetPropertyHeight(
+            property,
+            label,
+            includeChildren);
+        Rect fieldRect = new(position.x, y, position.width, height);
+        EditorGUI.PropertyField(
+            fieldRect,
+            property,
+            label,
+            includeChildren);
+        y += height + Spacing;
+    }
+
+    private static float AddHeight(
+        float current,
+        SerializedProperty property,
+        bool includeChildren = false)
+    {
+        return property == null
+            ? current
+            : current + Spacing + EditorGUI.GetPropertyHeight(
+                property,
+                includeChildren);
+    }
+}
+
+[InitializeOnLoad]
+internal static class CharacterModifierIdMigration
+{
+    private const string CharacterFolder = "Assets/Resources/Characters";
+
+    static CharacterModifierIdMigration()
+    {
+        EditorApplication.delayCall += MigrateMissingIds;
+    }
+
+    [MenuItem("PS260714/Data/Migrate Character Modifier IDs")]
+    private static void MigrateMissingIds()
+    {
+        foreach (string guid in AssetDatabase.FindAssets(
+                     "t:CharacterSO",
+                     new[] { CharacterFolder }))
+        {
+            string path = AssetDatabase.GUIDToAssetPath(guid);
+            CharacterSO character =
+                AssetDatabase.LoadAssetAtPath<CharacterSO>(path);
+            if (character == null)
+                continue;
+
+            SerializedObject serialized = new(character);
+            bool characterChanged = false;
+            characterChanged |= MigrateActionList(
+                serialized.FindProperty("attackDefinitions"),
+                "attack");
+            characterChanged |= MigrateActionList(
+                serialized.FindProperty("passiveDefinitions"),
+                "passive");
+            characterChanged |= MigrateActionList(
+                serialized.FindProperty("skillDefinitions"),
+                "skill");
+            if (!characterChanged)
+                continue;
+
+            serialized.ApplyModifiedPropertiesWithoutUndo();
+            EditorUtility.SetDirty(character);
+            AssetDatabase.SaveAssetIfDirty(character);
+        }
+    }
+
+    private static bool MigrateActionList(
+        SerializedProperty actions,
+        string prefix)
+    {
+        if (actions == null)
+            return false;
+
+        bool changed = false;
+        HashSet<string> usedActionIds = new(StringComparer.Ordinal);
+        for (int index = 0; index < actions.arraySize; index++)
+        {
+            SerializedProperty action = actions.GetArrayElementAtIndex(index);
+            SerializedProperty actionId =
+                action.FindPropertyRelative("actionId");
+            if (actionId != null)
+            {
+                string value = actionId.stringValue?.Trim() ?? string.Empty;
+                if (string.IsNullOrEmpty(value))
+                {
+                    value = CreateUniqueId(
+                        usedActionIds,
+                        $"{prefix}_{index + 1}");
+                    actionId.stringValue = value;
+                    changed = true;
+                }
+                usedActionIds.Add(value);
+            }
+
+            SerializedProperty effects =
+                action.FindPropertyRelative("effects");
+            if (effects == null)
+                continue;
+
+            HashSet<string> usedEffectIds = new(StringComparer.Ordinal);
+            for (int effectIndex = 0;
+                 effectIndex < effects.arraySize;
+                 effectIndex++)
+            {
+                SerializedProperty effect =
+                    effects.GetArrayElementAtIndex(effectIndex);
+                SerializedProperty effectId =
+                    effect.FindPropertyRelative("effectId");
+                if (effectId == null)
+                    continue;
+
+                string value = effectId.stringValue?.Trim() ?? string.Empty;
+                if (string.IsNullOrEmpty(value))
+                {
+                    value = CreateUniqueId(
+                        usedEffectIds,
+                        $"effect_{effectIndex + 1}");
+                    effectId.stringValue = value;
+                    changed = true;
+                }
+                usedEffectIds.Add(value);
+            }
+        }
+        return changed;
+    }
+
+    private static string CreateUniqueId(
+        HashSet<string> usedIds,
+        string baseId)
+    {
+        string candidate = baseId;
+        int suffix = 2;
+        while (usedIds.Contains(candidate))
+            candidate = $"{baseId}_{suffix++}";
+        return candidate;
     }
 }

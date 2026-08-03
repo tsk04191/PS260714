@@ -3771,6 +3771,280 @@ public sealed class CharacterP0RegressionTests
     }
 
     [Test]
+    public void CharacterModifier_ModulesResolveByActionAndEffect()
+    {
+        CharacterModifierCollection modifiers = new();
+        CharacterModifierModule allSkillDamage = new(
+            "all_skill_damage",
+            new CharacterModifierTarget(
+                CharacterModifierTargetScope.ActionKind,
+                CharacterActionKind.Skill),
+            CharacterModifierStat.Damage,
+            CharacterModifierOperation.AddPercent,
+            0.2f);
+        CharacterModifierModule selectedSkillDamage = new(
+            "selected_skill_damage",
+            new CharacterModifierTarget(
+                CharacterModifierTargetScope.Action,
+                CharacterActionKind.Skill,
+                "skill_a"),
+            CharacterModifierStat.Damage,
+            CharacterModifierOperation.AddFlat,
+            5f);
+        CharacterModifierModule selectedEffectDuration = new(
+            "burn_duration",
+            new CharacterModifierTarget(
+                CharacterModifierTargetScope.Effect,
+                CharacterActionKind.Skill,
+                "skill_a",
+                "burn"),
+            CharacterModifierStat.StatusDuration,
+            CharacterModifierOperation.AddFlat,
+            1f);
+
+        Assert.That(modifiers.ReplaceSource(
+            "test",
+            new[]
+            {
+                allSkillDamage,
+                selectedSkillDamage,
+                selectedEffectDuration,
+            },
+            1,
+            CharacterModifierLifetimeScope.Dungeon), Is.True);
+
+        Assert.That(
+            modifiers.Resolve(
+                10f,
+                CharacterModifierStat.Damage,
+                CharacterActionKind.Skill,
+                "skill_a"),
+            Is.EqualTo(18f).Within(0.001f));
+        Assert.That(
+            modifiers.Resolve(
+                10f,
+                CharacterModifierStat.Damage,
+                CharacterActionKind.Skill,
+                "skill_b"),
+            Is.EqualTo(12f).Within(0.001f));
+        Assert.That(
+            modifiers.Resolve(
+                2f,
+                CharacterModifierStat.StatusDuration,
+                CharacterActionKind.Skill,
+                "skill_a",
+                "burn"),
+            Is.EqualTo(3f).Within(0.001f));
+        Assert.That(
+            modifiers.Resolve(
+                2f,
+                CharacterModifierStat.StatusDuration,
+                CharacterActionKind.Skill,
+                "skill_a",
+                "stun"),
+            Is.EqualTo(2f).Within(0.001f));
+    }
+
+    [Test]
+    public void CharacterModifier_TimedAndScopedSourcesExpireIndependently()
+    {
+        CharacterModifierCollection modifiers = new();
+        CharacterModifierModule attackPower = new(
+            "power",
+            new CharacterModifierTarget(
+                CharacterModifierTargetScope.Character),
+            CharacterModifierStat.AttackPower,
+            CharacterModifierOperation.AddFlat,
+            2f);
+        modifiers.ReplaceSource(
+            "battle",
+            new[] { attackPower },
+            1,
+            CharacterModifierLifetimeScope.Battle,
+            1f);
+        modifiers.ReplaceSource(
+            "dungeon",
+            new[] { attackPower },
+            1,
+            CharacterModifierLifetimeScope.Dungeon);
+
+        Assert.That(
+            modifiers.Resolve(10f, CharacterModifierStat.AttackPower),
+            Is.EqualTo(14f).Within(0.001f));
+        Assert.That(modifiers.Tick(1f), Is.True);
+        Assert.That(
+            modifiers.Resolve(10f, CharacterModifierStat.AttackPower),
+            Is.EqualTo(12f).Within(0.001f));
+        Assert.That(
+            modifiers.ClearScope(CharacterModifierLifetimeScope.Battle),
+            Is.False);
+        Assert.That(
+            modifiers.ClearScope(CharacterModifierLifetimeScope.Dungeon),
+            Is.True);
+        Assert.That(
+            modifiers.Resolve(10f, CharacterModifierStat.AttackPower),
+            Is.EqualTo(10f).Within(0.001f));
+    }
+
+    [Test]
+    public void CharacterData_DungeonModifierPersistsUntilScopeIsCleared()
+    {
+        CharacterSO definition = CreateCumulativeUpgradeCharacter();
+        CharacterData data = definition.CreateData(
+            new CharacterProgressData(definition.CharacterId, true));
+        CharacterModifierModule attackPower = new(
+            "item_power",
+            new CharacterModifierTarget(
+                CharacterModifierTargetScope.Character),
+            CharacterModifierStat.AttackPower,
+            CharacterModifierOperation.AddPercent,
+            0.5f);
+
+        Assert.That(data.ReplaceModifierSource(
+            "item:test",
+            new[] { attackPower },
+            1,
+            CharacterModifierLifetimeScope.Dungeon), Is.True);
+        Assert.That(data.AttackPower, Is.EqualTo(15f).Within(0.001f));
+        Assert.That(
+            data.ClearModifierScope(CharacterModifierLifetimeScope.Battle),
+            Is.False);
+        Assert.That(data.AttackPower, Is.EqualTo(15f).Within(0.001f));
+        Assert.That(
+            data.ClearModifierScope(CharacterModifierLifetimeScope.Dungeon),
+            Is.True);
+        Assert.That(data.AttackPower, Is.EqualTo(10f).Within(0.001f));
+    }
+
+    [Test]
+    public void DungeonUpgrade_ModularOptionUsesStableIdAndConfiguredValue()
+    {
+        CharacterSO definition = CreateCumulativeUpgradeCharacter();
+        SerializedObject serialized = new(definition);
+        SerializedProperty pools = serialized.FindProperty(
+            "dungeonUpgradeDefinitions");
+        pools.arraySize = 1;
+        SerializedProperty entries = pools.GetArrayElementAtIndex(0)
+            .FindPropertyRelative("entries");
+        entries.arraySize = 1;
+        SerializedProperty entry = entries.GetArrayElementAtIndex(0);
+        entry.FindPropertyRelative("upgradeId").stringValue =
+            "skill_mastery";
+        entry.FindPropertyRelative("probability").floatValue = 2f;
+        entry.FindPropertyRelative("limit").intValue = 2;
+        SerializedProperty modules = entry.FindPropertyRelative(
+            "modifierModules");
+        modules.arraySize = 1;
+        SerializedProperty module = modules.GetArrayElementAtIndex(0);
+        module.FindPropertyRelative("moduleId").stringValue = "power";
+        module.FindPropertyRelative("stat").enumValueIndex =
+            (int)CharacterModifierStat.AttackPower;
+        module.FindPropertyRelative("operation").enumValueIndex =
+            (int)CharacterModifierOperation.AddFlat;
+        module.FindPropertyRelative("valuePerStack").floatValue = 1.5f;
+        module.FindPropertyRelative("target")
+            .FindPropertyRelative("scope").enumValueIndex =
+            (int)CharacterModifierTargetScope.Character;
+        serialized.ApplyModifiedPropertiesWithoutUndo();
+
+        CharacterData data = definition.CreateData(
+            new CharacterProgressData(definition.CharacterId, true));
+
+        Assert.That(
+            data.ApplyDungeonUpgrade(0, "skill_mastery"),
+            Is.True);
+        Assert.That(data.AttackPower, Is.EqualTo(11.5f).Within(0.001f));
+        Assert.That(
+            data.ApplyDungeonUpgrade(0, "skill_mastery"),
+            Is.True);
+        Assert.That(data.AttackPower, Is.EqualTo(13f).Within(0.001f));
+        Assert.That(
+            data.ApplyDungeonUpgrade(0, "skill_mastery"),
+            Is.False);
+        Assert.That(
+            data.GetDungeonUpgradeAppliedCount(0, "skill_mastery"),
+            Is.EqualTo(2));
+    }
+
+    [Test]
+    public void UpgradeLocalizationPreset_ResolvesDungeonAndCumulativeTitles()
+    {
+        CharacterSO definition = CreateCumulativeUpgradeCharacter();
+        SerializedObject serialized = new(definition);
+
+        SerializedProperty pools = serialized.FindProperty(
+            "dungeonUpgradeDefinitions");
+        pools.arraySize = 1;
+        SerializedProperty entries = pools.GetArrayElementAtIndex(0)
+            .FindPropertyRelative("entries");
+        entries.arraySize = 1;
+        SerializedProperty dungeonEntry =
+            entries.GetArrayElementAtIndex(0);
+        dungeonEntry.FindPropertyRelative("type").enumValueIndex =
+            (int)CharacterDungeonUpgradeType.AttackPower;
+        dungeonEntry.FindPropertyRelative("localizationPreset").intValue =
+            (int)CharacterUpgradeLocalizationPreset.SkillCost;
+
+        SerializedProperty cumulative = serialized.FindProperty(
+            "cumulativeUpgradeDefinitions");
+        cumulative.arraySize = 1;
+        SerializedProperty cumulativeEntry =
+            cumulative.GetArrayElementAtIndex(0);
+        cumulativeEntry.FindPropertyRelative("upgradeId").stringValue =
+            "speed_mastery";
+        cumulativeEntry.FindPropertyRelative("localizationPreset").intValue =
+            (int)CharacterUpgradeLocalizationPreset.AttackSpeed;
+        serialized.ApplyModifiedPropertiesWithoutUndo();
+
+        Assert.That(
+            CharacterLocalization.GetDungeonUpgradeTitle(
+                definition.DungeonUpgradeDefinitions[0].Entries[0]),
+            Is.EqualTo(CharacterLocalization.GetUpgradePresetTitle(
+                CharacterUpgradeLocalizationPreset.SkillCost)));
+        Assert.That(
+            CharacterLocalization.GetCumulativeUpgradeTitle(
+                definition.CumulativeUpgradeDefinitions[0]),
+            Is.EqualTo(CharacterLocalization.GetUpgradePresetTitle(
+                CharacterUpgradeLocalizationPreset.AttackSpeed)));
+    }
+
+    [Test]
+    public void UpgradeLocalizationPreset_CustomUsesConfiguredKeys()
+    {
+        CharacterSO definition = CreateCumulativeUpgradeCharacter();
+        SerializedObject serialized = new(definition);
+        SerializedProperty pools = serialized.FindProperty(
+            "dungeonUpgradeDefinitions");
+        pools.arraySize = 1;
+        SerializedProperty entries = pools.GetArrayElementAtIndex(0)
+            .FindPropertyRelative("entries");
+        entries.arraySize = 1;
+        SerializedProperty entry = entries.GetArrayElementAtIndex(0);
+        entry.FindPropertyRelative("localizationPreset").intValue =
+            (int)CharacterUpgradeLocalizationPreset.Custom;
+        entry.FindPropertyRelative("titleLocalizationKey").stringValue =
+            LocalizationKeys.UiDungeonRewardUpgradeSkillPowerTitle;
+        entry.FindPropertyRelative("descriptionLocalizationKey").stringValue =
+            LocalizationKeys.UiDungeonRewardUpgradeGenericTitle;
+        serialized.ApplyModifiedPropertiesWithoutUndo();
+
+        CharacterDungeonUpgradeEntry configured =
+            definition.DungeonUpgradeDefinitions[0].Entries[0];
+        Assert.That(
+            CharacterLocalization.GetDungeonUpgradeTitle(configured),
+            Is.EqualTo(LocalizationService.Get(
+                LocalizationKeys.UiDungeonRewardUpgradeSkillPowerTitle)));
+        Assert.That(
+            CharacterLocalization.GetDungeonUpgradeDescription(
+                definition.CreateData(new CharacterProgressData(
+                    definition.CharacterId,
+                    true)),
+                configured),
+            Is.EqualTo(LocalizationService.Get(
+                LocalizationKeys.UiDungeonRewardUpgradeGenericTitle)));
+    }
+
+    [Test]
     public void CumulativeUpgrade_AppliesCompoundModifiersFromSavedLevel()
     {
         CharacterSO definition = CreateCumulativeUpgradeCharacter();

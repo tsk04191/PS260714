@@ -745,6 +745,29 @@ public class DungeonPage : MonoBehaviour, IPage
         return true;
     }
 
+    public bool TryApplyCharacterDungeonUpgrade(
+        int slotIndex,
+        int definitionIndex,
+        string upgradeId)
+    {
+        if (!_eventRewardPending || slotIndex < 0 ||
+            slotIndex >= _ownedTurrets.Count)
+        {
+            return false;
+        }
+
+        CharacterRuntime character = _ownedTurrets[slotIndex];
+        if (character == null || !character.ApplyDungeonUpgrade(
+                definitionIndex,
+                upgradeId))
+        {
+            return false;
+        }
+
+        CompleteEventReward();
+        return true;
+    }
+
     public bool CanApplyEnergyUpgrade(EDungeonEnergyUpgradeType upgradeType)
     {
         return upgradeType != EDungeonEnergyUpgradeType.RechargeSpeed ||
@@ -808,6 +831,8 @@ public class DungeonPage : MonoBehaviour, IPage
 
         if (!TryGetBattleItemState(item, out BattleItemRunState state))
             return true;
+        if (!item.UsesLegacyUsagePolicy)
+            return !state.IsOwned && !state.IsRemoved;
         if (item.HasUnlimitedUses)
             return !state.IsOwned;
         return item.MaximumRunUses == 0 ||
@@ -1867,11 +1892,25 @@ public class DungeonPage : MonoBehaviour, IPage
     private void ResetBattleItemCooldowns()
     {
         foreach (BattleItemRunState state in _battleItems.Values)
-            state.ResetCooldown();
+        {
+            BattleItemSO item = BattleItemCatalog.Get(state.ItemId);
+            if (item != null)
+                state.BeginBattle(item);
+            else
+                state.ResetCooldown();
+        }
+        BattleItemsChanged?.Invoke();
     }
 
     private void ResetRunResourcesAndItems(bool includeStartingConsumable)
     {
+        foreach (CharacterRuntime turret in _ownedTurrets)
+        {
+            turret?.Data?.ClearModifierScope(
+                CharacterModifierLifetimeScope.Battle);
+            turret?.Data?.ClearModifierScope(
+                CharacterModifierLifetimeScope.Dungeon);
+        }
         _maximumEnergy = BattleManager.DefaultMaximumEnergy;
         _energyRechargeDuration =
             BattleManager.DefaultEnergyRechargeDuration;
@@ -2397,6 +2436,7 @@ public sealed class DungeonEventTab
         public int TurretSlotIndex { get; }
         public int DungeonUpgradeDefinitionIndex { get; }
         public CharacterDungeonUpgradeType DungeonUpgradeType { get; }
+        public string DungeonUpgradeId { get; }
         public CharacterSO TurretDefinition { get; }
         public EDungeonEnergyUpgradeType EnergyUpgradeType { get; }
         public BattleItemSO BattleItem { get; }
@@ -2406,6 +2446,7 @@ public sealed class DungeonEventTab
             int turretSlotIndex,
             int dungeonUpgradeDefinitionIndex,
             CharacterDungeonUpgradeType dungeonUpgradeType,
+            string dungeonUpgradeId,
             CharacterSO turretDefinition,
             EDungeonEnergyUpgradeType energyUpgradeType,
             BattleItemSO battleItem)
@@ -2414,6 +2455,7 @@ public sealed class DungeonEventTab
             TurretSlotIndex = turretSlotIndex;
             DungeonUpgradeDefinitionIndex = dungeonUpgradeDefinitionIndex;
             DungeonUpgradeType = dungeonUpgradeType;
+            DungeonUpgradeId = dungeonUpgradeId ?? string.Empty;
             TurretDefinition = turretDefinition;
             EnergyUpgradeType = energyUpgradeType;
             BattleItem = battleItem;
@@ -2422,13 +2464,15 @@ public sealed class DungeonEventTab
         public static RewardOption CreateDungeonUpgrade(
             int turretSlotIndex,
             int definitionIndex,
-            CharacterDungeonUpgradeType upgradeType)
+            string upgradeId,
+            CharacterDungeonUpgradeType legacyType = default)
         {
             return new RewardOption(
                 ERewardOptionType.TurretUpgrade,
                 turretSlotIndex,
                 definitionIndex,
-                upgradeType,
+                legacyType,
+                upgradeId,
                 null,
                 default,
                 default);
@@ -2441,6 +2485,7 @@ public sealed class DungeonEventTab
                 -1,
                 -1,
                 default,
+                string.Empty,
                 definition,
                 default,
                 default);
@@ -2454,6 +2499,7 @@ public sealed class DungeonEventTab
                 -1,
                 -1,
                 default,
+                string.Empty,
                 null,
                 upgradeType,
                 default);
@@ -2466,6 +2512,7 @@ public sealed class DungeonEventTab
                 -1,
                 -1,
                 default,
+                string.Empty,
                 null,
                 default,
                 item);
@@ -2717,12 +2764,16 @@ public sealed class DungeonEventTab
                 if (data.TryRollDungeonUpgrade(
                         definitionIndex,
                         random,
-                        out CharacterDungeonUpgradeType upgradeType))
+                        out string upgradeId))
                 {
+                    CharacterDungeonUpgradeEntry entry =
+                        data.DungeonUpgradeDefinitions[definitionIndex]
+                            ?.GetEntry(upgradeId);
                     candidates.Add(RewardOption.CreateDungeonUpgrade(
                         index,
                         definitionIndex,
-                        upgradeType));
+                        upgradeId,
+                        entry?.Type ?? default));
                 }
             }
         }
@@ -2911,16 +2962,23 @@ public sealed class DungeonEventTab
         }
 
         CharacterData data = turrets[slotIndex].Data;
+        CharacterDungeonUpgradeEntry upgradeEntry =
+            option.DungeonUpgradeDefinitionIndex >= 0 &&
+            option.DungeonUpgradeDefinitionIndex <
+                data.DungeonUpgradeDefinitions.Count
+                ? data.DungeonUpgradeDefinitions[
+                    option.DungeonUpgradeDefinitionIndex]?.GetEntry(
+                    option.DungeonUpgradeId)
+                : null;
         return new RewardCardContent(
             LocalizationService.Get(
                 LocalizationKeys.UiDungeonRewardCategoryTurretUpgradeSlot,
                 LocalizationService.Arg("slot", slotIndex + 1)),
-            CharacterLocalization.GetDungeonUpgradeTitle(
-                option.DungeonUpgradeType),
+            CharacterLocalization.GetDungeonUpgradeTitle(upgradeEntry),
             CharacterLocalization.GetName(data) + "\n" +
             CharacterLocalization.GetDungeonUpgradeDescription(
                 data,
-                option.DungeonUpgradeType),
+                upgradeEntry),
             LocalizationService.Get(
                 LocalizationKeys.UiDungeonRewardRunFooter),
             new Color(0.3f, 0.68f, 0.4f, 1f));
@@ -2966,7 +3024,7 @@ public sealed class DungeonEventTab
             _page.TryApplyCharacterDungeonUpgrade(
                 option.TurretSlotIndex,
                 option.DungeonUpgradeDefinitionIndex,
-                option.DungeonUpgradeType);
+                option.DungeonUpgradeId);
             return;
         }
 

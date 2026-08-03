@@ -273,6 +273,17 @@ namespace PS260714.Localization
 
         public static bool TryGet(string key, out string text)
         {
+            return TryGet(
+                key,
+                out text,
+                Array.Empty<LocalizationArgument>());
+        }
+
+        public static bool TryGet(
+            string key,
+            out string text,
+            params LocalizationArgument[] arguments)
+        {
             EnsureInitialized();
             string normalizedKey = (key ?? string.Empty).Trim();
             if (string.IsNullOrEmpty(normalizedKey) ||
@@ -286,11 +297,21 @@ namespace PS260714.Localization
                 return false;
             }
 
+            LocalizationArgumentMap map = new LocalizationArgumentMap();
+            if (arguments != null)
+            {
+                for (int index = 0; index < arguments.Length; index++)
+                {
+                    LocalizationArgument argument = arguments[index];
+                    if (!string.IsNullOrWhiteSpace(argument.Name))
+                        map[argument.Name] = argument.Value;
+                }
+            }
             text = FormatNamed(
                 normalizedKey,
                 entry.Text,
                 resolvedLocale,
-                new LocalizationArgumentMap());
+                map);
             return true;
         }
 

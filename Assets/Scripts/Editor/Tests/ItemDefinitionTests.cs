@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using System.Reflection;
 using NUnit.Framework;
+using PS260714.Localization;
 using UnityEditor;
 using UnityEngine;
 using UnityEngine.TestTools;
@@ -63,6 +64,139 @@ public sealed class ItemDefinitionTests
     }
 
     [Test]
+    public void LocalizationKeys_OverrideFallbackAndMissingKeysUseFallback()
+    {
+        GeneralItemSO item =
+            ScriptableObject.CreateInstance<GeneralItemSO>();
+        try
+        {
+            SerializedObject serialized = new(item);
+            serialized.FindProperty("itemId").stringValue =
+                "test.localized";
+            serialized.FindProperty("nameLocalizationKey").stringValue =
+                LocalizationKeys.ItemSoftCreditName;
+            serialized.FindProperty(
+                    "descriptionLocalizationKey").stringValue =
+                LocalizationKeys.ItemSoftCreditDescription;
+            serialized.FindProperty("koreanName").stringValue =
+                "한글 대체 이름";
+            serialized.FindProperty("englishName").stringValue =
+                "English Fallback Name";
+            serialized.FindProperty("koreanDescription").stringValue =
+                "한글 대체 설명";
+            serialized.FindProperty("englishDescription").stringValue =
+                "English fallback description";
+            serialized.ApplyModifiedPropertiesWithoutUndo();
+
+            Assert.That(item.GetDisplayName(true), Is.EqualTo(
+                "인게임 크레딧"));
+            Assert.That(item.GetDisplayName(false), Is.EqualTo(
+                "In-Game Credit"));
+            Assert.That(item.GetDescription(false), Is.EqualTo(
+                "Basic currency earned and spent through gameplay."));
+
+            serialized.Update();
+            serialized.FindProperty("nameLocalizationKey").stringValue =
+                "item.missing.name";
+            serialized.FindProperty(
+                    "descriptionLocalizationKey").stringValue =
+                "item.missing.description";
+            serialized.ApplyModifiedPropertiesWithoutUndo();
+
+            Assert.That(item.GetDisplayName(true), Is.EqualTo(
+                "한글 대체 이름"));
+            Assert.That(item.GetDisplayName(false), Is.EqualTo(
+                "English Fallback Name"));
+            Assert.That(item.GetDescription(true), Is.EqualTo(
+                "한글 대체 설명"));
+        }
+        finally
+        {
+            Object.DestroyImmediate(item);
+        }
+    }
+
+    [Test]
+    public void CoreItems_HaveResolvableLocalizationKeys()
+    {
+        string[] itemIds =
+        {
+            CoreItemIds.SoftCredit,
+            CoreItemIds.PaidCredit,
+            CoreItemIds.FreeCredit,
+            CoreItemIds.StandardRecruitTicket,
+            CoreItemIds.BasicUpgradeMaterial,
+            CoreBattleItemIds.Focus,
+            CoreBattleItemIds.Molotov,
+            CoreBattleItemIds.PrecisionShot,
+            CoreBattleItemIds.OverSupply,
+            CoreBattleItemIds.Overheat,
+        };
+
+        ItemDefinitionCatalog.Invalidate();
+        foreach (string itemId in itemIds)
+        {
+            ItemDefinitionSO item = ItemDefinitionCatalog.Get(itemId);
+            Assert.That(item, Is.Not.Null, itemId);
+            Assert.That(
+                GeneratedLocalizationTables.ReferenceEntries.ContainsKey(
+                    item.NameLocalizationKey),
+                Is.True,
+                $"{itemId} name key: {item.NameLocalizationKey}");
+            Assert.That(
+                GeneratedLocalizationTables.ReferenceEntries.ContainsKey(
+                    item.DescriptionLocalizationKey),
+                Is.True,
+                $"{itemId} description key: " +
+                item.DescriptionLocalizationKey);
+        }
+    }
+
+    [Test]
+    public void BattleItemLocalization_FormatsEffectArguments()
+    {
+        BattleItemSO item =
+            ScriptableObject.CreateInstance<BattleItemSO>();
+        string previousLocale = LocalizationService.CurrentLocale;
+        try
+        {
+            ConfigureBattleItem(
+                item,
+                "test.localized.battle",
+                BattleItemUsePolicy.SingleUse,
+                2,
+                0,
+                0f);
+            SerializedObject serialized = new(item);
+            serialized.FindProperty(
+                    "descriptionLocalizationKey").stringValue =
+                LocalizationKeys.ItemFocusEffect;
+            SerializedProperty effects =
+                serialized.FindProperty("effects");
+            effects.arraySize = 1;
+            SerializedProperty effect = effects.GetArrayElementAtIndex(0);
+            effect.FindPropertyRelative("effectType").enumValueIndex =
+                (int)BattleItemEffectType.ForcePriorityTarget;
+            effect.FindPropertyRelative("duration").floatValue = 5f;
+            serialized.ApplyModifiedPropertiesWithoutUndo();
+            Assert.That(
+                LocalizationService.SetLocale("en-US", false),
+                Is.True);
+
+            Assert.That(
+                item.GetLocalizedDescription(),
+                Is.EqualTo(
+                    "Mark the selected enemy as the highest-priority " +
+                    "target for 5 seconds."));
+        }
+        finally
+        {
+            LocalizationService.SetLocale(previousLocale, false);
+            Object.DestroyImmediate(item);
+        }
+    }
+
+    [Test]
     public void InitialAmount_IsClampedToMaximumStack()
     {
         CurrencyItemSO item =
@@ -110,7 +244,7 @@ public sealed class ItemDefinitionTests
     }
 
     [Test]
-    public void BattleItemRunState_LimitedUsesAccumulateAndRespectCap()
+    public void BattleItemRunState_LimitedReusableRestoresPerBattle()
     {
         BattleItemSO item =
             ScriptableObject.CreateInstance<BattleItemSO>();
@@ -127,11 +261,12 @@ public sealed class ItemDefinitionTests
 
             Assert.That(state.Acquire(item), Is.True);
             Assert.That(state.RemainingUses, Is.EqualTo(3));
-            Assert.That(state.Acquire(item), Is.True);
-            Assert.That(state.RemainingUses, Is.EqualTo(5));
             Assert.That(state.Acquire(item), Is.False);
             Assert.That(state.CompleteSuccessfulUse(item), Is.True);
-            Assert.That(state.RemainingUses, Is.EqualTo(4));
+            Assert.That(state.RemainingUses, Is.EqualTo(2));
+            Assert.That(state.IsOwned, Is.True);
+            state.BeginBattle(item);
+            Assert.That(state.RemainingUses, Is.EqualTo(3));
         }
         finally
         {
@@ -164,6 +299,107 @@ public sealed class ItemDefinitionTests
             Assert.That(state.CanUse(item), Is.False);
             Assert.That(state.TickCooldown(2f), Is.True);
             Assert.That(state.CanUse(item), Is.True);
+        }
+        finally
+        {
+            Object.DestroyImmediate(item);
+        }
+    }
+
+    [Test]
+    public void BattleItemRunState_DisposableIsRemovedAndNeverRestored()
+    {
+        BattleItemSO item = ScriptableObject.CreateInstance<BattleItemSO>();
+        try
+        {
+            ConfigureModernBattleItem(
+                item,
+                "test.battle.disposable",
+                BattleItemLifecycle.Disposable,
+                BattleItemChargeMode.Limited,
+                1);
+            BattleItemRunState state = new(item);
+
+            Assert.That(state.Acquire(item), Is.True);
+            Assert.That(state.CompleteSuccessfulUse(item), Is.True);
+            Assert.That(state.IsOwned, Is.False);
+            Assert.That(state.IsRemoved, Is.True);
+
+            state.BeginBattle(item);
+            Assert.That(state.IsOwned, Is.False);
+            Assert.That(state.RemainingUses, Is.Zero);
+            Assert.That(state.Acquire(item), Is.False);
+        }
+        finally
+        {
+            Object.DestroyImmediate(item);
+        }
+    }
+
+    [Test]
+    public void BattleItemRunState_ReusableChargesRestoreAtBattleStart()
+    {
+        BattleItemSO item = ScriptableObject.CreateInstance<BattleItemSO>();
+        try
+        {
+            ConfigureModernBattleItem(
+                item,
+                "test.battle.reusable",
+                BattleItemLifecycle.Reusable,
+                BattleItemChargeMode.Limited,
+                2);
+            BattleItemRunState state = new(item);
+
+            Assert.That(state.Acquire(item), Is.True);
+            Assert.That(state.CompleteSuccessfulUse(item), Is.True);
+            Assert.That(state.CompleteSuccessfulUse(item), Is.True);
+            Assert.That(state.IsOwned, Is.True);
+            Assert.That(state.RemainingUses, Is.Zero);
+            Assert.That(state.CanUse(item), Is.False);
+
+            state.BeginBattle(item);
+            Assert.That(state.IsOwned, Is.True);
+            Assert.That(state.RemainingUses, Is.EqualTo(2));
+            Assert.That(state.CanUse(item), Is.True);
+        }
+        finally
+        {
+            Object.DestroyImmediate(item);
+        }
+    }
+
+    [Test]
+    public void BattleItemEffect_PermanentDungeonModifierKeepsExplicitScope()
+    {
+        BattleItemSO item = ScriptableObject.CreateInstance<BattleItemSO>();
+        try
+        {
+            SerializedObject serialized = new(item);
+            serialized.FindProperty("itemId").stringValue =
+                "test.battle.permanent";
+            SerializedProperty effects = serialized.FindProperty("effects");
+            effects.arraySize = 1;
+            SerializedProperty effect = effects.GetArrayElementAtIndex(0);
+            effect.FindPropertyRelative("schemaVersion").intValue = 1;
+            effect.FindPropertyRelative("effectType").enumValueIndex =
+                (int)BattleItemEffectType.CharacterModifier;
+            effect.FindPropertyRelative("scope").enumValueIndex =
+                (int)BattleItemEffectScope.CurrentDungeon;
+            effect.FindPropertyRelative("durationMode").enumValueIndex =
+                (int)BattleItemEffectDurationMode.Permanent;
+            serialized.ApplyModifiedPropertiesWithoutUndo();
+
+            BattleItemEffectDefinition definition = item.Effects[0];
+            Assert.That(
+                definition.Scope,
+                Is.EqualTo(BattleItemEffectScope.CurrentDungeon));
+            Assert.That(definition.IsPermanent, Is.True);
+            Assert.That(
+                float.IsPositiveInfinity(definition.RuntimeDuration),
+                Is.True);
+            Assert.That(
+                definition.ModifierLifetimeScope,
+                Is.EqualTo(CharacterModifierLifetimeScope.Dungeon));
         }
         finally
         {
@@ -458,10 +694,40 @@ public sealed class ItemDefinitionTests
         SerializedObject serialized = new(item);
         serialized.FindProperty("usePolicy").enumValueIndex =
             (int)usePolicy;
-        serialized.FindProperty("limitedUses").intValue = limitedUses;
+        serialized.FindProperty("usageSchemaVersion").intValue = 1;
+        serialized.FindProperty("lifecycle").enumValueIndex =
+            usePolicy == BattleItemUsePolicy.SingleUse
+                ? (int)BattleItemLifecycle.Disposable
+                : (int)BattleItemLifecycle.Reusable;
+        serialized.FindProperty("chargeMode").enumValueIndex =
+            usePolicy == BattleItemUsePolicy.UnlimitedUse
+                ? (int)BattleItemChargeMode.Unlimited
+                : (int)BattleItemChargeMode.Limited;
+        serialized.FindProperty("limitedUses").intValue =
+            usePolicy == BattleItemUsePolicy.SingleUse
+                ? 1
+                : limitedUses;
         serialized.FindProperty("maximumRunUses").intValue =
             maximumRunUses;
         serialized.FindProperty("cooldown").floatValue = cooldown;
+        serialized.ApplyModifiedPropertiesWithoutUndo();
+    }
+
+    private static void ConfigureModernBattleItem(
+        BattleItemSO item,
+        string itemId,
+        BattleItemLifecycle lifecycle,
+        BattleItemChargeMode chargeMode,
+        int usesPerBattle)
+    {
+        ConfigureItem(item, itemId, 0L, 0L);
+        SerializedObject serialized = new(item);
+        serialized.FindProperty("usageSchemaVersion").intValue = 1;
+        serialized.FindProperty("lifecycle").enumValueIndex =
+            (int)lifecycle;
+        serialized.FindProperty("chargeMode").enumValueIndex =
+            (int)chargeMode;
+        serialized.FindProperty("limitedUses").intValue = usesPerBattle;
         serialized.ApplyModifiedPropertiesWithoutUndo();
     }
 }

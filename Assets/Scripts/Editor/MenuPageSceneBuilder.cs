@@ -267,6 +267,7 @@ public static class MenuPageSceneBuilder
             description,
             buttonRoot,
             buttons);
+        ApplyMainUtilityLayout(page);
         Scene scene = page.gameObject.scene;
         if (scene.IsValid() && scene.isLoaded)
             EditorSceneManager.MarkSceneDirty(scene);
@@ -732,6 +733,7 @@ public static class MenuPageSceneBuilder
             description,
             buttonRoot,
             buttons);
+        ApplyMainUtilityLayout(page);
         return true;
     }
 
@@ -1398,6 +1400,56 @@ public static class MenuPageSceneBuilder
 
         DisableLayoutGroup(buttonRoot);
         DisableLayoutGroup(panel);
+    }
+
+    private static void ApplyMainUtilityLayout(MainPage page)
+    {
+        Transform runtimeRoot = page != null
+            ? page.transform.Find(RuntimeMenuPageBase.RuntimeRootObjectName)
+            : null;
+        RectTransform notice = runtimeRoot != null
+            ? runtimeRoot.Find("btnNOTICEOverlay") as RectTransform
+            : null;
+        RectTransform attendance = runtimeRoot != null
+            ? runtimeRoot.Find("btnATTENDANCEOverlay") as RectTransform
+            : null;
+
+        if (notice != null)
+        {
+            SetTopCorner(
+                notice,
+                false,
+                48f,
+                104f,
+                160f,
+                52f,
+                "Restore Main Notice Button");
+            notice.SetAsLastSibling();
+        }
+
+        if (attendance != null)
+        {
+            SetTopCorner(
+                attendance,
+                false,
+                220f,
+                104f,
+                184f,
+                52f,
+                "Restore Main Attendance Button");
+            attendance.SetAsLastSibling();
+        }
+
+        Transform noticePopup = runtimeRoot != null
+            ? runtimeRoot.Find("grpMainNoticePopup")
+            : null;
+        Transform attendancePopup = runtimeRoot != null
+            ? runtimeRoot.Find("grpAttendancePopup")
+            : null;
+        if (noticePopup != null)
+            noticePopup.SetAsLastSibling();
+        if (attendancePopup != null)
+            attendancePopup.SetAsLastSibling();
     }
 
     private static void SetRightMiddle(

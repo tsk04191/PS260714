@@ -225,7 +225,8 @@ public static class BattleEffectExecutor
         int preparedResourceSpendAmount = 0,
         int preparedHealthSpendAmount = 0,
         Func<int, IBattleCharacter, bool>
-            inheritedEnemyDamageFallback = null)
+            inheritedEnemyDamageFallback = null,
+        string actionId = null)
     {
         if (!IsUsable(effect))
             return default;
@@ -246,7 +247,8 @@ public static class BattleEffectExecutor
                     sourceData,
                     amountMultiplier,
                     showAttackRange,
-                    inheritedEnemyDamageFallback);
+                    inheritedEnemyDamageFallback,
+                    actionId);
                 break;
 
             case BattleEffectType.ApplyStatus:
@@ -257,22 +259,42 @@ public static class BattleEffectExecutor
                     return default;
                 }
 
+                string effectId = effect is CharacterEffectDefinition
+                    characterEffect
+                        ? characterEffect.EffectId
+                        : string.Empty;
+                CharacterActionKind actionKind = ResolveActionKind(
+                    effectContext.OriginKind);
+                float duration = sourceData != null
+                    ? sourceData.ResolveStatusDuration(
+                        effect.StatusDuration,
+                        actionKind,
+                        actionId,
+                        effectId)
+                    : effect.StatusDuration;
+                float resolvedStacks = sourceData != null
+                    ? sourceData.ResolveStatusStacks(
+                        effect.StatusStacks,
+                        actionKind,
+                        actionId,
+                        effectId)
+                    : effect.StatusStacks;
                 float stacks = Mathf.Min(
                     float.MaxValue,
-                    effect.StatusStacks * amountMultiplier);
+                    resolvedStacks * amountMultiplier);
                 bool changed = effectContext.TargetFaction ==
                                CharacterTargetFaction.Ally
                     ? effectContext.Board.TryApplyAlliedCharacterStatus(
                         effectContext.Source,
                         effectContext.AllyTargets,
                         effect.StatusEffect,
-                        effect.StatusDuration,
+                        duration,
                         stacks)
                     : effectContext.Board.TryApplyCharacterStatus(
                         effectContext.Source,
                         effectContext.EnemyTargets,
                         effect.StatusEffect,
-                        effect.StatusDuration,
+                        duration,
                         stacks,
                         effect.StatusEffect.TickInterval,
                         showAttackRange);
@@ -316,7 +338,8 @@ public static class BattleEffectExecutor
                     effectContext,
                     sourceData,
                     false,
-                    amountMultiplier);
+                    amountMultiplier,
+                    actionId);
                 if (amount <= 0)
                 {
                     result = new BattleEffectResult(true, false);
@@ -337,7 +360,8 @@ public static class BattleEffectExecutor
                         effectContext,
                         sourceData,
                         false,
-                        amountMultiplier);
+                        amountMultiplier,
+                        actionId);
                 if (amount <= 0)
                 {
                     result = new BattleEffectResult(true, false);
@@ -356,7 +380,8 @@ public static class BattleEffectExecutor
                     sourceData,
                     amountMultiplier,
                     false,
-                    showAttackRange);
+                    showAttackRange,
+                    actionId);
                 break;
 
             case BattleEffectType.SpendHealth:
@@ -368,7 +393,8 @@ public static class BattleEffectExecutor
                         effectContext,
                         sourceData,
                         false,
-                        amountMultiplier);
+                        amountMultiplier,
+                        actionId);
                 if (amount <= 0)
                 {
                     result = new BattleEffectResult(true, false);
@@ -387,7 +413,8 @@ public static class BattleEffectExecutor
                     sourceData,
                     amountMultiplier,
                     true,
-                    showAttackRange);
+                    showAttackRange,
+                    actionId);
                 break;
 
             default:
@@ -539,7 +566,8 @@ public static class BattleEffectExecutor
         CharacterData sourceData,
         int amountMultiplier,
         bool showAttackRange,
-        Func<int, IBattleCharacter, bool> fallback)
+        Func<int, IBattleCharacter, bool> fallback,
+        string actionId)
     {
         if (!IsDirectDamageType(effect.DamageType))
         {
@@ -552,7 +580,8 @@ public static class BattleEffectExecutor
                 context,
                 effect,
                 sourceData,
-                amountMultiplier);
+                amountMultiplier,
+                actionId);
         }
 
         if (effect.AmountScaling.HasTargetDependentTerm)
@@ -574,7 +603,8 @@ public static class BattleEffectExecutor
                             effect.TargetStatusScalingEffect),
                         sourceData,
                         true,
-                        amountMultiplier)));
+                        amountMultiplier,
+                        actionId)));
             }
             if (snapshots.Count == 0)
                 return default;
@@ -625,7 +655,8 @@ public static class BattleEffectExecutor
             context,
             sourceData,
             true,
-            amountMultiplier);
+            amountMultiplier,
+            actionId);
         if (sharedDamage <= 0)
             return default;
         if (context.Board != null)
@@ -655,7 +686,8 @@ public static class BattleEffectExecutor
         BattleEffectContext context,
         IBattleEffectDefinition effect,
         CharacterData sourceData,
-        int amountMultiplier)
+        int amountMultiplier,
+        string actionId)
     {
         List<AllyAmountSnapshot> snapshots = new(
             context.AllyTargets.Count);
@@ -667,7 +699,8 @@ public static class BattleEffectExecutor
                 context,
                 sourceData,
                 true,
-                amountMultiplier);
+                amountMultiplier,
+                actionId);
         foreach (IBattleCharacter target in context.AllyTargets)
         {
             if (target == null || !uniqueTargets.Add(target))
@@ -681,7 +714,8 @@ public static class BattleEffectExecutor
                         effect.TargetStatusScalingEffect),
                     sourceData,
                     true,
-                    amountMultiplier)
+                    amountMultiplier,
+                    actionId)
                 : sharedAmount;
             snapshots.Add(new AllyAmountSnapshot(target, amount));
         }
@@ -739,7 +773,8 @@ public static class BattleEffectExecutor
         CharacterData sourceData,
         int amountMultiplier,
         bool shield,
-        bool showAttackRange)
+        bool showAttackRange,
+        string actionId)
     {
         if (context.Board == null)
             return default;
@@ -751,7 +786,8 @@ public static class BattleEffectExecutor
                 context,
                 sourceData,
                 false,
-                amountMultiplier);
+                amountMultiplier,
+                actionId);
             if (amount <= 0)
                 return default;
 
@@ -797,7 +833,8 @@ public static class BattleEffectExecutor
                         effect.TargetStatusScalingEffect),
                     sourceData,
                     false,
-                    amountMultiplier);
+                    amountMultiplier,
+                    actionId);
                 if (amount <= 0)
                     continue;
 
@@ -828,7 +865,8 @@ public static class BattleEffectExecutor
                         effect.TargetStatusScalingEffect),
                     sourceData,
                     false,
-                    amountMultiplier);
+                    amountMultiplier,
+                    actionId);
                 if (amount <= 0)
                     continue;
 
@@ -855,7 +893,8 @@ public static class BattleEffectExecutor
         BattleEffectContext context,
         CharacterData sourceData,
         bool damage,
-        int amountMultiplier)
+        int amountMultiplier,
+        string actionId = null)
     {
         ScalingValue scaling = effect.AmountScaling;
         if (damage && sourceData != null)
@@ -878,11 +917,41 @@ public static class BattleEffectExecutor
 
         double value = scaling.EvaluateBattle(context) *
                        (double)Mathf.Max(1, amountMultiplier);
+        if (sourceData != null)
+        {
+            string effectId = effect is CharacterEffectDefinition
+                characterEffect
+                    ? characterEffect.EffectId
+                    : string.Empty;
+            value = sourceData.ResolveModifier(
+                (float)value,
+                damage
+                    ? CharacterModifierStat.Damage
+                    : CharacterModifierStat.EffectAmount,
+                ResolveActionKind(context.OriginKind),
+                actionId,
+                effectId);
+        }
         if (double.IsNaN(value) || value <= 0d)
             return 0;
         if (double.IsInfinity(value) || value >= int.MaxValue)
             return int.MaxValue;
         return Mathf.Max(0, Mathf.RoundToInt((float)value));
+    }
+
+    private static CharacterActionKind ResolveActionKind(
+        BattleEffectOriginKind originKind)
+    {
+        return originKind switch
+        {
+            BattleEffectOriginKind.CharacterAttack =>
+                CharacterActionKind.Attack,
+            BattleEffectOriginKind.CharacterPassive =>
+                CharacterActionKind.Passive,
+            BattleEffectOriginKind.CharacterSkill =>
+                CharacterActionKind.Skill,
+            _ => default,
+        };
     }
 
     private static bool TryResolveContext(

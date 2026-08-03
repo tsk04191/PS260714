@@ -36,6 +36,7 @@ public abstract class RuntimeMenuPageBase : MonoBehaviour, IPage
     protected virtual string PageDescriptionLocalizationKey => string.Empty;
     protected virtual Vector2 PanelSize => new(520f, 560f);
     protected virtual bool FillAvailableSpace => false;
+    protected RectTransform RuntimeRoot => _runtimeRoot;
     protected RectTransform ButtonRoot => _buttonRoot;
     public bool HasDesignerLayout => _designerLayoutVersion > 0;
 

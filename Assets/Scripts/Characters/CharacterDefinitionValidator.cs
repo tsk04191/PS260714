@@ -183,6 +183,7 @@ public static class CharacterDefinitionValidator
             attackTargetFaction,
             definition.AttackDefinitions,
             result);
+        ValidateModifierTargetsAndIds(definition, result);
         ValidateCumulativeUpgrades(
             definition.CumulativeUpgradeDefinitions,
             result);
@@ -1378,6 +1379,8 @@ public static class CharacterDefinitionValidator
             return;
         }
 
+        HashSet<string> allUpgradeIds = new(StringComparer.Ordinal);
+
         for (int definitionIndex = 0;
              definitionIndex < definitions.Count;
              definitionIndex++)
@@ -1424,13 +1427,58 @@ public static class CharacterDefinitionValidator
                     continue;
                 }
 
-                if (!seenTypes.Add(entry.Type))
+                if (definition.UsesLegacyProbabilityMode &&
+                    !seenTypes.Add(entry.Type))
                 {
                     AddError(
                         result,
                         "upgrade.type_duplicate",
                         $"{entryPath}.type",
                         $"Upgrade type '{entry.Type}' is duplicated.");
+                }
+                if (!allUpgradeIds.Add(entry.UpgradeId))
+                {
+                    AddError(
+                        result,
+                        "upgrade.id_duplicate",
+                        $"{entryPath}.upgradeId",
+                        $"Upgrade id '{entry.UpgradeId}' is duplicated " +
+                        "across this character's dungeon upgrade pools.");
+                }
+                if (!definition.UsesLegacyProbabilityMode &&
+                    !entry.HasExplicitUpgradeId)
+                {
+                    AddError(
+                        result,
+                        "upgrade.id_missing",
+                        $"{entryPath}.upgradeId",
+                        "Modular dungeon upgrades require a stable id.");
+                }
+                for (int moduleIndex = 0;
+                     moduleIndex < entry.ModifierModules.Count;
+                     moduleIndex++)
+                {
+                    CharacterModifierModule module =
+                        entry.ModifierModules[moduleIndex];
+                    string modulePath =
+                        $"{entryPath}.modifierModules[{moduleIndex}]";
+                    if (module == null)
+                    {
+                        AddError(
+                            result,
+                            "upgrade.module_null",
+                            modulePath,
+                            "Modifier module is null.");
+                    }
+                    else if (!IsFinite(module.ValuePerStack) ||
+                             module.ValuePerStack == 0f)
+                    {
+                        AddError(
+                            result,
+                            "upgrade.module_value_invalid",
+                            $"{modulePath}.valuePerStack",
+                            "Modifier value must be finite and non-zero.");
+                    }
                 }
                 if (!IsFinite(entry.Probability) || entry.Probability < 0f)
                 {
@@ -1451,7 +1499,8 @@ public static class CharacterDefinitionValidator
                 }
             }
 
-            if (!definition.HasValidProbabilityTotal)
+            if (definition.UsesLegacyProbabilityMode &&
+                !definition.HasValidProbabilityTotal)
             {
                 AddError(
                     result,
@@ -1460,6 +1509,198 @@ public static class CharacterDefinitionValidator
                     $"Upgrade probabilities total " +
                     $"{definition.TotalProbability:0.###}; expected " +
                     $"{CharacterDungeonUpgradeDefinition.RequiredProbabilityTotal:0.###}.");
+            }
+        }
+    }
+
+    private static void ValidateModifierTargetsAndIds(
+        CharacterSO definition,
+        CharacterDefinitionValidationResult result)
+    {
+        Dictionary<CharacterActionKind, Dictionary<string, HashSet<string>>>
+            actions = new();
+        RegisterActions(
+            definition.AttackDefinitions,
+            CharacterActionKind.Attack,
+            action => action?.ActionId,
+            action => action?.Effects,
+            "attackDefinitions",
+            actions,
+            result);
+        RegisterActions(
+            definition.PassiveDefinitions,
+            CharacterActionKind.Passive,
+            action => action?.ActionId,
+            action => action?.Effects,
+            "passiveDefinitions",
+            actions,
+            result);
+        RegisterActions(
+            definition.SkillDefinitions,
+            CharacterActionKind.Skill,
+            action => action?.ActionId,
+            action => action?.Effects,
+            "skillDefinitions",
+            actions,
+            result);
+
+        for (int definitionIndex = 0;
+             definitionIndex < definition.CumulativeUpgradeDefinitions.Count;
+             definitionIndex++)
+        {
+            CharacterCumulativeUpgradeDefinition upgrade =
+                definition.CumulativeUpgradeDefinitions[definitionIndex];
+            if (upgrade == null)
+                continue;
+            ValidateModifierModules(
+                upgrade.ModifierModules,
+                $"cumulativeUpgradeDefinitions[{definitionIndex}]" +
+                ".modifierModules",
+                actions,
+                result);
+        }
+
+        for (int poolIndex = 0;
+             poolIndex < definition.DungeonUpgradeDefinitions.Count;
+             poolIndex++)
+        {
+            CharacterDungeonUpgradeDefinition pool =
+                definition.DungeonUpgradeDefinitions[poolIndex];
+            if (pool == null)
+                continue;
+            for (int entryIndex = 0;
+                 entryIndex < pool.Entries.Count;
+                 entryIndex++)
+            {
+                CharacterDungeonUpgradeEntry entry =
+                    pool.Entries[entryIndex];
+                if (entry == null)
+                    continue;
+                ValidateModifierModules(
+                    entry.ModifierModules,
+                    $"dungeonUpgradeDefinitions[{poolIndex}].entries" +
+                    $"[{entryIndex}].modifierModules",
+                    actions,
+                    result);
+            }
+        }
+    }
+
+    private static void RegisterActions<TAction>(
+        IReadOnlyList<TAction> definitions,
+        CharacterActionKind actionKind,
+        Func<TAction, string> getActionId,
+        Func<TAction, IReadOnlyList<CharacterEffectDefinition>> getEffects,
+        string path,
+        Dictionary<CharacterActionKind,
+            Dictionary<string, HashSet<string>>> actions,
+        CharacterDefinitionValidationResult result)
+        where TAction : class
+    {
+        Dictionary<string, HashSet<string>> byId =
+            new(StringComparer.Ordinal);
+        actions[actionKind] = byId;
+        if (definitions == null)
+            return;
+
+        for (int index = 0; index < definitions.Count; index++)
+        {
+            TAction action = definitions[index];
+            if (action == null)
+                continue;
+            string actionId = (getActionId(action) ?? string.Empty).Trim();
+            IReadOnlyList<CharacterEffectDefinition> effects =
+                getEffects(action) ?? Array.Empty<CharacterEffectDefinition>();
+            HashSet<string> effectIds = new(StringComparer.Ordinal);
+            if (!string.IsNullOrEmpty(actionId) &&
+                !byId.TryAdd(actionId, effectIds))
+            {
+                AddError(
+                    result,
+                    "modifier.action_id_duplicate",
+                    $"{path}[{index}].actionId",
+                    $"Action id '{actionId}' is duplicated.");
+            }
+
+            for (int effectIndex = 0;
+                 effectIndex < effects.Count;
+                 effectIndex++)
+            {
+                string effectId =
+                    effects[effectIndex]?.EffectId?.Trim() ?? string.Empty;
+                if (string.IsNullOrEmpty(effectId))
+                    continue;
+                if (!effectIds.Add(effectId))
+                {
+                    AddError(
+                        result,
+                        "modifier.effect_id_duplicate",
+                        $"{path}[{index}].effects[{effectIndex}].effectId",
+                        $"Effect id '{effectId}' is duplicated in action " +
+                        $"'{actionId}'.");
+                }
+            }
+        }
+    }
+
+    private static void ValidateModifierModules(
+        IReadOnlyList<CharacterModifierModule> modules,
+        string path,
+        Dictionary<CharacterActionKind,
+            Dictionary<string, HashSet<string>>> actions,
+        CharacterDefinitionValidationResult result)
+    {
+        if (modules == null)
+            return;
+        HashSet<string> moduleIds = new(StringComparer.Ordinal);
+        for (int index = 0; index < modules.Count; index++)
+        {
+            CharacterModifierModule module = modules[index];
+            if (module == null)
+                continue;
+            string modulePath = $"{path}[{index}]";
+            if (!string.IsNullOrWhiteSpace(module.ModuleId) &&
+                !moduleIds.Add(module.ModuleId))
+            {
+                AddError(
+                    result,
+                    "modifier.module_id_duplicate",
+                    $"{modulePath}.moduleId",
+                    $"Modifier module id '{module.ModuleId}' is duplicated.");
+            }
+
+            CharacterModifierTarget target = module.Target;
+            if (target == null ||
+                target.Scope == CharacterModifierTargetScope.Character ||
+                target.Scope == CharacterModifierTargetScope.ActionKind)
+            {
+                continue;
+            }
+
+            if (string.IsNullOrWhiteSpace(target.ActionId) ||
+                !actions.TryGetValue(
+                    target.ActionKind,
+                    out Dictionary<string, HashSet<string>> byId) ||
+                !byId.TryGetValue(target.ActionId, out HashSet<string> effects))
+            {
+                AddError(
+                    result,
+                    "modifier.action_target_missing",
+                    $"{modulePath}.target.actionId",
+                    $"Target action '{target.ActionId}' does not exist.");
+                continue;
+            }
+
+            if (target.Scope == CharacterModifierTargetScope.Effect &&
+                (string.IsNullOrWhiteSpace(target.EffectId) ||
+                 !effects.Contains(target.EffectId)))
+            {
+                AddError(
+                    result,
+                    "modifier.effect_target_missing",
+                    $"{modulePath}.target.effectId",
+                    $"Target effect '{target.EffectId}' does not exist in " +
+                    $"action '{target.ActionId}'.");
             }
         }
     }

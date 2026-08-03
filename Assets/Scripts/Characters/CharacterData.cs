@@ -782,6 +782,9 @@ public sealed class CharacterData
     private readonly float _baseAttackPower;
     private readonly float _baseAttackCooldown;
     private readonly Dictionary<int, int> _dungeonUpgradeCounts = new();
+    private readonly Dictionary<string, int> _dungeonUpgradeCountsById =
+        new(StringComparer.Ordinal);
+    private readonly CharacterModifierCollection _modifierCollection = new();
     private int _cumulativeMaximumHealthBonus;
     private float _cumulativeAttackPowerBonus;
     private float _cumulativeAttackCooldownBonus;
@@ -821,23 +824,22 @@ public sealed class CharacterData
     public Sprite DamagedSdSprite { get; }
     public Sprite SkillSdSprite { get; }
     public Sprite PassiveSdSprite { get; }
-    public int MaximumHealth => (int)Math.Min(
-        int.MaxValue,
-        Math.Max(
-            1L,
-            (long)_baseMaximumHealth +
-            _cumulativeMaximumHealthBonus));
+    public int MaximumHealth => ResolveMaximumHealth();
     public float AttackPower => Mathf.Max(
         0f,
-        _baseAttackPower +
-        _cumulativeAttackPowerBonus +
-        _dungeonAttackPowerBonus);
+        _modifierCollection.Resolve(
+            _baseAttackPower +
+            _cumulativeAttackPowerBonus +
+            _dungeonAttackPowerBonus,
+            CharacterModifierStat.AttackPower));
     public float AttackCooldown => TimePrecision.Normalize(
         Mathf.Max(
             TimePrecision.Step,
-            _baseAttackCooldown +
-            _cumulativeAttackCooldownBonus +
-            _dungeonAttackCooldownBonus),
+            _modifierCollection.Resolve(
+                _baseAttackCooldown +
+                _cumulativeAttackCooldownBonus +
+                _dungeonAttackCooldownBonus,
+                CharacterModifierStat.AttackCooldown)),
         TimePrecision.Step);
     public float AttackRecoveryDuration { get; }
     public float ActiveSkillRecoveryDuration { get; }
@@ -853,6 +855,18 @@ public sealed class CharacterData
         0f,
         _cumulativeSkillDamageBonus +
         _dungeonSkillDamageBonus);
+
+    private int ResolveMaximumHealth()
+    {
+        float resolved = _modifierCollection.Resolve(
+            _baseMaximumHealth + _cumulativeMaximumHealthBonus,
+            CharacterModifierStat.MaximumHealth);
+        if (float.IsNaN(resolved) || resolved <= 1f)
+            return 1;
+        if (float.IsInfinity(resolved) || resolved >= int.MaxValue)
+            return int.MaxValue;
+        return Mathf.Max(1, Mathf.RoundToInt(resolved));
+    }
 
     public IReadOnlyList<CharacterAttackDefinition> AttackDefinitions =>
         _definition?.AttackDefinitions ?? Array.Empty<CharacterAttackDefinition>();
@@ -1115,6 +1129,8 @@ public sealed class CharacterData
 
     private void RecalculateCumulativeUpgradeModifiers()
     {
+        _modifierCollection.ClearScope(
+            CharacterModifierLifetimeScope.Permanent);
         double maximumHealth = 0d;
         double attackPower = 0d;
         double attackCooldown = 0d;
@@ -1140,6 +1156,15 @@ public sealed class CharacterData
                     definition.UpgradeId) ?? 0);
             if (level <= 0)
                 continue;
+
+            if (definition.ModifierModules.Count > 0)
+            {
+                _modifierCollection.ReplaceSource(
+                    $"cumulative:{definition.UpgradeId}",
+                    definition.ModifierModules,
+                    level,
+                    CharacterModifierLifetimeScope.Permanent);
+            }
 
             foreach (CharacterCumulativeUpgradeModifier modifier in
                      definition.Modifiers)
@@ -1242,7 +1267,8 @@ public sealed class CharacterData
             definition.DamageAmountMode,
             CreatePreviewEffectContext(
                 CharacterActionKind.Attack,
-                attackPowerMultiplier));
+                attackPowerMultiplier),
+            definition.ActionId);
     }
 
     public int CalculateAttackDamage(
@@ -1257,7 +1283,9 @@ public sealed class CharacterData
             effect.DamageAmountMode,
             CreatePreviewEffectContext(
                 CharacterActionKind.Attack,
-                attackPowerMultiplier));
+                attackPowerMultiplier),
+            null,
+            effect.EffectId);
     }
 
     public int CalculatePassiveDamage(
@@ -1272,7 +1300,8 @@ public sealed class CharacterData
             definition.DamageAmountMode,
             CreatePreviewEffectContext(
                 CharacterActionKind.Passive,
-                attackPowerMultiplier));
+                attackPowerMultiplier),
+            definition.ActionId);
     }
 
     public int CalculatePassiveDamage(
@@ -1287,7 +1316,9 @@ public sealed class CharacterData
             effect.DamageAmountMode,
             CreatePreviewEffectContext(
                 CharacterActionKind.Passive,
-                attackPowerMultiplier));
+                attackPowerMultiplier),
+            null,
+            effect.EffectId);
     }
 
     public int CalculateSkillDamage(
@@ -1302,7 +1333,8 @@ public sealed class CharacterData
             definition.DamageAmountMode,
             CreatePreviewEffectContext(
                 CharacterActionKind.Skill,
-                attackPowerMultiplier));
+                attackPowerMultiplier),
+            definition.ActionId);
     }
 
     public int CalculateSkillDamage(
@@ -1317,12 +1349,15 @@ public sealed class CharacterData
             effect.DamageAmountMode,
             CreatePreviewEffectContext(
                 CharacterActionKind.Skill,
-                attackPowerMultiplier));
+                attackPowerMultiplier),
+            null,
+            effect.EffectId);
     }
 
     public int CalculateEffectDamage(
         CharacterEffectDefinition effect,
-        EffectContext context)
+        EffectContext context,
+        string actionId = null)
     {
         if (effect == null || effect.Type != CharacterEffectType.Damage)
             return 0;
@@ -1330,18 +1365,27 @@ public sealed class CharacterData
         return CalculateDamage(
             effect.DamageScaling,
             effect.DamageAmountMode,
-            context);
+            context,
+            actionId,
+            effect.EffectId);
     }
 
     public int CalculateEffectAmount(
         CharacterEffectDefinition effect,
-        EffectContext context)
+        EffectContext context,
+        string actionId = null)
     {
         if (effect == null)
             return 0;
 
-        return RoundEffectValue(
-            effect.AmountScaling.Evaluate(context));
+        float amount = effect.AmountScaling.Evaluate(context);
+        amount = ResolveModifier(
+            amount,
+            CharacterModifierStat.EffectAmount,
+            context.ActionKind,
+            actionId,
+            effect.EffectId);
+        return RoundEffectValue(amount);
     }
 
     private EffectContext CreatePreviewEffectContext(
@@ -1358,7 +1402,9 @@ public sealed class CharacterData
     private int CalculateDamage(
         ScalingValue scaling,
         CharacterDamageAmountMode legacyAmountMode,
-        EffectContext context)
+        EffectContext context,
+        string actionId = null,
+        string effectId = null)
     {
         scaling += context.ActionKind switch
         {
@@ -1374,7 +1420,14 @@ public sealed class CharacterData
             _ => default
         };
 
-        return RoundEffectValue(scaling.Evaluate(context));
+        float damage = scaling.Evaluate(context);
+        damage = ResolveModifier(
+            damage,
+            CharacterModifierStat.Damage,
+            context.ActionKind,
+            actionId,
+            effectId);
+        return RoundEffectValue(damage);
     }
 
     private static int RoundEffectValue(float amount)
@@ -1403,12 +1456,125 @@ public sealed class CharacterData
             int.MaxValue,
             (long)_cumulativeSkillCostReduction +
             _dungeonSkillCostReduction);
-        return Mathf.Max(1, definition.Cost - totalReduction);
+        float cost = ResolveModifier(
+            definition.Cost - totalReduction,
+            CharacterModifierStat.SkillCost,
+            CharacterActionKind.Skill,
+            definition.ActionId);
+        return Mathf.Max(1, Mathf.RoundToInt(cost));
+    }
+
+    public float ResolveModifier(
+        float baseValue,
+        CharacterModifierStat stat,
+        CharacterActionKind actionKind = default,
+        string actionId = null,
+        string effectId = null)
+    {
+        return _modifierCollection.Resolve(
+            baseValue,
+            stat,
+            actionKind,
+            actionId,
+            effectId);
+    }
+
+    public float ResolveStatusDuration(
+        float baseDuration,
+        CharacterActionKind actionKind,
+        string actionId = null,
+        string effectId = null)
+    {
+        if (float.IsPositiveInfinity(baseDuration))
+            return baseDuration;
+
+        return TimePrecision.Normalize(
+            Mathf.Max(
+                TimePrecision.Step,
+                ResolveModifier(
+                    baseDuration,
+                    CharacterModifierStat.StatusDuration,
+                    actionKind,
+                    actionId,
+                    effectId)),
+            TimePrecision.Step);
+    }
+
+    public float ResolveStatusStacks(
+        float baseStacks,
+        CharacterActionKind actionKind,
+        string actionId = null,
+        string effectId = null)
+    {
+        return Mathf.Max(
+            0.1f,
+            ResolveModifier(
+                baseStacks,
+                CharacterModifierStat.StatusStacks,
+                actionKind,
+                actionId,
+                effectId));
+    }
+
+    public bool ReplaceModifierSource(
+        string sourceId,
+        IReadOnlyList<CharacterModifierModule> modules,
+        int stackCount,
+        CharacterModifierLifetimeScope lifetimeScope,
+        float duration = float.PositiveInfinity)
+    {
+        bool changed = _modifierCollection.ReplaceSource(
+            sourceId,
+            modules,
+            stackCount,
+            lifetimeScope,
+            duration);
+        if (changed)
+            StatsChanged?.Invoke();
+        return changed;
+    }
+
+    public bool RemoveModifierSource(string sourceId)
+    {
+        bool changed = _modifierCollection.RemoveSource(sourceId);
+        if (changed)
+            StatsChanged?.Invoke();
+        return changed;
+    }
+
+    public bool ClearModifierScope(CharacterModifierLifetimeScope scope)
+    {
+        bool changed = _modifierCollection.ClearScope(scope);
+        if (changed)
+            StatsChanged?.Invoke();
+        return changed;
+    }
+
+    public bool TickModifiers(float deltaTime)
+    {
+        bool changed = _modifierCollection.Tick(deltaTime);
+        if (changed)
+            StatsChanged?.Invoke();
+        return changed;
     }
 
     public bool CanApplyDungeonUpgrade(
         int definitionIndex,
         CharacterDungeonUpgradeType upgradeType)
+    {
+        CharacterDungeonUpgradeEntry entry = definitionIndex >= 0 &&
+            definitionIndex < DungeonUpgradeDefinitions.Count
+                ? DungeonUpgradeDefinitions[definitionIndex]
+                    ?.GetEntry(upgradeType)
+                : null;
+        return entry != null && CanApplyDungeonUpgrade(
+            definitionIndex,
+            entry.UpgradeId);
+    }
+
+    public bool CanApplyDungeonUpgrade(
+        int definitionIndex,
+        string upgradeId)
     {
         if (definitionIndex < 0 ||
             definitionIndex >= DungeonUpgradeDefinitions.Count)
@@ -1417,17 +1583,20 @@ public sealed class CharacterData
         }
 
         CharacterDungeonUpgradeEntry entry =
-            DungeonUpgradeDefinitions[definitionIndex]?.GetEntry(upgradeType);
+            DungeonUpgradeDefinitions[definitionIndex]?.GetEntry(upgradeId);
         if (entry == null || entry.Probability <= 0f)
             return false;
 
         int appliedCount = GetDungeonUpgradeAppliedCount(
             definitionIndex,
-            upgradeType);
+            entry.UpgradeId);
         if (!entry.HasUnlimitedLimit && appliedCount >= entry.Limit)
             return false;
 
-        return upgradeType switch
+        if (entry.HasModifierModules)
+            return true;
+
+        return entry.Type switch
         {
             CharacterDungeonUpgradeType.Speed =>
                 AttackCooldown > TimePrecision.Step,
@@ -1441,42 +1610,75 @@ public sealed class CharacterData
         int definitionIndex,
         CharacterDungeonUpgradeType upgradeType)
     {
-        if (!CanApplyDungeonUpgrade(definitionIndex, upgradeType))
+        CharacterDungeonUpgradeEntry entry = definitionIndex >= 0 &&
+            definitionIndex < DungeonUpgradeDefinitions.Count
+                ? DungeonUpgradeDefinitions[definitionIndex]
+                    ?.GetEntry(upgradeType)
+                : null;
+        return entry != null && ApplyDungeonUpgrade(
+            definitionIndex,
+            entry.UpgradeId);
+    }
+
+    public bool ApplyDungeonUpgrade(
+        int definitionIndex,
+        string upgradeId)
+    {
+        if (!CanApplyDungeonUpgrade(definitionIndex, upgradeId))
             return false;
 
         CharacterDungeonUpgradeEntry entry =
-            DungeonUpgradeDefinitions[definitionIndex].GetEntry(upgradeType);
-        float value = entry.FixedValue;
-        switch (upgradeType)
+            DungeonUpgradeDefinitions[definitionIndex].GetEntry(upgradeId);
+        int nextCount = GetDungeonUpgradeAppliedCount(
+            definitionIndex,
+            entry.UpgradeId) + 1;
+        if (entry.HasModifierModules)
         {
-            case CharacterDungeonUpgradeType.AttackPower:
-                _dungeonAttackPowerBonus += value;
-                break;
-            case CharacterDungeonUpgradeType.Speed:
-                _dungeonAttackCooldownBonus += value;
-                break;
-            case CharacterDungeonUpgradeType.PassiveDamage:
-                _dungeonPassiveDamageBonus += value;
-                break;
-            case CharacterDungeonUpgradeType.AttackDamage:
-                _dungeonAttackDamageBonus += value;
-                break;
-            case CharacterDungeonUpgradeType.SkillDamage:
-                _dungeonSkillDamageBonus += value;
-                break;
-            case CharacterDungeonUpgradeType.SkillCostReduction:
-                _dungeonSkillCostReduction = Mathf.Max(
-                    0,
-                    _dungeonSkillCostReduction +
-                    Mathf.RoundToInt(-value));
-                break;
-            default:
+            if (!_modifierCollection.ReplaceSource(
+                    $"dungeon:{entry.UpgradeId}",
+                    entry.ModifierModules,
+                    nextCount,
+                    CharacterModifierLifetimeScope.Dungeon))
+            {
                 return false;
+            }
+        }
+        else
+        {
+            float value = entry.FixedValue;
+            switch (entry.Type)
+            {
+                case CharacterDungeonUpgradeType.AttackPower:
+                    _dungeonAttackPowerBonus += value;
+                    break;
+                case CharacterDungeonUpgradeType.Speed:
+                    _dungeonAttackCooldownBonus += value;
+                    break;
+                case CharacterDungeonUpgradeType.PassiveDamage:
+                    _dungeonPassiveDamageBonus += value;
+                    break;
+                case CharacterDungeonUpgradeType.AttackDamage:
+                    _dungeonAttackDamageBonus += value;
+                    break;
+                case CharacterDungeonUpgradeType.SkillDamage:
+                    _dungeonSkillDamageBonus += value;
+                    break;
+                case CharacterDungeonUpgradeType.SkillCostReduction:
+                    _dungeonSkillCostReduction = Mathf.Max(
+                        0,
+                        _dungeonSkillCostReduction +
+                        Mathf.RoundToInt(-value));
+                    break;
+                default:
+                    return false;
+            }
         }
 
-        int key = GetDungeonUpgradeKey(definitionIndex, upgradeType);
-        _dungeonUpgradeCounts.TryGetValue(key, out int count);
-        _dungeonUpgradeCounts[key] = count + 1;
+        string key = GetDungeonUpgradeKey(
+            definitionIndex,
+            entry.UpgradeId);
+        _dungeonUpgradeCountsById[key] = nextCount;
+        StatsChanged?.Invoke();
         return true;
     }
 
@@ -1484,8 +1686,24 @@ public sealed class CharacterData
         int definitionIndex,
         CharacterDungeonUpgradeType upgradeType)
     {
-        int key = GetDungeonUpgradeKey(definitionIndex, upgradeType);
-        return _dungeonUpgradeCounts.TryGetValue(key, out int count)
+        CharacterDungeonUpgradeEntry entry = definitionIndex >= 0 &&
+            definitionIndex < DungeonUpgradeDefinitions.Count
+                ? DungeonUpgradeDefinitions[definitionIndex]
+                    ?.GetEntry(upgradeType)
+                : null;
+        return entry != null
+            ? GetDungeonUpgradeAppliedCount(
+                definitionIndex,
+                entry.UpgradeId)
+            : 0;
+    }
+
+    public int GetDungeonUpgradeAppliedCount(
+        int definitionIndex,
+        string upgradeId)
+    {
+        string key = GetDungeonUpgradeKey(definitionIndex, upgradeId);
+        return _dungeonUpgradeCountsById.TryGetValue(key, out int count)
             ? count
             : 0;
     }
@@ -1496,6 +1714,29 @@ public sealed class CharacterData
         out CharacterDungeonUpgradeType upgradeType)
     {
         upgradeType = default;
+        if (!TryRollDungeonUpgrade(
+                definitionIndex,
+                random,
+                out string upgradeId))
+        {
+            return false;
+        }
+
+        CharacterDungeonUpgradeEntry entry =
+            DungeonUpgradeDefinitions[definitionIndex]?.GetEntry(upgradeId);
+        if (entry == null)
+            return false;
+
+        upgradeType = entry.Type;
+        return true;
+    }
+
+    public bool TryRollDungeonUpgrade(
+        int definitionIndex,
+        System.Random random,
+        out string upgradeId)
+    {
+        upgradeId = string.Empty;
         if (random == null || definitionIndex < 0 ||
             definitionIndex >= DungeonUpgradeDefinitions.Count)
         {
@@ -1504,14 +1745,16 @@ public sealed class CharacterData
 
         CharacterDungeonUpgradeDefinition definition =
             DungeonUpgradeDefinitions[definitionIndex];
-        if (definition == null || !definition.HasValidProbabilityTotal)
+        if (definition == null ||
+            (definition.UsesLegacyProbabilityMode &&
+             !definition.HasValidProbabilityTotal))
             return false;
 
         float totalWeight = 0f;
         foreach (CharacterDungeonUpgradeEntry entry in definition.Entries)
         {
             if (entry != null &&
-                CanApplyDungeonUpgrade(definitionIndex, entry.Type))
+                CanApplyDungeonUpgrade(definitionIndex, entry.UpgradeId))
             {
                 totalWeight += entry.Probability;
             }
@@ -1524,7 +1767,7 @@ public sealed class CharacterData
         foreach (CharacterDungeonUpgradeEntry entry in definition.Entries)
         {
             if (entry == null ||
-                !CanApplyDungeonUpgrade(definitionIndex, entry.Type))
+                !CanApplyDungeonUpgrade(definitionIndex, entry.UpgradeId))
             {
                 continue;
             }
@@ -1533,7 +1776,7 @@ public sealed class CharacterData
             if (roll > 0d)
                 continue;
 
-            upgradeType = entry.Type;
+            upgradeId = entry.UpgradeId;
             return true;
         }
 
@@ -1572,5 +1815,13 @@ public sealed class CharacterData
         CharacterDungeonUpgradeType upgradeType)
     {
         return definitionIndex * DungeonUpgradeTypeCount + (int)upgradeType;
+    }
+
+    private static string GetDungeonUpgradeKey(
+        int definitionIndex,
+        string upgradeId)
+    {
+        _ = definitionIndex;
+        return (upgradeId ?? string.Empty).Trim();
     }
 }

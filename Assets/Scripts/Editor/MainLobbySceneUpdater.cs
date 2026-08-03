@@ -503,6 +503,14 @@ public static class MainLobbySceneUpdater
 
         RenameChild(buttonRoot, "btnCODEX", "btnBASE");
         RenameChild(buttonRoot, "btnQUEST", "btnRECRUIT");
+        EnsureMainUtilityButton(
+            root,
+            "btnNOTICEOverlay",
+            LocalizationKeys.UiTitleNotice);
+        EnsureMainUtilityButton(
+            root,
+            "btnATTENDANCEOverlay",
+            LocalizationKeys.UiMainAttendance);
         MenuPageSceneBuilder.RestoreMainMenuDefaultLayout(mainPage);
 
         Image rootImage = root.GetComponent<Image>();
@@ -564,6 +572,7 @@ public static class MainLobbySceneUpdater
         ConfigureBrand(root);
         ConfigureCurrencyBar(root);
         ConfigureMenuPanel(panel, buttonRoot);
+        ConfigureMainUtilityButtons(root);
         ConfigureSettingsButton(root);
 
         backdrop.transform.SetSiblingIndex(0);
@@ -580,6 +589,12 @@ public static class MainLobbySceneUpdater
         Transform currency = root.Find("grpCurrencyBar");
         if (currency != null)
             currency.SetSiblingIndex(7);
+        Transform notice = root.Find("btnNOTICEOverlay");
+        if (notice != null)
+            notice.SetAsLastSibling();
+        Transform attendance = root.Find("btnATTENDANCEOverlay");
+        if (attendance != null)
+            attendance.SetAsLastSibling();
         Transform settings = root.Find("btnSETTINGSOverlay");
         if (settings != null)
             settings.SetAsLastSibling();
@@ -923,6 +938,122 @@ public static class MainLobbySceneUpdater
                 label.rectTransform,
                 new Vector2(6f, 4f),
                 new Vector2(-6f, -4f));
+        }
+    }
+
+    private static void EnsureMainUtilityButton(
+        Transform root,
+        string objectName,
+        string localizationKey)
+    {
+        GameObject buttonObject = GetOrCreateRect(root, objectName);
+        Image image = buttonObject.GetComponent<Image>();
+        if (image == null)
+            image = buttonObject.AddComponent<Image>();
+        Button button = buttonObject.GetComponent<Button>();
+        if (button == null)
+            button = buttonObject.AddComponent<Button>();
+        image.raycastTarget = true;
+        button.targetGraphic = image;
+
+        TextMeshProUGUI label = GetOrCreateText(
+            buttonObject.transform,
+            "txtLabel",
+            17f,
+            TextAlignmentOptions.Center);
+        ConfigureStretchText(
+            label.rectTransform,
+            new Vector2(10f, 4f),
+            new Vector2(-10f, -4f));
+        ApplyLocalizedText(label, localizationKey);
+        label.fontStyle = FontStyles.Bold;
+    }
+
+    private static void ConfigureMainUtilityButtons(Transform root)
+    {
+        ConfigureMainUtilityButton(
+            root.Find("btnNOTICEOverlay"),
+            48f,
+            160f,
+            new Color(0.08f, 0.19f, 0.17f, 0.98f));
+        Transform attendance = root.Find("btnATTENDANCEOverlay");
+        ConfigureMainUtilityButton(
+            attendance,
+            220f,
+            184f,
+            new Color(0.14f, 0.25f, 0.18f, 0.98f));
+
+        if (attendance == null)
+            return;
+
+        GameObject badge = GetOrCreateImage(
+            attendance,
+            "imgAttendanceAvailable");
+        RectTransform badgeRect = (RectTransform)badge.transform;
+        ConfigureRect(
+            badgeRect,
+            Vector2.one,
+            Vector2.one,
+            new Vector2(0.5f, 0.5f),
+            new Vector2(-4f, -4f),
+            new Vector2(18f, 18f));
+        Image badgeImage = badge.GetComponent<Image>();
+        badgeImage.color = new Color(0.95f, 0.3f, 0.2f, 1f);
+        badgeImage.raycastTarget = false;
+        badge.SetActive(false);
+    }
+
+    private static void ConfigureMainUtilityButton(
+        Transform buttonTransform,
+        float left,
+        float width,
+        Color color)
+    {
+        if (buttonTransform == null)
+            return;
+
+        RectTransform rect = (RectTransform)buttonTransform;
+        ConfigureRect(
+            rect,
+            new Vector2(0f, 1f),
+            new Vector2(0f, 1f),
+            new Vector2(0f, 1f),
+            new Vector2(left, -104f),
+            new Vector2(width, 52f));
+        Image image = buttonTransform.GetComponent<Image>();
+        if (image != null)
+        {
+            image.color = color;
+            image.raycastTarget = true;
+        }
+
+        Button button = buttonTransform.GetComponent<Button>();
+        if (button != null && image != null)
+        {
+            button.targetGraphic = image;
+            ColorBlock colors = button.colors;
+            colors.normalColor = color;
+            colors.highlightedColor =
+                Color.Lerp(color, Color.white, 0.14f);
+            colors.pressedColor =
+                Color.Lerp(color, Color.black, 0.18f);
+            colors.selectedColor = colors.highlightedColor;
+            colors.disabledColor =
+                Color.Lerp(color, Color.black, 0.5f);
+            button.colors = colors;
+        }
+
+        TextMeshProUGUI label = buttonTransform.Find("txtLabel")
+            ?.GetComponent<TextMeshProUGUI>();
+        if (label != null)
+        {
+            label.fontSize = 17f;
+            label.fontSizeMax = 17f;
+            label.fontSizeMin = 13f;
+            ConfigureStretchText(
+                label.rectTransform,
+                new Vector2(8f, 4f),
+                new Vector2(-8f, -4f));
         }
     }
 

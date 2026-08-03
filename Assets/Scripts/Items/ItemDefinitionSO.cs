@@ -1,4 +1,5 @@
 using System;
+using PS260714.Localization;
 using UnityEngine;
 
 public enum ItemCategory
@@ -39,6 +40,8 @@ public abstract class ItemDefinitionSO : ScriptableObject
     [SerializeField] private int sortOrder;
 
     [Header("Localization")]
+    [SerializeField] private string nameLocalizationKey;
+    [SerializeField] private string descriptionLocalizationKey;
     [SerializeField] private string koreanName;
     [SerializeField] private string englishName;
     [SerializeField, TextArea] private string koreanDescription;
@@ -56,6 +59,10 @@ public abstract class ItemDefinitionSO : ScriptableObject
     public ItemCategory Category => category;
     public ItemRarity Rarity => rarity;
     public int SortOrder => sortOrder;
+    public string NameLocalizationKey =>
+        nameLocalizationKey ?? string.Empty;
+    public string DescriptionLocalizationKey =>
+        descriptionLocalizationKey ?? string.Empty;
     public Sprite Icon => icon;
     public long MaximumStack => Math.Max(0L, maximumStack);
     public bool HasUnlimitedStack => MaximumStack == 0L;
@@ -65,7 +72,11 @@ public abstract class ItemDefinitionSO : ScriptableObject
 
     public string GetDisplayName(bool korean)
     {
-        string localized = korean ? koreanName : englishName;
+        string localized = ResolveForLocale(
+            nameLocalizationKey,
+            korean);
+        if (string.IsNullOrWhiteSpace(localized))
+            localized = korean ? koreanName : englishName;
         if (!string.IsNullOrWhiteSpace(localized))
             return localized.Trim();
         return string.IsNullOrWhiteSpace(ItemId)
@@ -75,10 +86,40 @@ public abstract class ItemDefinitionSO : ScriptableObject
 
     public string GetDescription(bool korean)
     {
-        string localized = korean
-            ? koreanDescription
-            : englishDescription;
+        string localized = ResolveForLocale(
+            descriptionLocalizationKey,
+            korean);
+        if (string.IsNullOrWhiteSpace(localized))
+        {
+            localized = korean
+                ? koreanDescription
+                : englishDescription;
+        }
         return localized?.Trim() ?? string.Empty;
+    }
+
+    public string GetLocalizedDisplayName()
+    {
+        if (TryResolveCurrentLocale(
+                nameLocalizationKey,
+                out string localized))
+        {
+            return localized;
+        }
+
+        return GetDisplayName(IsCurrentLocaleKorean());
+    }
+
+    public virtual string GetLocalizedDescription()
+    {
+        if (TryResolveCurrentLocale(
+                descriptionLocalizationKey,
+                out string localized))
+        {
+            return localized;
+        }
+
+        return GetDescription(IsCurrentLocaleKorean());
     }
 
     public long ClampAmount(long amount)
@@ -92,10 +133,60 @@ public abstract class ItemDefinitionSO : ScriptableObject
     protected virtual void OnValidate()
     {
         itemId = itemId?.Trim() ?? string.Empty;
+        nameLocalizationKey =
+            nameLocalizationKey?.Trim() ?? string.Empty;
+        descriptionLocalizationKey =
+            descriptionLocalizationKey?.Trim() ?? string.Empty;
         koreanName = koreanName?.Trim() ?? string.Empty;
         englishName = englishName?.Trim() ?? string.Empty;
         maximumStack = Math.Max(0L, maximumStack);
         initialAmount = ClampAmount(
             Math.Max(0L, initialAmount));
+    }
+
+    protected static bool TryResolveCurrentLocale(
+        string localizationKey,
+        out string localized,
+        params LocalizationArgument[] arguments)
+    {
+        localizationKey = localizationKey?.Trim() ?? string.Empty;
+        if (string.IsNullOrEmpty(localizationKey) ||
+            !LocalizationService.TryGet(
+                localizationKey,
+                out _,
+                arguments ?? Array.Empty<LocalizationArgument>()))
+        {
+            localized = string.Empty;
+            return false;
+        }
+
+        localized = LocalizationService.Get(
+            localizationKey,
+            arguments ?? Array.Empty<LocalizationArgument>());
+        return !string.IsNullOrWhiteSpace(localized);
+    }
+
+    protected static bool IsCurrentLocaleKorean()
+    {
+        return LocalizationService.CurrentLocale?.StartsWith(
+            "ko",
+            StringComparison.OrdinalIgnoreCase) == true;
+    }
+
+    private static string ResolveForLocale(
+        string localizationKey,
+        bool korean)
+    {
+        localizationKey = localizationKey?.Trim() ?? string.Empty;
+        if (string.IsNullOrEmpty(localizationKey))
+            return string.Empty;
+
+        string locale = korean ? "ko-KR" : "en-US";
+        return GeneratedLocalizationTables.TryGet(
+            locale,
+            localizationKey,
+            out LocalizationEntry entry)
+            ? entry.Text
+            : string.Empty;
     }
 }

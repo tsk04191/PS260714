@@ -30,6 +30,50 @@ public static class CharacterLocalization
             : data.CharacterDescription ?? string.Empty;
     }
 
+    public static string GetUpgradePresetTitle(
+        CharacterUpgradeLocalizationPreset preset)
+    {
+        return LocalizationService.Get(GetUpgradePresetTitleKey(preset));
+    }
+
+    public static string GetCumulativeUpgradeTitle(
+        CharacterCumulativeUpgradeDefinition definition)
+    {
+        if (definition == null)
+            return string.Empty;
+
+        if (definition.UsesCustomLocalization &&
+            !string.IsNullOrWhiteSpace(definition.TitleLocalizationKey))
+        {
+            return LocalizationService.Get(definition.TitleLocalizationKey);
+        }
+
+        if (definition.LocalizationPreset !=
+                CharacterUpgradeLocalizationPreset.Automatic &&
+            definition.LocalizationPreset !=
+                CharacterUpgradeLocalizationPreset.Custom)
+        {
+            return GetUpgradePresetTitle(definition.LocalizationPreset);
+        }
+
+        return definition.UpgradeId;
+    }
+
+    public static string GetCumulativeUpgradeDetail(
+        CharacterCumulativeUpgradeDefinition definition)
+    {
+        if (definition == null ||
+            !definition.UsesCustomLocalization ||
+            string.IsNullOrWhiteSpace(
+                definition.DescriptionLocalizationKey))
+        {
+            return string.Empty;
+        }
+
+        return LocalizationService.Get(
+            definition.DescriptionLocalizationKey);
+    }
+
     public static string GetDungeonUpgradeTitle(
         CharacterDungeonUpgradeType upgradeType)
     {
@@ -50,11 +94,88 @@ public static class CharacterLocalization
         return LocalizationService.Get(key);
     }
 
+    public static string GetDungeonUpgradeTitle(
+        CharacterDungeonUpgradeEntry entry)
+    {
+        if (entry == null)
+            return LocalizationService.Get(
+                LocalizationKeys.UiDungeonRewardUpgradeGenericTitle);
+        if (entry.UsesCustomLocalization &&
+            !string.IsNullOrWhiteSpace(entry.TitleLocalizationKey))
+            return LocalizationService.Get(entry.TitleLocalizationKey);
+        if (entry.LocalizationPreset !=
+                CharacterUpgradeLocalizationPreset.Automatic &&
+            entry.LocalizationPreset !=
+                CharacterUpgradeLocalizationPreset.Custom)
+        {
+            return GetUpgradePresetTitle(entry.LocalizationPreset);
+        }
+        return GetDungeonUpgradeTitle(entry.Type);
+    }
+
     public static string GetDungeonUpgradeDescription(
         CharacterData data,
         CharacterDungeonUpgradeType upgradeType)
     {
         return data?.GetDungeonUpgradeLabel(upgradeType) ?? string.Empty;
+    }
+
+    public static string GetDungeonUpgradeDescription(
+        CharacterData data,
+        CharacterDungeonUpgradeEntry entry)
+    {
+        if (entry == null)
+            return string.Empty;
+        if (entry.UsesCustomLocalization &&
+            !string.IsNullOrWhiteSpace(entry.DescriptionLocalizationKey))
+            return LocalizationService.Get(entry.DescriptionLocalizationKey);
+        if (!entry.HasModifierModules)
+            return data?.GetDungeonUpgradeLabel(entry.Type) ?? string.Empty;
+
+        StringBuilder builder = new();
+        foreach (CharacterModifierModule module in entry.ModifierModules)
+        {
+            if (module == null)
+                continue;
+            AppendCodexLine(builder, FormatModifierModule(module));
+        }
+        return builder.ToString();
+    }
+
+    private static string FormatModifierModule(
+        CharacterModifierModule module)
+    {
+        string target = module.Target?.Scope switch
+        {
+            CharacterModifierTargetScope.Character =>
+                UsesKoreanLocale ? "캐릭터" : "Character",
+            CharacterModifierTargetScope.ActionKind =>
+                module.Target.ActionKind.ToString(),
+            CharacterModifierTargetScope.Action =>
+                module.Target.ActionId,
+            CharacterModifierTargetScope.Effect =>
+                $"{module.Target.ActionId}/{module.Target.EffectId}",
+            _ => string.Empty,
+        };
+        string operation = module.Operation switch
+        {
+            CharacterModifierOperation.AddFlat =>
+                module.ValuePerStack >= 0f ? "+" : string.Empty,
+            CharacterModifierOperation.AddPercent =>
+                module.ValuePerStack >= 0f ? "+" : string.Empty,
+            CharacterModifierOperation.Multiply => "×",
+            _ => string.Empty,
+        };
+        float displayedValue =
+            module.Operation == CharacterModifierOperation.AddPercent
+                ? module.ValuePerStack * 100f
+                : module.ValuePerStack;
+        string suffix =
+            module.Operation == CharacterModifierOperation.AddPercent
+                ? "%"
+                : string.Empty;
+        return $"{target} · {module.Stat} {operation}" +
+               $"{displayedValue:0.##}{suffix}";
     }
 
     public static string GetIdentity(string assetName, CharacterData data)
@@ -132,9 +253,14 @@ public static class CharacterLocalization
             string maximum = definition.HasUnlimitedMaxLevel
                 ? string.Empty
                 : $"/{definition.MaxLevel}";
+            string title = GetCumulativeUpgradeTitle(definition);
+            string detail = GetCumulativeUpgradeDetail(definition);
+            string line = $"{title}  Lv.{level}{maximum}";
+            if (!string.IsNullOrWhiteSpace(detail))
+                line += $"  {detail}";
             AppendCodexLine(
                 builder,
-                $"{definition.UpgradeId}  Lv.{level}{maximum}");
+                line);
         }
 
         foreach (CharacterCumulativeUpgradeProgress progress in
@@ -313,6 +439,23 @@ public static class CharacterLocalization
         return LocalizationService.Get(
             key,
             LocalizationService.Arg("seconds", seconds));
+    }
+
+    private static string GetUpgradePresetTitleKey(
+        CharacterUpgradeLocalizationPreset preset)
+    {
+        return preset switch
+        {
+            CharacterUpgradeLocalizationPreset.AttackPower =>
+                LocalizationKeys.UiDungeonRewardUpgradeAttackPowerTitle,
+            CharacterUpgradeLocalizationPreset.AttackSpeed =>
+                LocalizationKeys.UiDungeonRewardUpgradeAttackSpeedTitle,
+            CharacterUpgradeLocalizationPreset.SkillPower =>
+                LocalizationKeys.UiDungeonRewardUpgradeSkillPowerTitle,
+            CharacterUpgradeLocalizationPreset.SkillCost =>
+                LocalizationKeys.UiDungeonRewardUpgradeSkillCostTitle,
+            _ => LocalizationKeys.UiDungeonRewardUpgradeGenericTitle,
+        };
     }
 
     private static string GetCustomPassiveDescription(

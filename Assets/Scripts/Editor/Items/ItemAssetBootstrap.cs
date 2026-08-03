@@ -22,10 +22,83 @@ public static class ItemAssetBootstrap
         "Assets/Resources/ItemCatalog.asset";
     private const string MenuPath =
         "PS260714/Data/Create Core Item Assets";
+    private const string MigrationMenuPath =
+        "PS260714/Data/Migrate Battle Item Usage Schema";
 
     static ItemAssetBootstrap()
     {
         EditorApplication.delayCall += CreateRequestedAssets;
+        EditorApplication.delayCall += MigrateBattleItemAssets;
+    }
+
+    [MenuItem(MigrationMenuPath)]
+    public static void MigrateBattleItemAssets()
+    {
+        foreach (string guid in AssetDatabase.FindAssets(
+                     "t:BattleItemSO",
+                     new[] { ItemRoot }))
+        {
+            string path = AssetDatabase.GUIDToAssetPath(guid);
+            BattleItemSO item = AssetDatabase.LoadAssetAtPath<BattleItemSO>(
+                path);
+            if (item == null)
+                continue;
+
+            SerializedObject serialized = new(item);
+            SerializedProperty schema = serialized.FindProperty(
+                "usageSchemaVersion");
+            if (schema != null && schema.intValue <= 0)
+            {
+                BattleItemUsePolicy legacyPolicy =
+                    (BattleItemUsePolicy)(serialized.FindProperty(
+                        "usePolicy")?.enumValueIndex ?? 0);
+                SetEnum(
+                    serialized,
+                    "lifecycle",
+                    legacyPolicy == BattleItemUsePolicy.SingleUse
+                        ? (int)BattleItemLifecycle.Disposable
+                        : (int)BattleItemLifecycle.Reusable);
+                SetEnum(
+                    serialized,
+                    "chargeMode",
+                    legacyPolicy == BattleItemUsePolicy.UnlimitedUse
+                        ? (int)BattleItemChargeMode.Unlimited
+                        : (int)BattleItemChargeMode.Limited);
+                if (legacyPolicy == BattleItemUsePolicy.SingleUse)
+                    SetInt(serialized, "limitedUses", 1);
+                schema.intValue = 1;
+            }
+
+            SerializedProperty effects = serialized.FindProperty("effects");
+            for (int index = 0;
+                 effects != null && index < effects.arraySize;
+                 index++)
+            {
+                SerializedProperty effect =
+                    effects.GetArrayElementAtIndex(index);
+                SerializedProperty effectSchema =
+                    effect.FindPropertyRelative("schemaVersion");
+                if (effectSchema == null || effectSchema.intValue > 0)
+                    continue;
+
+                BattleItemEffectType type =
+                    (BattleItemEffectType)(effect.FindPropertyRelative(
+                        "effectType")?.enumValueIndex ?? 0);
+                effect.FindPropertyRelative("scope").enumValueIndex =
+                    (int)BattleItemEffectScope.CurrentBattle;
+                effect.FindPropertyRelative("durationMode").enumValueIndex =
+                    type == BattleItemEffectType.FixedDamage
+                        ? (int)BattleItemEffectDurationMode.Instant
+                        : (int)BattleItemEffectDurationMode.Timed;
+                effectSchema.intValue = 1;
+            }
+
+            if (serialized.ApplyModifiedPropertiesWithoutUndo())
+            {
+                EditorUtility.SetDirty(item);
+                AssetDatabase.SaveAssetIfDirty(item);
+            }
+        }
     }
 
     [MenuItem(MenuPath)]
@@ -307,7 +380,16 @@ public static class ItemAssetBootstrap
             serialized,
             "usePolicy",
             (int)BattleItemUsePolicy.SingleUse);
-        SetInt(serialized, "limitedUses", 2);
+        SetInt(serialized, "usageSchemaVersion", 1);
+        SetEnum(
+            serialized,
+            "lifecycle",
+            (int)BattleItemLifecycle.Disposable);
+        SetEnum(
+            serialized,
+            "chargeMode",
+            (int)BattleItemChargeMode.Limited);
+        SetInt(serialized, "limitedUses", 1);
         SetInt(serialized, "maximumRunUses", 0);
         SetInt(serialized, "energyCost", energyCost);
         SetFloat(serialized, "cooldown", 0f);
@@ -317,8 +399,15 @@ public static class ItemAssetBootstrap
         SerializedProperty effects = serialized.FindProperty("effects");
         effects.arraySize = 1;
         SerializedProperty effect = effects.GetArrayElementAtIndex(0);
+        effect.FindPropertyRelative("schemaVersion").intValue = 1;
         effect.FindPropertyRelative("effectType").enumValueIndex =
             (int)effectType;
+        effect.FindPropertyRelative("scope").enumValueIndex =
+            (int)BattleItemEffectScope.CurrentBattle;
+        effect.FindPropertyRelative("durationMode").enumValueIndex =
+            effectType == BattleItemEffectType.FixedDamage
+                ? (int)BattleItemEffectDurationMode.Instant
+                : (int)BattleItemEffectDurationMode.Timed;
         effect.FindPropertyRelative("amount").intValue = amount;
         effect.FindPropertyRelative("duration").floatValue = duration;
         effect.FindPropertyRelative("interval").floatValue = interval;
@@ -343,6 +432,18 @@ public static class ItemAssetBootstrap
         SetEnum(serialized, "category", (int)category);
         SetEnum(serialized, "rarity", (int)rarity);
         SetInt(serialized, "sortOrder", sortOrder);
+        ResolveCoreLocalizationKeys(
+            itemId,
+            out string nameLocalizationKey,
+            out string descriptionLocalizationKey);
+        SetString(
+            serialized,
+            "nameLocalizationKey",
+            nameLocalizationKey);
+        SetString(
+            serialized,
+            "descriptionLocalizationKey",
+            descriptionLocalizationKey);
         SetString(serialized, "koreanName", koreanName);
         SetString(serialized, "englishName", englishName);
         SetString(
@@ -356,6 +457,40 @@ public static class ItemAssetBootstrap
         SetLong(serialized, "maximumStack", 0L);
         SetLong(serialized, "initialAmount", 0L);
         SetBool(serialized, "hiddenInStorage", false);
+    }
+
+    private static void ResolveCoreLocalizationKeys(
+        string itemId,
+        out string nameLocalizationKey,
+        out string descriptionLocalizationKey)
+    {
+        (nameLocalizationKey, descriptionLocalizationKey) = itemId switch
+        {
+            CoreItemIds.SoftCredit =>
+                ("item.soft_credit.name", "item.soft_credit.description"),
+            CoreItemIds.PaidCredit =>
+                ("item.paid_credit.name", "item.paid_credit.description"),
+            CoreItemIds.FreeCredit =>
+                ("item.free_credit.name", "item.free_credit.description"),
+            CoreItemIds.StandardRecruitTicket =>
+                ("item.standard_recruit_ticket.name",
+                 "item.standard_recruit_ticket.description"),
+            CoreItemIds.BasicUpgradeMaterial =>
+                ("item.basic_upgrade_material.name",
+                 "item.basic_upgrade_material.description"),
+            CoreBattleItemIds.Focus =>
+                ("item.focus.name", "item.focus.effect"),
+            CoreBattleItemIds.Molotov =>
+                ("item.molotov.name", "item.molotov.effect"),
+            CoreBattleItemIds.PrecisionShot =>
+                ("item.precision_shot.name",
+                 "item.precision_shot.effect"),
+            CoreBattleItemIds.OverSupply =>
+                ("item.over_supply.name", "item.over_supply.effect"),
+            CoreBattleItemIds.Overheat =>
+                ("item.overheat.name", "item.overheat.effect"),
+            _ => (string.Empty, string.Empty),
+        };
     }
 
     internal static void RefreshCatalog()

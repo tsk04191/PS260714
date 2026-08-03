@@ -603,6 +603,17 @@ public enum CharacterDungeonUpgradeType
     SkillCostReduction
 }
 
+public enum CharacterUpgradeLocalizationPreset
+{
+    Automatic = 0,
+    Generic = 1,
+    AttackPower = 2,
+    AttackSpeed = 3,
+    SkillPower = 4,
+    SkillCost = 5,
+    Custom = 100,
+}
+
 public enum CharacterCumulativeUpgradeModifierType
 {
     AttackPower = 0,
@@ -612,6 +623,365 @@ public enum CharacterCumulativeUpgradeModifierType
     AttackDamage = 4,
     SkillDamage = 5,
     SkillCostReduction = 6
+}
+
+public enum CharacterModifierTargetScope
+{
+    Character = 0,
+    ActionKind = 1,
+    Action = 2,
+    Effect = 3,
+}
+
+public enum CharacterModifierStat
+{
+    MaximumHealth = 0,
+    AttackPower = 1,
+    AttackCooldown = 2,
+    Damage = 3,
+    EffectAmount = 4,
+    StatusDuration = 5,
+    StatusStacks = 6,
+    SkillCost = 7,
+}
+
+public enum CharacterModifierOperation
+{
+    AddFlat = 0,
+    AddPercent = 1,
+    Multiply = 2,
+}
+
+public enum CharacterModifierLifetimeScope
+{
+    Permanent = 0,
+    Dungeon = 1,
+    Battle = 2,
+}
+
+[Serializable]
+public sealed class CharacterModifierTarget
+{
+    [SerializeField]
+    private CharacterModifierTargetScope scope;
+    [SerializeField]
+    private CharacterActionKind actionKind;
+    [SerializeField]
+    private string actionId;
+    [SerializeField]
+    private string effectId;
+
+    public CharacterModifierTargetScope Scope => scope;
+    public CharacterActionKind ActionKind => actionKind;
+    public string ActionId => actionId ?? string.Empty;
+    public string EffectId => effectId ?? string.Empty;
+
+    public CharacterModifierTarget()
+    {
+    }
+
+    public CharacterModifierTarget(
+        CharacterModifierTargetScope targetScope,
+        CharacterActionKind targetActionKind = default,
+        string targetActionId = null,
+        string targetEffectId = null)
+    {
+        scope = targetScope;
+        actionKind = targetActionKind;
+        actionId = targetActionId ?? string.Empty;
+        effectId = targetEffectId ?? string.Empty;
+        Validate();
+    }
+
+    public bool Matches(
+        CharacterActionKind candidateKind,
+        string candidateActionId,
+        string candidateEffectId)
+    {
+        if (scope == CharacterModifierTargetScope.Character)
+            return true;
+        if (actionKind != candidateKind)
+            return false;
+        if (scope == CharacterModifierTargetScope.ActionKind)
+            return true;
+        if (!string.Equals(
+                ActionId,
+                candidateActionId ?? string.Empty,
+                StringComparison.Ordinal))
+        {
+            return false;
+        }
+        return scope != CharacterModifierTargetScope.Effect ||
+               string.Equals(
+                   EffectId,
+                   candidateEffectId ?? string.Empty,
+                   StringComparison.Ordinal);
+    }
+
+    public void Validate()
+    {
+        actionId = (actionId ?? string.Empty).Trim();
+        effectId = (effectId ?? string.Empty).Trim();
+        if (scope == CharacterModifierTargetScope.Character)
+        {
+            actionId = string.Empty;
+            effectId = string.Empty;
+        }
+        else if (scope == CharacterModifierTargetScope.ActionKind)
+        {
+            actionId = string.Empty;
+            effectId = string.Empty;
+        }
+        else if (scope == CharacterModifierTargetScope.Action)
+        {
+            effectId = string.Empty;
+        }
+    }
+}
+
+[Serializable]
+public sealed class CharacterModifierModule
+{
+    [SerializeField]
+    private string moduleId;
+    [SerializeField]
+    private CharacterModifierTarget target = new();
+    [SerializeField]
+    private CharacterModifierStat stat;
+    [SerializeField]
+    private CharacterModifierOperation operation;
+    [SerializeField]
+    private float valuePerStack;
+
+    public string ModuleId => moduleId ?? string.Empty;
+    public CharacterModifierTarget Target => target;
+    public CharacterModifierStat Stat => stat;
+    public CharacterModifierOperation Operation => operation;
+    public float ValuePerStack => valuePerStack;
+
+    public CharacterModifierModule()
+    {
+    }
+
+    public CharacterModifierModule(
+        string id,
+        CharacterModifierTarget modifierTarget,
+        CharacterModifierStat modifierStat,
+        CharacterModifierOperation modifierOperation,
+        float value)
+    {
+        moduleId = id ?? string.Empty;
+        target = modifierTarget ?? new CharacterModifierTarget();
+        stat = modifierStat;
+        operation = modifierOperation;
+        valuePerStack = value;
+        Validate();
+    }
+
+    public bool Matches(
+        CharacterModifierStat candidateStat,
+        CharacterActionKind actionKind,
+        string actionId,
+        string effectId)
+    {
+        return stat == candidateStat &&
+               target != null &&
+               target.Matches(actionKind, actionId, effectId);
+    }
+
+    public void Validate()
+    {
+        moduleId = (moduleId ?? string.Empty).Trim();
+        target ??= new CharacterModifierTarget();
+        target.Validate();
+        if (float.IsNaN(valuePerStack) ||
+            float.IsInfinity(valuePerStack))
+        {
+            valuePerStack = 0f;
+        }
+        if (operation == CharacterModifierOperation.Multiply &&
+            valuePerStack < 0f)
+        {
+            valuePerStack = 0f;
+        }
+    }
+}
+
+public sealed class CharacterModifierInstance
+{
+    public string SourceId { get; }
+    public CharacterModifierModule Module { get; }
+    public CharacterModifierLifetimeScope LifetimeScope { get; }
+    public int StackCount { get; private set; }
+    public bool HasFiniteDuration { get; }
+    public float RemainingDuration { get; private set; }
+
+    public bool IsExpired => HasFiniteDuration && RemainingDuration <= 0f;
+
+    public CharacterModifierInstance(
+        string sourceId,
+        CharacterModifierModule module,
+        int stackCount,
+        CharacterModifierLifetimeScope lifetimeScope,
+        float duration = float.PositiveInfinity)
+    {
+        SourceId = (sourceId ?? string.Empty).Trim();
+        Module = module;
+        StackCount = Mathf.Max(1, stackCount);
+        LifetimeScope = lifetimeScope;
+        HasFiniteDuration = !float.IsPositiveInfinity(duration);
+        RemainingDuration = HasFiniteDuration
+            ? Mathf.Max(0f, duration)
+            : float.PositiveInfinity;
+    }
+
+    public void SetStackCount(int stackCount)
+    {
+        StackCount = Mathf.Max(1, stackCount);
+    }
+
+    public bool Tick(float deltaTime)
+    {
+        if (!HasFiniteDuration || RemainingDuration <= 0f || deltaTime <= 0f)
+            return false;
+
+        float previous = RemainingDuration;
+        RemainingDuration = Mathf.Max(0f, previous - deltaTime);
+        return !Mathf.Approximately(previous, RemainingDuration);
+    }
+}
+
+public sealed class CharacterModifierCollection
+{
+    private readonly List<CharacterModifierInstance> _instances = new();
+
+    public IReadOnlyList<CharacterModifierInstance> Instances => _instances;
+
+    public bool ReplaceSource(
+        string sourceId,
+        IReadOnlyList<CharacterModifierModule> modules,
+        int stackCount,
+        CharacterModifierLifetimeScope lifetimeScope,
+        float duration = float.PositiveInfinity)
+    {
+        sourceId = (sourceId ?? string.Empty).Trim();
+        if (string.IsNullOrEmpty(sourceId))
+            return false;
+
+        if (modules == null || modules.Count == 0 || stackCount <= 0)
+            return false;
+
+        List<CharacterModifierModule> validModules = new();
+        foreach (CharacterModifierModule module in modules)
+        {
+            if (module != null && module.ValuePerStack != 0f)
+                validModules.Add(module);
+        }
+        if (validModules.Count == 0)
+            return false;
+
+        RemoveSource(sourceId);
+
+        bool added = false;
+        foreach (CharacterModifierModule module in validModules)
+        {
+            _instances.Add(new CharacterModifierInstance(
+                sourceId,
+                module,
+                stackCount,
+                lifetimeScope,
+                duration));
+            added = true;
+        }
+        return added;
+    }
+
+    public bool RemoveSource(string sourceId)
+    {
+        int removed = _instances.RemoveAll(instance =>
+            instance != null &&
+            string.Equals(
+                instance.SourceId,
+                sourceId,
+                StringComparison.Ordinal));
+        return removed > 0;
+    }
+
+    public bool ClearScope(CharacterModifierLifetimeScope scope)
+    {
+        return _instances.RemoveAll(instance =>
+            instance == null || instance.LifetimeScope == scope) > 0;
+    }
+
+    public bool Tick(float deltaTime)
+    {
+        bool resolvedValuesChanged = false;
+        for (int index = _instances.Count - 1; index >= 0; index--)
+        {
+            CharacterModifierInstance instance = _instances[index];
+            if (instance == null)
+            {
+                _instances.RemoveAt(index);
+                resolvedValuesChanged = true;
+                continue;
+            }
+
+            instance.Tick(deltaTime);
+            if (!instance.IsExpired)
+                continue;
+
+            _instances.RemoveAt(index);
+            resolvedValuesChanged = true;
+        }
+        return resolvedValuesChanged;
+    }
+
+    public float Resolve(
+        float baseValue,
+        CharacterModifierStat stat,
+        CharacterActionKind actionKind = default,
+        string actionId = null,
+        string effectId = null)
+    {
+        double flat = 0d;
+        double percent = 0d;
+        double multiplier = 1d;
+        foreach (CharacterModifierInstance instance in _instances)
+        {
+            CharacterModifierModule module = instance?.Module;
+            if (module == null || instance.IsExpired ||
+                !module.Matches(stat, actionKind, actionId, effectId))
+            {
+                continue;
+            }
+
+            double value = module.ValuePerStack *
+                           (double)instance.StackCount;
+            switch (module.Operation)
+            {
+                case CharacterModifierOperation.AddFlat:
+                    flat += value;
+                    break;
+                case CharacterModifierOperation.AddPercent:
+                    percent += value;
+                    break;
+                case CharacterModifierOperation.Multiply:
+                    multiplier *= Math.Pow(
+                        Math.Max(0d, module.ValuePerStack),
+                        instance.StackCount);
+                    break;
+            }
+        }
+
+        double resolved = (baseValue + flat) * (1d + percent) * multiplier;
+        if (double.IsNaN(resolved))
+            return baseValue;
+        if (resolved >= float.MaxValue)
+            return float.MaxValue;
+        if (resolved <= -float.MaxValue)
+            return -float.MaxValue;
+        return (float)resolved;
+    }
 }
 
 [Serializable]
@@ -1048,18 +1418,41 @@ public sealed class CharacterCumulativeUpgradeDefinition
 {
     [SerializeField]
     private string upgradeId;
+    [SerializeField]
+    private CharacterUpgradeLocalizationPreset localizationPreset;
+    [SerializeField]
+    private string titleLocalizationKey;
+    [SerializeField]
+    private string descriptionLocalizationKey;
     [SerializeField, Min(0)]
     private int maxLevel = 1;
     [SerializeField]
     private List<CharacterCumulativeUpgradeModifier> modifiers = new();
+    [SerializeField]
+    private List<CharacterModifierModule> modifierModules = new();
 
     public string UpgradeId => upgradeId ?? string.Empty;
+    public CharacterUpgradeLocalizationPreset LocalizationPreset =>
+        localizationPreset;
+    public string TitleLocalizationKey => titleLocalizationKey ?? string.Empty;
+    public string DescriptionLocalizationKey =>
+        descriptionLocalizationKey ?? string.Empty;
+    public bool UsesCustomLocalization =>
+        localizationPreset == CharacterUpgradeLocalizationPreset.Custom ||
+        (localizationPreset ==
+             CharacterUpgradeLocalizationPreset.Automatic &&
+         (!string.IsNullOrWhiteSpace(titleLocalizationKey) ||
+          !string.IsNullOrWhiteSpace(descriptionLocalizationKey)));
     public int MaxLevel => Mathf.Max(0, maxLevel);
     public bool HasUnlimitedMaxLevel => MaxLevel == 0;
     public IReadOnlyList<CharacterCumulativeUpgradeModifier> Modifiers =>
         modifiers != null
             ? modifiers
             : Array.Empty<CharacterCumulativeUpgradeModifier>();
+    public IReadOnlyList<CharacterModifierModule> ModifierModules =>
+        modifierModules != null
+            ? modifierModules
+            : Array.Empty<CharacterModifierModule>();
 
     public int ClampLevel(int level)
     {
@@ -1072,10 +1465,24 @@ public sealed class CharacterCumulativeUpgradeDefinition
     public void Validate()
     {
         upgradeId = (upgradeId ?? string.Empty).Trim();
+        titleLocalizationKey =
+            (titleLocalizationKey ?? string.Empty).Trim();
+        descriptionLocalizationKey =
+            (descriptionLocalizationKey ?? string.Empty).Trim();
+        if (localizationPreset ==
+                CharacterUpgradeLocalizationPreset.Automatic &&
+            (!string.IsNullOrEmpty(titleLocalizationKey) ||
+             !string.IsNullOrEmpty(descriptionLocalizationKey)))
+        {
+            localizationPreset = CharacterUpgradeLocalizationPreset.Custom;
+        }
         maxLevel = Mathf.Max(0, maxLevel);
         modifiers ??= new List<CharacterCumulativeUpgradeModifier>();
         foreach (CharacterCumulativeUpgradeModifier modifier in modifiers)
             modifier?.Validate();
+        modifierModules ??= new List<CharacterModifierModule>();
+        foreach (CharacterModifierModule module in modifierModules)
+            module?.Validate();
     }
 }
 
@@ -1083,16 +1490,47 @@ public sealed class CharacterCumulativeUpgradeDefinition
 public sealed class CharacterDungeonUpgradeEntry
 {
     [SerializeField]
+    private string upgradeId;
+    [SerializeField]
+    private CharacterUpgradeLocalizationPreset localizationPreset;
+    [SerializeField]
+    private string titleLocalizationKey;
+    [SerializeField]
+    private string descriptionLocalizationKey;
+    [SerializeField]
     private CharacterDungeonUpgradeType type;
     [SerializeField, Range(0f, 100f)]
     private float probability;
     [SerializeField, Min(0)]
     private int limit = 1;
+    [SerializeField]
+    private List<CharacterModifierModule> modifierModules = new();
 
+    public string UpgradeId => !string.IsNullOrWhiteSpace(upgradeId)
+        ? upgradeId.Trim()
+        : $"legacy.{type.ToString().ToLowerInvariant()}";
+    public bool HasExplicitUpgradeId =>
+        !string.IsNullOrWhiteSpace(upgradeId);
+    public CharacterUpgradeLocalizationPreset LocalizationPreset =>
+        localizationPreset;
+    public string TitleLocalizationKey => titleLocalizationKey ?? string.Empty;
+    public string DescriptionLocalizationKey =>
+        descriptionLocalizationKey ?? string.Empty;
+    public bool UsesCustomLocalization =>
+        localizationPreset == CharacterUpgradeLocalizationPreset.Custom ||
+        (localizationPreset ==
+             CharacterUpgradeLocalizationPreset.Automatic &&
+         (!string.IsNullOrWhiteSpace(titleLocalizationKey) ||
+          !string.IsNullOrWhiteSpace(descriptionLocalizationKey)));
     public CharacterDungeonUpgradeType Type => type;
     public float Probability => probability;
     public int Limit => limit;
     public bool HasUnlimitedLimit => limit == 0;
+    public IReadOnlyList<CharacterModifierModule> ModifierModules =>
+        modifierModules != null
+            ? modifierModules
+            : Array.Empty<CharacterModifierModule>();
+    public bool HasModifierModules => ModifierModules.Count > 0;
     public float FixedValue => type switch
     {
         CharacterDungeonUpgradeType.AttackPower => 0.5f,
@@ -1116,8 +1554,22 @@ public sealed class CharacterDungeonUpgradeEntry
 
     public void Validate()
     {
+        upgradeId = (upgradeId ?? string.Empty).Trim();
+        titleLocalizationKey = (titleLocalizationKey ?? string.Empty).Trim();
+        descriptionLocalizationKey =
+            (descriptionLocalizationKey ?? string.Empty).Trim();
+        if (localizationPreset ==
+                CharacterUpgradeLocalizationPreset.Automatic &&
+            (!string.IsNullOrEmpty(titleLocalizationKey) ||
+             !string.IsNullOrEmpty(descriptionLocalizationKey)))
+        {
+            localizationPreset = CharacterUpgradeLocalizationPreset.Custom;
+        }
         probability = Mathf.Clamp(probability, 0f, 100f);
         limit = Mathf.Max(0, limit);
+        modifierModules ??= new List<CharacterModifierModule>();
+        foreach (CharacterModifierModule module in modifierModules)
+            module?.Validate();
     }
 }
 
@@ -1153,6 +1605,23 @@ public sealed class CharacterDungeonUpgradeDefinition
     public bool HasValidProbabilityTotal => Mathf.Abs(
         TotalProbability - RequiredProbabilityTotal) <=
         ProbabilityTolerance;
+    public bool UsesLegacyProbabilityMode
+    {
+        get
+        {
+            if (entries == null || entries.Count == 0)
+                return false;
+            foreach (CharacterDungeonUpgradeEntry entry in entries)
+            {
+                if (entry == null || entry.HasExplicitUpgradeId ||
+                    entry.HasModifierModules)
+                {
+                    return false;
+                }
+            }
+            return true;
+        }
+    }
 
     public CharacterDungeonUpgradeEntry GetEntry(
         CharacterDungeonUpgradeType type)
@@ -1164,6 +1633,25 @@ public sealed class CharacterDungeonUpgradeDefinition
         {
             if (entry != null && entry.Type == type)
                 return entry;
+        }
+
+        return null;
+    }
+
+    public CharacterDungeonUpgradeEntry GetEntry(string upgradeId)
+    {
+        if (entries == null || string.IsNullOrWhiteSpace(upgradeId))
+            return null;
+
+        foreach (CharacterDungeonUpgradeEntry entry in entries)
+        {
+            if (entry != null && string.Equals(
+                    entry.UpgradeId,
+                    upgradeId.Trim(),
+                    StringComparison.Ordinal))
+            {
+                return entry;
+            }
         }
 
         return null;
@@ -1182,6 +1670,8 @@ public sealed class CharacterEffectDefinition :
     IBattleEffectDefinition,
     IBattlePresentationEffectDefinition
 {
+    [SerializeField]
+    private string effectId;
     [SerializeField]
     private CharacterEffectType type;
     [SerializeField]
@@ -1269,6 +1759,7 @@ public sealed class CharacterEffectDefinition :
         };
     }
 
+    public string EffectId => effectId ?? string.Empty;
     public CharacterEffectType Type => type;
     public BattleEffectType BattleEffectType =>
         (BattleEffectType)(int)type;
@@ -1353,6 +1844,7 @@ public sealed class CharacterEffectDefinition :
 
     public void Validate()
     {
+        effectId = (effectId ?? string.Empty).Trim();
         targetSelector ??= new CharacterEffectTargetSelector();
         statusRemovalEffects ??= new List<StatusEffectSO>();
         statusContributionMultipliers ??=
@@ -1412,6 +1904,8 @@ public sealed class CharacterSkillDefinition :
     ICharacterConditionalActionDefinition
 {
     [SerializeField]
+    private string actionId;
+    [SerializeField]
     private List<CharacterSkillSectionType> sections = new();
     [SerializeField]
     private Sprite iconSprite;
@@ -1466,6 +1960,7 @@ public sealed class CharacterSkillDefinition :
     [SerializeField]
     private List<CharacterEffectDefinition> effects = new();
 
+    public string ActionId => actionId ?? string.Empty;
     public IReadOnlyList<CharacterSkillSectionType> Sections => sections;
     public Sprite IconSprite => iconSprite;
     public AudioClip AudioClip => audioClip;
@@ -1532,6 +2027,7 @@ public sealed class CharacterSkillDefinition :
 
     public void Validate()
     {
+        actionId = (actionId ?? string.Empty).Trim();
         sections ??= new List<CharacterSkillSectionType>();
         numericConditions ??= new List<CharacterNumericCondition>();
         foreach (CharacterNumericCondition condition in numericConditions)
@@ -1590,6 +2086,8 @@ public sealed class CharacterStatusStackCostDefinition
 public sealed class CharacterPassiveDefinition :
     ICharacterConditionalActionDefinition
 {
+    [SerializeField]
+    private string actionId;
     [SerializeField]
     private List<CharacterPassiveSectionType> sections = new();
     [SerializeField]
@@ -1666,6 +2164,7 @@ public sealed class CharacterPassiveDefinition :
     [SerializeField]
     private List<CharacterEffectDefinition> effects = new();
 
+    public string ActionId => actionId ?? string.Empty;
     public IReadOnlyList<CharacterPassiveSectionType> Sections => sections;
     public Sprite IconSprite => iconSprite;
     public AudioClip AudioClip => audioClip;
@@ -1767,6 +2266,7 @@ public sealed class CharacterPassiveDefinition :
 
     public void Validate()
     {
+        actionId = (actionId ?? string.Empty).Trim();
         sections ??= new List<CharacterPassiveSectionType>();
         if (trigger != CharacterPassiveTrigger.OnAttack)
             linkage = CharacterActionLinkage.None;
@@ -1867,6 +2367,8 @@ public sealed class CharacterAttackDefinition :
     ICharacterConditionalActionDefinition
 {
     [SerializeField]
+    private string actionId;
+    [SerializeField]
     private List<CharacterAttackSectionType> sections = new();
     [SerializeField]
     private AudioClip audioClip;
@@ -1920,6 +2422,7 @@ public sealed class CharacterAttackDefinition :
     [SerializeField]
     private List<CharacterEffectDefinition> effects = new();
 
+    public string ActionId => actionId ?? string.Empty;
     public IReadOnlyList<CharacterAttackSectionType> Sections => sections;
     public AudioClip AudioClip => audioClip;
     public bool HasLinkageSection =>
@@ -1999,6 +2502,7 @@ public sealed class CharacterAttackDefinition :
 
     public void Validate()
     {
+        actionId = (actionId ?? string.Empty).Trim();
         sections ??= new List<CharacterAttackSectionType>();
         numericConditions ??= new List<CharacterNumericCondition>();
         foreach (CharacterNumericCondition condition in numericConditions)

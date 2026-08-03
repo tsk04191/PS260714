@@ -772,11 +772,64 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
         return true;
     }
 
+    public bool ApplyDungeonUpgrade(
+        int definitionIndex,
+        string upgradeId)
+    {
+        if ((!_initialized && !Initialize()) || Data == null)
+            return false;
+
+        float previousCooldown = Data.AttackCooldown;
+        if (!Data.ApplyDungeonUpgrade(definitionIndex, upgradeId))
+            return false;
+
+        if (Data.AttackCooldown < previousCooldown)
+        {
+            _remainingCooldown = Mathf.Min(
+                _remainingCooldown,
+                GetEffectiveAttackCooldown());
+        }
+
+        RefreshUi();
+        return true;
+    }
+
+    public bool ApplyModifierSource(
+        string sourceId,
+        IReadOnlyList<CharacterModifierModule> modules,
+        CharacterModifierLifetimeScope lifetimeScope,
+        float duration = float.PositiveInfinity,
+        int stackCount = 1)
+    {
+        if ((!_initialized && !Initialize()) || Data == null)
+            return false;
+
+        float previousCooldown = Data.AttackCooldown;
+        bool applied = Data.ReplaceModifierSource(
+            sourceId,
+            modules,
+            stackCount,
+            lifetimeScope,
+            duration);
+        if (!applied)
+            return false;
+
+        if (Data.AttackCooldown < previousCooldown)
+        {
+            _remainingCooldown = Mathf.Min(
+                _remainingCooldown,
+                GetEffectiveAttackCooldown());
+        }
+        RefreshUi();
+        return true;
+    }
+
     public void ResetRuntime()
     {
         if (!_initialized && !Initialize())
             return;
 
+        Data?.ClearModifierScope(CharacterModifierLifetimeScope.Battle);
         _attackSpeedBoostRemaining = 0f;
         _attackSpeedMultiplier = 1f;
         _powerBoostRemaining = 0f;
@@ -839,6 +892,18 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
         }
 
         TickSdActionTimers(deltaTime);
+        float modifierCooldownBeforeTick = Data?.AttackCooldown ?? 0f;
+        if (Data?.TickModifiers(deltaTime) == true &&
+            modifierCooldownBeforeTick > 0f &&
+            Data.AttackCooldown > 0f &&
+            !Mathf.Approximately(
+                modifierCooldownBeforeTick,
+                Data.AttackCooldown))
+        {
+            float ratio = Data.AttackCooldown / modifierCooldownBeforeTick;
+            _remainingCooldown *= ratio;
+            _attackRecoveryRemaining *= ratio;
+        }
         TickTemporaryBoosts(deltaTime);
 
         bool passiveCooldownPaused = ArePassiveCooldownsPaused;
@@ -1757,6 +1822,7 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
                 selectedTargets,
                 selected.Effects,
                 CharacterActionKind.Skill,
+                selected.ActionId,
                 selectedEffects)
             : ExecuteLegacyAbilityOnTargets(
                 _board,
@@ -1764,8 +1830,14 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
                 selected.DamageType,
                 selectedDamage,
                 selected.AppliedStatusEffect,
-                selected.StatusDuration,
-                selected.StatusStacks,
+                Data.ResolveStatusDuration(
+                    selected.StatusDuration,
+                    CharacterActionKind.Skill,
+                    selected.ActionId),
+                Data.ResolveStatusStacks(
+                    selected.StatusStacks,
+                    CharacterActionKind.Skill,
+                    selected.ActionId),
                 selected.StatusRemovalSelection,
                 selected.StatusRemovalAmount);
         RecordDamageDealt(effectResult.DamageDealt);
@@ -1902,6 +1974,7 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
                             action.Targets,
                             actionDefinition.Effects,
                             CharacterActionKind.Skill,
+                            actionDefinition.ActionId,
                             action.Effects)
                         : ExecuteLegacyAbilityOnTargets(
                             _board,
@@ -1909,8 +1982,14 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
                             actionDefinition.DamageType,
                             action.Damage,
                             actionDefinition.AppliedStatusEffect,
-                            actionDefinition.StatusDuration,
-                            actionDefinition.StatusStacks,
+                            Data.ResolveStatusDuration(
+                                actionDefinition.StatusDuration,
+                                CharacterActionKind.Skill,
+                                actionDefinition.ActionId),
+                            Data.ResolveStatusStacks(
+                                actionDefinition.StatusStacks,
+                                CharacterActionKind.Skill,
+                                actionDefinition.ActionId),
                             actionDefinition.StatusRemovalSelection,
                             actionDefinition.StatusRemovalAmount);
                 totalDamage += effectResult.DamageDealt;
@@ -2016,6 +2095,7 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
                 targets,
                 definition.Effects,
                 CharacterActionKind.Skill,
+                definition.ActionId,
                 costReservation);
             return CanExecutePreparedExplicitEffects(
                 definition.Effects,
@@ -2254,6 +2334,7 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
                             targets,
                             definition.Effects,
                             CharacterActionKind.Attack,
+                            definition.ActionId,
                             CreateEffectCostReservation());
                     effectResult = HasUsableExplicitEffects(
                         definition.Effects,
@@ -2263,6 +2344,7 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
                             targets,
                             definition.Effects,
                             CharacterActionKind.Attack,
+                            definition.ActionId,
                             effects)
                         : default;
                 }
@@ -2281,8 +2363,14 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
                         definition.DamageType,
                         abilityDamage,
                         definition.AppliedStatusEffect,
-                        definition.StatusDuration,
-                        definition.StatusStacks,
+                        Data.ResolveStatusDuration(
+                            definition.StatusDuration,
+                            CharacterActionKind.Attack,
+                            definition.ActionId),
+                        Data.ResolveStatusStacks(
+                            definition.StatusStacks,
+                            CharacterActionKind.Attack,
+                            definition.ActionId),
                         definition.StatusRemovalSelection,
                         definition.StatusRemovalAmount,
                         out int damageDealt);
@@ -2958,6 +3046,7 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
                     targets,
                     definition.Effects,
                     CharacterActionKind.Passive,
+                    definition.ActionId,
                     CreateEffectCostReservation());
             effectResult = HasUsableExplicitEffects(
                 definition.Effects,
@@ -2967,6 +3056,7 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
                     targets,
                     definition.Effects,
                     CharacterActionKind.Passive,
+                    definition.ActionId,
                     effects)
                 : default;
         }
@@ -2988,8 +3078,14 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
                 definition.DamageType,
                 legacyDamage,
                 definition.AppliedStatusEffect,
-                definition.StatusDuration,
-                definition.StatusStacks,
+                Data.ResolveStatusDuration(
+                    definition.StatusDuration,
+                    CharacterActionKind.Passive,
+                    definition.ActionId),
+                Data.ResolveStatusStacks(
+                    definition.StatusStacks,
+                    CharacterActionKind.Passive,
+                    definition.ActionId),
                 definition.StatusRemovalSelection,
                 definition.StatusRemovalAmount,
                 definition.AreaOffsets,
@@ -3262,6 +3358,7 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
             AbilityTargetSelection actionTargets,
             IReadOnlyList<CharacterEffectDefinition> effects,
             CharacterActionKind actionKind,
+            string actionId,
             EffectCostReservation costReservation)
     {
         if (effects == null || effects.Count == 0)
@@ -3335,7 +3432,8 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
                         effect.StatusContributionMultipliers));
                 int spendAmount = Data.CalculateEffectAmount(
                     effect,
-                    reservationContext);
+                    reservationContext,
+                    actionId);
                 bool reserved = effect.Type ==
                                 CharacterEffectType.SpendResource
                     ? costReservation?.TryReserveEffectSpend(
@@ -3509,6 +3607,7 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
         AbilityTargetSelection targets,
         IReadOnlyList<CharacterEffectDefinition> effects,
         CharacterActionKind actionKind,
+        string actionId,
         IReadOnlyList<PreparedEffectExecution> preparedEffects)
     {
         if (board == null || effects == null || effects.Count == 0 ||
@@ -3574,7 +3673,8 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
                 effect,
                 effectShowAttackRange,
                 preparedEffect.ResourceSpendAmount,
-                preparedEffect.HealthSpendAmount);
+                preparedEffect.HealthSpendAmount,
+                actionId);
             combined = combined.Combine(current);
             if (current.Attempted &&
                 effect.TargetMode ==
@@ -3639,7 +3739,8 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
         CharacterEffectDefinition effect,
         bool showAttackRange,
         int preparedResourceSpendAmount,
-        int preparedHealthSpendAmount)
+        int preparedHealthSpendAmount,
+        string actionId)
     {
         return BattleEffectExecutor.ExecuteEffect(
             BattleEffectContext.FromCharacter(context),
@@ -3648,7 +3749,9 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
             1,
             showAttackRange,
             preparedResourceSpendAmount,
-            preparedHealthSpendAmount);
+            preparedHealthSpendAmount,
+            null,
+            actionId);
     }
 
     private BattleEffectResult ExecuteHeal(

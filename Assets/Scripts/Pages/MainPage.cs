@@ -25,6 +25,14 @@ public sealed class MainPage : RuntimeMenuPageBase
     private Sprite _defaultLobbyCharacterSprite;
     private string _defaultLobbyCharacterName;
     private string _defaultLobbyCharacterCaption;
+    private Button _noticeButton;
+    private Button _attendanceButton;
+    private GameObject _attendanceBadge;
+    private AttendancePopupView _attendancePopup;
+    private LobbyNoticePopupView _noticePopup;
+    private AttendanceData _boundAttendanceData;
+    private GameEventManager _gameEvents;
+    private float _nextAttendanceRefreshTime;
 
     protected override string PageTitle => "MAIN";
     protected override string PageDescription =>
@@ -65,6 +73,19 @@ public sealed class MainPage : RuntimeMenuPageBase
             "btnSETTINGSOverlay",
             LocalizationKeys.UiCommonSettings,
             HandleSettingsClicked);
+        _noticeButton = CreateLocalizedTopLeftOverlayMenuButton(
+            "btnNOTICEOverlay",
+            LocalizationKeys.UiTitleNotice,
+            HandleNoticeClicked);
+        _attendanceButton = CreateLocalizedTopLeftOverlayMenuButton(
+            "btnATTENDANCEOverlay",
+            LocalizationKeys.UiMainAttendance,
+            HandleAttendanceClicked);
+        ConfigureUtilityButton(_noticeButton, 48f, 160f);
+        ConfigureUtilityButton(_attendanceButton, 220f, 184f);
+        BuildAttendanceBadge();
+        _noticePopup = LobbyNoticePopupView.BuildOrBind(RuntimeRoot);
+        _attendancePopup = AttendancePopupView.BuildOrBind(RuntimeRoot);
         BindLobbyCharacterView();
         RefreshLobbyCharacterView();
     }
@@ -74,7 +95,12 @@ public sealed class MainPage : RuntimeMenuPageBase
         LobbyRepresentativeSelection.SelectionChanged +=
             HandleLobbyRepresentativeChanged;
         LocalizationService.LocaleChanged += HandleLocaleChanged;
+        BindGameEvents(GameManager.Instance?.Events);
+        BindAttendanceData(DataManager.Current?.AttendanceDatas);
+        _noticePopup?.Hide();
+        _attendancePopup?.Hide();
         RefreshLobbyCharacterView();
+        RefreshAttendanceAvailability();
     }
 
     private void OnDisable()
@@ -82,6 +108,10 @@ public sealed class MainPage : RuntimeMenuPageBase
         LobbyRepresentativeSelection.SelectionChanged -=
             HandleLobbyRepresentativeChanged;
         LocalizationService.LocaleChanged -= HandleLocaleChanged;
+        BindGameEvents(null);
+        BindAttendanceData(null);
+        _noticePopup?.Hide();
+        _attendancePopup?.Hide();
     }
 
     protected override void OnDestroy()
@@ -89,7 +119,24 @@ public sealed class MainPage : RuntimeMenuPageBase
         LobbyRepresentativeSelection.SelectionChanged -=
             HandleLobbyRepresentativeChanged;
         LocalizationService.LocaleChanged -= HandleLocaleChanged;
+        BindGameEvents(null);
+        BindAttendanceData(null);
         base.OnDestroy();
+    }
+
+    private void Update()
+    {
+        if (Time.unscaledTime < _nextAttendanceRefreshTime)
+            return;
+
+        _nextAttendanceRefreshTime = Time.unscaledTime + 30f;
+        RefreshAttendanceAvailability();
+    }
+
+    private void OnApplicationFocus(bool hasFocus)
+    {
+        if (hasFocus)
+            RefreshAttendanceAvailability();
     }
 
     private void HandlePlayClicked()
@@ -104,6 +151,8 @@ public sealed class MainPage : RuntimeMenuPageBase
 
     private void HandleSettingsClicked()
     {
+        _noticePopup?.Hide();
+        _attendancePopup?.Hide();
         if (settingPage != null &&
             settingPage.TryGetComponent(out SettingPage page))
         {
@@ -112,6 +161,21 @@ public sealed class MainPage : RuntimeMenuPageBase
         }
 
         NavigateTo(settingPage, PageOpenMode.Fresh);
+    }
+
+    private void HandleNoticeClicked()
+    {
+        _attendancePopup?.Hide();
+        _noticePopup?.Show();
+    }
+
+    private void HandleAttendanceClicked()
+    {
+        _noticePopup?.Hide();
+        AttendanceService service = DataManager.Current?.Attendance;
+        _attendancePopup?.Bind(service);
+        _attendancePopup?.Show();
+        RefreshAttendanceAvailability();
     }
 
     private void HandleLobbyRepresentativeChanged(
@@ -123,6 +187,100 @@ public sealed class MainPage : RuntimeMenuPageBase
     private void HandleLocaleChanged(string unusedLocale)
     {
         RefreshLobbyCharacterView();
+        RefreshAttendanceAvailability();
+    }
+
+    private void HandleAttendanceChanged()
+    {
+        RefreshAttendanceAvailability();
+    }
+
+    private void HandleDataReady()
+    {
+        BindAttendanceData(DataManager.Current?.AttendanceDatas);
+        _attendancePopup?.Bind(DataManager.Current?.Attendance);
+        RefreshAttendanceAvailability();
+    }
+
+    private void BindGameEvents(GameEventManager events)
+    {
+        if (_gameEvents == events)
+            return;
+
+        if (_gameEvents != null)
+            _gameEvents.DataReady -= HandleDataReady;
+        _gameEvents = events;
+        if (_gameEvents != null)
+            _gameEvents.DataReady += HandleDataReady;
+    }
+
+    private void BindAttendanceData(AttendanceData data)
+    {
+        if (_boundAttendanceData == data)
+            return;
+
+        if (_boundAttendanceData != null)
+            _boundAttendanceData.Changed -= HandleAttendanceChanged;
+        _boundAttendanceData = data;
+        if (_boundAttendanceData != null)
+            _boundAttendanceData.Changed += HandleAttendanceChanged;
+    }
+
+    private void RefreshAttendanceAvailability()
+    {
+        AttendanceService service = DataManager.Current?.Attendance;
+        AttendanceStatus status = service?.RefreshStatus();
+        if (_attendanceBadge != null)
+        {
+            _attendanceBadge.SetActive(
+                status?.Availability ==
+                AttendanceAvailability.Claimable);
+        }
+    }
+
+    private void BuildAttendanceBadge()
+    {
+        if (_attendanceButton == null)
+            return;
+
+        Transform existing = _attendanceButton.transform.Find(
+            "imgAttendanceAvailable");
+        GameObject badge = existing != null
+            ? existing.gameObject
+            : new GameObject(
+                "imgAttendanceAvailable",
+                typeof(RectTransform),
+                typeof(CanvasRenderer),
+                typeof(Image));
+        if (existing == null)
+            badge.transform.SetParent(_attendanceButton.transform, false);
+
+        RectTransform rect = (RectTransform)badge.transform;
+        rect.anchorMin = Vector2.one;
+        rect.anchorMax = Vector2.one;
+        rect.pivot = new Vector2(0.5f, 0.5f);
+        rect.anchoredPosition = new Vector2(-4f, -4f);
+        rect.sizeDelta = new Vector2(18f, 18f);
+        Image image = badge.GetComponent<Image>();
+        image.color = new Color(0.95f, 0.3f, 0.2f, 1f);
+        image.raycastTarget = false;
+        _attendanceBadge = badge;
+    }
+
+    private static void ConfigureUtilityButton(
+        Button button,
+        float left,
+        float width)
+    {
+        if (button == null)
+            return;
+
+        RectTransform rect = (RectTransform)button.transform;
+        rect.anchorMin = new Vector2(0f, 1f);
+        rect.anchorMax = new Vector2(0f, 1f);
+        rect.pivot = new Vector2(0f, 1f);
+        rect.anchoredPosition = new Vector2(left, -104f);
+        rect.sizeDelta = new Vector2(width, 52f);
     }
 
     private void BindLobbyCharacterView()

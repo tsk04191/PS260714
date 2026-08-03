@@ -9,6 +9,18 @@ status.opening.name,상태 이름,title,,빈틈,Opening
 status.opening.description,상태 설명,tooltip,,받는 피해가 10% 증가합니다.,Takes 10% more damage.
 ui.settings.language,설정 UI,body,,언어,Language
 ui.settings.font,설정 UI,body,,글꼴,Font
+item.soft_credit.name,아이템 이름,title,,인게임 크레딧,In-Game Credit
+item.soft_credit.description,아이템 설명,tooltip,,게임 플레이에서 획득하고 사용하는 기본 재화입니다.,Basic currency earned and spent through gameplay.
+item.paid_credit.name,아이템 이름,title,,유료 크레딧,Paid Credit
+item.paid_credit.description,아이템 설명,tooltip,,결제를 통해 획득하는 유료 재화입니다.,Premium currency obtained through purchases.
+item.free_credit.name,아이템 이름,title,,무료 크레딧,Free Credit
+item.free_credit.description,아이템 설명,tooltip,,게임 보상으로 획득하는 무료 프리미엄 재화입니다.,Free premium currency earned as gameplay rewards.
+item.standard_recruit_ticket.name,아이템 이름,title,,일반 모집권,Standard Recruit Ticket
+item.standard_recruit_ticket.description,아이템 설명,tooltip,,일반 모집에서 1회 사용할 수 있는 모집권입니다.,A ticket used for one standard recruitment.
+item.basic_upgrade_material.name,아이템 이름,title,,기초 강화 재료,Basic Upgrade Material
+item.basic_upgrade_material.description,아이템 설명,tooltip,,대원과 장비 강화에 사용하는 기초 재료입니다.,A basic material used for operator and equipment upgrades.
+item.focus.name,아이템 이름,title,,집중 표식,Focus Marker
+item.focus.effect,아이템 설명,tooltip,최우선 공격 대상,선택한 적을 {duration:0.#}초 동안 최우선 공격 대상으로 지정합니다.,Mark the selected enemy as the highest-priority target for {duration:0.#} seconds.
 item.molotov.name,아이템 이름,title,,화염병,Molotov
 item.molotov.effect,아이템 설명,tooltip,화염 지속시간,선택한 적에게 [icon=fire] [style=fire]화염[/style]을 {duration:0.#}초 부여합니다.,Apply [icon=fire] [style=fire]Fire[/style] to the selected enemy for {duration:0.#} seconds.
 item.molotov.usage,아이템 사용 정보,number,에너지 코스트,[style=energy]코스트 {cost}[/style] | 소모형,[style=energy]Cost {cost}[/style] | Consumable
@@ -66,6 +78,24 @@ ui.title.notice,타이틀 공지 버튼,title,,공지,NOTICE
 ui.title.notice_empty,타이틀 공지 빈 상태,body,,현재 등록된 공지가 없습니다,NO NOTICES AVAILABLE
 ui.main.title,메인 페이지 제목,title,,메인,MAIN
 ui.main.description,메인 페이지 설명,body,,로비 메뉴를 선택하세요,SELECT A LOBBY MENU
+ui.main.attendance,메인 출석 버튼,body,,출석체크,ATTENDANCE
+ui.attendance.title,출석 팝업 제목,title,,출석 보상,ATTENDANCE REWARDS
+ui.attendance.description,출석 팝업 설명,body,,매일 접속하고 순서대로 보상을 받으세요,Log in each day and claim rewards in order.
+ui.attendance.day,출석 일차,number,,{day}일차,DAY {day}
+ui.attendance.claim,출석 수령 버튼,body,,보상 받기,CLAIM REWARD
+ui.attendance.claimed,출석 수령 상태,body,,수령 완료,CLAIMED
+ui.attendance.today,출석 오늘 상태,body,,오늘,TODAY
+ui.attendance.upcoming,출석 예정 상태,body,,예정,UPCOMING
+ui.attendance.available,출석 수령 가능 안내,body,,오늘 보상을 받을 수 있습니다,Today's reward is ready to claim.
+ui.attendance.completed_today,출석 당일 수령 완료 안내,body,,오늘 보상을 이미 받았습니다,Today's reward has already been claimed.
+ui.attendance.schedule_complete,출석 일정 완료 안내,body,,모든 출석 보상을 받았습니다,All attendance rewards have been claimed.
+ui.attendance.next_reset,출석 다음 갱신 시간,number,,다음 갱신: {time},NEXT RESET: {time}
+ui.attendance.not_ready,출석 데이터 준비 안내,body,,데이터 준비 중입니다,Attendance data is loading.
+ui.attendance.not_configured,출석 설정 오류 안내,body,,출석 일정 설정이 올바르지 않습니다,The attendance schedule is not configured correctly.
+ui.attendance.save_blocked,출석 저장 보호 안내,body,,손상된 저장 데이터 보호를 위해 수령할 수 없습니다,Claiming is blocked to protect damaged save data.
+ui.attendance.clock_rollback,출석 시간 역행 안내,body,,시스템 시간이 이전 접속 시점보다 빠릅니다,The system date is earlier than the last recorded session.
+ui.attendance.inventory_full,출석 보관 한도 안내,body,,아이템 보관 한도가 부족합니다,There is not enough inventory capacity for this reward.
+ui.attendance.claim_success,출석 수령 성공 안내,body,,{reward} 수령 완료,Claimed {reward}.
 ui.currency.soft,재화 이름,body,,인게임 크레딧,CREDITS
 ui.currency.free,재화 이름,body,,무료 크레딧,FREE CREDIT
 ui.currency.paid,재화 이름,body,,유료 크레딧,PAID CREDIT
@@ -169,6 +199,13 @@ ui.dungeon.item_reusable,아이템 카드 상태,body,,재사용 가능 | 쿨다
 ui.dungeon.item_consumable,아이템 카드 상태,body,,소모형,CONSUMABLE
 ui.dungeon.item_count,아이템 카드 상태,number,,x{count},x{count}
 ui.dungeon.item_cooldown,아이템 카드 상태,number,,쿨다운 {cooldown:0.0}초,CD {cooldown:0.0}s
+ui.dungeon.item_disposable,아이템 카드 수명,body,,일회용 · 사용 시 덱에서 제거,DISPOSABLE · REMOVED FROM DECK ON USE
+ui.dungeon.item_reusable_limited,아이템 카드 수명,body,,다회용 · 전투당 {uses}회 · 다음 전투 회복,REUSABLE · {uses} PER BATTLE · RESTORES NEXT BATTLE
+ui.dungeon.item_reusable_unlimited,아이템 카드 수명,body,,다회용 · 무한 사용,REUSABLE · UNLIMITED USES
+ui.dungeon.item_restore_next_battle,아이템 카드 상태,body,,다음 전투 회복,RESTORES NEXT BATTLE
+ui.dungeon.item_scope_battle,아이템 효과 범위,body,,전투,BATTLE
+ui.dungeon.item_scope_dungeon,아이템 효과 범위,body,,던전,DUNGEON
+ui.dungeon.item_duration_permanent,아이템 효과 지속,body,,영구,PERMANENT
 ui.character.compact_summary,캐릭터 요약,number,,공격력 {attack:0.##} | 기술 C{cost} ×{count},ATK {attack:0.##} | SKILL C{cost} ×{count}
 codex.character.title,캐릭터 도감 제목,title,,캐릭터 도감,CHARACTER CODEX
 codex.character.description,캐릭터 도감 설명,body,,캐릭터 탭을 선택해 정보를 확인하세요,SELECT A CHARACTER TAB TO VIEW ITS INFORMATION

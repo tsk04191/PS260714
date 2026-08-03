@@ -16,6 +16,9 @@ public class DataManager : MonoBehaviour
     [HideInInspector] public AudioData AudioDatas;
     [HideInInspector] public CharacterCollectionData CharacterDatas;
     [HideInInspector] public InventoryData InventoryDatas;
+    [HideInInspector] public AttendanceData AttendanceDatas;
+
+    public AttendanceService Attendance { get; private set; }
 
     [Header("Audio Clip")]
     public AudioClipList MusicList = new AudioClipList();
@@ -39,8 +42,11 @@ public class DataManager : MonoBehaviour
         IsSetupDone = false;
         CharacterDatas ??= new CharacterCollectionData();
         InventoryDatas ??= new InventoryData();
+        AttendanceDatas ??= new AttendanceData();
         CharacterDatas.Load();
         InventoryDatas.Load();
+        AttendanceDatas.Load();
+        RebuildAttendanceService();
         LocalizationFontResolver.RefreshAllClientText();
     }
 
@@ -52,6 +58,8 @@ public class DataManager : MonoBehaviour
         AudioDatas ??= new AudioData();
         CharacterDatas ??= new CharacterCollectionData();
         InventoryDatas ??= new InventoryData();
+        AttendanceDatas ??= new AttendanceData();
+        RebuildAttendanceService();
 
         LoadAll(loadCharacters: false);
         SaveALL();
@@ -63,6 +71,7 @@ public class DataManager : MonoBehaviour
     private void OnDestroy()
     {
         SetEventManager(null);
+        Attendance = null;
         if (Current == this)
             Current = null;
     }
@@ -120,10 +129,12 @@ public class DataManager : MonoBehaviour
         AudioDatas ??= new AudioData();
         CharacterDatas ??= new CharacterCollectionData();
         InventoryDatas ??= new InventoryData();
+        AttendanceDatas ??= new AttendanceData();
         DisplayDatas.Save(false);
         AudioDatas.Save(false);
         CharacterDatas.Save(false);
         InventoryDatas.Save(false);
+        AttendanceDatas.Save(false);
         PlayerPrefs.Save();
 
         _events?.NotifyDataSaved();
@@ -140,16 +151,28 @@ public class DataManager : MonoBehaviour
         AudioDatas ??= new AudioData();
         CharacterDatas ??= new CharacterCollectionData();
         InventoryDatas ??= new InventoryData();
+        AttendanceDatas ??= new AttendanceData();
         DisplayDatas.Load();
         AudioDatas.Load();
         if (loadCharacters)
         {
             CharacterDatas.Load();
             InventoryDatas.Load();
+            AttendanceDatas.Load();
         }
         
         NotifyCurrentSettings();
         _events?.NotifyDataLoaded();
+    }
+
+    private void RebuildAttendanceService()
+    {
+        Attendance = new AttendanceService(
+            AttendanceDatas,
+            InventoryDatas,
+            AttendanceRewardScheduleCatalog.GetDefault(),
+            SystemAttendanceClock.Instance,
+            () => IsSetupDone);
     }
 
     #region Display

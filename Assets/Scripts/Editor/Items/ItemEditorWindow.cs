@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using PS260714.Localization.Editor;
 using UnityEditor;
 using UnityEngine;
 
@@ -10,6 +11,7 @@ public sealed class ItemEditorWindow : EditorWindow
 
     private const string AssetRoot = "Assets/Resources/Items";
     private const string RenameControlName = "ItemAssetRenameField";
+    private const string LocalizationPrefix = "item.";
 
     private static readonly string[] CategoryLabels =
     {
@@ -21,6 +23,9 @@ public sealed class ItemEditorWindow : EditorWindow
     };
 
     private readonly List<ItemDefinitionSO> _items = new();
+    private readonly List<LocalizationKeyOption> _nameKeyOptions = new();
+    private readonly List<LocalizationKeyOption>
+        _descriptionKeyOptions = new();
     private ItemDefinitionSO _selected;
     private SerializedObject _serialized;
     private Vector2 _listScroll;
@@ -30,6 +35,19 @@ public sealed class ItemEditorWindow : EditorWindow
     private bool _renaming;
     private bool _focusRenameField;
     private string _renameText = string.Empty;
+    private string _localizationLoadError = string.Empty;
+
+    private readonly struct LocalizationKeyOption
+    {
+        public string Key { get; }
+        public string Label { get; }
+
+        public LocalizationKeyOption(string key, string label)
+        {
+            Key = key;
+            Label = label;
+        }
+    }
 
     [MenuItem(MenuPath)]
     public static void Open()
@@ -43,6 +61,7 @@ public sealed class ItemEditorWindow : EditorWindow
     private void OnEnable()
     {
         EditorApplication.projectChanged += OnProjectChanged;
+        RefreshLocalizationKeys();
         RefreshAssets(true);
     }
 
@@ -53,6 +72,7 @@ public sealed class ItemEditorWindow : EditorWindow
 
     private void OnProjectChanged()
     {
+        RefreshLocalizationKeys();
         RefreshAssets(true);
     }
 
@@ -209,6 +229,7 @@ public sealed class ItemEditorWindow : EditorWindow
             EditorGUILayout.LabelField(
                 "기본 정보",
                 EditorStyles.boldLabel);
+            DrawLocalizationControls();
 
             using (new EditorGUILayout.HorizontalScope())
             {
@@ -216,13 +237,27 @@ public sealed class ItemEditorWindow : EditorWindow
                 using (new EditorGUILayout.VerticalScope())
                 {
                     DrawProperty("icon", "아이콘");
-                    DrawProperty("koreanName", "이름");
+                    DrawLocalizationKey(
+                        "nameLocalizationKey",
+                        "이름 키",
+                        _nameKeyOptions,
+                        ".name");
+                    DrawProperty(
+                        "koreanName",
+                        "한글 이름 (Fallback)");
                     DrawCategoryProperty();
                 }
             }
 
             EditorGUILayout.Space(4f);
-            DrawProperty("koreanDescription", "설명");
+            DrawLocalizationKey(
+                "descriptionLocalizationKey",
+                "설명 키",
+                _descriptionKeyOptions,
+                ".description / .effect");
+            DrawProperty(
+                "koreanDescription",
+                "한글 설명 (Fallback)");
         }
 
         EditorGUILayout.Space(6f);
@@ -328,8 +363,12 @@ public sealed class ItemEditorWindow : EditorWindow
             }
 
             DrawProperty("itemId", "아이템 ID");
-            DrawProperty("englishName", "영문 이름");
-            DrawProperty("englishDescription", "영문 설명");
+            DrawProperty(
+                "englishName",
+                "영문 이름 (Fallback)");
+            DrawProperty(
+                "englishDescription",
+                "영문 설명 (Fallback)");
             DrawProperty("rarity", "희귀도");
             DrawProperty("sortOrder", "정렬 순서");
             DrawProperty("hiddenInStorage", "창고에서 숨김");
@@ -375,19 +414,24 @@ public sealed class ItemEditorWindow : EditorWindow
                     "Battle Item Settings",
                     EditorStyles.boldLabel);
                 DrawProperty("targetType", "Target");
-                DrawProperty("usePolicy", "Use Policy");
-                SerializedProperty usePolicy = Find("usePolicy");
-                if (usePolicy != null &&
-                    usePolicy.enumValueIndex ==
-                    (int)BattleItemUsePolicy.LimitedUse)
+                DrawProperty("lifecycle", "Deck Lifecycle");
+                SerializedProperty lifecycle = Find("lifecycle");
+                bool disposable = lifecycle != null &&
+                    lifecycle.enumValueIndex ==
+                    (int)BattleItemLifecycle.Disposable;
+                using (new EditorGUI.DisabledScope(disposable))
                 {
-                    DrawProperty("limitedUses", "Uses Per Acquisition");
+                    DrawProperty("chargeMode", "Charge Mode");
                 }
-                if (usePolicy == null ||
-                    usePolicy.enumValueIndex !=
-                    (int)BattleItemUsePolicy.UnlimitedUse)
+                SerializedProperty chargeMode = Find("chargeMode");
+                if (disposable || chargeMode == null ||
+                    chargeMode.enumValueIndex !=
+                    (int)BattleItemChargeMode.Unlimited)
                 {
-                    DrawProperty("maximumRunUses", "Maximum Run Uses");
+                    DrawProperty(
+                        "limitedUses",
+                        disposable ? "Uses (Fixed at 1)" :
+                            "Uses Per Battle");
                 }
                 DrawProperty("energyCost", "Energy Cost");
                 DrawProperty("cooldown", "Cooldown");
@@ -448,19 +492,24 @@ public sealed class ItemEditorWindow : EditorWindow
                     MessageType.Error);
             }
 
-            SerializedProperty usePolicy = Find("usePolicy");
+            SerializedProperty lifecycle = Find("lifecycle");
+            SerializedProperty chargeMode = Find("chargeMode");
             SerializedProperty limitedUses = Find("limitedUses");
-            SerializedProperty maximumRunUses = Find("maximumRunUses");
-            if (usePolicy != null && limitedUses != null &&
-                maximumRunUses != null &&
-                usePolicy.enumValueIndex ==
-                (int)BattleItemUsePolicy.LimitedUse &&
-                maximumRunUses.intValue > 0 &&
-                maximumRunUses.intValue < limitedUses.intValue)
+            if (lifecycle != null && chargeMode != null &&
+                lifecycle.enumValueIndex ==
+                (int)BattleItemLifecycle.Disposable &&
+                chargeMode.enumValueIndex ==
+                (int)BattleItemChargeMode.Unlimited)
             {
                 EditorGUILayout.HelpBox(
-                    "Maximum run uses is lower than the uses granted per acquisition.",
-                    MessageType.Warning);
+                    "Disposable items must use exactly one limited charge.",
+                    MessageType.Error);
+            }
+            if (limitedUses != null && limitedUses.intValue < 1)
+            {
+                EditorGUILayout.HelpBox(
+                    "Limited items require at least one use per battle.",
+                    MessageType.Error);
             }
         }
     }
@@ -492,6 +541,183 @@ public sealed class ItemEditorWindow : EditorWindow
         SerializedProperty property = Find(propertyName);
         if (property != null)
             EditorGUILayout.PropertyField(property, new GUIContent(label));
+    }
+
+    private void DrawLocalizationControls()
+    {
+        using (new EditorGUILayout.HorizontalScope())
+        {
+            EditorGUILayout.LabelField(
+                "Localization",
+                EditorStyles.miniBoldLabel);
+            if (GUILayout.Button("키 새로고침", GUILayout.Width(88f)))
+                RefreshLocalizationKeys();
+        }
+
+        if (!string.IsNullOrWhiteSpace(_localizationLoadError))
+        {
+            EditorGUILayout.HelpBox(
+                _localizationLoadError,
+                MessageType.Error);
+        }
+    }
+
+    private void DrawLocalizationKey(
+        string propertyName,
+        string label,
+        List<LocalizationKeyOption> options,
+        string expectedSuffix)
+    {
+        SerializedProperty property = Find(propertyName);
+        if (property == null)
+        {
+            EditorGUILayout.HelpBox(
+                $"'{propertyName}' 속성을 찾을 수 없습니다.",
+                MessageType.Error);
+            return;
+        }
+
+        property.stringValue = EditorGUILayout.TextField(
+            label,
+            property.stringValue ?? string.Empty);
+        string currentKey = property.stringValue.Trim();
+        int currentIndex = 0;
+        string[] labels = new string[options.Count + 1];
+        labels[0] = "(직접 입력 유지)";
+        for (int index = 0; index < options.Count; index++)
+        {
+            LocalizationKeyOption option = options[index];
+            labels[index + 1] = option.Label;
+            if (string.Equals(
+                    currentKey,
+                    option.Key,
+                    StringComparison.Ordinal))
+            {
+                currentIndex = index + 1;
+            }
+        }
+
+        using (new EditorGUILayout.HorizontalScope())
+        {
+            int selectedIndex = EditorGUILayout.Popup(
+                "목록에서 선택",
+                currentIndex,
+                labels);
+            if (selectedIndex > 0 && selectedIndex != currentIndex)
+            {
+                property.stringValue = options[selectedIndex - 1].Key;
+                currentKey = property.stringValue;
+                currentIndex = selectedIndex;
+            }
+
+            using (new EditorGUI.DisabledScope(
+                       string.IsNullOrEmpty(currentKey)))
+            {
+                if (GUILayout.Button("키 지우기", GUILayout.Width(72f)))
+                {
+                    property.stringValue = string.Empty;
+                    currentKey = string.Empty;
+                    currentIndex = 0;
+                }
+            }
+        }
+
+        if (!string.IsNullOrEmpty(currentKey) && currentIndex == 0)
+        {
+            EditorGUILayout.HelpBox(
+                $"현재 키 '{currentKey}'는 {LocalizationPrefix}*" +
+                $"{expectedSuffix} 목록에 없습니다.",
+                MessageType.Warning);
+        }
+        else if (options.Count == 0 &&
+                 string.IsNullOrWhiteSpace(_localizationLoadError))
+        {
+            EditorGUILayout.HelpBox(
+                $"{LocalizationPrefix}*{expectedSuffix} 형식의 키가 " +
+                "없습니다.",
+                MessageType.Info);
+        }
+    }
+
+    private void RefreshLocalizationKeys()
+    {
+        _nameKeyOptions.Clear();
+        _descriptionKeyOptions.Clear();
+        _localizationLoadError = string.Empty;
+
+        try
+        {
+            LocalizationSourceModel model =
+                LocalizationCodeGenerator.LoadSource();
+            foreach (LocalizationSourceString entry in model.Strings)
+            {
+                string key = (entry.Key ?? string.Empty).Trim();
+                if (!key.StartsWith(
+                        LocalizationPrefix,
+                        StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                LocalizationKeyOption option = new(
+                    key,
+                    BuildLocalizationOptionLabel(entry, key));
+                if (key.EndsWith(
+                        ".name",
+                        StringComparison.OrdinalIgnoreCase))
+                {
+                    _nameKeyOptions.Add(option);
+                }
+                else if (key.EndsWith(
+                             ".description",
+                             StringComparison.OrdinalIgnoreCase) ||
+                         key.EndsWith(
+                             ".effect",
+                             StringComparison.OrdinalIgnoreCase))
+                {
+                    _descriptionKeyOptions.Add(option);
+                }
+            }
+
+            _nameKeyOptions.Sort(CompareLocalizationOptions);
+            _descriptionKeyOptions.Sort(CompareLocalizationOptions);
+        }
+        catch (Exception exception)
+        {
+            _localizationLoadError =
+                "Localization 키를 불러오지 못했습니다: " +
+                exception.Message;
+        }
+    }
+
+    private static string BuildLocalizationOptionLabel(
+        LocalizationSourceString entry,
+        string key)
+    {
+        entry.Translations.TryGetValue("ko-KR", out string korean);
+        entry.Translations.TryGetValue("en-US", out string english);
+        korean = (korean ?? string.Empty).Trim();
+        english = (english ?? string.Empty).Trim();
+        if (!string.IsNullOrEmpty(korean) &&
+            !string.IsNullOrEmpty(english))
+        {
+            return $"{key}  |  {korean} / {english}";
+        }
+        if (!string.IsNullOrEmpty(korean))
+            return $"{key}  |  {korean}";
+        if (!string.IsNullOrEmpty(english))
+            return $"{key}  |  {english}";
+        return key;
+    }
+
+    private static int CompareLocalizationOptions(
+        LocalizationKeyOption left,
+        LocalizationKeyOption right)
+    {
+        return string.Compare(
+            left.Key,
+            right.Key,
+            StringComparison.OrdinalIgnoreCase);
     }
 
     private void ShowCreateMenu()
