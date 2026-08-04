@@ -1338,6 +1338,20 @@ public sealed class RecruitBannerView
 
     public static RecruitBannerView Build(Transform host)
     {
+        return BuildInternal(host, false);
+    }
+
+#if UNITY_EDITOR
+    public static RecruitBannerView BuildEditor(Transform host)
+    {
+        return BuildInternal(host, true);
+    }
+#endif
+
+    private static RecruitBannerView BuildInternal(
+        Transform host,
+        bool allowEditorCreation)
+    {
         RecruitBannerView view = new(host);
         if (!view.TryBindLayout())
         {
@@ -1353,6 +1367,14 @@ public sealed class RecruitBannerView
                     "The designer-owned recruit banner has missing UI " +
                     "references. Repair its bindings instead of rebuilding " +
                     "the scene layout.");
+            }
+
+            if (!allowEditorCreation)
+            {
+                throw new InvalidOperationException(
+                    "The saved recruit banner UI is missing. Synchronize " +
+                    "the Recruit editor and save the scene before entering " +
+                    "Play Mode.");
             }
 
             view.BuildLayout();

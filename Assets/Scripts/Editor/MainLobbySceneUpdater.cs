@@ -281,7 +281,7 @@ public static class MainLobbySceneUpdater
         GameObject titleObject,
         TitlePage titlePage)
     {
-        MenuPageSceneBuilder.RestoreTitleMenuDefaultLayout(titlePage);
+        MenuPageSceneBuilder.ApplyGeneratedTitleLobbyLayout(titlePage);
         Transform root = titleObject.transform.Find(
             RuntimeMenuPageBase.RuntimeRootObjectName);
         Transform panel = root != null
@@ -336,7 +336,7 @@ public static class MainLobbySceneUpdater
             new Color(0.09f, 0.15f, 0.14f, 0.98f),
             17f);
         ConfigureTitleNoticePopup(root);
-        MenuPageSceneBuilder.RestoreTitleMenuDefaultLayout(titlePage);
+        MenuPageSceneBuilder.ApplyGeneratedTitleLobbyLayout(titlePage);
         titlePage.MarkDesignerLayoutCurrent();
     }
 
@@ -511,7 +511,7 @@ public static class MainLobbySceneUpdater
             root,
             "btnATTENDANCEOverlay",
             LocalizationKeys.UiMainAttendance);
-        MenuPageSceneBuilder.RestoreMainMenuDefaultLayout(mainPage);
+        MenuPageSceneBuilder.ApplyGeneratedMainLobbyLayout(mainPage);
 
         Image rootImage = root.GetComponent<Image>();
         rootImage.color = LobbyBackground;

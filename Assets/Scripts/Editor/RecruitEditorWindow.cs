@@ -2173,7 +2173,7 @@ public sealed class RecruitEditorWindow : EditorWindow
         if (_targetPage == null)
             return;
         _serializedTarget?.ApplyModifiedProperties();
-        if (!SyncTargetPreview(_revealPreviewCount, false))
+        if (!SyncTargetPreview(0, false))
             return;
         Scene scene = _targetPage.gameObject.scene;
         if (scene.IsValid() && scene.isLoaded)

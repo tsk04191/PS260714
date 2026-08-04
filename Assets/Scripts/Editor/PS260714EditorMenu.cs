@@ -13,6 +13,8 @@ internal static class PS260714EditorMenu
         Root + "Common Settings";
     public const string RecruitEditor =
         Root + "Recruit Editor";
+    public const string StageSelectEditor =
+        Root + "Stage Select Editor";
     public const string ItemEditor =
         Root + "Item Editor";
     public const string EnemyEditor =

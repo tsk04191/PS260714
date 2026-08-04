@@ -39,9 +39,18 @@ public sealed class RuntimeMenuPageBaseEditor : Editor
                     page.gameObject.scene);
             }
 
-            if (GUILayout.Button("Restore Menu Default Layout"))
+            if (page is StageSelectPage stageSelectPage &&
+                GUILayout.Button("Sync Stage Select UI & Save Scene"))
             {
-                MenuPageSceneBuilder.RestoreStaticMenuDefaultLayout(page);
+                if (stageSelectPage.SyncEditorUi(out string error))
+                {
+                    UnityEditor.SceneManagement.EditorSceneManager.SaveScene(
+                        page.gameObject.scene);
+                }
+                else
+                {
+                    Debug.LogError(error, stageSelectPage);
+                }
             }
 
             if (GUILayout.Button("Validate Designer UI References"))

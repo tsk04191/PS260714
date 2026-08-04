@@ -17,6 +17,7 @@ public class DataManager : MonoBehaviour
     [HideInInspector] public CharacterCollectionData CharacterDatas;
     [HideInInspector] public InventoryData InventoryDatas;
     [HideInInspector] public AttendanceData AttendanceDatas;
+    [HideInInspector] public DungeonProgressData DungeonProgressDatas;
 
     public AttendanceService Attendance { get; private set; }
 
@@ -43,9 +44,11 @@ public class DataManager : MonoBehaviour
         CharacterDatas ??= new CharacterCollectionData();
         InventoryDatas ??= new InventoryData();
         AttendanceDatas ??= new AttendanceData();
+        DungeonProgressDatas ??= new DungeonProgressData();
         CharacterDatas.Load();
         InventoryDatas.Load();
         AttendanceDatas.Load();
+        DungeonProgressDatas.Load();
         RebuildAttendanceService();
         LocalizationFontResolver.RefreshAllClientText();
     }
@@ -59,6 +62,7 @@ public class DataManager : MonoBehaviour
         CharacterDatas ??= new CharacterCollectionData();
         InventoryDatas ??= new InventoryData();
         AttendanceDatas ??= new AttendanceData();
+        DungeonProgressDatas ??= new DungeonProgressData();
         RebuildAttendanceService();
 
         LoadAll(loadCharacters: false);
@@ -130,11 +134,13 @@ public class DataManager : MonoBehaviour
         CharacterDatas ??= new CharacterCollectionData();
         InventoryDatas ??= new InventoryData();
         AttendanceDatas ??= new AttendanceData();
+        DungeonProgressDatas ??= new DungeonProgressData();
         DisplayDatas.Save(false);
         AudioDatas.Save(false);
         CharacterDatas.Save(false);
         InventoryDatas.Save(false);
         AttendanceDatas.Save(false);
+        DungeonProgressDatas.Save(false);
         PlayerPrefs.Save();
 
         _events?.NotifyDataSaved();
@@ -152,6 +158,7 @@ public class DataManager : MonoBehaviour
         CharacterDatas ??= new CharacterCollectionData();
         InventoryDatas ??= new InventoryData();
         AttendanceDatas ??= new AttendanceData();
+        DungeonProgressDatas ??= new DungeonProgressData();
         DisplayDatas.Load();
         AudioDatas.Load();
         if (loadCharacters)
@@ -159,6 +166,7 @@ public class DataManager : MonoBehaviour
             CharacterDatas.Load();
             InventoryDatas.Load();
             AttendanceDatas.Load();
+            DungeonProgressDatas.Load();
         }
         
         NotifyCurrentSettings();

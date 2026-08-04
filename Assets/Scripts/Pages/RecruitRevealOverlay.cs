@@ -67,6 +67,23 @@ public sealed class RecruitRevealOverlay
         MonoBehaviour runner,
         Transform host)
     {
+        return BuildInternal(runner, host, false);
+    }
+
+#if UNITY_EDITOR
+    public static RecruitRevealOverlay BuildEditor(
+        MonoBehaviour runner,
+        Transform host)
+    {
+        return BuildInternal(runner, host, true);
+    }
+#endif
+
+    private static RecruitRevealOverlay BuildInternal(
+        MonoBehaviour runner,
+        Transform host,
+        bool allowEditorCreation)
+    {
         if (runner == null || host == null)
             return null;
 
@@ -83,6 +100,14 @@ public sealed class RecruitRevealOverlay
                     "The designer-owned recruit reveal overlay has missing " +
                     "UI references. Repair its bindings instead of " +
                     "rebuilding the scene layout.");
+            }
+
+            if (!allowEditorCreation)
+            {
+                throw new InvalidOperationException(
+                    "The saved recruit reveal UI is missing. Synchronize " +
+                    "the Recruit editor and save the scene before entering " +
+                    "Play Mode.");
             }
 
             overlay.BuildLayout();

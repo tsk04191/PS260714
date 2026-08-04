@@ -42,6 +42,47 @@ public static class DungeonDefinitionCatalog
         return Definitions.Values;
     }
 
+    public static void Invalidate()
+    {
+        Definitions.Clear();
+        _loaded = false;
+    }
+
+    public static IReadOnlyList<DungeonDefinition>
+        GetStageSelectDefinitions()
+    {
+        EnsureLoaded();
+        List<DungeonDefinition> result = new();
+        foreach (DungeonDefinition definition in Definitions.Values)
+        {
+            if (definition != null && definition.IsListedInStageSelect)
+                result.Add(definition);
+        }
+
+        result.Sort(CompareStageSelectDefinitions);
+        return result;
+    }
+
+    private static int CompareStageSelectDefinitions(
+        DungeonDefinition left,
+        DungeonDefinition right)
+    {
+        if (ReferenceEquals(left, right))
+            return 0;
+        if (left == null)
+            return 1;
+        if (right == null)
+            return -1;
+
+        int order = left.StageOrder.CompareTo(right.StageOrder);
+        return order != 0
+            ? order
+            : string.Compare(
+                left.DungeonId,
+                right.DungeonId,
+                StringComparison.Ordinal);
+    }
+
     private static void EnsureLoaded()
     {
         if (_loaded)

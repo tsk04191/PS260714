@@ -8,6 +8,12 @@ public enum EDungeonCompletionDestination
     StageSelect,
 }
 
+public enum EDungeonStageSelectVisibility
+{
+    Listed = 0,
+    Hidden = 1,
+}
+
 [CreateAssetMenu(
     fileName = "DungeonDefinition",
     menuName = "Dungeon/Definition")]
@@ -16,6 +22,14 @@ public sealed class DungeonDefinition : ScriptableObject
     [Header("Identity")]
     [SerializeField] private string dungeonId = "free_battle";
     [SerializeField, Min(1)] private int contentVersion = 1;
+
+    [Header("Stage Select")]
+    [SerializeField]
+    private EDungeonStageSelectVisibility stageSelectVisibility;
+    [SerializeField] private int stageOrder;
+    [SerializeField] private string titleLocalizationKey;
+    [SerializeField] private string fallbackTitle;
+    [SerializeField] private Sprite stageCoverSprite;
 
     [Header("Flow")]
     [SerializeField, Min(1)] private int minimumBattleCount = 5;
@@ -50,6 +64,64 @@ public sealed class DungeonDefinition : ScriptableObject
 
     public string DungeonId => dungeonId;
     public int ContentVersion => contentVersion;
+    public bool IsListedInStageSelect =>
+        stageSelectVisibility == EDungeonStageSelectVisibility.Listed;
+    public int StageOrder => stageOrder;
+    public string TitleLocalizationKey
+    {
+        get
+        {
+            if (!string.IsNullOrWhiteSpace(titleLocalizationKey))
+                return titleLocalizationKey.Trim();
+            if (string.Equals(
+                    dungeonId,
+                    DungeonDefinitionCatalog.TestFieldId,
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                return PS260714.Localization.LocalizationKeys
+                    .UiStageSelectTestField;
+            }
+            if (string.Equals(
+                    dungeonId,
+                    DungeonDefinitionCatalog.FreeBattleId,
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                return PS260714.Localization.LocalizationKeys
+                    .UiStageSelectFreeBattle;
+            }
+            return string.Empty;
+        }
+    }
+    public string FallbackTitle
+    {
+        get
+        {
+            if (!string.IsNullOrWhiteSpace(fallbackTitle))
+                return fallbackTitle.Trim();
+            if (string.Equals(
+                    dungeonId,
+                    DungeonDefinitionCatalog.TestFieldId,
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                return "STAGE 0 · TEST FIELD";
+            }
+            if (string.Equals(
+                    dungeonId,
+                    DungeonDefinitionCatalog.FreeBattleId,
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                return "FREE BATTLE";
+            }
+            return !string.IsNullOrWhiteSpace(dungeonId)
+                ? dungeonId.Trim()
+                : name;
+        }
+    }
+    public Sprite StageCoverSprite => stageCoverSprite != null
+        ? stageCoverSprite
+        : theme != null
+            ? theme.BackgroundSprite
+            : null;
     public bool SelectStartingCharacter => selectStartingCharacter;
     public bool IncludeStartingConsumable => includeStartingConsumable;
     public bool UseIntroBattleBalance => useIntroBattleBalance;
@@ -118,6 +190,13 @@ public sealed class DungeonDefinition : ScriptableObject
         if (string.IsNullOrWhiteSpace(dungeonId))
         {
             error = "Dungeon id is required.";
+            return false;
+        }
+        if (IsListedInStageSelect &&
+            string.IsNullOrWhiteSpace(TitleLocalizationKey) &&
+            string.IsNullOrWhiteSpace(FallbackTitle))
+        {
+            error = "A listed dungeon requires a stage-select title.";
             return false;
         }
 
@@ -195,6 +274,15 @@ public sealed class DungeonDefinition : ScriptableObject
             : "RuntimeFreeBattleDefinition";
         definition.hideFlags = HideFlags.HideAndDontSave;
         definition.dungeonId = id;
+        definition.stageOrder = tutorialStage ? 0 : 1;
+        definition.titleLocalizationKey = tutorialStage
+            ? PS260714.Localization.LocalizationKeys
+                .UiStageSelectTestField
+            : PS260714.Localization.LocalizationKeys
+                .UiStageSelectFreeBattle;
+        definition.fallbackTitle = tutorialStage
+            ? "STAGE 0 · TEST FIELD"
+            : "FREE BATTLE";
         definition.minimumBattleCount = tutorialStage ? 1 : 5;
         definition.maximumBattleCount = tutorialStage ? 1 : 8;
         definition.insertEventBetweenBattles = !tutorialStage;
@@ -214,6 +302,9 @@ public sealed class DungeonDefinition : ScriptableObject
             ? name.Trim().ToLowerInvariant().Replace(' ', '_')
             : dungeonId.Trim();
         contentVersion = Mathf.Max(1, contentVersion);
+        titleLocalizationKey =
+            (titleLocalizationKey ?? string.Empty).Trim();
+        fallbackTitle = (fallbackTitle ?? string.Empty).Trim();
         minimumBattleCount = Mathf.Max(1, minimumBattleCount);
         maximumBattleCount = Mathf.Max(
             minimumBattleCount,

@@ -48,6 +48,11 @@ public sealed class MainSubPage : RuntimeMenuPageBase
     private bool _recruitLocaleEventBound;
     private bool _recruitRevealInProgress;
     private string _lastRecruitResultMessage = string.Empty;
+#if UNITY_EDITOR
+    private bool _recruitEditorSyncInProgress;
+#endif
+
+    public bool IsRecruitPage => pageType == EMainSubPageType.Recruit;
 
     protected override string PageTitle => pageType switch
     {
@@ -97,6 +102,8 @@ public sealed class MainSubPage : RuntimeMenuPageBase
         : new Vector2(680f, 720f);
     protected override bool FillAvailableSpace =>
         pageType == EMainSubPageType.Roster ||
+        pageType == EMainSubPageType.Recruit;
+    protected override bool RequiresSavedDesignerUiAtRuntime =>
         pageType == EMainSubPageType.Recruit;
 
     protected override void BuildButtons()
@@ -150,10 +157,7 @@ public sealed class MainSubPage : RuntimeMenuPageBase
                 break;
             case EMainSubPageType.Recruit:
                 BuildRecruitBrowser();
-                CreateLocalizedTopLeftOverlayMenuButton(
-                    "btnBACKTOMAIN",
-                    LocalizationKeys.UiCommonBack,
-                    HandleBackClicked);
+                BindOrCreateRecruitBackButton();
                 return;
             case EMainSubPageType.Storage:
                 CreateLocalizedPlaceholderButton(
@@ -241,12 +245,42 @@ public sealed class MainSubPage : RuntimeMenuPageBase
         SetLegacyRosterControlActive("btnBACK", false);
         ConfigureFullScreenContainer();
 
+#if UNITY_EDITOR
+        _recruitBannerView = _recruitEditorSyncInProgress
+            ? RecruitBannerView.BuildEditor(ButtonRoot)
+            : RecruitBannerView.Build(ButtonRoot);
+#else
         _recruitBannerView = RecruitBannerView.Build(ButtonRoot);
+#endif
         _recruitBannerView.SetRecruitRequested(
             HandleRecruitRequested);
+#if UNITY_EDITOR
+        _recruitRevealOverlay = _recruitEditorSyncInProgress
+            ? RecruitRevealOverlay.BuildEditor(this, ButtonRoot)
+            : RecruitRevealOverlay.Build(this, ButtonRoot);
+#else
         _recruitRevealOverlay =
             RecruitRevealOverlay.Build(this, ButtonRoot);
+#endif
         RefreshRecruitBannerView();
+    }
+
+    private void BindOrCreateRecruitBackButton()
+    {
+#if UNITY_EDITOR
+        if (_recruitEditorSyncInProgress)
+        {
+            CreateLocalizedTopLeftOverlayMenuButton(
+                "btnBACKTOMAIN",
+                LocalizationKeys.UiCommonBack,
+                HandleBackClicked);
+            return;
+        }
+#endif
+        BindLocalizedOverlayMenuButton(
+            "btnBACKTOMAIN",
+            LocalizationKeys.UiCommonBack,
+            HandleBackClicked);
     }
 
     public bool EnsureRecruitRewardPoolData()
@@ -271,6 +305,44 @@ public sealed class MainSubPage : RuntimeMenuPageBase
     }
 
 #if UNITY_EDITOR
+    public bool ValidateRecruitEditorUi(out string error)
+    {
+        error = string.Empty;
+        if (pageType != EMainSubPageType.Recruit)
+        {
+            error = "선택한 페이지가 모집 페이지가 아닙니다.";
+            return false;
+        }
+
+        RecruitBannerDesignerBindings banner =
+            GetComponentInChildren<RecruitBannerDesignerBindings>(true);
+        RecruitRevealDesignerBindings reveal =
+            GetComponentInChildren<RecruitRevealDesignerBindings>(true);
+        Transform root = transform.Find(RuntimeRootObjectName);
+        Transform back = root != null
+            ? root.Find("btnBACKTOMAIN")
+            : null;
+        if (banner == null || !banner.HasDesignerLayout ||
+            !banner.HasRequiredReferences)
+        {
+            error = "모집 배너 디자이너 UI 참조가 누락되었습니다.";
+            return false;
+        }
+        if (reveal == null || !reveal.HasDesignerLayout ||
+            !reveal.HasRequiredReferences)
+        {
+            error = "모집 결과창 디자이너 UI 참조가 누락되었습니다.";
+            return false;
+        }
+        if (back == null || back.GetComponent<Button>() == null ||
+            back.Find("txtLabel")?.GetComponent<TextMeshProUGUI>() == null)
+        {
+            error = "모집 페이지 뒤로가기 버튼 참조가 누락되었습니다.";
+            return false;
+        }
+        return true;
+    }
+
     public bool SyncRecruitEditorPreview(
         int bannerIndex,
         int revealPreviewCount,
@@ -288,21 +360,27 @@ public sealed class MainSubPage : RuntimeMenuPageBase
             return false;
         }
 
-        Init();
-        if (_recruitBannerView == null ||
-            _recruitRevealOverlay == null)
+        _recruitEditorSyncInProgress = true;
+        try
         {
-            try
+            Init();
+            if (_recruitBannerView == null ||
+                _recruitRevealOverlay == null)
             {
                 BuildRecruitBrowser();
             }
-            catch (Exception exception)
-            {
-                error =
-                    "모집 배너 또는 결과창 UI 재바인딩에 실패했습니다.\n" +
-                    exception.Message;
-                return false;
-            }
+            BindOrCreateRecruitBackButton();
+        }
+        catch (Exception exception)
+        {
+            error =
+                "모집 배너 또는 결과창 UI 재바인딩에 실패했습니다.\n" +
+                exception.Message;
+            return false;
+        }
+        finally
+        {
+            _recruitEditorSyncInProgress = false;
         }
         if (_recruitBannerView == null ||
             _recruitRevealOverlay == null)

@@ -36,7 +36,9 @@ public abstract class RuntimeMenuPageBase : MonoBehaviour, IPage
     protected virtual string PageDescriptionLocalizationKey => string.Empty;
     protected virtual Vector2 PanelSize => new(520f, 560f);
     protected virtual bool FillAvailableSpace => false;
+    protected virtual bool RequiresSavedDesignerUiAtRuntime => false;
     protected RectTransform RuntimeRoot => _runtimeRoot;
+    protected RectTransform PanelRoot => _panel;
     protected RectTransform ButtonRoot => _buttonRoot;
     public bool HasDesignerLayout => _designerLayoutVersion > 0;
 
@@ -59,7 +61,7 @@ public abstract class RuntimeMenuPageBase : MonoBehaviour, IPage
             RefreshLayout();
     }
 
-    public void Open(PageOpenMode mode = PageOpenMode.Fresh)
+    public virtual void Open(PageOpenMode mode = PageOpenMode.Fresh)
     {
         gameObject.SetActive(true);
         if (!_initialized)
@@ -78,7 +80,8 @@ public abstract class RuntimeMenuPageBase : MonoBehaviour, IPage
         if (_initialized)
             return;
 
-        BuildRuntimeUi();
+        if (!BuildRuntimeUi())
+            return;
         BuildButtons();
         _initialized = true;
         RefreshPageLocalization();
@@ -264,6 +267,41 @@ public abstract class RuntimeMenuPageBase : MonoBehaviour, IPage
             true);
     }
 
+    protected Button BindLocalizedOverlayMenuButton(
+        string stableName,
+        string localizationKey,
+        Action action)
+    {
+        if (_runtimeRoot == null)
+            return null;
+
+        Transform buttonTransform = _runtimeRoot.Find(stableName);
+        Button button = buttonTransform != null
+            ? buttonTransform.GetComponent<Button>()
+            : null;
+        TextMeshProUGUI label = buttonTransform != null
+            ? buttonTransform.Find("txtLabel")
+                ?.GetComponent<TextMeshProUGUI>()
+            : null;
+        if (button == null || label == null)
+        {
+            Debug.LogError(
+                $"{name}: saved designer button '{stableName}' is " +
+                "missing or has incomplete references.",
+                this);
+            return null;
+        }
+
+        button.onClick.RemoveAllListeners();
+        if (action != null)
+            button.onClick.AddListener(() => action());
+        ApplyLocalizedText(
+            label,
+            localizationKey,
+            LocalizationService.Get(localizationKey));
+        return button;
+    }
+
     private Button CreateOverlayMenuButtonCore(
         string objectName,
         string label,
@@ -376,12 +414,22 @@ public abstract class RuntimeMenuPageBase : MonoBehaviour, IPage
         PageControl.PagToPag(gameObject, targetPage, mode);
     }
 
-    private void BuildRuntimeUi()
+    private bool BuildRuntimeUi()
     {
         if (TryBindExistingUi())
         {
             RefreshPageLocalization();
-            return;
+            return true;
+        }
+
+        if (Application.isPlaying && RequiresSavedDesignerUiAtRuntime)
+        {
+            Debug.LogError(
+                $"{name}: saved designer UI is required. Open the page " +
+                "editor, synchronize the UI, and save the scene before " +
+                "entering Play Mode.",
+                this);
+            return false;
         }
 
         _usesDesignerLayout = false;
@@ -472,6 +520,7 @@ public abstract class RuntimeMenuPageBase : MonoBehaviour, IPage
         buttonLayout.childForceExpandWidth = true;
         buttonLayout.childControlHeight = true;
         buttonLayout.childForceExpandHeight = false;
+        return true;
     }
 
     private bool TryBindExistingUi()
@@ -511,6 +560,7 @@ public abstract class RuntimeMenuPageBase : MonoBehaviour, IPage
     public void MarkDesignerLayoutCurrent()
     {
         _designerLayoutVersion = 1;
+        _usesDesignerLayout = true;
         UnityEditor.EditorUtility.SetDirty(this);
     }
 
@@ -518,6 +568,14 @@ public abstract class RuntimeMenuPageBase : MonoBehaviour, IPage
     {
         if (Application.isPlaying)
             return;
+        if (RequiresSavedDesignerUiAtRuntime)
+        {
+            Debug.LogError(
+                $"{name}: destructive preview rebuilding is disabled for " +
+                "saved designer UI. Use the page-specific editor sync.",
+                this);
+            return;
+        }
 
         Transform existingRoot = transform.Find(RuntimeRootObjectName);
         if (existingRoot != null)
@@ -529,7 +587,8 @@ public abstract class RuntimeMenuPageBase : MonoBehaviour, IPage
         _titleText = null;
         _descriptionText = null;
         _initialized = false;
-        BuildRuntimeUi();
+        if (!BuildRuntimeUi())
+            return;
         BuildButtons();
         RefreshPageLocalization();
         RefreshLayout();

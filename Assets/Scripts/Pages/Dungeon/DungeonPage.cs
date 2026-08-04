@@ -1776,6 +1776,7 @@ public class DungeonPage : MonoBehaviour, IPage
             _startingCharacterSelectionPending = false;
             _session.Finish(EDungeonRunResult.Clear);
             NotifyRunEnded(EDungeonRunResult.Clear);
+            RunEnded?.Invoke(EDungeonRunResult.Clear);
             ApplyBattlePauseState();
             _tutorialController?.ShowCompletion();
             return;
@@ -2307,6 +2308,13 @@ public class DungeonPage : MonoBehaviour, IPage
 
     private void NotifyRunEnded(EDungeonRunResult result)
     {
+        if (result == EDungeonRunResult.Clear &&
+            _session.Definition != null)
+        {
+            DataManager.Current?.DungeonProgressDatas?.MarkCleared(
+                _session.Definition);
+        }
+
         ForEachModifier(modifier =>
             modifier.OnRunEnded(GetRuntimeContext(), result));
     }

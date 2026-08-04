@@ -159,6 +159,26 @@ public sealed class RecruitDesignerUiTests
         }
     }
 
+    [Test]
+    public void RecruitRuntimeBinding_DoesNotCreateMissingSceneUi()
+    {
+        GameObject host = new(
+            "RecruitRuntimeBindingHost",
+            typeof(RectTransform));
+        try
+        {
+            Assert.Throws<System.InvalidOperationException>(
+                () => RecruitBannerView.Build(host.transform));
+            Assert.That(
+                host.transform.Find("grpRecruitBannerView"),
+                Is.Null);
+        }
+        finally
+        {
+            Object.DestroyImmediate(host);
+        }
+    }
+
     private static GameObject CreateRecruitPage(
         out MainSubPage page)
     {

@@ -647,219 +647,193 @@ public sealed class CharacterP0RegressionTests
     }
 
     [Test]
-    public void TitleMenuDesignerLayout_UsesFullScreenStartWithCornerActions()
+    public void StageSelectDesignerLayout_BuildsHorizontalStageTrack()
     {
         GameObject pageObject = new(
-            "TitleMenuDesignerLayoutTest",
-            typeof(RectTransform),
-            typeof(TitlePage));
-        _createdObjects.Add(pageObject);
-        pageObject.GetComponent<RectTransform>().sizeDelta =
-            new Vector2(1920f, 1080f);
-        TitlePage page = pageObject.GetComponent<TitlePage>();
-        page.RebuildEditorPreview();
-
-        MenuPageSceneBuilder.RestoreTitleMenuDefaultLayout(page);
-
-        RectTransform runtimeRoot = pageObject.transform.Find(
-                RuntimeMenuPageBase.RuntimeRootObjectName)
-            .GetComponent<RectTransform>();
-        RectTransform panel = runtimeRoot.Find("grpMenuPanel")
-            .GetComponent<RectTransform>();
-        RectTransform buttonRoot = panel.Find("grpMenuButtons")
-            .GetComponent<RectTransform>();
-        RectTransform start = buttonRoot.Find("btnSTARTFullscreen")
-            .GetComponent<RectTransform>();
-        RectTransform notice = runtimeRoot.Find("btnNOTICEOverlay")
-            .GetComponent<RectTransform>();
-        RectTransform settings = runtimeRoot.Find("btnSETTINGSOverlay")
-            .GetComponent<RectTransform>();
-
-        Assert.That(panel.anchorMin, Is.EqualTo(Vector2.zero));
-        Assert.That(panel.anchorMax, Is.EqualTo(Vector2.one));
-        Assert.That(panel.offsetMin, Is.EqualTo(Vector2.zero));
-        Assert.That(panel.offsetMax, Is.EqualTo(Vector2.zero));
-        Assert.That(start.anchorMin, Is.EqualTo(Vector2.zero));
-        Assert.That(start.anchorMax, Is.EqualTo(Vector2.one));
-        Assert.That(start.offsetMin, Is.EqualTo(Vector2.zero));
-        Assert.That(start.offsetMax, Is.EqualTo(Vector2.zero));
-        Assert.That(start.GetComponent<Image>().raycastTarget, Is.True);
-        Assert.That(start.GetComponent<Image>().color.a, Is.EqualTo(0f));
-
-        Assert.That(
-            notice.anchoredPosition,
-            Is.EqualTo(new Vector2(48f, -32f)));
-        Assert.That(
-            notice.sizeDelta,
-            Is.EqualTo(new Vector2(220f, 64f)));
-        Assert.That(
-            settings.anchoredPosition,
-            Is.EqualTo(new Vector2(-48f, -32f)));
-        Assert.That(
-            settings.sizeDelta,
-            Is.EqualTo(new Vector2(80f, 64f)));
-        Assert.That(
-            buttonRoot.Find("btnQUIT"),
-            Is.Null,
-            "Game quit must remain inside the settings page.");
-        Assert.That(
-            buttonRoot.GetComponent<VerticalLayoutGroup>().enabled,
-            Is.False);
-        Assert.That(
-            panel.GetComponent<VerticalLayoutGroup>().enabled,
-            Is.False);
-    }
-
-    [Test]
-    public void MainMenuDesignerLayout_RestoresLobbyTilesWithoutLocking()
-    {
-        GameObject pageObject = new(
-            "MainMenuDesignerLayoutTest",
-            typeof(RectTransform),
-            typeof(MainPage));
-        _createdObjects.Add(pageObject);
-        MainPage page = pageObject.GetComponent<MainPage>();
-        page.RebuildEditorPreview();
-
-        RectTransform panel = pageObject.transform.Find(
-                RuntimeMenuPageBase.RuntimeRootObjectName +
-                "/grpMenuPanel")
-            .GetComponent<RectTransform>();
-        RectTransform buttonRoot = panel.Find("grpMenuButtons")
-            .GetComponent<RectTransform>();
-        buttonRoot.sizeDelta = new Vector2(100f, 100f);
-        foreach (RectTransform child in buttonRoot)
-        {
-            child.anchoredPosition = Vector2.zero;
-            child.sizeDelta = new Vector2(100f, 100f);
-        }
-
-        MenuPageSceneBuilder.RestoreMainMenuDefaultLayout(page);
-
-        string[] buttonNames =
-        {
-            "btnPLAY",
-            "btnROSTER",
-            "btnSHOP",
-            "btnRECRUIT",
-            "btnBASE",
-            "btnSTORAGE",
-        };
-        Vector2[] expectedPositions =
-        {
-            new(0f, 214f),
-            new(0f, 28f),
-            new(-184f, -118f),
-            new(184f, -118f),
-            new(-96f, -259f),
-            new(272f, -259f),
-        };
-        Vector2[] expectedSizes =
-        {
-            new(720f, 210f),
-            new(720f, 130f),
-            new(352f, 130f),
-            new(352f, 130f),
-            new(528f, 120f),
-            new(176f, 120f),
-        };
-        for (int index = 0; index < buttonNames.Length; index++)
-        {
-            RectTransform button = buttonRoot.Find(buttonNames[index])
-                .GetComponent<RectTransform>();
-            Assert.That(
-                button.anchoredPosition,
-                Is.EqualTo(expectedPositions[index]));
-            Assert.That(
-                button.sizeDelta,
-                Is.EqualTo(expectedSizes[index]));
-        }
-
-        Assert.That(
-            buttonRoot.sizeDelta,
-            Is.EqualTo(new Vector2(720f, 638f)));
-        Assert.That(
-            buttonRoot.GetComponent<VerticalLayoutGroup>().enabled,
-            Is.False,
-            "The restored layout must remain directly editable.");
-        Assert.That(
-            panel.GetComponent<VerticalLayoutGroup>().enabled,
-            Is.False,
-            "The panel layout must remain directly editable.");
-    }
-
-    [Test]
-    public void StaticMenuDesignerLayout_RestoresInactivePageButtonPlacement()
-    {
-        GameObject pageObject = new(
-            "StaticMenuDesignerLayoutTest",
+            "StageSelectDesignerLayoutTest",
             typeof(RectTransform),
             typeof(StageSelectPage));
         _createdObjects.Add(pageObject);
         pageObject.GetComponent<RectTransform>().sizeDelta =
             new Vector2(1920f, 1080f);
         StageSelectPage page = pageObject.GetComponent<StageSelectPage>();
-        page.RebuildEditorPreview();
-
-        RectTransform panel = pageObject.transform.Find(
-                RuntimeMenuPageBase.RuntimeRootObjectName +
-                "/grpMenuPanel")
-            .GetComponent<RectTransform>();
-        RectTransform title = panel.Find("txtPageTitle")
-            .GetComponent<RectTransform>();
-        RectTransform description = panel.Find("txtPageDescription")
-            .GetComponent<RectTransform>();
-        RectTransform buttonRoot = panel.Find("grpMenuButtons")
-            .GetComponent<RectTransform>();
-        buttonRoot.sizeDelta = new Vector2(100f, 100f);
-        foreach (RectTransform child in buttonRoot)
-        {
-            child.anchoredPosition = Vector2.zero;
-            child.sizeDelta = new Vector2(100f, 100f);
-        }
+        Assert.That(page.SyncEditorUi(out string error), Is.True, error);
         pageObject.SetActive(false);
 
-        MenuPageSceneBuilder.RestoreStaticMenuDefaultLayout(page);
+        Transform runtimeRoot = pageObject.transform.Find(
+            RuntimeMenuPageBase.RuntimeRootObjectName);
+        ScrollRect scroll = runtimeRoot.Find(
+                "grpMenuPanel/grpMenuButtons/scrStageTrack")
+            .GetComponent<ScrollRect>();
+        Transform content = scroll.content;
+        IReadOnlyList<DungeonDefinition> definitions =
+            DungeonDefinitionCatalog.GetStageSelectDefinitions();
 
+        Assert.That(scroll.horizontal, Is.True);
+        Assert.That(scroll.vertical, Is.False);
+        Assert.That(scroll.viewport.GetComponent<RectMask2D>(), Is.Not.Null);
         Assert.That(
-            title.anchoredPosition,
-            Is.EqualTo(new Vector2(310f, -81f)));
+            content.GetComponent<HorizontalLayoutGroup>(),
+            Is.Not.Null);
         Assert.That(
-            description.anchoredPosition,
-            Is.EqualTo(new Vector2(310f, -174f)));
+            content.GetComponent<ContentSizeFitter>().horizontalFit,
+            Is.EqualTo(ContentSizeFitter.FitMode.PreferredSize));
         Assert.That(
-            buttonRoot.anchoredPosition,
-            Is.EqualTo(new Vector2(310f, -373f)));
-        Assert.That(
-            buttonRoot.sizeDelta,
-            Is.EqualTo(new Vector2(540f, 294f)));
+            content.childCount,
+            Is.EqualTo(Mathf.Max(0, definitions.Count * 2 - 1)));
+        Assert.That(runtimeRoot.Find("btnBACK"), Is.Not.Null);
 
-        string[] buttonNames =
+        Image tintedCover = null;
+        for (int index = 0; index < content.childCount; index += 2)
         {
-            "btnSTAGE0TESTFIELD",
-            "btnFREEBATTLE",
-            "btnBACK",
-        };
-        for (int index = 0; index < buttonNames.Length; index++)
-        {
-            RectTransform button = buttonRoot.Find(buttonNames[index])
+            Transform node = content.GetChild(index);
+            Transform coverTransform = node.Find("imgStageCover");
+            LayoutElement cover =
+                coverTransform.GetComponent<LayoutElement>();
+            RectTransform coverRect =
+                coverTransform.GetComponent<RectTransform>();
+            Image coverImage = coverTransform.GetComponent<Image>();
+            Assert.That(cover.preferredWidth, Is.EqualTo(320f));
+            Assert.That(cover.preferredHeight, Is.EqualTo(320f));
+            Assert.That(
+                cover.preferredWidth,
+                Is.EqualTo(cover.preferredHeight),
+                "Stage banner must remain square.");
+            Assert.That(
+                coverRect.sizeDelta,
+                Is.EqualTo(new Vector2(320f, 320f)));
+            DungeonDefinition definition = definitions[index / 2];
+            if (definition.StageCoverSprite != null)
+            {
+                Assert.That(coverImage.sprite, Is.Not.Null);
+                Assert.That(coverImage.color, Is.EqualTo(Color.white));
+                if (tintedCover == null)
+                {
+                    tintedCover = coverImage;
+                    tintedCover.color = new Color(0.12f, 0.17f, 0.145f, 1f);
+                }
+            }
+            Assert.That(
+                node.GetComponent<VerticalLayoutGroup>().enabled,
+                Is.False);
+            Assert.That(
+                node.Find("grpStageTitleBanner/txtStageSequence"),
+                Is.Not.Null);
+            Assert.That(
+                node.Find("grpStageTitleBanner/txtStageTitle"),
+                Is.Not.Null);
+            Assert.That(node.Find("imgStageProgressLine"), Is.Not.Null);
+            Assert.That(
+                node.Find("grpStageMarker/imgStageClearState"),
+                Is.Not.Null);
+            Assert.That(
+                node.Find(
+                    "grpStageMarker/imgStageClearState/" +
+                    "txtStageMarkerGlyph"),
+                Is.Not.Null);
+
+            RectTransform marker = node.Find(
+                    "grpStageMarker/imgStageClearState")
                 .GetComponent<RectTransform>();
-            Assert.That(
-                button.anchoredPosition,
-                Is.EqualTo(new Vector2(
-                    270f,
-                    -61f - index * 86f)));
-            Assert.That(
-                button.sizeDelta,
-                Is.EqualTo(new Vector2(540f, 72f)));
+            Assert.That(marker.sizeDelta, Is.EqualTo(new Vector2(58f, 58f)));
+            Assert.That(marker.anchoredPosition.x, Is.EqualTo(24f));
         }
 
+        if (content.childCount > 1)
+        {
+            RectTransform connectorLine = content.GetChild(1)
+                .Find("imgLine")
+                .GetComponent<RectTransform>();
+            Assert.That(connectorLine.anchorMin.y, Is.EqualTo(1f));
+            Assert.That(connectorLine.anchoredPosition.y, Is.EqualTo(-36f));
+        }
+
+        if (definitions.Count > 0)
+        {
+            Transform firstNode = content.GetChild(0);
+            GameObject decoration = new(
+                "DesignerDecoration",
+                typeof(RectTransform),
+                typeof(Image));
+            decoration.transform.SetParent(
+                firstNode.Find("imgStageCover"),
+                false);
+            RectTransform decorationRect =
+                decoration.GetComponent<RectTransform>();
+            decorationRect.anchoredPosition = new Vector2(17f, -23f);
+            Color designerColor = new(0.17f, 0.28f, 0.39f, 0.71f);
+            decoration.GetComponent<Image>().color = designerColor;
+
+            Assert.That(
+                page.SyncEditorUi(out string secondError),
+                Is.True,
+                secondError);
+            if (tintedCover != null)
+            {
+                Assert.That(
+                    tintedCover.color,
+                    Is.EqualTo(Color.white),
+                    "Stage sync must remove stale placeholder tint.");
+            }
+            Assert.That(content.GetChild(0), Is.SameAs(firstNode));
+            Assert.That(
+                firstNode.Find("imgStageCover/DesignerDecoration"),
+                Is.SameAs(decoration.transform));
+            Assert.That(
+                decorationRect.anchoredPosition,
+                Is.EqualTo(new Vector2(17f, -23f)));
+            Assert.That(
+                decoration.GetComponent<Image>().color,
+                Is.EqualTo(designerColor));
+
+            RectTransform titleBanner = firstNode.Find(
+                    "grpStageTitleBanner")
+                .GetComponent<RectTransform>();
+            Vector2 designerBannerPosition = new(91f, -137f);
+            titleBanner.anchoredPosition = designerBannerPosition;
+            RectTransform coverRect = firstNode.Find("imgStageCover")
+                .GetComponent<RectTransform>();
+            coverRect.sizeDelta = new Vector2(320f, 410f);
+            LayoutElement coverLayout =
+                coverRect.GetComponent<LayoutElement>();
+            coverLayout.preferredWidth = 320f;
+            coverLayout.preferredHeight = 410f;
+            SerializedObject serializedPage = new(page);
+            serializedPage.FindProperty("_stageBannerLayoutVersion")
+                .intValue = 0;
+            serializedPage.ApplyModifiedPropertiesWithoutUndo();
+
+            Assert.That(
+                page.SyncEditorUi(out string migrationError),
+                Is.True,
+                migrationError);
+            Assert.That(
+                coverRect.sizeDelta,
+                Is.EqualTo(new Vector2(320f, 320f)));
+            Assert.That(coverLayout.preferredHeight, Is.EqualTo(320f));
+            Assert.That(
+                titleBanner.anchoredPosition,
+                Is.EqualTo(designerBannerPosition),
+                "Square migration must preserve designer title placement.");
+        }
+    }
+
+    [Test]
+    public void DungeonProgressData_RoundTripsClearStateAndCount()
+    {
+        DungeonProgressData source = new();
         Assert.That(
-            buttonRoot.GetComponent<VerticalLayoutGroup>().enabled,
-            Is.False);
+            source.MarkCleared("test_field", 2, false),
+            Is.True);
         Assert.That(
-            panel.GetComponent<VerticalLayoutGroup>().enabled,
-            Is.False);
+            source.MarkCleared("test_field", 3, false),
+            Is.True);
+
+        DungeonProgressData restored = new();
+        Assert.That(restored.ImportJson(source.ExportJson()), Is.True);
+        Assert.That(restored.IsCleared("test_field"), Is.True);
+        Assert.That(restored.GetClearCount("test_field"), Is.EqualTo(2));
+        Assert.That(restored.IsCleared("free_battle"), Is.False);
     }
 
     [Test]

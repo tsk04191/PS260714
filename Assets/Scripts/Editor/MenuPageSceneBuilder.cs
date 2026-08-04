@@ -203,15 +203,34 @@ public static class MenuPageSceneBuilder
             if (page == null)
                 continue;
 
-            if (page.HasDesignerLayout)
+            if (page is StageSelectPage stageSelectPage)
             {
-                if (RepairCollapsedStaticMenuLayout(page))
+                if (stageSelectPage.SyncEditorUi(out string stageError))
+                    migratedCount++;
+                else
+                    Debug.LogError(stageError, stageSelectPage);
+                continue;
+            }
+
+            if (page is MainSubPage recruitPage &&
+                recruitPage.IsRecruitPage)
+            {
+                if (recruitPage.SyncRecruitEditorPreview(
+                        0,
+                        0,
+                        out string recruitError))
                 {
                     migratedCount++;
                 }
-
+                else
+                {
+                    Debug.LogError(recruitError, recruitPage);
+                }
                 continue;
             }
+
+            if (page.HasDesignerLayout)
+                continue;
 
             Transform runtimeRoot = pageObject.transform.Find(
                 RuntimeMenuPageBase.RuntimeRootObjectName);
@@ -241,44 +260,10 @@ public static class MenuPageSceneBuilder
         return migratedCount;
     }
 
-    internal static void RestoreMainMenuDefaultLayout(MainPage page)
+    internal static void ApplyGeneratedTitleLobbyLayout(TitlePage page)
     {
-        if (page == null || Application.isPlaying)
-            return;
-
-        if (!TryGetMainMenuLayout(
-                page,
-                out RectTransform panel,
-                out RectTransform title,
-                out RectTransform description,
-                out RectTransform buttonRoot,
-                out List<RectTransform> buttons))
-        {
-            Debug.LogWarning(
-                "Main menu hierarchy is incomplete. Rebuild its editor " +
-                "preview before restoring the layout.",
-                page);
-            return;
-        }
-
-        ApplyMainMenuDefaultLayout(
-            panel,
-            title,
-            description,
-            buttonRoot,
-            buttons);
-        ApplyMainUtilityLayout(page);
-        Scene scene = page.gameObject.scene;
-        if (scene.IsValid() && scene.isLoaded)
-            EditorSceneManager.MarkSceneDirty(scene);
-    }
-
-    internal static void RestoreTitleMenuDefaultLayout(TitlePage page)
-    {
-        if (page == null || Application.isPlaying)
-            return;
-
-        if (!TryGetTitleMenuLayout(
+        if (page == null || Application.isPlaying ||
+            !TryGetTitleMenuLayout(
                 page,
                 out RectTransform panel,
                 out RectTransform title,
@@ -288,10 +273,6 @@ public static class MenuPageSceneBuilder
                 out RectTransform noticeButton,
                 out RectTransform settingsButton))
         {
-            Debug.LogWarning(
-                "Title menu hierarchy is incomplete. Rebuild its editor " +
-                "preview before restoring the layout.",
-                page);
             return;
         }
 
@@ -303,30 +284,12 @@ public static class MenuPageSceneBuilder
             startButton,
             noticeButton,
             settingsButton);
-        Scene scene = page.gameObject.scene;
-        if (scene.IsValid() && scene.isLoaded)
-            EditorSceneManager.MarkSceneDirty(scene);
     }
 
-    internal static void RestoreStaticMenuDefaultLayout(
-        RuntimeMenuPageBase page)
+    internal static void ApplyGeneratedMainLobbyLayout(MainPage page)
     {
-        if (page == null || Application.isPlaying)
-            return;
-
-        if (page is TitlePage titlePage)
-        {
-            RestoreTitleMenuDefaultLayout(titlePage);
-            return;
-        }
-
-        if (page is MainPage mainPage)
-        {
-            RestoreMainMenuDefaultLayout(mainPage);
-            return;
-        }
-
-        if (!TryGetStaticMenuLayout(
+        if (page == null || Application.isPlaying ||
+            !TryGetMainMenuLayout(
                 page,
                 out RectTransform panel,
                 out RectTransform title,
@@ -334,22 +297,16 @@ public static class MenuPageSceneBuilder
                 out RectTransform buttonRoot,
                 out List<RectTransform> buttons))
         {
-            Debug.LogWarning(
-                $"{page.name}: menu hierarchy is incomplete. Rebuild its " +
-                "editor preview before restoring the layout.",
-                page);
             return;
         }
 
-        ApplyStaticMenuDefaultLayout(
+        ApplyMainMenuDefaultLayout(
             panel,
             title,
             description,
             buttonRoot,
             buttons);
-        Scene scene = page.gameObject.scene;
-        if (scene.IsValid() && scene.isLoaded)
-            EditorSceneManager.MarkSceneDirty(scene);
+        ApplyMainUtilityLayout(page);
     }
 
     private static bool MigrateCodexPage(
@@ -1856,7 +1813,10 @@ public static class MenuPageSceneBuilder
         if (forceRebuild || !mainUiExists)
             mainPage.RebuildEditorPreview();
         if (forceRebuild || !stageSelectUiExists)
-            stageSelectPage.RebuildEditorPreview();
+        {
+            if (!stageSelectPage.SyncEditorUi(out string stageSelectError))
+                Debug.LogError(stageSelectError, stageSelectPage);
+        }
         if (forceRebuild || !HasGeneratedUi(codexObject))
             codexPage.RebuildEditorPreview();
         if (forceRebuild || !HasGeneratedUi(rosterObject))
@@ -1864,7 +1824,15 @@ public static class MenuPageSceneBuilder
         if (forceRebuild || !HasGeneratedUi(shopObject))
             shopPage.RebuildEditorPreview();
         if (forceRebuild || !HasGeneratedUi(questObject))
-            questPage.RebuildEditorPreview();
+        {
+            if (!questPage.SyncRecruitEditorPreview(
+                    0,
+                    0,
+                    out string recruitError))
+            {
+                Debug.LogError(recruitError, questPage);
+            }
+        }
         if (forceRebuild || !HasGeneratedUi(storageObject))
             storagePage.RebuildEditorPreview();
         if (forceRebuild || !HasCurrentCodexBrowserUi(
@@ -2216,13 +2184,16 @@ public static class MenuPageSceneBuilder
         if (!HasGeneratedUi(pageObject))
             return false;
 
-        Transform buttonRoot = pageObject.transform.Find(
-            RuntimeMenuPageBase.RuntimeRootObjectName +
-            "/grpMenuPanel/grpMenuButtons");
-        return buttonRoot != null &&
-               buttonRoot.Find("btnSTAGE0TESTFIELD") != null &&
-               buttonRoot.Find("btnFREEBATTLE") != null &&
-               buttonRoot.Find("btnBACK") != null;
+        Transform runtimeRoot = pageObject.transform.Find(
+            RuntimeMenuPageBase.RuntimeRootObjectName);
+        Transform stageScroll = runtimeRoot?.Find(
+            "grpMenuPanel/grpMenuButtons/scrStageTrack");
+        Transform stageContent = stageScroll?.Find(
+            "vptStageTrack/grpStageContent");
+        return stageScroll != null &&
+               stageContent != null &&
+               stageScroll.GetComponent<ScrollRect>() != null &&
+               runtimeRoot.Find("btnBACK") != null;
     }
 
     private static bool HasObjectReference(
