@@ -737,8 +737,9 @@ public readonly struct CharacterActionConditionData
 
 public enum CharacterPassiveOrigin
 {
-    Role,
-    Character
+    Role = 0,
+    Character = 1,
+    Archetype = 2,
 }
 
 public sealed class CharacterResolvedPassive
@@ -747,24 +748,36 @@ public sealed class CharacterResolvedPassive
     public CharacterPassiveOrigin Origin { get; }
     public CharacterRoleSO Role { get; }
     public CharacterRolePassiveDefinition RolePassive { get; }
+    public CharacterArchetypeSO Archetype { get; }
+    public CharacterRolePassiveDefinition ArchetypePassive { get; }
     public bool IsRolePassive => Origin == CharacterPassiveOrigin.Role;
+    public bool IsArchetypePassive =>
+        Origin == CharacterPassiveOrigin.Archetype;
     public Sprite IconSprite =>
-        RolePassive?.IconSprite != null
+        IsRolePassive && RolePassive?.IconSprite != null
             ? RolePassive.IconSprite
+            : IsArchetypePassive && ArchetypePassive?.IconSprite != null
+                ? ArchetypePassive.IconSprite
             : Definition?.IconSprite != null
                 ? Definition.IconSprite
-                : Role?.IconSprite;
+                : IsArchetypePassive
+                    ? Archetype?.IconSprite
+                    : Role?.IconSprite;
 
     public CharacterResolvedPassive(
         CharacterPassiveDefinition definition,
         CharacterPassiveOrigin origin,
         CharacterRoleSO role = null,
-        CharacterRolePassiveDefinition rolePassive = null)
+        CharacterRolePassiveDefinition rolePassive = null,
+        CharacterArchetypeSO archetype = null,
+        CharacterRolePassiveDefinition archetypePassive = null)
     {
         Definition = definition;
         Origin = origin;
         Role = role;
         RolePassive = rolePassive;
+        Archetype = archetype;
+        ArchetypePassive = archetypePassive;
     }
 }
 
@@ -954,15 +967,38 @@ public sealed class CharacterData
 
     private Sprite ResolvePassiveAbilityIconSprite()
     {
-        foreach (CharacterPassiveDefinition definition in
-                 PassiveDefinitions)
+        CharacterPassiveDefinition definition =
+            PassiveDefinitions.Count > 0
+                ? PassiveDefinitions[0]
+                : null;
+        return GetPassiveAbilityIconSprite(definition);
+    }
+
+    private Sprite ResolveActiveAbilityIconSprite()
+    {
+        CharacterSkillDefinition definition = SkillDefinitions.Count > 0
+            ? SkillDefinitions[0]
+            : null;
+        return GetActiveAbilityIconSprite(definition);
+    }
+
+    public Sprite GetPassiveAbilityIconSprite(
+        CharacterPassiveDefinition definition)
+    {
+        if (definition != null)
         {
-            if (definition != null &&
-                !definition.IsEmptyPlaceholder &&
-                definition.IconSprite != null)
+            foreach (CharacterResolvedPassive resolved in
+                     ResolvedPassives)
             {
-                return definition.IconSprite;
+                if (ReferenceEquals(resolved?.Definition, definition) &&
+                    resolved.IconSprite != null)
+                {
+                    return resolved.IconSprite;
+                }
             }
+
+            if (definition.IconSprite != null)
+                return definition.IconSprite;
         }
 
         return PassiveSdSprite != null
@@ -970,14 +1006,11 @@ public sealed class CharacterData
             : IconSprite;
     }
 
-    private Sprite ResolveActiveAbilityIconSprite()
+    public Sprite GetActiveAbilityIconSprite(
+        CharacterSkillDefinition definition)
     {
-        foreach (CharacterSkillDefinition definition in
-                 SkillDefinitions)
-        {
-            if (definition?.IconSprite != null)
-                return definition.IconSprite;
-        }
+        if (definition?.IconSprite != null)
+            return definition.IconSprite;
 
         return SkillSdSprite != null
             ? SkillSdSprite
@@ -1050,6 +1083,29 @@ public sealed class CharacterData
                     CharacterPassiveOrigin.Role,
                     role,
                     rolePassive));
+            }
+        }
+
+        CharacterArchetypeSO archetype = Archetype;
+        if (archetype != null)
+        {
+            foreach (CharacterRolePassiveDefinition archetypePassive in
+                     archetype.PassiveDefinitions)
+            {
+                CharacterPassiveDefinition definition =
+                    archetypePassive?.Ability;
+                if (definition == null ||
+                    definition.IsEmptyPlaceholder)
+                {
+                    continue;
+                }
+
+                _effectivePassiveDefinitions.Add(definition);
+                _resolvedPassives.Add(new CharacterResolvedPassive(
+                    definition,
+                    CharacterPassiveOrigin.Archetype,
+                    archetype: archetype,
+                    archetypePassive: archetypePassive));
             }
         }
 

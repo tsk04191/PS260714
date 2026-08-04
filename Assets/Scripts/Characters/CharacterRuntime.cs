@@ -9,6 +9,8 @@ using UnityEngine.UI;
 internal enum CharacterAbilityIconKind
 {
     Details,
+    Role,
+    Archetype,
     Passive,
     Active,
 }
@@ -369,6 +371,10 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
     private Image _passiveIconImage;
     private Image _activeSkillIconFrame;
     private Image _activeSkillIconImage;
+    private Image _roleIconFrame;
+    private Image _roleIconImage;
+    private Image _archetypeIconFrame;
+    private Image _archetypeIconImage;
     private bool _infoLayoutCached;
     private bool _sdLayoutEnabled;
     private RectTransform _cooldownTrack;
@@ -671,6 +677,7 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
 
         if (_board != null)
         {
+            _board.OccupancyChanged -= HandleBoardOccupancyChanged;
             _board.StatusApplied -= HandleStatusApplied;
             _board.EnemyDefeated -= HandleEnemyDefeated;
         }
@@ -684,6 +691,7 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
             _activeSkillResource.Changed += HandleActiveSkillResourceChanged;
         if (_board != null)
         {
+            _board.OccupancyChanged += HandleBoardOccupancyChanged;
             _board.StatusApplied += HandleStatusApplied;
             _board.EnemyDefeated += HandleEnemyDefeated;
         }
@@ -4368,6 +4376,28 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
             localContributionMultipliers = null)
     {
         StatusEffectStatAccumulator accumulator = default;
+        float dungeonStageProgress = GetDungeonStageProgress();
+        if (Data?.PassiveDefinitions != null)
+        {
+            foreach (CharacterPassiveDefinition passive in
+                     Data.PassiveDefinitions)
+            {
+                if (passive == null || !passive.HasStatModifierSection)
+                    continue;
+
+                foreach (CharacterPassiveStatModifierDefinition modifier in
+                         passive.StatModifiers)
+                {
+                    if (modifier == null || modifier.StatType != statType)
+                        continue;
+
+                    accumulator.Add(
+                        modifier.Mode,
+                        modifier.ResolveValue(dungeonStageProgress));
+                }
+            }
+        }
+
         foreach (StatusEffectRuntimeState state in _statusEffects.Values)
         {
             if (state == null || !state.HasStacks ||
@@ -4436,6 +4466,7 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
             localContributionMultipliers)
     {
         float multiplier = 1f;
+        float dungeonStageProgress = GetDungeonStageProgress();
         if (Data?.PassiveDefinitions != null)
         {
             foreach (CharacterPassiveDefinition passive in
@@ -4450,24 +4481,34 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
                 multiplier *= ResolveStatusContributionMultiplier(
                     passive.StatusContributionMultipliers,
                     statusEffect,
-                    statType);
+                    statType,
+                    dungeonStageProgress);
             }
         }
 
         multiplier *= ResolveStatusContributionMultiplier(
             localContributionMultipliers,
             statusEffect,
-            statType);
+            statType,
+            dungeonStageProgress);
         return float.IsNaN(multiplier) ||
                float.IsInfinity(multiplier)
             ? 1f
             : Mathf.Max(0f, multiplier);
     }
 
+    private float GetDungeonStageProgress()
+    {
+        return _board is IDungeonStageProgressProvider progressProvider
+            ? Mathf.Max(0f, progressProvider.DungeonStageProgress)
+            : 0f;
+    }
+
     private static float ResolveStatusContributionMultiplier(
         IReadOnlyList<CharacterStatusStatContributionMultiplier> modifiers,
         StatusEffectSO statusEffect,
-        StatusEffectStatType statType)
+        StatusEffectStatType statType,
+        float dungeonStageProgress)
     {
         if (modifiers == null || statusEffect == null)
             return 1f;
@@ -4485,7 +4526,8 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
                 continue;
             }
 
-            multiplier *= Mathf.Max(0f, modifier.Multiplier);
+            multiplier *= modifier.ResolveMultiplier(
+                dungeonStageProgress);
         }
 
         return multiplier;
@@ -4554,6 +4596,11 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
     }
 
     private void HandleActiveSkillResourceChanged(int _)
+    {
+        RefreshUi();
+    }
+
+    private void HandleBoardOccupancyChanged()
     {
         RefreshUi();
     }
@@ -4694,6 +4741,22 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
         }
 
         ResizeSkillTooltip(new Vector2(420f, 220f));
+        if (_skillTooltipKind == CharacterAbilityIconKind.Role)
+        {
+            _skillTooltipText.text =
+                $"<b>{CharacterRolePresentation.GetRoleName(Data.Role)}</b>\n" +
+                (Data.Role?.GetDescription() ?? string.Empty);
+            return;
+        }
+
+        if (_skillTooltipKind == CharacterAbilityIconKind.Archetype)
+        {
+            _skillTooltipText.text =
+                $"<b>{CharacterRolePresentation.GetArchetypeName(Data.Archetype)}</b>\n" +
+                (Data.Archetype?.GetDescription() ?? string.Empty);
+            return;
+        }
+
         if (_skillTooltipKind == CharacterAbilityIconKind.Passive)
         {
             string passiveTitle = LocalizationService.Get(
@@ -4887,6 +4950,20 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
 
     private void EnsureAbilityIconView()
     {
+        _roleIconImage = EnsureAbilityIcon(
+            "grpRoleIcon",
+            "imgRoleIcon",
+            new Vector2(6f, -6f),
+            CharacterAbilityIconKind.Role,
+            out _roleIconFrame,
+            true);
+        _archetypeIconImage = EnsureAbilityIcon(
+            "grpArchetypeIcon",
+            "imgArchetypeIcon",
+            new Vector2(60f, -6f),
+            CharacterAbilityIconKind.Archetype,
+            out _archetypeIconFrame,
+            true);
         _passiveIconImage = EnsureAbilityIcon(
             "grpPassiveAbilityIcon",
             "imgPassiveAbilityIcon",
@@ -4907,7 +4984,8 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
         string imageName,
         Vector2 anchoredPosition,
         CharacterAbilityIconKind kind,
-        out Image frameImage)
+        out Image frameImage,
+        bool alignLeft = false)
     {
         Transform existingFrame = transform.Find(frameName);
         GameObject frameObject = existingFrame != null
@@ -4925,9 +5003,12 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
 
         RectTransform frameRect =
             (RectTransform)frameObject.transform;
-        frameRect.anchorMin = Vector2.one;
-        frameRect.anchorMax = Vector2.one;
-        frameRect.pivot = Vector2.one;
+        Vector2 topAnchor = alignLeft
+            ? new Vector2(0f, 1f)
+            : Vector2.one;
+        frameRect.anchorMin = topAnchor;
+        frameRect.anchorMax = topAnchor;
+        frameRect.pivot = topAnchor;
         frameRect.anchoredPosition = anchoredPosition;
         frameRect.sizeDelta = new Vector2(
             AbilityIconSize,
@@ -4986,13 +5067,24 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
         if (Data == null)
             return;
 
+        RefreshClassificationIcon(
+            _roleIconFrame,
+            _roleIconImage,
+            Data.Role?.IconSprite);
+        RefreshClassificationIcon(
+            _archetypeIconFrame,
+            _archetypeIconImage,
+            Data.Archetype?.IconSprite);
+
         bool hasPassive = Data.HasCustomPassiveDefinitions;
         if (_passiveIconFrame != null)
             _passiveIconFrame.gameObject.SetActive(hasPassive);
         if (_passiveIconImage != null)
         {
+            CharacterPassiveDefinition displayedPassive =
+                ResolveDisplayedPassiveDefinition();
             _passiveIconImage.sprite =
-                Data.PassiveAbilityIconSprite;
+                Data.GetPassiveAbilityIconSprite(displayedPassive);
             _passiveIconImage.enabled =
                 _passiveIconImage.sprite != null;
             _passiveIconImage.color = Color.white;
@@ -5003,8 +5095,10 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
             _activeSkillIconFrame.gameObject.SetActive(hasActiveSkill);
         if (_activeSkillIconImage != null)
         {
+            CharacterSkillDefinition displayedSkill =
+                ResolveDisplayedSkillDefinition();
             _activeSkillIconImage.sprite =
-                Data.ActiveAbilityIconSprite;
+                Data.GetActiveAbilityIconSprite(displayedSkill);
             _activeSkillIconImage.enabled =
                 _activeSkillIconImage.sprite != null;
             _activeSkillIconImage.color = CanActivateActiveSkill()
@@ -5034,6 +5128,169 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
                     : new Color(0.18f, 0.18f, 0.18f, 1f);
             }
         }
+    }
+
+    private static void RefreshClassificationIcon(
+        Image frame,
+        Image icon,
+        Sprite sprite)
+    {
+        if (frame != null)
+            frame.gameObject.SetActive(sprite != null);
+        if (icon == null)
+            return;
+
+        icon.sprite = sprite;
+        icon.enabled = sprite != null;
+        icon.color = Color.white;
+    }
+
+    private CharacterPassiveDefinition ResolveDisplayedPassiveDefinition()
+    {
+        IReadOnlyList<CharacterPassiveDefinition> definitions =
+            Data?.PassiveDefinitions;
+        if (definitions == null || definitions.Count == 0)
+            return null;
+
+        CharacterPassiveDefinition fallback = definitions[0];
+        for (int index = 1; index < definitions.Count; index++)
+        {
+            CharacterPassiveDefinition definition = definitions[index];
+            if (definition != null &&
+                !definition.IsEmptyPlaceholder &&
+                IsConditionalIconDefinitionActive(
+                    definition,
+                    definition.TargetFaction,
+                    definition.Subject,
+                    definition.SubjectMetric))
+            {
+                return definition;
+            }
+        }
+
+        return fallback;
+    }
+
+    private CharacterSkillDefinition ResolveDisplayedSkillDefinition()
+    {
+        IReadOnlyList<CharacterSkillDefinition> definitions =
+            Data?.SkillDefinitions;
+        if (definitions == null || definitions.Count == 0)
+            return null;
+
+        CharacterSkillDefinition fallback = definitions[0];
+        for (int index = 1; index < definitions.Count; index++)
+        {
+            CharacterSkillDefinition definition = definitions[index];
+            if (definition != null &&
+                definition.HasSection(
+                    CharacterSkillSectionType.Ability) &&
+                IsConditionalIconDefinitionActive(
+                    definition,
+                    definition.TargetFaction,
+                    definition.Subject,
+                    definition.SubjectMetric))
+            {
+                return definition;
+            }
+        }
+
+        return fallback;
+    }
+
+    private bool IsConditionalIconDefinitionActive(
+        ICharacterConditionalActionDefinition definition,
+        CharacterTargetFaction targetFaction,
+        CharacterAttackSubject subject,
+        CharacterAttackSubjectMetric subjectMetric)
+    {
+        if (definition == null ||
+            !definition.HasConditionSection ||
+            definition.NumericConditions == null ||
+            definition.NumericConditions.Count == 0)
+        {
+            return false;
+        }
+
+        CharacterActionConditionData condition =
+            Data.GetActionConditionData(definition);
+        if (!PassesLinkage(
+                condition.Linkage,
+                _lastAttackAttempted,
+                _lastAttackSucceeded))
+        {
+            return false;
+        }
+
+        bool hasMatchingTarget = HasMatchingConditionalIconTarget(
+            targetFaction,
+            subject,
+            subjectMetric,
+            condition);
+        return CharacterConditionEvaluator.AllowsAction(
+            this,
+            condition.MatchMode,
+            condition.NumericConditions,
+            hasMatchingTarget);
+    }
+
+    private bool HasMatchingConditionalIconTarget(
+        CharacterTargetFaction targetFaction,
+        CharacterAttackSubject subject,
+        CharacterAttackSubjectMetric subjectMetric,
+        CharacterActionConditionData condition)
+    {
+        if (_board == null || condition.NumericConditions == null)
+            return false;
+
+        bool hasActionTargetCondition = false;
+        foreach (CharacterNumericCondition numericCondition in
+                 condition.NumericConditions)
+        {
+            if (numericCondition?.Target ==
+                CharacterConditionTarget.ActionTarget)
+            {
+                hasActionTargetCondition = true;
+                break;
+            }
+        }
+        if (!hasActionTargetCondition)
+            return false;
+
+        CharacterAttackSubject previewSubject = subject switch
+        {
+            CharacterAttackSubject.Random =>
+                CharacterAttackSubject.LowestValue,
+            CharacterAttackSubject.RandomExceptSelf =>
+                CharacterAttackSubject.LowestValue,
+            CharacterAttackSubject.Manual =>
+                CharacterAttackSubject.LowestValue,
+            CharacterAttackSubject.None =>
+                CharacterAttackSubject.LowestValue,
+            _ => subject,
+        };
+        if (targetFaction == CharacterTargetFaction.Ally)
+        {
+            IReadOnlyList<IBattleCharacter> targets =
+                _board.SelectAlliedCharacters(
+                    this,
+                    previewSubject,
+                    subjectMetric,
+                    1,
+                    condition.MatchMode,
+                    condition.NumericConditions);
+            return targets != null && targets.Count > 0;
+        }
+
+        IReadOnlyList<EnemyRuntime> enemies =
+            _board.SelectCharacterTargets(
+                this,
+                previewSubject,
+                subjectMetric,
+                1,
+                condition.MatchMode,
+                condition.NumericConditions);
+        return enemies != null && enemies.Count > 0;
     }
 
     private static void SetAnchoredRect(

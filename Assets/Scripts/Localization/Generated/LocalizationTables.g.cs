@@ -9,7 +9,7 @@ namespace PS260714.Localization
 {
     public static class GeneratedLocalizationTables
     {
-        public const string SourceHash = "85627921817f7cb13231e43abb970bb5966656d6c1b39e7d0d5f9bdcdfe89b8d";
+        public const string SourceHash = "96d19bce387b7e8aecfc95d922f9db85a4caa8f13ae62a02af44de6ede6841ca";
         public const string ReferenceLocale = "en-US";
 
         private static readonly LocalizationLocaleInfo[] LocaleData =
@@ -362,16 +362,20 @@ namespace PS260714.Localization
                 { "character.isana.description", new LocalizationEntry("\uC544\uCE74\uB370\uBBF8 \uAE30\uC0AC\uB2E8 \uAD50\uD658\uD559\uC0DD", "body") },
                 { "status.dualside.name", new LocalizationEntry("\uB4C0\uC5BC\uC0AC\uC774\uB4DC", "title") },
                 { "status.dualside.description", new LocalizationEntry("\uB4C0\uC5BC\uC0AC\uC774\uB4DC", "tooltip") },
-                { "roll.vanguard.name", new LocalizationEntry("\uC804\uC704", "title") },
-                { "roll.vanguard.description", new LocalizationEntry("\uC804\uC704", "body") },
-                { "roll.shooter.name", new LocalizationEntry("\uC0AC\uC218", "title") },
-                { "roll.shooter.description", new LocalizationEntry("\uC0AC\uC218", "body") },
-                { "roll.support.name", new LocalizationEntry("\uC9C0\uC6D0", "title") },
-                { "roll.support.description", new LocalizationEntry("\uC9C0\uC6D0", "body") },
-                { "roll.mage.name", new LocalizationEntry("\uC220\uC0AC", "title") },
-                { "roll.mage.description", new LocalizationEntry("\uC220\uC0AC", "body") },
-                { "roll.scout.name", new LocalizationEntry("\uCC99\uD6C4", "title") },
-                { "roll.scout.description", new LocalizationEntry("\uCC99\uD6C4", "body") },
+                { "roll.main.vanguard.name", new LocalizationEntry("\uC804\uC704", "title") },
+                { "roll.main.vanguard.description", new LocalizationEntry("\uC804\uC704", "body") },
+                { "roll.main.shooter.name", new LocalizationEntry("\uC0AC\uC218", "title") },
+                { "roll.main.shooter.description", new LocalizationEntry("\uC0AC\uC218", "body") },
+                { "roll.main.support.name", new LocalizationEntry("\uC9C0\uC6D0", "title") },
+                { "roll.main.support.description", new LocalizationEntry("\uC9C0\uC6D0", "body") },
+                { "roll.main.mage.name", new LocalizationEntry("\uC220\uC0AC", "title") },
+                { "roll.main.mage.description", new LocalizationEntry("\uC220\uC0AC", "body") },
+                { "roll.main.scout.name", new LocalizationEntry("\uCC99\uD6C4", "title") },
+                { "roll.main.scout.description", new LocalizationEntry("\uCC99\uD6C4", "body") },
+                { "roll.sub.exploration.name", new LocalizationEntry("\uD0D0\uD5D8 \uB3D9\uC544\uB9AC", "title") },
+                { "roll.sub.exploration.description", new LocalizationEntry("\uD0D0\uD5D8 \uB3D9\uC544\uB9AC", "body") },
+                { "roll.sub.exploration.passive.stage_attack.name", new LocalizationEntry("\uD0D0\uD5D8\uC758 \uC131\uACFC", "title") },
+                { "roll.sub.exploration.passive.stage_attack.description", new LocalizationEntry("\uC644\uB8CC\uD55C \uB358\uC804 \uC2A4\uD14C\uC774\uC9C0\uB9C8\uB2E4 \uACF5\uACA9\uB825\uC744 1 \uD68D\uB4DD\uD569\uB2C8\uB2E4. \uC774\uBCA4\uD2B8, \uD734\uC2DD, \uC0C1\uC810 \uC2A4\uD14C\uC774\uC9C0\uB97C \uD3EC\uD568\uD569\uB2C8\uB2E4.", "body") },
             };
 
         private static readonly Dictionary<string, LocalizationEntry>
@@ -715,16 +719,20 @@ namespace PS260714.Localization
                 { "character.isana.description", new LocalizationEntry("exchange student of Order", "body") },
                 { "status.dualside.name", new LocalizationEntry("DualSide", "title") },
                 { "status.dualside.description", new LocalizationEntry("DualSide", "tooltip") },
-                { "roll.vanguard.name", new LocalizationEntry("Vanguard", "title") },
-                { "roll.vanguard.description", new LocalizationEntry("Vanguard", "body") },
-                { "roll.shooter.name", new LocalizationEntry("Shooter", "title") },
-                { "roll.shooter.description", new LocalizationEntry("Shooter", "body") },
-                { "roll.support.name", new LocalizationEntry("Support", "title") },
-                { "roll.support.description", new LocalizationEntry("Support", "body") },
-                { "roll.mage.name", new LocalizationEntry("Mage", "title") },
-                { "roll.mage.description", new LocalizationEntry("Mage", "body") },
-                { "roll.scout.name", new LocalizationEntry("Scount", "title") },
-                { "roll.scout.description", new LocalizationEntry("Scount", "body") },
+                { "roll.main.vanguard.name", new LocalizationEntry("Vanguard", "title") },
+                { "roll.main.vanguard.description", new LocalizationEntry("Vanguard", "body") },
+                { "roll.main.shooter.name", new LocalizationEntry("Shooter", "title") },
+                { "roll.main.shooter.description", new LocalizationEntry("Shooter", "body") },
+                { "roll.main.support.name", new LocalizationEntry("Support", "title") },
+                { "roll.main.support.description", new LocalizationEntry("Support", "body") },
+                { "roll.main.mage.name", new LocalizationEntry("Mage", "title") },
+                { "roll.main.mage.description", new LocalizationEntry("Mage", "body") },
+                { "roll.main.scout.name", new LocalizationEntry("Scount", "title") },
+                { "roll.main.scout.description", new LocalizationEntry("Scount", "body") },
+                { "roll.sub.exploration.name", new LocalizationEntry("Exploration Club", "title") },
+                { "roll.sub.exploration.description", new LocalizationEntry("Exploration Club", "body") },
+                { "roll.sub.exploration.passive.stage_attack.name", new LocalizationEntry("Exploration Results", "title") },
+                { "roll.sub.exploration.passive.stage_attack.description", new LocalizationEntry("Gain 1 Attack Power for each completed dungeon stage, including event, rest, and shop stages.", "body") },
             };
 
         private static readonly IReadOnlyDictionary<string, LocalizationEntry>

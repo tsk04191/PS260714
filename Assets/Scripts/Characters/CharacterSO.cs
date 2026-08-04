@@ -528,7 +528,57 @@ public enum CharacterPassiveSectionType
     Subject = 2,
     Condition = 3,
     SelfStatusCost = 4,
-    StatusContribution = 5
+    StatusContribution = 5,
+    StatModifier = 6
+}
+
+[Serializable]
+public sealed class CharacterPassiveStatModifierDefinition
+{
+    [SerializeField]
+    private StatusEffectStatType statType;
+    [SerializeField]
+    private StatusEffectStatModifierMode mode;
+    [SerializeField]
+    private float baseValue;
+    [SerializeField]
+    private float dungeonStageProgressScale;
+
+    public StatusEffectStatType StatType => statType;
+    public StatusEffectStatModifierMode Mode => mode;
+    public float BaseValue => baseValue;
+    public float DungeonStageProgressScale => dungeonStageProgressScale;
+
+    public float ResolveValue(float dungeonStageProgress)
+    {
+        float progress = float.IsNaN(dungeonStageProgress) ||
+                         float.IsInfinity(dungeonStageProgress)
+            ? 0f
+            : Mathf.Max(0f, dungeonStageProgress);
+        float resolved = baseValue + progress * dungeonStageProgressScale;
+        return float.IsNaN(resolved) || float.IsInfinity(resolved)
+            ? baseValue
+            : resolved;
+    }
+
+    public void Validate()
+    {
+        if (!Enum.IsDefined(typeof(StatusEffectStatType), statType))
+            statType = StatusEffectStatType.AttackPower;
+        if (!Enum.IsDefined(typeof(StatusEffectStatModifierMode), mode))
+            mode = StatusEffectStatModifierMode.Flat;
+        if (statType == StatusEffectStatType.TargetPriority)
+            mode = StatusEffectStatModifierMode.Flat;
+        if (float.IsNaN(baseValue) || float.IsInfinity(baseValue))
+            baseValue = 0f;
+        if (float.IsNaN(dungeonStageProgressScale) ||
+            float.IsInfinity(dungeonStageProgressScale))
+        {
+            dungeonStageProgressScale = 0f;
+        }
+        if (mode == StatusEffectStatModifierMode.MultiplicativeRatio)
+            baseValue = Mathf.Max(-1f, baseValue);
+    }
 }
 
 [Serializable]
@@ -540,17 +590,40 @@ public sealed class CharacterStatusStatContributionMultiplier
     private StatusEffectStatType statType;
     [SerializeField, Min(0f)]
     private float multiplier = 1f;
+    [SerializeField, Min(0f)]
+    private float dungeonStageProgressScale;
 
     public StatusEffectSO StatusEffect => statusEffect;
     public StatusEffectStatType StatType => statType;
     public float Multiplier => multiplier;
+    public float DungeonStageProgressScale => dungeonStageProgressScale;
+
+    public float ResolveMultiplier(float dungeonStageProgress)
+    {
+        float progress = float.IsNaN(dungeonStageProgress) ||
+                         float.IsInfinity(dungeonStageProgress)
+            ? 0f
+            : Mathf.Max(0f, dungeonStageProgress);
+        float resolved = multiplier + progress * dungeonStageProgressScale;
+        return float.IsNaN(resolved) || float.IsInfinity(resolved)
+            ? Mathf.Max(0f, multiplier)
+            : Mathf.Max(0f, resolved);
+    }
 
     public void Validate()
     {
         if (float.IsNaN(multiplier) || float.IsInfinity(multiplier))
             multiplier = 1f;
 
+        if (float.IsNaN(dungeonStageProgressScale) ||
+            float.IsInfinity(dungeonStageProgressScale))
+        {
+            dungeonStageProgressScale = 0f;
+        }
+
         multiplier = Mathf.Max(0f, multiplier);
+        dungeonStageProgressScale =
+            Mathf.Max(0f, dungeonStageProgressScale);
     }
 }
 
@@ -2159,6 +2232,9 @@ public sealed class CharacterPassiveDefinition :
     [SerializeField]
     private CharacterStatusStackCostDefinition selfStatusCost = new();
     [SerializeField]
+    private List<CharacterPassiveStatModifierDefinition> statModifiers =
+        new();
+    [SerializeField]
     private List<CharacterStatusStatContributionMultiplier>
         statusContributionMultipliers = new();
     [SerializeField]
@@ -2239,6 +2315,12 @@ public sealed class CharacterPassiveDefinition :
     public bool HasSelfStatusCost =>
         HasSection(CharacterPassiveSectionType.SelfStatusCost) &&
         selfStatusCost != null && selfStatusCost.IsConfigured;
+    public IReadOnlyList<CharacterPassiveStatModifierDefinition>
+        StatModifiers => statModifiers != null
+            ? statModifiers
+            : Array.Empty<CharacterPassiveStatModifierDefinition>();
+    public bool HasStatModifierSection =>
+        HasSection(CharacterPassiveSectionType.StatModifier);
     public IReadOnlyList<CharacterStatusStatContributionMultiplier>
         StatusContributionMultipliers =>
             statusContributionMultipliers != null
@@ -2281,6 +2363,13 @@ public sealed class CharacterPassiveDefinition :
         numericConditions ??= new List<CharacterNumericCondition>();
         foreach (CharacterNumericCondition condition in numericConditions)
             condition?.Validate();
+        statModifiers ??=
+            new List<CharacterPassiveStatModifierDefinition>();
+        foreach (CharacterPassiveStatModifierDefinition modifier in
+                 statModifiers)
+        {
+            modifier?.Validate();
+        }
         statusContributionMultipliers ??=
             new List<CharacterStatusStatContributionMultiplier>();
         foreach (CharacterStatusStatContributionMultiplier modifier in

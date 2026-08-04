@@ -198,11 +198,13 @@ public sealed class CharacterCodexPage : RuntimeMenuPageBase
                 $"{data.AttackCooldown:0.##}s"),
             new(
                 korean ? "직군" : "CLASS",
-                CharacterRolePresentation.GetRoleName(data.Role)),
+                CharacterRolePresentation.GetRoleName(data.Role),
+                data.Role?.IconSprite),
             new(
                 korean ? "세부 직군" : "ARCHETYPE",
                 CharacterRolePresentation.GetArchetypeName(
-                    data.Archetype)),
+                    data.Archetype),
+                data.Archetype?.IconSprite),
         };
 
         List<OperatorAbilityIconModel> passives = new();
@@ -215,14 +217,22 @@ public sealed class CharacterCodexPage : RuntimeMenuPageBase
             if (passive == null || passive.IsEmptyPlaceholder)
                 continue;
 
-            string label = resolved.IsRolePassive
-                ? resolved.RolePassive.GetDisplayName()
+            CharacterRolePassiveDefinition sharedPassive =
+                resolved.IsRolePassive
+                    ? resolved.RolePassive
+                    : resolved.IsArchetypePassive
+                        ? resolved.ArchetypePassive
+                        : null;
+            string label = sharedPassive != null
+                ? sharedPassive.GetDisplayName()
                 : (korean
                     ? $"패시브 {passiveIndex}"
                     : $"PASSIVE {passiveIndex}");
             string badge = resolved.IsRolePassive
                 ? resolved.Role.GetDisplayName()
-                : string.Empty;
+                : resolved.IsArchetypePassive
+                    ? resolved.Archetype.GetDisplayName()
+                    : string.Empty;
             passives.Add(new OperatorAbilityIconModel(
                 resolved.IconSprite,
                 label,
@@ -1175,11 +1185,16 @@ public readonly struct OperatorStatModel
 {
     public string Label { get; }
     public string Value { get; }
+    public Sprite Icon { get; }
 
-    public OperatorStatModel(string label, string value)
+    public OperatorStatModel(
+        string label,
+        string value,
+        Sprite icon = null)
     {
         Label = label ?? string.Empty;
         Value = value ?? string.Empty;
+        Icon = icon;
     }
 }
 
@@ -1330,6 +1345,7 @@ public sealed class OperatorDetailView
         new TextMeshProUGUI[StatCount];
     private readonly TextMeshProUGUI[] _statValues =
         new TextMeshProUGUI[StatCount];
+    private readonly Image[] _statIcons = new Image[StatCount];
     private readonly TextMeshProUGUI[] _equipmentLabels =
         new TextMeshProUGUI[EquipmentSlotCount];
     private readonly TextMeshProUGUI[] _equipmentStatuses =
@@ -1381,6 +1397,7 @@ public sealed class OperatorDetailView
             }
         }
 
+        view.EnsureStatIconViews();
         SetNavigationLabel(view._previousButton, "<");
         SetNavigationLabel(view._nextButton, ">");
         view.EnsureGradeIconStrip();
@@ -1487,6 +1504,11 @@ public sealed class OperatorDetailView
             _statValues[index].text = hasStat
                 ? model.Stats[index].Value
                 : "-";
+            Sprite statIcon = hasStat
+                ? model.Stats[index].Icon
+                : null;
+            _statIcons[index].sprite = statIcon;
+            _statIcons[index].enabled = statIcon != null;
         }
 
         _attackTitle.text = model.BasicAttackTitle;
@@ -1540,6 +1562,8 @@ public sealed class OperatorDetailView
         {
             _statLabels[index].text = string.Empty;
             _statValues[index].text = "-";
+            _statIcons[index].sprite = null;
+            _statIcons[index].enabled = false;
         }
 
         _attackSummary.text = string.Empty;
@@ -1628,6 +1652,8 @@ public sealed class OperatorDetailView
                 ?.GetComponent<TextMeshProUGUI>();
             _statValues[index] = stat?.Find("txtStatValue")
                 ?.GetComponent<TextMeshProUGUI>();
+            _statIcons[index] = stat?.Find("imgStatIcon")
+                ?.GetComponent<Image>();
         }
 
         for (int index = 0; index < EquipmentSlotCount; index++)
@@ -2085,6 +2111,43 @@ public sealed class OperatorDetailView
         value.rectTransform.offsetMin = new Vector2(12f, 8f);
         value.rectTransform.offsetMax = new Vector2(-12f, -34f);
         value.fontStyle = FontStyles.Bold;
+
+        GetOrCreateStatIcon(cell);
+    }
+
+    private void EnsureStatIconViews()
+    {
+        for (int index = 0; index < StatCount; index++)
+        {
+            if (_statIcons[index] != null)
+                continue;
+
+            Transform cell = _statLabels[index]?.transform.parent;
+            _statIcons[index] = GetOrCreateStatIcon(cell);
+        }
+    }
+
+    private static Image GetOrCreateStatIcon(Transform cell)
+    {
+        if (cell == null)
+            return null;
+
+        GameObject iconObject = GetOrCreateUiObject(
+            cell,
+            "imgStatIcon",
+            typeof(CanvasRenderer),
+            typeof(Image));
+        RectTransform iconRect = (RectTransform)iconObject.transform;
+        ConfigureBottomLeft(
+            iconRect,
+            new Vector2(12f, 8f),
+            new Vector2(32f, 32f));
+        Image icon = iconObject.GetComponent<Image>();
+        icon.color = Color.white;
+        icon.preserveAspect = true;
+        icon.raycastTarget = false;
+        icon.enabled = false;
+        return icon;
     }
 
     private void BuildRightPanel(Transform parent)
@@ -2724,6 +2787,18 @@ public sealed class OperatorDetailView
         rect.anchorMin = new Vector2(0f, 1f);
         rect.anchorMax = new Vector2(0f, 1f);
         rect.pivot = new Vector2(0f, 1f);
+        rect.anchoredPosition = position;
+        rect.sizeDelta = size;
+    }
+
+    private static void ConfigureBottomLeft(
+        RectTransform rect,
+        Vector2 position,
+        Vector2 size)
+    {
+        rect.anchorMin = Vector2.zero;
+        rect.anchorMax = Vector2.zero;
+        rect.pivot = Vector2.zero;
         rect.anchoredPosition = position;
         rect.sizeDelta = size;
     }

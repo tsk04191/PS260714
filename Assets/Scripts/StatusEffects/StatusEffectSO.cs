@@ -182,6 +182,30 @@ public struct StatusEffectStatAccumulator
         }
     }
 
+    public void Add(
+        StatusEffectStatModifierMode mode,
+        float value)
+    {
+        if (float.IsNaN(value) || float.IsInfinity(value))
+            return;
+
+        EnsureInitialized();
+        switch (mode)
+        {
+            case StatusEffectStatModifierMode.Flat:
+                _flat += value;
+                break;
+
+            case StatusEffectStatModifierMode.AdditiveRatio:
+                _additiveRatio += value;
+                break;
+
+            case StatusEffectStatModifierMode.MultiplicativeRatio:
+                _multiplicativeFactor *= Mathf.Max(0f, 1f + value);
+                break;
+        }
+    }
+
     public void AddFlat(float value)
     {
         if (float.IsNaN(value) || float.IsInfinity(value))

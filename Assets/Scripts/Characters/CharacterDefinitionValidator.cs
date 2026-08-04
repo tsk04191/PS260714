@@ -577,14 +577,22 @@ public static class CharacterDefinitionValidator
                 CharacterPassiveSectionType.Ability);
             bool hasStatusContribution =
                 definition.HasStatusContributionSection;
-            if (!hasAbility && !hasStatusContribution)
+            bool hasStatModifier = definition.HasStatModifierSection;
+            if (!hasAbility && !hasStatusContribution && !hasStatModifier)
             {
                 AddError(
                     result,
                     "passive.ability_required",
                     $"{path}.sections",
-                    "A passive requires an Ability or Status Contribution " +
-                    "section.");
+                    "A passive requires an Ability, Stat Modifier, or " +
+                    "Status Contribution section.");
+            }
+            if (hasStatModifier)
+            {
+                ValidatePassiveStatModifiers(
+                    definition.StatModifiers,
+                    $"{path}.statModifiers",
+                    result);
             }
             if (hasStatusContribution)
             {
@@ -2291,6 +2299,17 @@ public static class CharacterDefinitionValidator
                     "non-negative.");
             }
 
+            if (!IsFinite(modifier.DungeonStageProgressScale) ||
+                modifier.DungeonStageProgressScale < 0f)
+            {
+                AddError(
+                    result,
+                    "status_contribution.dungeon_progress_scale_invalid",
+                    $"{modifierPath}.dungeonStageProgressScale",
+                    "Dungeon-stage progress contribution scale must be " +
+                    "finite and non-negative.");
+            }
+
             for (int previous = 0; previous < index; previous++)
             {
                 CharacterStatusStatContributionMultiplier earlier =
@@ -2311,6 +2330,88 @@ public static class CharacterDefinitionValidator
                     "The same status and stat contribution is configured " +
                     "more than once.");
                 break;
+            }
+        }
+    }
+
+    private static void ValidatePassiveStatModifiers(
+        IReadOnlyList<CharacterPassiveStatModifierDefinition> modifiers,
+        string path,
+        CharacterDefinitionValidationResult result)
+    {
+        if (modifiers == null)
+        {
+            AddError(
+                result,
+                "passive_stat_modifier.list_null",
+                path,
+                "Passive stat modifier list is null.");
+            return;
+        }
+
+        if (modifiers.Count == 0)
+        {
+            AddError(
+                result,
+                "passive_stat_modifier.list_empty",
+                path,
+                "A Stat Modifier section requires at least one modifier.");
+            return;
+        }
+
+        for (int index = 0; index < modifiers.Count; index++)
+        {
+            string modifierPath = $"{path}[{index}]";
+            CharacterPassiveStatModifierDefinition modifier =
+                modifiers[index];
+            if (modifier == null)
+            {
+                AddError(
+                    result,
+                    "passive_stat_modifier.null",
+                    modifierPath,
+                    "Passive stat modifier is null.");
+                continue;
+            }
+
+            if (!Enum.IsDefined(
+                    typeof(StatusEffectStatType),
+                    modifier.StatType) ||
+                modifier.StatType == StatusEffectStatType.TargetPriority)
+            {
+                AddError(
+                    result,
+                    "passive_stat_modifier.stat_unsupported",
+                    $"{modifierPath}.statType",
+                    $"Unsupported passive stat type '{modifier.StatType}'.");
+            }
+            if (!Enum.IsDefined(
+                    typeof(StatusEffectStatModifierMode),
+                    modifier.Mode))
+            {
+                AddError(
+                    result,
+                    "passive_stat_modifier.mode_invalid",
+                    $"{modifierPath}.mode",
+                    $"Unsupported passive stat modifier mode " +
+                    $"'{modifier.Mode}'.");
+            }
+            if (!IsFinite(modifier.BaseValue))
+            {
+                AddError(
+                    result,
+                    "passive_stat_modifier.base_invalid",
+                    $"{modifierPath}.baseValue",
+                    "Passive stat modifier base value must be finite.");
+            }
+            if (!IsFinite(modifier.DungeonStageProgressScale))
+            {
+                AddError(
+                    result,
+                    "passive_stat_modifier.progress_scale_invalid",
+                    $"{modifierPath}.dungeonStageProgressScale",
+                    "Passive stat modifier dungeon-stage scale must be " +
+                    "finite.");
             }
         }
     }

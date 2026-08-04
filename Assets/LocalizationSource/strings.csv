@@ -336,13 +336,17 @@ character.isana.name,캐릭터 이름,title,,이사나,Isana
 character.isana.description,캐릭터 설명,body,,아카데미 기사단 교환학생,exchange student of Order
 status.dualside.name,상태 이름,title,,듀얼사이드,DualSide
 status.dualside.description,상태 설명,tooltip,,듀얼사이드,DualSide
-roll.vanguard.name,직군 이름,title,,전위,Vanguard
-roll.vanguard.description,직군 설명,body,,전위,Vanguard
-roll.shooter.name,직군 이름,title,,사수,Shooter
-roll.shooter.description,직군 설명,body,,사수,Shooter
-roll.support.name,직군 이름,title,,지원,Support
-roll.support.description,직군 설명,body,,지원,Support
-roll.mage.name,직군 이름,title,,술사,Mage
-roll.mage.description,직군 설명,body,,술사,Mage
-roll.scout.name,직군 이름,title,,척후,Scount
-roll.scout.description,직군 설명,body,,척후,Scount
+roll.main.vanguard.name,직군 이름,title,,전위,Vanguard
+roll.main.vanguard.description,직군 설명,body,,전위,Vanguard
+roll.main.shooter.name,직군 이름,title,,사수,Shooter
+roll.main.shooter.description,직군 설명,body,,사수,Shooter
+roll.main.support.name,직군 이름,title,,지원,Support
+roll.main.support.description,직군 설명,body,,지원,Support
+roll.main.mage.name,직군 이름,title,,술사,Mage
+roll.main.mage.description,직군 설명,body,,술사,Mage
+roll.main.scout.name,직군 이름,title,,척후,Scount
+roll.main.scout.description,직군 설명,body,,척후,Scount
+roll.sub.exploration.name,세부 직군 이름,title,,탐험 동아리,Exploration Club
+roll.sub.exploration.description,세부 직군 설명,body,,탐험 동아리,Exploration Club
+roll.sub.exploration.passive.stage_attack.name,세부 직군 패시브 이름,title,,탐험의 성과,Exploration Results
+roll.sub.exploration.passive.stage_attack.description,세부 직군 패시브 설명,body,,"완료한 던전 스테이지마다 공격력을 1 획득합니다. 이벤트, 휴식, 상점 스테이지를 포함합니다.","Gain 1 Attack Power for each completed dungeon stage, including event, rest, and shop stages."

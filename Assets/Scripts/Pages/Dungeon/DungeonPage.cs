@@ -1122,6 +1122,10 @@ public class DungeonPage : MonoBehaviour, IPage
             return false;
         }
 
+        float dungeonStageProgress = flowController != null
+            ? flowController.CurrentStageProgress
+            : Mathf.Max(0, battleIndex);
+        board.SetDungeonStageProgress(dungeonStageProgress);
         board.Initialize(setup.FieldSize, setup.MaximumStackSize);
         ResetBattleItemCooldowns();
         _battleManager.ConfigureActiveSkillResource(

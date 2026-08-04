@@ -1351,6 +1351,16 @@ public interface IBattleManualTargetSelectionService
     void CancelManualTargetSelection();
 }
 
+public interface IDungeonStageProgressProvider
+{
+    /// <summary>
+    /// Number of dungeon stages completed before the current stage. Battle,
+    /// event, rest, and shop stages all contribute one step. The first stage
+    /// is 0. Non-dungeon boards should omit this interface.
+    /// </summary>
+    float DungeonStageProgress { get; }
+}
+
 public interface IBattleBoard
 {
     int InitialEnemyCapacity { get; }

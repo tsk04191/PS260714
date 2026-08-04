@@ -34,6 +34,7 @@ public sealed class DungeonFlowController : MonoBehaviour
     public EDungeonPhase CurrentPhase { get; private set; } = EDungeonPhase.Battle;
     public int CurrentStepIndex { get; private set; }
     public int StepCount => phaseSequence != null ? phaseSequence.Length : 0;
+    public float CurrentStageProgress => Mathf.Max(0, CurrentStepIndex);
     public int CurrentBattleNumber
     {
         get

@@ -242,6 +242,10 @@ public sealed class CharacterP0RegressionTests
             .Find("grpPassiveAbilityIcon") as RectTransform;
         RectTransform activeIcon = character.transform
             .Find("grpActiveAbilityIcon") as RectTransform;
+        RectTransform roleIcon = character.transform
+            .Find("grpRoleIcon") as RectTransform;
+        RectTransform archetypeIcon = character.transform
+            .Find("grpArchetypeIcon") as RectTransform;
         GameObject nameObject =
             character.transform.Find("txtName").gameObject;
         GameObject attackObject =
@@ -264,6 +268,8 @@ public sealed class CharacterP0RegressionTests
 
         Assert.That(passiveIcon, Is.Not.Null);
         Assert.That(activeIcon, Is.Not.Null);
+        Assert.That(roleIcon, Is.Not.Null);
+        Assert.That(archetypeIcon, Is.Not.Null);
         Assert.That(
             passiveIcon.anchoredPosition,
             Is.EqualTo(new Vector2(-62f, -6f)));
@@ -276,6 +282,12 @@ public sealed class CharacterP0RegressionTests
         Assert.That(
             passiveIcon.anchoredPosition.x,
             Is.LessThan(activeIcon.anchoredPosition.x));
+        Assert.That(
+            roleIcon.anchoredPosition,
+            Is.EqualTo(new Vector2(6f, -6f)));
+        Assert.That(
+            archetypeIcon.anchoredPosition,
+            Is.EqualTo(new Vector2(60f, -6f)));
         Assert.That(
             sdRect.GetComponent<Image>().raycastTarget,
             Is.True);
@@ -431,6 +443,130 @@ public sealed class CharacterP0RegressionTests
             Is.SameAs(activeIcon));
         Assert.That(passiveImage.sprite, Is.SameAs(passiveIcon));
         Assert.That(activeImage.sprite, Is.SameAs(activeIcon));
+    }
+
+    [Test]
+    public void DungeonCharacterInfo_ShowsRoleAndArchetypeIcons()
+    {
+        CharacterRoleSO role =
+            ScriptableObject.CreateInstance<CharacterRoleSO>();
+        CharacterArchetypeSO archetype =
+            ScriptableObject.CreateInstance<CharacterArchetypeSO>();
+        _createdObjects.Add(role);
+        _createdObjects.Add(archetype);
+        Sprite roleIcon = CreateTestSprite(Color.blue);
+        Sprite archetypeIcon = CreateTestSprite(Color.cyan);
+
+        SerializedObject roleSerialized = new(role);
+        roleSerialized.FindProperty("iconSprite").objectReferenceValue =
+            roleIcon;
+        roleSerialized.FindProperty("fallbackName").stringValue =
+            "Test Role";
+        roleSerialized.ApplyModifiedPropertiesWithoutUndo();
+
+        SerializedObject archetypeSerialized = new(archetype);
+        archetypeSerialized.FindProperty("parentRole")
+            .objectReferenceValue = role;
+        archetypeSerialized.FindProperty("iconSprite")
+            .objectReferenceValue = archetypeIcon;
+        archetypeSerialized.FindProperty("fallbackName").stringValue =
+            "Test Archetype";
+        archetypeSerialized.ApplyModifiedPropertiesWithoutUndo();
+
+        CharacterSO definition = CreateBaseCharacterFixture(
+            "CharacterInfoClassificationIconFixture");
+        SerializedObject characterSerialized = new(definition);
+        characterSerialized.FindProperty("role").objectReferenceValue =
+            role;
+        characterSerialized.FindProperty("archetype")
+            .objectReferenceValue = archetype;
+        characterSerialized.ApplyModifiedPropertiesWithoutUndo();
+
+        CharacterRuntime character = CreateCharacter(definition);
+        Transform roleFrame = character.transform.Find("grpRoleIcon");
+        Transform archetypeFrame =
+            character.transform.Find("grpArchetypeIcon");
+        Image roleImage = roleFrame.Find("imgRoleIcon")
+            .GetComponent<Image>();
+        Image archetypeImage = archetypeFrame.Find("imgArchetypeIcon")
+            .GetComponent<Image>();
+
+        Assert.That(roleFrame.gameObject.activeSelf, Is.True);
+        Assert.That(archetypeFrame.gameObject.activeSelf, Is.True);
+        Assert.That(roleImage.sprite, Is.SameAs(roleIcon));
+        Assert.That(archetypeImage.sprite, Is.SameAs(archetypeIcon));
+    }
+
+    [Test]
+    public void DungeonCharacterInfo_UsesIndexZeroIconsUntilVariantConditionMatches()
+    {
+        CharacterSO definition = CreateBaseCharacterFixture(
+            "CharacterInfoConditionalIconFixture");
+        Sprite basePassiveIcon = CreateTestSprite(Color.red);
+        Sprite variantPassiveIcon = CreateTestSprite(Color.yellow);
+        Sprite baseSkillIcon = CreateTestSprite(Color.green);
+        Sprite variantSkillIcon = CreateTestSprite(Color.magenta);
+
+        SerializedObject serialized = new(definition);
+        SerializedProperty passives =
+            serialized.FindProperty("passiveDefinitions");
+        passives.arraySize = 2;
+        passives.GetArrayElementAtIndex(0)
+            .FindPropertyRelative("iconSprite")
+            .objectReferenceValue = basePassiveIcon;
+        SerializedProperty passiveVariant =
+            passives.GetArrayElementAtIndex(1);
+        passiveVariant.FindPropertyRelative("iconSprite")
+            .objectReferenceValue = variantPassiveIcon;
+        SetSections(
+            passiveVariant.FindPropertyRelative("sections"),
+            (int)CharacterPassiveSectionType.Condition,
+            (int)CharacterPassiveSectionType.Ability);
+        ConfigureSourceHealthPercentageCondition(passiveVariant, 50f);
+
+        SerializedProperty skills =
+            serialized.FindProperty("skillDefinitions");
+        skills.arraySize = 2;
+        skills.GetArrayElementAtIndex(0)
+            .FindPropertyRelative("iconSprite")
+            .objectReferenceValue = baseSkillIcon;
+        SerializedProperty skillVariant = skills.GetArrayElementAtIndex(1);
+        skillVariant.FindPropertyRelative("iconSprite")
+            .objectReferenceValue = variantSkillIcon;
+        SetSections(
+            skillVariant.FindPropertyRelative("sections"),
+            (int)CharacterSkillSectionType.Condition,
+            (int)CharacterSkillSectionType.Ability);
+        ConfigureSourceHealthPercentageCondition(skillVariant, 50f);
+        serialized.ApplyModifiedPropertiesWithoutUndo();
+
+        CharacterRuntime character = CreateCharacter(definition);
+        Image passiveImage = character.transform
+            .Find("grpPassiveAbilityIcon/imgPassiveAbilityIcon")
+            .GetComponent<Image>();
+        Image skillImage = character.transform
+            .Find("grpActiveAbilityIcon/imgActiveAbilityIcon")
+            .GetComponent<Image>();
+
+        Assert.That(
+            character.Data.PassiveAbilityIconSprite,
+            Is.SameAs(basePassiveIcon));
+        Assert.That(
+            character.Data.ActiveAbilityIconSprite,
+            Is.SameAs(baseSkillIcon));
+        Assert.That(passiveImage.sprite, Is.SameAs(basePassiveIcon));
+        Assert.That(skillImage.sprite, Is.SameAs(baseSkillIcon));
+
+        Assert.That(character.TakeDamage(60), Is.EqualTo(60));
+
+        Assert.That(passiveImage.sprite, Is.SameAs(variantPassiveIcon));
+        Assert.That(skillImage.sprite, Is.SameAs(variantSkillIcon));
+        Assert.That(
+            character.Data.PassiveAbilityIconSprite,
+            Is.SameAs(basePassiveIcon));
+        Assert.That(
+            character.Data.ActiveAbilityIconSprite,
+            Is.SameAs(baseSkillIcon));
     }
 
     [Test]
@@ -5786,6 +5922,157 @@ public sealed class CharacterP0RegressionTests
     }
 
     [Test]
+    public void PassiveStatusContributionMultiplier_ScalesWithDungeonProgress()
+    {
+        StatusEffectSO power = CreateRuntimeStatus(
+            "test_dungeon_progress_power",
+            false,
+            true,
+            StatusEffectStackMode.AddAndRefreshDuration,
+            0);
+        ConfigureRuntimeStatusModifier(
+            power,
+            0,
+            StatusEffectStatType.AttackPower,
+            StatusEffectStatModifierMode.Flat,
+            1f,
+            true);
+
+        CharacterSO definition = CreateBaseCharacterFixture(
+            "DungeonProgressContributionFixture",
+            10f);
+        SerializedObject serialized = new(definition);
+        SerializedProperty passive = serialized
+            .FindProperty("passiveDefinitions")
+            .GetArrayElementAtIndex(0);
+        SetSections(
+            passive.FindPropertyRelative("sections"),
+            (int)CharacterPassiveSectionType.StatusContribution);
+        passive.FindPropertyRelative("effects").ClearArray();
+        ConfigureStatusContributionMultiplier(
+            passive,
+            0,
+            power,
+            StatusEffectStatType.AttackPower,
+            1f,
+            2f);
+        serialized.ApplyModifiedPropertiesWithoutUndo();
+
+        CharacterDefinitionValidationResult validation =
+            CharacterDefinitionValidator.Validate(definition);
+        Assert.That(
+            validation.IsValid,
+            Is.True,
+            string.Join("\n", validation.Diagnostics));
+
+        CharacterRuntime character = CreateCharacter(definition);
+        FakeBattleBoard board = new()
+        {
+            DungeonStageProgress = 2f,
+        };
+        character.BindBattle(null, board);
+        Assert.That(
+            character.ApplyStatusEffect(power, 5f, 2),
+            Is.True);
+        Assert.That(
+            character.CurrentAttackPower,
+            Is.EqualTo(20f).Within(0.0001f),
+            "10 base + (2 stacks × (1 fixed + 2 stages × 2)).");
+        Assert.That(
+            CharacterLocalization.GetPassiveDescription(character.Data),
+            Does.Contain("2"));
+    }
+
+    [Test]
+    public void PassiveStatModifier_AddsAttackPowerPerCompletedStage()
+    {
+        CharacterSO definition = CreateBaseCharacterFixture(
+            "DungeonStageAttackPowerFixture",
+            10f);
+        SerializedObject serialized = new(definition);
+        SerializedProperty passive = serialized
+            .FindProperty("passiveDefinitions")
+            .GetArrayElementAtIndex(0);
+        SetSections(
+            passive.FindPropertyRelative("sections"),
+            (int)CharacterPassiveSectionType.StatModifier);
+        passive.FindPropertyRelative("effects").ClearArray();
+        SerializedProperty modifiers =
+            passive.FindPropertyRelative("statModifiers");
+        modifiers.arraySize = 1;
+        SerializedProperty modifier = modifiers.GetArrayElementAtIndex(0);
+        modifier.FindPropertyRelative("statType").enumValueIndex =
+            (int)StatusEffectStatType.AttackPower;
+        modifier.FindPropertyRelative("mode").enumValueIndex =
+            (int)StatusEffectStatModifierMode.Flat;
+        modifier.FindPropertyRelative("baseValue").floatValue = 0f;
+        modifier.FindPropertyRelative("dungeonStageProgressScale")
+            .floatValue = 1f;
+        serialized.ApplyModifiedPropertiesWithoutUndo();
+
+        CharacterDefinitionValidationResult validation =
+            CharacterDefinitionValidator.Validate(definition);
+        Assert.That(
+            validation.IsValid,
+            Is.True,
+            string.Join("\n", validation.Diagnostics));
+
+        CharacterRuntime character = CreateCharacter(definition);
+        FakeBattleBoard board = new()
+        {
+            DungeonStageProgress = 2f,
+        };
+        character.BindBattle(null, board);
+
+        Assert.That(
+            character.CurrentAttackPower,
+            Is.EqualTo(12f).Within(0.0001f));
+        Assert.That(
+            CharacterLocalization.GetPassiveDescription(character.Data),
+            Does.Contain("완료 스테이지"));
+    }
+
+    [Test]
+    public void DungeonStageProgress_CountsEventStages()
+    {
+        GameObject root = new("DungeonStageProgressFixture");
+        _createdObjects.Add(root);
+        DungeonFlowController flow =
+            root.AddComponent<DungeonFlowController>();
+        GameObject battle = CreateFlowTab(root, "Battle");
+        GameObject dungeonEvent = CreateFlowTab(root, "Event");
+        GameObject rest = CreateFlowTab(root, "Rest");
+        GameObject shop = CreateFlowTab(root, "Shop");
+
+        SerializedObject serialized = new(flow);
+        serialized.FindProperty("battleTab").objectReferenceValue = battle;
+        serialized.FindProperty("eventTab").objectReferenceValue =
+            dungeonEvent;
+        serialized.FindProperty("restTab").objectReferenceValue = rest;
+        serialized.FindProperty("shopTab").objectReferenceValue = shop;
+        serialized.ApplyModifiedPropertiesWithoutUndo();
+
+        Assert.That(flow.Initialize(), Is.True);
+        Assert.That(
+            flow.StartRun(new[]
+            {
+                EDungeonPhase.Battle,
+                EDungeonPhase.Event,
+                EDungeonPhase.Battle,
+            }),
+            Is.True);
+        Assert.That(flow.CurrentStageProgress, Is.EqualTo(0f));
+
+        Assert.That(flow.TryAdvance(), Is.True);
+        Assert.That(flow.CurrentPhase, Is.EqualTo(EDungeonPhase.Event));
+        Assert.That(flow.CurrentStageProgress, Is.EqualTo(1f));
+
+        Assert.That(flow.TryAdvance(), Is.True);
+        Assert.That(flow.CurrentPhase, Is.EqualTo(EDungeonPhase.Battle));
+        Assert.That(flow.CurrentStageProgress, Is.EqualTo(2f));
+    }
+
+    [Test]
     public void EffectStatusContributionMultiplier_IsLocalToThatEffect()
     {
         StatusEffectSO power = CreateRuntimeStatus(
@@ -7177,7 +7464,8 @@ public sealed class CharacterP0RegressionTests
         int modifierIndex,
         StatusEffectSO status,
         StatusEffectStatType statType,
-        float multiplier)
+        float multiplier,
+        float dungeonStageProgressScale = 0f)
     {
         SerializedProperty modifiers = owner.FindPropertyRelative(
             "statusContributionMultipliers");
@@ -7192,6 +7480,8 @@ public sealed class CharacterP0RegressionTests
             (int)statType;
         modifier.FindPropertyRelative("multiplier").floatValue =
             multiplier;
+        modifier.FindPropertyRelative("dungeonStageProgressScale")
+            .floatValue = dungeonStageProgressScale;
     }
 
     private static void ConfigureRuntimeStatusControl(
@@ -7537,6 +7827,45 @@ public sealed class CharacterP0RegressionTests
         // Runtime tests use an isolated definition. The string only provides
         // a readable fixture name and is never resolved through AssetDatabase.
         return CreateCharacter(CreateBaseCharacterFixture(fixtureId));
+    }
+
+    private Sprite CreateTestSprite(Color color)
+    {
+        Texture2D texture = new(2, 2, TextureFormat.RGBA32, false);
+        texture.hideFlags = HideFlags.HideAndDontSave;
+        texture.SetPixels(new[] { color, color, color, color });
+        texture.Apply();
+        Sprite sprite = Sprite.Create(
+            texture,
+            new Rect(0f, 0f, 2f, 2f),
+            new Vector2(0.5f, 0.5f));
+        sprite.hideFlags = HideFlags.HideAndDontSave;
+        _createdObjects.Add(texture);
+        _createdObjects.Add(sprite);
+        return sprite;
+    }
+
+    private static void ConfigureSourceHealthPercentageCondition(
+        SerializedProperty owner,
+        float maximumPercentage)
+    {
+        owner.FindPropertyRelative("conditionMatchMode").enumValueIndex =
+            (int)CharacterConditionMatchMode.All;
+        SerializedProperty conditions =
+            owner.FindPropertyRelative("numericConditions");
+        conditions.arraySize = 1;
+        SerializedProperty condition =
+            conditions.GetArrayElementAtIndex(0);
+        condition.FindPropertyRelative("type").enumValueIndex =
+            (int)CharacterConditionType.Numeric;
+        condition.FindPropertyRelative("target").enumValueIndex =
+            (int)CharacterConditionTarget.Source;
+        condition.FindPropertyRelative("metric").enumValueIndex =
+            (int)CharacterNumericConditionMetric.HealthPercentage;
+        condition.FindPropertyRelative("comparison").enumValueIndex =
+            (int)CharacterNumericComparison.LessThanOrEqual;
+        condition.FindPropertyRelative("threshold").floatValue =
+            maximumPercentage;
     }
 
     private CharacterSO CreateBaseCharacterFixture(
@@ -9027,6 +9356,15 @@ public sealed class CharacterP0RegressionTests
         return runtime;
     }
 
+    private static GameObject CreateFlowTab(
+        GameObject root,
+        string name)
+    {
+        GameObject tab = new(name);
+        tab.transform.SetParent(root.transform, false);
+        return tab;
+    }
+
     private static T LoadAsset<T>(string assetPath)
         where T : UnityEngine.Object
     {
@@ -9085,12 +9423,14 @@ public sealed class CharacterP0RegressionTests
 
     private sealed class FakeBattleBoard :
         IBattleBoard,
+        IDungeonStageProgressProvider,
         IBattleManualTargetSelectionService
     {
         private EnemyRuntime _centerTarget;
         private EnemyRuntime _crossTarget;
 
         public int InitialEnemyCapacity => 9;
+        public float DungeonStageProgress { get; set; }
         public int LivingEnemyCount => LivingEnemyCountValue;
         public bool HasEmptyEnemyTile => false;
         public int LivingEnemyCountValue { get; set; }

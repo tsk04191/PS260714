@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.Serialization;
 
@@ -17,6 +18,8 @@ public sealed class CharacterArchetypeSO : ScriptableObject
     [FormerlySerializedAs("koreanDescription")]
     [SerializeField, TextArea(2, 6)] private string fallbackDescription;
     [SerializeField] private Sprite iconSprite;
+    [SerializeField]
+    private List<CharacterRolePassiveDefinition> passiveDefinitions = new();
 
     public string ArchetypeId => archetypeId ?? string.Empty;
     public CharacterRoleSO ParentRole => parentRole;
@@ -28,6 +31,10 @@ public sealed class CharacterArchetypeSO : ScriptableObject
     public string FallbackDescription =>
         fallbackDescription ?? string.Empty;
     public Sprite IconSprite => iconSprite;
+    public IReadOnlyList<CharacterRolePassiveDefinition>
+        PassiveDefinitions => passiveDefinitions != null
+            ? passiveDefinitions
+            : Array.Empty<CharacterRolePassiveDefinition>();
 
     public string GetDisplayName()
     {
@@ -62,6 +69,14 @@ public sealed class CharacterArchetypeSO : ScriptableObject
         fallbackName = (fallbackName ?? string.Empty).Trim();
         fallbackDescription =
             (fallbackDescription ?? string.Empty).Trim();
+        passiveDefinitions ??=
+            new List<CharacterRolePassiveDefinition>();
+        foreach (CharacterRolePassiveDefinition passive in
+                 passiveDefinitions)
+        {
+            passive?.Validate();
+        }
+
         CharacterRolePresentation.Invalidate();
     }
 }

@@ -471,17 +471,22 @@ public static class CharacterLocalization
             if (definition == null || definition.IsEmptyPlaceholder)
                 continue;
 
-            string passiveLabel = resolved.IsRolePassive
-                ? resolved.RolePassive.GetDisplayName()
+            CharacterRolePassiveDefinition sharedPassive =
+                resolved.IsRolePassive
+                    ? resolved.RolePassive
+                    : resolved.IsArchetypePassive
+                        ? resolved.ArchetypePassive
+                        : null;
+            string passiveLabel = sharedPassive != null
+                ? sharedPassive.GetDisplayName()
                 : (UsesKoreanLocale ? "패시브" : "PASSIVE");
-            string roleDescription = resolved.IsRolePassive
-                ? resolved.RolePassive.GetDescription()
-                : string.Empty;
-            if (!string.IsNullOrWhiteSpace(roleDescription))
+            string sharedDescription = sharedPassive?.GetDescription() ??
+                                       string.Empty;
+            if (!string.IsNullOrWhiteSpace(sharedDescription))
             {
                 AppendCodexLine(
                     builder,
-                    $"{passiveLabel} {index++}: {roleDescription}");
+                    $"{passiveLabel} {index++}: {sharedDescription}");
                 continue;
             }
 
@@ -495,6 +500,19 @@ public static class CharacterLocalization
                     $"{index++}: " +
                     FormatStatusContributionMultipliers(
                         definition.StatusContributionMultipliers));
+                continue;
+            }
+
+            if (definition.HasStatModifierSection &&
+                !definition.HasSection(
+                    CharacterPassiveSectionType.Ability))
+            {
+                AppendCodexLine(
+                    builder,
+                    $"{passiveLabel} " +
+                    $"{index++}: " +
+                    FormatPassiveStatModifiers(
+                        definition.StatModifiers));
                 continue;
             }
 
@@ -1589,6 +1607,49 @@ public static class CharacterLocalization
         return builder.ToString().TrimStart(' ', '/', '+');
     }
 
+    private static string FormatPassiveStatModifiers(
+        IReadOnlyList<CharacterPassiveStatModifierDefinition> modifiers)
+    {
+        if (modifiers == null || modifiers.Count == 0)
+        {
+            return UsesKoreanLocale
+                ? "설정된 상시 능력치 보정 없음"
+                : "No passive stat modifiers";
+        }
+
+        StringBuilder builder = new();
+        foreach (CharacterPassiveStatModifierDefinition modifier in modifiers)
+        {
+            if (modifier == null)
+                continue;
+            if (builder.Length > 0)
+                builder.Append(" / ");
+
+            string statName = FormatStatusStatType(modifier.StatType);
+            string modeName = modifier.Mode switch
+            {
+                StatusEffectStatModifierMode.AdditiveRatio =>
+                    UsesKoreanLocale ? "기본값 비율 가산" : "base ratio",
+                StatusEffectStatModifierMode.MultiplicativeRatio =>
+                    UsesKoreanLocale ? "곱연산 비율" : "multiplicative ratio",
+                _ => UsesKoreanLocale ? "고정 가산" : "flat",
+            };
+            builder.Append(
+                $"{statName} {modeName} {modifier.BaseValue:0.##}");
+            if (modifier.DungeonStageProgressScale != 0f)
+            {
+                builder.Append(
+                    UsesKoreanLocale
+                        ? $" + (완료 스테이지 ×" +
+                          $"{modifier.DungeonStageProgressScale:0.##})"
+                        : $" + (completed stages ×" +
+                          $"{modifier.DungeonStageProgressScale:0.##})");
+            }
+        }
+
+        return builder.ToString();
+    }
+
     private static void AppendStatusContributionMultipliers(
         StringBuilder builder,
         IReadOnlyList<CharacterStatusStatContributionMultiplier> modifiers)
@@ -1613,6 +1674,15 @@ public static class CharacterLocalization
                       $"{modifier.Multiplier:0.##}"
                     : $"{statusName} {statName} contribution ×" +
                       $"{modifier.Multiplier:0.##}");
+            if (modifier.DungeonStageProgressScale > 0f)
+            {
+                builder.Append(
+                    UsesKoreanLocale
+                        ? $" + (던전 진행도 ×" +
+                          $"{modifier.DungeonStageProgressScale:0.##})"
+                        : $" + (dungeon progress ×" +
+                          $"{modifier.DungeonStageProgressScale:0.##})");
+            }
         }
     }
 

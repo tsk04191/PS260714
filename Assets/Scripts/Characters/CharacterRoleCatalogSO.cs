@@ -153,6 +153,38 @@ public sealed class CharacterRoleCatalogSO : ScriptableObject
                 archetype.FallbackDescription,
                 issues);
 
+            HashSet<string> passiveIds = new(StringComparer.Ordinal);
+            foreach (CharacterRolePassiveDefinition passive in
+                     archetype.PassiveDefinitions)
+            {
+                if (passive == null || !passive.IsConfigured)
+                    continue;
+                if (string.IsNullOrWhiteSpace(passive.PassiveId))
+                {
+                    issues.Add(
+                        $"{archetype.name}: 설정된 세부 직군 패시브 " +
+                        "ID가 비어 있습니다.");
+                }
+                else if (!passiveIds.Add(passive.PassiveId))
+                {
+                    issues.Add(
+                        $"{archetype.name}: 세부 직군 패시브 ID " +
+                        $"'{passive.PassiveId}'가 중복됩니다.");
+                }
+                ValidateLocalizedName(
+                    $"{archetype.name}/{passive.PassiveId}",
+                    "세부 직군 패시브",
+                    passive.NameLocalizationKey,
+                    passive.FallbackName,
+                    issues);
+                ValidateOptionalLocalizedDescription(
+                    $"{archetype.name}/{passive.PassiveId}",
+                    "세부 직군 패시브",
+                    passive.DescriptionLocalizationKey,
+                    passive.FallbackDescription,
+                    issues);
+            }
+
             if (archetype.ParentRole == null)
             {
                 issues.Add(

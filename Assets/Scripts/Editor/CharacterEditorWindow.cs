@@ -26,6 +26,13 @@ public sealed class CharacterEditorWindow : EditorWindow
     private const string PassiveAttackTargetRelationPropertyName =
         "attackTargetRelation";
     private const string PassiveSelfStatusCostPropertyName = "selfStatusCost";
+    private const string PassiveStatModifiersPropertyName = "statModifiers";
+    private const string PassiveStatModifierTypePropertyName = "statType";
+    private const string PassiveStatModifierModePropertyName = "mode";
+    private const string PassiveStatModifierBaseValuePropertyName =
+        "baseValue";
+    private const string PassiveStatModifierDungeonProgressScalePropertyName =
+        "dungeonStageProgressScale";
     private const string StatusCostEffectPropertyName = "statusEffect";
     private const string StatusCostRequiredStacksPropertyName =
         "requiredStacks";
@@ -116,6 +123,8 @@ public sealed class CharacterEditorWindow : EditorWindow
         "statType";
     private const string StatusContributionMultiplierPropertyName =
         "multiplier";
+    private const string StatusContributionDungeonProgressScalePropertyName =
+        "dungeonStageProgressScale";
     private const string StatusDurationPropertyName = "statusDuration";
     private const string StatusStacksPropertyName = "statusStacks";
     private const string StatusEffectPropertyName = "statusEffect";
@@ -150,6 +159,7 @@ public sealed class CharacterEditorWindow : EditorWindow
         CharacterPassiveSectionType.Linkage,
         CharacterPassiveSectionType.Condition,
         CharacterPassiveSectionType.SelfStatusCost,
+        CharacterPassiveSectionType.StatModifier,
         CharacterPassiveSectionType.StatusContribution,
         CharacterPassiveSectionType.Subject,
         CharacterPassiveSectionType.Ability
@@ -192,6 +202,13 @@ public sealed class CharacterEditorWindow : EditorWindow
         "공격 속도",
         "받는 피해",
         "대상 우선순위 (미지원)"
+    };
+
+    private static readonly string[] PassiveStatModifierModeOptions =
+    {
+        "고정 가산",
+        "기본값 비율 가산",
+        "곱연산 비율"
     };
 
     private static readonly CharacterAttackSectionType[] AttackSectionOrder =
@@ -533,6 +550,20 @@ public sealed class CharacterEditorWindow : EditorWindow
         "현재 스택 비율"
     };
 
+    private readonly struct ActionEditorContext
+    {
+        public ActionEditorContext(
+            UnityEngine.Object owner,
+            float? previewAttackPower)
+        {
+            Owner = owner;
+            PreviewAttackPower = previewAttackPower;
+        }
+
+        public UnityEngine.Object Owner { get; }
+        public float? PreviewAttackPower { get; }
+    }
+
     private readonly List<CharacterSO> _characters = new();
     private CharacterSO _selectedCharacter;
     private SerializedObject _serializedCharacter;
@@ -550,6 +581,24 @@ public sealed class CharacterEditorWindow : EditorWindow
     private bool _validationExpanded = true;
     private bool _cumulativeUpgradeExpanded;
     private bool _dungeonUpgradeExpanded;
+
+    private ActionEditorContext CurrentActionEditorContext
+    {
+        get
+        {
+            float? previewAttackPower = null;
+            SerializedProperty attackPower =
+                _serializedCharacter?.FindProperty("attackPower");
+            if (attackPower != null)
+                previewAttackPower = attackPower.intValue;
+            else if (_selectedCharacter != null)
+                previewAttackPower = _selectedCharacter.AttackPower;
+
+            return new ActionEditorContext(
+                _selectedCharacter,
+                previewAttackPower);
+        }
+    }
 
     [MenuItem(MenuPath)]
     public static void Open()
@@ -1533,7 +1582,10 @@ public sealed class CharacterEditorWindow : EditorWindow
             EditorGUILayout.Space(4f);
             SerializedProperty sections = definition.FindPropertyRelative(
                 PassiveSectionsPropertyName);
-            DrawPassiveSectionBlocks(definition, sections);
+            DrawPassiveSectionBlocks(
+                definition,
+                sections,
+                CurrentActionEditorContext);
         }
 
         EditorGUILayout.EndVertical();
@@ -1544,9 +1596,78 @@ public sealed class CharacterEditorWindow : EditorWindow
         return removePassive;
     }
 
-    private void DrawPassiveSectionBlocks(
+    internal static void DrawEmbeddedPassiveDefinition(
         SerializedProperty definition,
-        SerializedProperty sections)
+        UnityEngine.Object owner,
+        string label = "패시브 능력")
+    {
+        if (definition == null)
+        {
+            EditorGUILayout.HelpBox(
+                "패시브 능력 속성을 찾을 수 없습니다.",
+                MessageType.Error);
+            return;
+        }
+
+        using (new EditorGUILayout.VerticalScope(EditorStyles.helpBox))
+        {
+            using (new EditorGUILayout.HorizontalScope())
+            {
+                definition.isExpanded = EditorGUILayout.Foldout(
+                    definition.isExpanded,
+                    label,
+                    true,
+                    EditorStyles.foldoutHeader);
+                if (GUILayout.Button(
+                        new GUIContent("+", "패시브 구성 블록 추가"),
+                        EditorStyles.miniButton,
+                        GUILayout.Width(28f),
+                        GUILayout.Height(20f)))
+                {
+                    ShowPassiveSectionMenu(
+                        owner,
+                        definition.propertyPath);
+                }
+            }
+
+            if (!definition.isExpanded)
+                return;
+
+            EditorGUILayout.PropertyField(
+                definition.FindPropertyRelative(ActionIdPropertyName),
+                new GUIContent("Action ID"));
+            DrawActionIconSprite(definition);
+            DrawActionAudioClip(definition);
+            EditorGUILayout.Space(4f);
+            DrawPassiveSectionBlocks(
+                definition,
+                definition.FindPropertyRelative(
+                    PassiveSectionsPropertyName),
+                new ActionEditorContext(owner, null));
+        }
+    }
+
+    internal static void InitializeEmbeddedPassiveDefinition(
+        SerializedProperty definition,
+        string actionId)
+    {
+        if (definition == null)
+            return;
+
+        SerializedProperty actionIdProperty =
+            definition.FindPropertyRelative(ActionIdPropertyName);
+        if (actionIdProperty != null)
+            actionIdProperty.stringValue = actionId ?? string.Empty;
+        definition.FindPropertyRelative(PassiveSectionsPropertyName)
+            ?.ClearArray();
+        ResetPassiveDefinitionValues(definition);
+        definition.isExpanded = true;
+    }
+
+    private static void DrawPassiveSectionBlocks(
+        SerializedProperty definition,
+        SerializedProperty sections,
+        ActionEditorContext context)
     {
         if (sections == null || sections.arraySize == 0)
         {
@@ -1577,7 +1698,7 @@ public sealed class CharacterEditorWindow : EditorWindow
                 sectionToRemove = sectionType;
             }
             EditorGUILayout.EndHorizontal();
-            DrawPassiveSectionValue(definition, sectionType);
+            DrawPassiveSectionValue(definition, sectionType, context);
             EditorGUILayout.EndVertical();
 
             if (sectionToRemove.HasValue)
@@ -1597,9 +1718,10 @@ public sealed class CharacterEditorWindow : EditorWindow
         }
     }
 
-    private void DrawPassiveSectionValue(
+    private static void DrawPassiveSectionValue(
         SerializedProperty definition,
-        CharacterPassiveSectionType sectionType)
+        CharacterPassiveSectionType sectionType,
+        ActionEditorContext context)
     {
         switch (sectionType)
         {
@@ -1779,6 +1901,12 @@ public sealed class CharacterEditorWindow : EditorWindow
                 DrawPassiveSelfStatusCost(definition);
                 break;
 
+            case CharacterPassiveSectionType.StatModifier:
+                DrawPassiveStatModifiers(
+                    definition.FindPropertyRelative(
+                        PassiveStatModifiersPropertyName));
+                break;
+
             case CharacterPassiveSectionType.StatusContribution:
                 DrawStatusContributionMultipliers(
                     definition.FindPropertyRelative(
@@ -1787,11 +1915,11 @@ public sealed class CharacterEditorWindow : EditorWindow
                 break;
 
             case CharacterPassiveSectionType.Subject:
-                DrawAttackSubject(definition, true);
+                DrawAttackSubject(definition, context, true);
                 break;
 
             case CharacterPassiveSectionType.Ability:
-                DrawAbility(definition);
+                DrawAbility(definition, context);
                 break;
         }
     }
@@ -1838,6 +1966,9 @@ public sealed class CharacterEditorWindow : EditorWindow
         ResetPassiveSectionValue(
             definition,
             CharacterPassiveSectionType.SelfStatusCost);
+        ResetPassiveSectionValue(
+            definition,
+            CharacterPassiveSectionType.StatModifier);
         ResetPassiveSectionValue(
             definition,
             CharacterPassiveSectionType.StatusContribution);
@@ -1907,6 +2038,11 @@ public sealed class CharacterEditorWindow : EditorWindow
 
             case CharacterPassiveSectionType.SelfStatusCost:
                 ResetPassiveSelfStatusCost(definition);
+                break;
+
+            case CharacterPassiveSectionType.StatModifier:
+                definition.FindPropertyRelative(
+                    PassiveStatModifiersPropertyName)?.ClearArray();
                 break;
 
             case CharacterPassiveSectionType.StatusContribution:
@@ -2029,6 +2165,133 @@ public sealed class CharacterEditorWindow : EditorWindow
             consumedStacks.intValue = 1;
     }
 
+    private static void DrawPassiveStatModifiers(
+        SerializedProperty modifiers)
+    {
+        if (modifiers == null)
+        {
+            EditorGUILayout.HelpBox(
+                "상시 능력치 보정 속성을 찾을 수 없습니다.",
+                MessageType.Error);
+            return;
+        }
+
+        EditorGUILayout.HelpBox(
+            "상태 효과나 발동 조건 없이 항상 적용됩니다. 최종 수치는 " +
+            "기본 수치 + (완료한 던전 스테이지 수 × 진행도 배율)이며 " +
+            "이벤트, 휴식, 상점 스테이지도 진행도에 포함합니다.",
+            MessageType.Info);
+
+        int removeIndex = -1;
+        for (int index = 0; index < modifiers.arraySize; index++)
+        {
+            SerializedProperty modifier =
+                modifiers.GetArrayElementAtIndex(index);
+            using (new EditorGUILayout.VerticalScope(EditorStyles.helpBox))
+            {
+                using (new EditorGUILayout.HorizontalScope())
+                {
+                    EditorGUILayout.LabelField(
+                        $"능력치 보정 {index + 1}",
+                        EditorStyles.miniBoldLabel);
+                    if (GUILayout.Button(
+                            "X",
+                            EditorStyles.miniButton,
+                            GUILayout.Width(24f)))
+                    {
+                        removeIndex = index;
+                    }
+                }
+
+                SerializedProperty statType = modifier.FindPropertyRelative(
+                    PassiveStatModifierTypePropertyName);
+                DrawAttackEnumPopup(
+                    statType,
+                    "능력치",
+                    StatusContributionStatTypeOptions);
+                if (statType != null && statType.enumValueIndex ==
+                    (int)StatusEffectStatType.TargetPriority)
+                {
+                    EditorGUILayout.HelpBox(
+                        "대상 우선순위 상시 보정은 현재 지원하지 않습니다.",
+                        MessageType.Error);
+                }
+
+                SerializedProperty mode = modifier.FindPropertyRelative(
+                    PassiveStatModifierModePropertyName);
+                DrawAttackEnumPopup(
+                    mode,
+                    "연산",
+                    PassiveStatModifierModeOptions);
+
+                SerializedProperty baseValue =
+                    modifier.FindPropertyRelative(
+                        PassiveStatModifierBaseValuePropertyName);
+                if (baseValue != null)
+                {
+                    baseValue.floatValue = EditorGUILayout.FloatField(
+                        new GUIContent(
+                            "기본 수치",
+                            "던전 진행도가 0일 때 적용되는 수치입니다."),
+                        baseValue.floatValue);
+                    if (mode != null && mode.enumValueIndex ==
+                        (int)StatusEffectStatModifierMode.MultiplicativeRatio)
+                    {
+                        baseValue.floatValue = Mathf.Max(
+                            -1f,
+                            baseValue.floatValue);
+                    }
+                }
+
+                SerializedProperty progressScale =
+                    modifier.FindPropertyRelative(
+                        PassiveStatModifierDungeonProgressScalePropertyName);
+                if (progressScale != null)
+                {
+                    progressScale.floatValue = EditorGUILayout.FloatField(
+                        new GUIContent(
+                            "던전 스테이지 진행도 배율",
+                            "완료한 전체 스테이지 수에 곱할 수치입니다."),
+                        progressScale.floatValue);
+                }
+            }
+
+            if (removeIndex >= 0)
+                break;
+        }
+
+        if (removeIndex >= 0)
+        {
+            modifiers.DeleteArrayElementAtIndex(removeIndex);
+            GUI.changed = true;
+        }
+
+        if (GUILayout.Button("+ 능력치 보정 추가", EditorStyles.miniButton))
+        {
+            int newIndex = modifiers.arraySize;
+            modifiers.InsertArrayElementAtIndex(newIndex);
+            SerializedProperty modifier =
+                modifiers.GetArrayElementAtIndex(newIndex);
+            SetEnumValue(
+                modifier,
+                PassiveStatModifierTypePropertyName,
+                (int)StatusEffectStatType.AttackPower);
+            SetEnumValue(
+                modifier,
+                PassiveStatModifierModePropertyName,
+                (int)StatusEffectStatModifierMode.Flat);
+            SetFloatValue(
+                modifier,
+                PassiveStatModifierBaseValuePropertyName,
+                0f);
+            SetFloatValue(
+                modifier,
+                PassiveStatModifierDungeonProgressScalePropertyName,
+                0f);
+            GUI.changed = true;
+        }
+    }
+
     private static void DrawStatusContributionMultipliers(
         SerializedProperty modifiers,
         bool effectLocal)
@@ -2097,9 +2360,26 @@ public sealed class CharacterEditorWindow : EditorWindow
                     0f,
                     EditorGUILayout.FloatField(
                         new GUIContent(
-                            "총 기여 배율",
+                            "기본 기여 배율",
+                            "던전 진행도 추가 배율이 0일 때의 최종 배율입니다. " +
                             "1은 기본 기여도, 1.5는 150%, 3은 300%입니다."),
                         multiplier.floatValue));
+            }
+            SerializedProperty dungeonProgressScale =
+                modifier.FindPropertyRelative(
+                    StatusContributionDungeonProgressScalePropertyName);
+            if (dungeonProgressScale != null)
+            {
+                dungeonProgressScale.floatValue = Mathf.Max(
+                    0f,
+                    EditorGUILayout.FloatField(
+                        new GUIContent(
+                            "던전 진행도 추가 배율",
+                            "고정 배율에 (완료한 던전 스테이지 수 × " +
+                            "입력값)을 더합니다. 첫 스테이지는 0이며 " +
+                            "전투, 이벤트, 휴식, 상점 스테이지를 모두 " +
+                            "포함합니다. 던전 외 전투는 0입니다."),
+                        dungeonProgressScale.floatValue));
             }
             EditorGUILayout.EndVertical();
 
@@ -2131,6 +2411,10 @@ public sealed class CharacterEditorWindow : EditorWindow
                 modifier,
                 StatusContributionMultiplierPropertyName,
                 1f);
+            SetFloatValue(
+                modifier,
+                StatusContributionDungeonProgressScalePropertyName,
+                0f);
             GUI.changed = true;
         }
     }
@@ -2151,9 +2435,30 @@ public sealed class CharacterEditorWindow : EditorWindow
             return;
         }
 
-        SerializedProperty sections = definitions
-            .GetArrayElementAtIndex(passiveIndex)
-            .FindPropertyRelative(PassiveSectionsPropertyName);
+        SerializedProperty definition =
+            definitions.GetArrayElementAtIndex(passiveIndex);
+        ShowPassiveSectionMenu(character, definition.propertyPath);
+    }
+
+    private static void ShowPassiveSectionMenu(
+        UnityEngine.Object owner,
+        string definitionPropertyPath)
+    {
+        if (owner == null ||
+            string.IsNullOrWhiteSpace(definitionPropertyPath))
+        {
+            return;
+        }
+
+        SerializedObject serializedOwner = new(owner);
+        serializedOwner.UpdateIfRequiredOrScript();
+        SerializedProperty definition = serializedOwner.FindProperty(
+            definitionPropertyPath);
+        SerializedProperty sections = definition?.FindPropertyRelative(
+            PassiveSectionsPropertyName);
+        if (sections == null)
+            return;
+
         GenericMenu menu = new();
         foreach (CharacterPassiveSectionType sectionType in PassiveSectionOrder)
         {
@@ -2168,64 +2473,59 @@ public sealed class CharacterEditorWindow : EditorWindow
             menu.AddItem(
                 label,
                 false,
-                () => AddPassiveSection(
-                    character,
-                    passiveIndex,
+                () => AddPassiveSectionForEditor(
+                    owner,
+                    definitionPropertyPath,
                     capturedType));
         }
 
         menu.ShowAsContext();
     }
 
-    private void AddPassiveSection(
-        CharacterSO character,
-        int passiveIndex,
+    internal static bool AddPassiveSectionForEditor(
+        UnityEngine.Object owner,
+        string definitionPropertyPath,
         CharacterPassiveSectionType sectionType)
     {
-        if (character == null)
-            return;
-
-        SerializedObject serializedCharacter = new(character);
-        SerializedProperty definitions = serializedCharacter.FindProperty(
-            PassiveDefinitionsPropertyName);
-        if (definitions == null ||
-            passiveIndex < 0 ||
-            passiveIndex >= definitions.arraySize)
+        if (owner == null ||
+            string.IsNullOrWhiteSpace(definitionPropertyPath))
         {
-            return;
+            return false;
         }
 
-        SerializedProperty sections = definitions
-            .GetArrayElementAtIndex(passiveIndex)
-            .FindPropertyRelative(PassiveSectionsPropertyName);
+        Undo.RecordObject(owner, "Add Passive Section");
+        SerializedObject serializedOwner = new(owner);
+        serializedOwner.UpdateIfRequiredOrScript();
+        SerializedProperty definition = serializedOwner.FindProperty(
+            definitionPropertyPath);
+        if (definition == null)
+            return false;
+
+        SerializedProperty sections = definition.FindPropertyRelative(
+            PassiveSectionsPropertyName);
         if (sections == null ||
             FindPassiveSectionIndex(sections, sectionType) >= 0)
         {
-            return;
+            return false;
         }
 
         int newIndex = sections.arraySize;
         sections.InsertArrayElementAtIndex(newIndex);
         SerializedProperty section = sections.GetArrayElementAtIndex(newIndex);
         section.enumValueIndex = (int)sectionType;
-        ResetPassiveSectionValue(
-            definitions.GetArrayElementAtIndex(passiveIndex),
-            sectionType);
+        ResetPassiveSectionValue(definition, sectionType);
         if (sectionType == CharacterPassiveSectionType.Ability)
-        {
-            ResetExplicitEffects(
-                definitions.GetArrayElementAtIndex(passiveIndex));
-        }
+            ResetExplicitEffects(definition);
         if (sectionType == CharacterPassiveSectionType.Condition)
-        {
-            AddDefaultNumericCondition(
-                definitions.GetArrayElementAtIndex(passiveIndex));
-        }
+            AddDefaultNumericCondition(definition);
 
-        if (serializedCharacter.ApplyModifiedProperties())
-            EditorUtility.SetDirty(character);
+        if (serializedOwner.ApplyModifiedProperties())
+            EditorUtility.SetDirty(owner);
+        if (owner is CharacterRoleSO or CharacterArchetypeSO)
+            CharacterRolePresentation.Invalidate();
 
-        Repaint();
+        EditorWindow.focusedWindow?.Repaint();
+        return true;
     }
 
     private static int FindPassiveSectionIndex(
@@ -2255,10 +2555,12 @@ public sealed class CharacterEditorWindow : EditorWindow
             CharacterPassiveSectionType.Linkage => "1. 트리거 / 연동",
             CharacterPassiveSectionType.Condition => "2. 조건",
             CharacterPassiveSectionType.SelfStatusCost => "3. 자기 상태 비용",
+            CharacterPassiveSectionType.StatModifier =>
+                "4. 상시 능력치 보정",
             CharacterPassiveSectionType.StatusContribution =>
-                "4. 상태 능력치 기여 배율",
-            CharacterPassiveSectionType.Subject => "5. 대상",
-            CharacterPassiveSectionType.Ability => "6. 능력",
+                "5. 상태 능력치 기여 배율",
+            CharacterPassiveSectionType.Subject => "6. 대상",
+            CharacterPassiveSectionType.Ability => "7. 능력",
             _ => sectionType.ToString()
         };
     }
@@ -2494,11 +2796,14 @@ public sealed class CharacterEditorWindow : EditorWindow
                 break;
 
             case CharacterSkillSectionType.Subject:
-                DrawAttackSubject(definition, true);
+                DrawAttackSubject(
+                    definition,
+                    CurrentActionEditorContext,
+                    true);
                 break;
 
             case CharacterSkillSectionType.Ability:
-                DrawAbility(definition);
+                DrawAbility(definition, CurrentActionEditorContext);
                 break;
         }
     }
@@ -2946,17 +3251,21 @@ public sealed class CharacterEditorWindow : EditorWindow
                 break;
 
             case CharacterAttackSectionType.Subject:
-                DrawAttackSubject(definition, true);
+                DrawAttackSubject(
+                    definition,
+                    CurrentActionEditorContext,
+                    true);
                 break;
 
             case CharacterAttackSectionType.Ability:
-                DrawAbility(definition);
+                DrawAbility(definition, CurrentActionEditorContext);
                 break;
         }
     }
 
-    private void DrawAttackSubject(
+    private static void DrawAttackSubject(
         SerializedProperty definition,
+        ActionEditorContext context,
         bool allowAllyFaction = false,
         bool allowInheritedSubject = true)
     {
@@ -3092,13 +3401,15 @@ public sealed class CharacterEditorWindow : EditorWindow
 
         DrawTargetAreaEditor(
             definition,
+            context.Owner,
             reusesPreviousTargets
                 ? CharacterTargetFaction.Enemy
                 : faction);
     }
 
-    private void DrawTargetAreaEditor(
+    private static void DrawTargetAreaEditor(
         SerializedProperty definition,
+        UnityEngine.Object owner,
         CharacterTargetFaction faction)
     {
         SerializedProperty offsets = definition.FindPropertyRelative(
@@ -3129,12 +3440,12 @@ public sealed class CharacterEditorWindow : EditorWindow
             buttonRect = GUILayoutUtility.GetLastRect();
         }
 
-        if (showAreaEditor && _selectedCharacter != null)
+        if (showAreaEditor && owner != null)
         {
             PopupWindow.Show(
                 buttonRect,
                 new TargetAreaPopup(
-                    _selectedCharacter,
+                    owner,
                     definition.propertyPath));
         }
     }
@@ -3665,7 +3976,9 @@ public sealed class CharacterEditorWindow : EditorWindow
             audioClip.objectReferenceValue = null;
     }
 
-    private void DrawAbility(SerializedProperty definition)
+    private static void DrawAbility(
+        SerializedProperty definition,
+        ActionEditorContext context)
     {
         SerializedProperty effects = definition?.FindPropertyRelative(
             EffectsPropertyName);
@@ -3679,11 +3992,11 @@ public sealed class CharacterEditorWindow : EditorWindow
 
         if (effects.arraySize > 0)
         {
-            DrawEffectList(effects);
+            DrawEffectList(effects, context);
             return;
         }
 
-        DrawLegacyAbility(definition);
+        DrawLegacyAbility(definition, context);
         EditorGUILayout.Space(2f);
         if (GUILayout.Button(
                 new GUIContent(
@@ -3695,7 +4008,9 @@ public sealed class CharacterEditorWindow : EditorWindow
         }
     }
 
-    private void DrawLegacyAbility(SerializedProperty definition)
+    private static void DrawLegacyAbility(
+        SerializedProperty definition,
+        ActionEditorContext context)
     {
         SerializedProperty damageType = definition.FindPropertyRelative(
             AttackDamageTypePropertyName);
@@ -3714,10 +4029,12 @@ public sealed class CharacterEditorWindow : EditorWindow
         else if (removesStatus)
             DrawStatusRemovalSettings(definition);
         else
-            DrawDamageAmount(definition);
+            DrawDamageAmount(definition, context);
     }
 
-    private void DrawEffectList(SerializedProperty effects)
+    private static void DrawEffectList(
+        SerializedProperty effects,
+        ActionEditorContext context)
     {
         EditorGUILayout.LabelField("효과 목록", EditorStyles.boldLabel);
         int removeIndex = -1;
@@ -3772,7 +4089,7 @@ public sealed class CharacterEditorWindow : EditorWindow
             EditorGUILayout.EndHorizontal();
 
             if (effect.isExpanded)
-                DrawEffect(effect);
+                DrawEffect(effect, context);
             EditorGUILayout.EndVertical();
 
             if (removeIndex >= 0 || moveFromIndex >= 0)
@@ -3798,7 +4115,9 @@ public sealed class CharacterEditorWindow : EditorWindow
         }
     }
 
-    private void DrawEffect(SerializedProperty effect)
+    private static void DrawEffect(
+        SerializedProperty effect,
+        ActionEditorContext context)
     {
         EditorGUILayout.PropertyField(
             effect?.FindPropertyRelative(EffectIdPropertyName),
@@ -3916,6 +4235,7 @@ public sealed class CharacterEditorWindow : EditorWindow
                     MessageType.Info);
                 DrawAttackSubject(
                     targetSelector,
+                    context,
                     true,
                     false);
                 DrawNumericConditions(targetSelector);
@@ -3953,7 +4273,7 @@ public sealed class CharacterEditorWindow : EditorWindow
                         AttackDamageTypePropertyName),
                     "피해 종류",
                     DirectDamageTypeOptions);
-                DrawDamageAmount(effect);
+                DrawDamageAmount(effect, context);
                 break;
         }
 
@@ -4334,7 +4654,9 @@ public sealed class CharacterEditorWindow : EditorWindow
         }
     }
 
-    private void DrawDamageAmount(SerializedProperty definition)
+    private static void DrawDamageAmount(
+        SerializedProperty definition,
+        ActionEditorContext context)
     {
         SerializedProperty damageAmountMode = definition.FindPropertyRelative(
             DamageAmountModePropertyName);
@@ -4361,15 +4683,10 @@ public sealed class CharacterEditorWindow : EditorWindow
                 isFixed ? "고정 피해" : "공격력 배율",
                 damageAmount.floatValue));
 
-        if (!isFixed)
+        if (!isFixed && context.PreviewAttackPower.HasValue)
         {
-            SerializedProperty attackPower =
-                _serializedCharacter.FindProperty("attackPower");
-            float characterAttackPower = attackPower != null
-                ? attackPower.intValue
-                : _selectedCharacter.AttackPower;
             float finalAttackPower =
-                characterAttackPower * damageAmount.floatValue;
+                context.PreviewAttackPower.Value * damageAmount.floatValue;
             using (new EditorGUI.DisabledScope(true))
             {
                 EditorGUILayout.FloatField(
@@ -6291,14 +6608,14 @@ public sealed class CharacterEditorWindow : EditorWindow
         private const float HorizontalPadding = 12f;
         private const float VerticalPadding = 10f;
 
-        private readonly CharacterSO _character;
+        private readonly UnityEngine.Object _owner;
         private readonly string _definitionPropertyPath;
 
         public TargetAreaPopup(
-            CharacterSO character,
+            UnityEngine.Object owner,
             string definitionPropertyPath)
         {
-            _character = character;
+            _owner = owner;
             _definitionPropertyPath = definitionPropertyPath;
         }
 
@@ -6320,10 +6637,10 @@ public sealed class CharacterEditorWindow : EditorWindow
                 "흰색은 고정 타겟 칸입니다.",
                 EditorStyles.miniLabel);
 
-            SerializedObject serializedCharacter =
-                TryCreateSerializedCharacter();
+            SerializedObject serializedOwner =
+                TryCreateSerializedOwner();
             SerializedProperty offsets = FindAreaOffsets(
-                serializedCharacter);
+                serializedOwner);
             if (offsets == null)
             {
                 EditorGUILayout.HelpBox(
@@ -6396,26 +6713,26 @@ public sealed class CharacterEditorWindow : EditorWindow
             }
         }
 
-        private SerializedObject TryCreateSerializedCharacter()
+        private SerializedObject TryCreateSerializedOwner()
         {
-            if (_character == null)
+            if (_owner == null)
                 return null;
 
-            SerializedObject serializedCharacter = new(_character);
-            serializedCharacter.UpdateIfRequiredOrScript();
-            return serializedCharacter;
+            SerializedObject serializedOwner = new(_owner);
+            serializedOwner.UpdateIfRequiredOrScript();
+            return serializedOwner;
         }
 
         private SerializedProperty FindAreaOffsets(
-            SerializedObject serializedCharacter)
+            SerializedObject serializedOwner)
         {
-            if (serializedCharacter == null)
+            if (serializedOwner == null)
                 return null;
 
             if (string.IsNullOrWhiteSpace(_definitionPropertyPath))
                 return null;
 
-            SerializedProperty definition = serializedCharacter.FindProperty(
+            SerializedProperty definition = serializedOwner.FindProperty(
                 _definitionPropertyPath);
             return definition?.FindPropertyRelative(AreaOffsetsPropertyName);
         }
@@ -6457,11 +6774,11 @@ public sealed class CharacterEditorWindow : EditorWindow
 
         private void ToggleOffset(int rowOffset, int columnOffset)
         {
-            Undo.RecordObject(_character, "Change Character Attack Area");
-            SerializedObject serializedCharacter =
-                TryCreateSerializedCharacter();
+            Undo.RecordObject(_owner, "Change Action Target Area");
+            SerializedObject serializedOwner =
+                TryCreateSerializedOwner();
             SerializedProperty offsets = FindAreaOffsets(
-                serializedCharacter);
+                serializedOwner);
             if (offsets == null)
                 return;
 
@@ -6485,30 +6802,32 @@ public sealed class CharacterEditorWindow : EditorWindow
                     .intValue = columnOffset;
             }
 
-            ApplyChanges(serializedCharacter);
+            ApplyChanges(serializedOwner);
         }
 
         private void ClearOffsets()
         {
-            Undo.RecordObject(_character, "Clear Character Attack Area");
-            SerializedObject serializedCharacter =
-                TryCreateSerializedCharacter();
+            Undo.RecordObject(_owner, "Clear Action Target Area");
+            SerializedObject serializedOwner =
+                TryCreateSerializedOwner();
             SerializedProperty offsets = FindAreaOffsets(
-                serializedCharacter);
+                serializedOwner);
             if (offsets == null)
                 return;
 
             offsets.ClearArray();
-            ApplyChanges(serializedCharacter);
+            ApplyChanges(serializedOwner);
         }
 
-        private void ApplyChanges(SerializedObject serializedCharacter)
+        private void ApplyChanges(SerializedObject serializedOwner)
         {
-            if (serializedCharacter == null)
+            if (serializedOwner == null)
                 return;
 
-            serializedCharacter.ApplyModifiedProperties();
-            EditorUtility.SetDirty(_character);
+            serializedOwner.ApplyModifiedProperties();
+            EditorUtility.SetDirty(_owner);
+            if (_owner is CharacterRoleSO or CharacterArchetypeSO)
+                CharacterRolePresentation.Invalidate();
             editorWindow?.Repaint();
         }
     }

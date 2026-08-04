@@ -389,13 +389,138 @@ public sealed class CharacterRoleTests
         PS260714LocalizationKeyField.Refresh();
         var keys = PS260714LocalizationKeyField.GetKeys();
 
-        Assert.That(keys, Does.Contain("roll.vanguard.name"));
+        Assert.That(keys, Does.Contain("roll.main.vanguard.name"));
         Assert.That(keys, Does.Contain("character.suiren.name"));
         Assert.That(keys, Does.Contain("ui.title.notice"));
         Assert.That(
             PS260714LocalizationKeyField.GetMenuPath(
                 "character.suiren.name"),
             Is.EqualTo("character/suiren/name"));
+    }
+
+    [TestCase(false)]
+    [TestCase(true)]
+    public void SharedPassiveEditor_AddsSectionsToNestedRoleAbility(
+        bool useArchetype)
+    {
+        ScriptableObject owner = useArchetype
+            ? ScriptableObject.CreateInstance<CharacterArchetypeSO>()
+            : ScriptableObject.CreateInstance<CharacterRoleSO>();
+        try
+        {
+            SerializedObject serialized = new(owner);
+            SerializedProperty passives =
+                serialized.FindProperty("passiveDefinitions");
+            passives.arraySize = 1;
+            SerializedProperty ability = passives.GetArrayElementAtIndex(0)
+                .FindPropertyRelative("ability");
+            ability.FindPropertyRelative("sections").ClearArray();
+            string abilityPath = ability.propertyPath;
+            serialized.ApplyModifiedPropertiesWithoutUndo();
+
+            Assert.That(
+                CharacterEditorWindow.AddPassiveSectionForEditor(
+                    owner,
+                    abilityPath,
+                    CharacterPassiveSectionType.Ability),
+                Is.True);
+            Assert.That(
+                CharacterEditorWindow.AddPassiveSectionForEditor(
+                    owner,
+                    abilityPath,
+                    CharacterPassiveSectionType.Ability),
+                Is.False,
+                "동일 구성 블록은 중복 추가되면 안 됩니다.");
+
+            SerializedObject result = new(owner);
+            SerializedProperty resultAbility = result.FindProperty(
+                abilityPath);
+            SerializedProperty sections = resultAbility
+                .FindPropertyRelative("sections");
+            Assert.That(sections.arraySize, Is.EqualTo(1));
+            Assert.That(
+                sections.GetArrayElementAtIndex(0).enumValueIndex,
+                Is.EqualTo((int)CharacterPassiveSectionType.Ability));
+            Assert.That(
+                resultAbility.FindPropertyRelative("effects").arraySize,
+                Is.EqualTo(1));
+        }
+        finally
+        {
+            UnityEngine.Object.DestroyImmediate(owner);
+        }
+    }
+
+    [Test]
+    public void SharedPassiveEditor_InitializesClonedAbilityAsNew()
+    {
+        CharacterRoleSO role =
+            ScriptableObject.CreateInstance<CharacterRoleSO>();
+        try
+        {
+            SerializedObject serialized = new(role);
+            SerializedProperty passives =
+                serialized.FindProperty("passiveDefinitions");
+            passives.arraySize = 1;
+            SerializedProperty originalAbility = passives
+                .GetArrayElementAtIndex(0)
+                .FindPropertyRelative("ability");
+            originalAbility.FindPropertyRelative("actionId").stringValue =
+                "original";
+            SerializedProperty originalSections = originalAbility
+                .FindPropertyRelative("sections");
+            originalSections.arraySize = 1;
+            originalSections.GetArrayElementAtIndex(0).enumValueIndex =
+                (int)CharacterPassiveSectionType.Linkage;
+
+            passives.arraySize = 2;
+            SerializedProperty addedAbility = passives
+                .GetArrayElementAtIndex(1)
+                .FindPropertyRelative("ability");
+            CharacterEditorWindow.InitializeEmbeddedPassiveDefinition(
+                addedAbility,
+                "passive_2");
+
+            Assert.That(
+                addedAbility.FindPropertyRelative("actionId").stringValue,
+                Is.EqualTo("passive_2"));
+            Assert.That(
+                addedAbility.FindPropertyRelative("sections").arraySize,
+                Is.Zero);
+            Assert.That(
+                addedAbility.FindPropertyRelative("effects").arraySize,
+                Is.EqualTo(1));
+        }
+        finally
+        {
+            UnityEngine.Object.DestroyImmediate(role);
+        }
+    }
+
+    [Test]
+    public void ExplorationArchetype_GainsAttackPowerPerCompletedStage()
+    {
+        CharacterArchetypeSO exploration =
+            AssetDatabase.LoadAssetAtPath<CharacterArchetypeSO>(
+                "Assets/Resources/Presentation/Archetypes/" +
+                "RoleExploration.asset");
+
+        Assert.That(exploration, Is.Not.Null);
+        Assert.That(exploration.PassiveDefinitions, Has.Count.GreaterThan(0));
+        CharacterPassiveDefinition passive =
+            exploration.PassiveDefinitions[0].Ability;
+        Assert.That(passive.HasStatModifierSection, Is.True);
+        Assert.That(passive.StatModifiers, Has.Count.EqualTo(1));
+        CharacterPassiveStatModifierDefinition modifier =
+            passive.StatModifiers[0];
+        Assert.That(
+            modifier.StatType,
+            Is.EqualTo(StatusEffectStatType.AttackPower));
+        Assert.That(
+            modifier.Mode,
+            Is.EqualTo(StatusEffectStatModifierMode.Flat));
+        Assert.That(modifier.BaseValue, Is.EqualTo(0f));
+        Assert.That(modifier.DungeonStageProgressScale, Is.EqualTo(1f));
     }
 
     [Test]
@@ -447,6 +572,83 @@ public sealed class CharacterRoleTests
         finally
         {
             UnityEngine.Object.DestroyImmediate(character);
+            UnityEngine.Object.DestroyImmediate(role);
+        }
+    }
+
+    [Test]
+    public void CharacterData_MergesArchetypePassiveBetweenRoleAndCharacter()
+    {
+        CharacterRoleSO role =
+            ScriptableObject.CreateInstance<CharacterRoleSO>();
+        CharacterArchetypeSO archetype =
+            ScriptableObject.CreateInstance<CharacterArchetypeSO>();
+        CharacterSO character =
+            ScriptableObject.CreateInstance<CharacterSO>();
+        try
+        {
+            SerializedObject roleSerialized = new(role);
+            SerializedProperty rolePassives =
+                roleSerialized.FindProperty("passiveDefinitions");
+            rolePassives.arraySize = 1;
+            SerializedProperty rolePassive =
+                rolePassives.GetArrayElementAtIndex(0);
+            rolePassive.FindPropertyRelative("passiveId").stringValue =
+                "role.passive";
+            ConfigurePassive(
+                rolePassive.FindPropertyRelative("ability"));
+            roleSerialized.ApplyModifiedPropertiesWithoutUndo();
+
+            SerializedObject archetypeSerialized = new(archetype);
+            archetypeSerialized.FindProperty("parentRole")
+                .objectReferenceValue = role;
+            SerializedProperty archetypePassives =
+                archetypeSerialized.FindProperty("passiveDefinitions");
+            archetypePassives.arraySize = 1;
+            SerializedProperty archetypePassive =
+                archetypePassives.GetArrayElementAtIndex(0);
+            archetypePassive.FindPropertyRelative("passiveId").stringValue =
+                "archetype.passive";
+            ConfigurePassive(
+                archetypePassive.FindPropertyRelative("ability"));
+            archetypeSerialized.ApplyModifiedPropertiesWithoutUndo();
+
+            SerializedObject characterSerialized = new(character);
+            characterSerialized.FindProperty("role").objectReferenceValue =
+                role;
+            characterSerialized.FindProperty("archetype")
+                .objectReferenceValue = archetype;
+            SerializedProperty personalPassives =
+                characterSerialized.FindProperty("passiveDefinitions");
+            personalPassives.arraySize = 1;
+            ConfigurePassive(
+                personalPassives.GetArrayElementAtIndex(0));
+            characterSerialized.ApplyModifiedPropertiesWithoutUndo();
+
+            CharacterData data = character.CreateData();
+
+            Assert.That(data.PassiveDefinitions, Has.Count.EqualTo(3));
+            Assert.That(data.ResolvedPassives, Has.Count.EqualTo(3));
+            Assert.That(
+                data.ResolvedPassives[0].Origin,
+                Is.EqualTo(CharacterPassiveOrigin.Role));
+            Assert.That(
+                data.ResolvedPassives[1].Origin,
+                Is.EqualTo(CharacterPassiveOrigin.Archetype));
+            Assert.That(
+                data.ResolvedPassives[1].Archetype,
+                Is.SameAs(archetype));
+            Assert.That(
+                data.ResolvedPassives[1].ArchetypePassive,
+                Is.SameAs(archetype.PassiveDefinitions[0]));
+            Assert.That(
+                data.ResolvedPassives[2].Origin,
+                Is.EqualTo(CharacterPassiveOrigin.Character));
+        }
+        finally
+        {
+            UnityEngine.Object.DestroyImmediate(character);
+            UnityEngine.Object.DestroyImmediate(archetype);
             UnityEngine.Object.DestroyImmediate(role);
         }
     }

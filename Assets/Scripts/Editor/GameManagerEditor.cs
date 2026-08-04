@@ -145,8 +145,15 @@ public sealed class GameManagerEditor : Editor
             foreach (CharacterArchetypeSO archetype in
                      roleCatalog.Archetypes)
             {
-                if (archetype != null)
-                    archetypeCount++;
+                if (archetype == null)
+                    continue;
+                archetypeCount++;
+                foreach (CharacterRolePassiveDefinition passive in
+                         archetype.PassiveDefinitions)
+                {
+                    if (passive != null && passive.IsConfigured)
+                        passiveCount++;
+                }
             }
 
             EditorGUILayout.LabelField(
@@ -348,7 +355,8 @@ internal static class CommonSettingsEditorGUI
             "설명 fallback");
         DrawProperty(serialized, "iconSprite", "직군 아이콘");
         DrawRolePassives(
-            serialized.FindProperty("passiveDefinitions"));
+            serialized.FindProperty("passiveDefinitions"),
+            "직군");
         ApplyDefinition(serialized, role);
 
         DrawLocalizationPreview(
@@ -410,6 +418,9 @@ internal static class CommonSettingsEditorGUI
             "fallbackDescription",
             "설명 fallback");
         DrawProperty(serialized, "iconSprite", "세부 직군 아이콘");
+        DrawRolePassives(
+            serialized.FindProperty("passiveDefinitions"),
+            "세부 직군");
         ApplyDefinition(serialized, archetype);
 
         DrawLocalizationPreview(
@@ -420,6 +431,26 @@ internal static class CommonSettingsEditorGUI
             "세부 직군 설명",
             archetype.DescriptionLocalizationKey,
             archetype.GetDescription());
+        int passiveIndex = 1;
+        foreach (CharacterRolePassiveDefinition passive in
+                 archetype.PassiveDefinitions)
+        {
+            if (passive == null || !passive.IsConfigured)
+                continue;
+            DrawLocalizationPreview(
+                $"세부 직군 패시브 {passiveIndex} 이름",
+                passive.NameLocalizationKey,
+                passive.GetDisplayName());
+            string description = passive.GetDescription();
+            if (!string.IsNullOrWhiteSpace(description))
+            {
+                DrawLocalizationPreview(
+                    $"세부 직군 패시브 {passiveIndex} 설명",
+                    passive.DescriptionLocalizationKey,
+                    description);
+            }
+            passiveIndex++;
+        }
         DrawDefinitionFooter(archetype);
     }
 
@@ -460,7 +491,9 @@ internal static class CommonSettingsEditorGUI
         }
     }
 
-    private static void DrawRolePassives(SerializedProperty passives)
+    private static void DrawRolePassives(
+        SerializedProperty passives,
+        string ownerLabel)
     {
         if (passives == null)
             return;
@@ -468,7 +501,7 @@ internal static class CommonSettingsEditorGUI
         EditorGUILayout.Space(6f);
         passives.isExpanded = EditorGUILayout.Foldout(
             passives.isExpanded,
-            $"직군 패시브 ({passives.arraySize})",
+            $"{ownerLabel} 패시브 ({passives.arraySize})",
             true,
             EditorStyles.foldoutHeader);
         if (!passives.isExpanded)
@@ -507,20 +540,28 @@ internal static class CommonSettingsEditorGUI
                     "fallbackDescription",
                     "설명 fallback");
                 DrawRelativeProperty(passive, "iconSprite", "패시브 아이콘");
-                DrawRelativeProperty(passive, "ability", "패시브 능력");
+                CharacterEditorWindow.DrawEmbeddedPassiveDefinition(
+                    passive.FindPropertyRelative("ability"),
+                    passives.serializedObject.targetObject);
             }
         }
 
         if (removeIndex >= 0)
             passives.DeleteArrayElementAtIndex(removeIndex);
 
-        if (GUILayout.Button("직군 패시브 추가"))
+        if (GUILayout.Button($"{ownerLabel} 패시브 추가"))
         {
             int newIndex = passives.arraySize;
             passives.arraySize++;
             SerializedProperty added =
                 passives.GetArrayElementAtIndex(newIndex);
-            ClearRelativeString(added, "passiveId");
+            string passiveId = CreateUniqueRolePassiveId(
+                passives,
+                newIndex);
+            SerializedProperty passiveIdProperty =
+                added.FindPropertyRelative("passiveId");
+            if (passiveIdProperty != null)
+                passiveIdProperty.stringValue = passiveId;
             ClearRelativeString(added, "nameLocalizationKey");
             ClearRelativeString(added, "descriptionLocalizationKey");
             ClearRelativeString(added, "fallbackName");
@@ -529,7 +570,44 @@ internal static class CommonSettingsEditorGUI
                 added.FindPropertyRelative("iconSprite");
             if (icon != null)
                 icon.objectReferenceValue = null;
+            CharacterEditorWindow.InitializeEmbeddedPassiveDefinition(
+                added.FindPropertyRelative("ability"),
+                passiveId);
         }
+    }
+
+    private static string CreateUniqueRolePassiveId(
+        SerializedProperty passives,
+        int excludedIndex)
+    {
+        HashSet<string> usedIds = new(StringComparer.Ordinal);
+        for (int index = 0; index < passives.arraySize; index++)
+        {
+            if (index == excludedIndex)
+                continue;
+
+            SerializedProperty passive =
+                passives.GetArrayElementAtIndex(index);
+            string passiveId = passive.FindPropertyRelative("passiveId")
+                ?.stringValue;
+            if (!string.IsNullOrWhiteSpace(passiveId))
+                usedIds.Add(passiveId.Trim());
+
+            string actionId = passive.FindPropertyRelative("ability")
+                ?.FindPropertyRelative("actionId")?.stringValue;
+            if (!string.IsNullOrWhiteSpace(actionId))
+                usedIds.Add(actionId.Trim());
+        }
+
+        int suffix = 1;
+        string candidate;
+        do
+        {
+            candidate = $"passive_{suffix++}";
+        }
+        while (usedIds.Contains(candidate));
+
+        return candidate;
     }
 
     private static void ClearRelativeString(

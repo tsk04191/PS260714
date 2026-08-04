@@ -7,6 +7,7 @@ using Random = UnityEngine.Random;
 [DisallowMultipleComponent]
 [RequireComponent(typeof(RectTransform))]
 public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
+    IDungeonStageProgressProvider,
     IBattlePresentationEventPublisher,
     IBattleVfxTargetResolver,
     IBattleManualTargetSelectionService
@@ -108,6 +109,7 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
     private BattlePresentationDispatcher _presentationDispatcher;
 
     public int GridSize { get; private set; } = MinimumGridSize;
+    public float DungeonStageProgress { get; private set; }
     public RectTransform HighlightRect => boardRect != null
         ? boardRect
         : transform as RectTransform;
@@ -632,6 +634,14 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
         _initialized = true;
         CollectSceneTiles(gridSize);
         SetGridSize(gridSize);
+    }
+
+    public void SetDungeonStageProgress(float progress)
+    {
+        DungeonStageProgress = float.IsNaN(progress) ||
+                               float.IsInfinity(progress)
+            ? 0f
+            : Mathf.Max(0f, progress);
     }
 
     public void SetPixelSize(float size)
