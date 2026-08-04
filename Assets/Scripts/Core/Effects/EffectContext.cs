@@ -374,7 +374,8 @@ public enum BattleEffectOriginKind
     CharacterSkill = 2,
     StatusEffect = 3,
     EnemyAbility = 4,
-    BattleLifecycle = 5
+    BattleLifecycle = 5,
+    BattleItem = 6
 }
 
 public readonly struct BattleEffectContext
@@ -470,6 +471,33 @@ public readonly struct BattleEffectContext
             context,
             BattleEffectOriginKind.EnemyAbility,
             sourceTarget,
+            0,
+            0,
+            1);
+    }
+
+    public static BattleEffectContext ForBattleItem(
+        BattleStatusTarget selectedTarget,
+        IBattleBoard board,
+        IActiveSkillResource resource,
+        CharacterTargetFaction targetFaction,
+        IReadOnlyList<EnemyRuntime> enemyTargets,
+        IReadOnlyList<IBattleCharacter> allyTargets,
+        float sourceAttackPower = 0f)
+    {
+        EffectContext context = new(
+            selectedTarget,
+            board,
+            resource,
+            CharacterActionKind.Skill,
+            targetFaction,
+            enemyTargets,
+            allyTargets,
+            sourceAttackPower);
+        return new BattleEffectContext(
+            context,
+            BattleEffectOriginKind.BattleItem,
+            selectedTarget,
             0,
             0,
             1);
@@ -629,6 +657,8 @@ public readonly struct BattleEffectContext
                 CharacterActionKind.Passive,
             BattleEffectOriginKind.EnemyAbility =>
                 CharacterActionKind.Passive,
+            BattleEffectOriginKind.BattleItem =>
+                CharacterActionKind.Skill,
             _ => CharacterActionKind.Attack
         };
     }

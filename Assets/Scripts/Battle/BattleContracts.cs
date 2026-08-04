@@ -950,6 +950,8 @@ public static class BattleEffectExecutor
                 CharacterActionKind.Passive,
             BattleEffectOriginKind.CharacterSkill =>
                 CharacterActionKind.Skill,
+            BattleEffectOriginKind.BattleItem =>
+                CharacterActionKind.Skill,
             _ => default,
         };
     }

@@ -350,3 +350,5 @@ roll.sub.exploration.name,세부 직군 이름,title,,탐험 동아리,Explorati
 roll.sub.exploration.description,세부 직군 설명,body,,탐험 동아리,Exploration Club
 roll.sub.exploration.passive.stage_attack.name,세부 직군 패시브 이름,title,,탐험의 성과,Exploration Results
 roll.sub.exploration.passive.stage_attack.description,세부 직군 패시브 설명,body,,"완료한 던전 스테이지마다 공격력을 1 획득합니다. 이벤트, 휴식, 상점 스테이지를 포함합니다.","Gain 1 Attack Power for each completed dungeon stage, including event, rest, and shop stages."
+item.battle.power_drink.name,아이템 이름,title,,파워 음료,Power Drink
+item.battle.power_drink.description,아이템 설명,tooltip,,파워 1 획득,Gain Power 1 status

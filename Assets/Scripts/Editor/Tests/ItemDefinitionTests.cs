@@ -126,11 +126,6 @@ public sealed class ItemDefinitionTests
             CoreItemIds.FreeCredit,
             CoreItemIds.StandardRecruitTicket,
             CoreItemIds.BasicUpgradeMaterial,
-            CoreBattleItemIds.Focus,
-            CoreBattleItemIds.Molotov,
-            CoreBattleItemIds.PrecisionShot,
-            CoreBattleItemIds.OverSupply,
-            CoreBattleItemIds.Overheat,
         };
 
         ItemDefinitionCatalog.Invalidate();
@@ -192,6 +187,89 @@ public sealed class ItemDefinitionTests
         finally
         {
             LocalizationService.SetLocale(previousLocale, false);
+            Object.DestroyImmediate(item);
+        }
+    }
+
+    [Test]
+    public void BattleItemAbilityEffects_UseCharacterSkillEffectModel()
+    {
+        BattleItemSO item = ScriptableObject.CreateInstance<BattleItemSO>();
+        try
+        {
+            ConfigureBattleItem(
+                item,
+                "test.battle.unified_ability",
+                BattleItemUsePolicy.SingleUse,
+                1,
+                0,
+                0f);
+            SerializedObject serialized = new(item);
+            SerializedProperty abilities =
+                serialized.FindProperty("abilityEffects");
+            abilities.arraySize = 1;
+            SerializedProperty effect =
+                abilities.GetArrayElementAtIndex(0);
+            effect.FindPropertyRelative("effectId").stringValue =
+                "item_damage";
+            effect.FindPropertyRelative("type").enumValueIndex =
+                (int)CharacterEffectType.Damage;
+            effect.FindPropertyRelative("targetMode").enumValueIndex =
+                (int)CharacterEffectTargetMode.InheritAction;
+            effect.FindPropertyRelative("damageType").enumValueIndex =
+                (int)CharacterAttackDamageType.Fixed;
+            effect.FindPropertyRelative("damageAmountMode").enumValueIndex =
+                (int)CharacterDamageAmountMode.Fixed;
+            effect.FindPropertyRelative("damageAmount").floatValue = 5f;
+            serialized.ApplyModifiedPropertiesWithoutUndo();
+
+            Assert.That(item.UsesUnifiedAbilityEffects, Is.True);
+            Assert.That(item.AbilityEffects, Has.Count.EqualTo(1));
+            Assert.That(
+                item.AbilityEffects[0].Type,
+                Is.EqualTo(CharacterEffectType.Damage));
+            Assert.That(item.HasCompatibleEffects, Is.True);
+        }
+        finally
+        {
+            Object.DestroyImmediate(item);
+        }
+    }
+
+    [Test]
+    public void EnemyBattleItem_FreshSkillSelectionIsRejectedWithoutSource()
+    {
+        BattleItemSO item = ScriptableObject.CreateInstance<BattleItemSO>();
+        try
+        {
+            SerializedObject serialized = new(item);
+            serialized.FindProperty("targetType").enumValueIndex =
+                (int)BattleItemTargetType.Enemy;
+            SerializedProperty abilities =
+                serialized.FindProperty("abilityEffects");
+            abilities.arraySize = 1;
+            SerializedProperty effect =
+                abilities.GetArrayElementAtIndex(0);
+            effect.FindPropertyRelative("type").enumValueIndex =
+                (int)CharacterEffectType.Damage;
+            effect.FindPropertyRelative("targetMode").enumValueIndex =
+                (int)CharacterEffectTargetMode.FreshSelection;
+            effect.FindPropertyRelative("damageType").enumValueIndex =
+                (int)CharacterAttackDamageType.Fixed;
+            effect.FindPropertyRelative("damageAmountMode").enumValueIndex =
+                (int)CharacterDamageAmountMode.Fixed;
+            effect.FindPropertyRelative("damageAmount").floatValue = 1f;
+            SerializedProperty selector =
+                effect.FindPropertyRelative("targetSelector");
+            selector.FindPropertyRelative("subject").enumValueIndex =
+                (int)CharacterAttackSubject.Random;
+            serialized.ApplyModifiedPropertiesWithoutUndo();
+
+            Assert.That(item.UsesUnifiedAbilityEffects, Is.True);
+            Assert.That(item.HasCompatibleEffects, Is.False);
+        }
+        finally
+        {
             Object.DestroyImmediate(item);
         }
     }
@@ -408,27 +486,18 @@ public sealed class ItemDefinitionTests
     }
 
     [Test]
-    public void BattleItemCatalog_ContainsMigratedBattleItems()
+    public void ItemAssets_AreNotAutomaticallyCreatedOnEditorLoad()
     {
-        ItemDefinitionCatalog.Invalidate();
-        HashSet<string> expected = new()
-        {
-            CoreBattleItemIds.Focus,
-            CoreBattleItemIds.Molotov,
-            CoreBattleItemIds.PrecisionShot,
-            CoreBattleItemIds.OverSupply,
-            CoreBattleItemIds.Overheat,
-        };
-
-        foreach (BattleItemSO item in BattleItemCatalog.GetAll())
-        {
-            Assert.That(item, Is.Not.Null);
-            Assert.That(item.Effects, Is.Not.Empty);
-            Assert.That(item.HasCompatibleEffects, Is.True);
-            expected.Remove(item.ItemId);
-        }
-
-        Assert.That(expected, Is.Empty);
+        Assert.That(
+            System.Attribute.IsDefined(
+                typeof(ItemAssetBootstrap),
+                typeof(InitializeOnLoadAttribute)),
+            Is.False);
+        Assert.That(
+            typeof(ItemAssetBootstrap).GetMethod(
+                "CreateCoreItemAssets",
+                BindingFlags.Public | BindingFlags.Static),
+            Is.Null);
     }
 
     [Test]

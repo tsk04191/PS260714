@@ -445,7 +445,32 @@ public sealed class ItemEditorWindow : EditorWindow
                 DrawProperty(
                     "availableAsStartingItem",
                     "Starting Item");
-                DrawProperty("effects", "Effects");
+                EditorGUILayout.Space(4f);
+                EditorGUILayout.LabelField(
+                    "Ability",
+                    EditorStyles.boldLabel);
+                EditorGUILayout.HelpBox(
+                    "캐릭터 기술의 능력 효과와 같은 데이터/실행 방식을 " +
+                    "사용합니다. 선택한 적 또는 터렛은 '행동 대상 상속' " +
+                    "대상으로 전달됩니다.",
+                    MessageType.Info);
+                SerializedProperty abilityEffects = Find("abilityEffects");
+                CharacterEditorWindow.DrawEmbeddedEffectList(
+                    abilityEffects,
+                    _selected);
+
+                SerializedProperty legacyEffects = Find("effects");
+                if ((abilityEffects == null ||
+                     abilityEffects.arraySize == 0) &&
+                    legacyEffects != null &&
+                    legacyEffects.arraySize > 0)
+                {
+                    EditorGUILayout.HelpBox(
+                        "공용 능력 효과가 없어 기존 배틀아이템 효과를 " +
+                        "호환 모드로 실행합니다. 새 효과를 추가하면 기존 " +
+                        "효과는 실행되지 않습니다.",
+                        MessageType.Warning);
+                }
             }
         }
     }
@@ -481,18 +506,24 @@ public sealed class ItemEditorWindow : EditorWindow
 
         if (_selected is BattleItemSO)
         {
-            SerializedProperty effects = Find("effects");
-            if (effects == null || effects.arraySize == 0)
+            BattleItemSO battleItem = (BattleItemSO)_selected;
+            SerializedProperty abilityEffects = Find("abilityEffects");
+            SerializedProperty legacyEffects = Find("effects");
+            bool hasUnifiedEffects = abilityEffects != null &&
+                                     abilityEffects.arraySize > 0;
+            bool hasLegacyEffects = legacyEffects != null &&
+                                    legacyEffects.arraySize > 0;
+            if (!hasUnifiedEffects && !hasLegacyEffects)
             {
                 EditorGUILayout.HelpBox(
-                    "Battle items require at least one effect.",
+                    "Battle items require at least one ability effect.",
                     MessageType.Error);
             }
-            else if (_selected is BattleItemSO battleItem &&
-                     !battleItem.HasCompatibleEffects)
+            else if (!battleItem.HasCompatibleEffects)
             {
                 EditorGUILayout.HelpBox(
-                    "One or more effects are incompatible with the selected target.",
+                    "One or more ability effects are incompatible with the " +
+                    "selected target or have invalid values.",
                     MessageType.Error);
             }
 

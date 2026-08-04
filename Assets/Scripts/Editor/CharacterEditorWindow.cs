@@ -1306,7 +1306,7 @@ public sealed class CharacterEditorWindow : EditorWindow
 
         using (new EditorGUILayout.HorizontalScope())
         {
-            DrawRolePopup(roleProperty, archetypeProperty, roles);
+            DrawRolePopup(roleProperty, roles);
             if (GUILayout.Button("공통 직군 설정", GUILayout.Width(108f)))
             {
                 UnityEngine.Object selectedDefinition =
@@ -1320,17 +1320,12 @@ public sealed class CharacterEditorWindow : EditorWindow
             }
         }
 
-        CharacterRoleSO selectedRole =
-            roleProperty.objectReferenceValue as CharacterRoleSO;
         List<CharacterArchetypeSO> archetypes = new();
         foreach (CharacterArchetypeSO archetype in
                  CharacterRolePresentation.Archetypes)
         {
-            if (archetype != null &&
-                archetype.ParentRole == selectedRole)
-            {
+            if (archetype != null)
                 archetypes.Add(archetype);
-            }
         }
         DrawArchetypePopup(archetypeProperty, archetypes);
 
@@ -1344,7 +1339,6 @@ public sealed class CharacterEditorWindow : EditorWindow
 
     private static void DrawRolePopup(
         SerializedProperty roleProperty,
-        SerializedProperty archetypeProperty,
         IReadOnlyList<CharacterRoleSO> roles)
     {
         string[] labels = new string[roles.Count + 1];
@@ -1368,7 +1362,6 @@ public sealed class CharacterEditorWindow : EditorWindow
 
         roleProperty.objectReferenceValue =
             nextIndex > 0 ? roles[nextIndex - 1] : null;
-        archetypeProperty.objectReferenceValue = null;
     }
 
     private static void DrawArchetypePopup(
@@ -4030,6 +4023,24 @@ public sealed class CharacterEditorWindow : EditorWindow
             DrawStatusRemovalSettings(definition);
         else
             DrawDamageAmount(definition, context);
+    }
+
+    internal static void DrawEmbeddedEffectList(
+        SerializedProperty effects,
+        UnityEngine.Object owner,
+        float? previewAttackPower = null)
+    {
+        if (effects == null)
+        {
+            EditorGUILayout.HelpBox(
+                "공용 능력 효과 목록을 찾을 수 없습니다.",
+                MessageType.Error);
+            return;
+        }
+
+        DrawEffectList(
+            effects,
+            new ActionEditorContext(owner, previewAttackPower));
     }
 
     private static void DrawEffectList(

@@ -654,7 +654,7 @@ public sealed class CharacterRoleTests
     }
 
     [Test]
-    public void CharacterValidation_RemovesArchetypeFromDifferentRole()
+    public void CharacterValidation_PreservesArchetypeFromDifferentRole()
     {
         CharacterRoleSO roleA =
             ScriptableObject.CreateInstance<CharacterRoleSO>();
@@ -685,7 +685,12 @@ public sealed class CharacterRoleTests
             onValidate.Invoke(character, null);
 
             Assert.That(character.Role, Is.SameAs(roleB));
-            Assert.That(character.Archetype, Is.Null);
+            Assert.That(character.Archetype, Is.SameAs(archetype));
+            Assert.That(
+                CharacterRolePresentation.IsValidCombination(
+                    roleB,
+                    archetype),
+                Is.True);
         }
         finally
         {

@@ -9,7 +9,7 @@ namespace PS260714.Localization
 {
     public static class GeneratedLocalizationTables
     {
-        public const string SourceHash = "96d19bce387b7e8aecfc95d922f9db85a4caa8f13ae62a02af44de6ede6841ca";
+        public const string SourceHash = "78a5fd6ff51bca481e7885fb35cc37ba55d25ee4e6cdda4b07c28c0477a8b814";
         public const string ReferenceLocale = "en-US";
 
         private static readonly LocalizationLocaleInfo[] LocaleData =
@@ -376,6 +376,8 @@ namespace PS260714.Localization
                 { "roll.sub.exploration.description", new LocalizationEntry("\uD0D0\uD5D8 \uB3D9\uC544\uB9AC", "body") },
                 { "roll.sub.exploration.passive.stage_attack.name", new LocalizationEntry("\uD0D0\uD5D8\uC758 \uC131\uACFC", "title") },
                 { "roll.sub.exploration.passive.stage_attack.description", new LocalizationEntry("\uC644\uB8CC\uD55C \uB358\uC804 \uC2A4\uD14C\uC774\uC9C0\uB9C8\uB2E4 \uACF5\uACA9\uB825\uC744 1 \uD68D\uB4DD\uD569\uB2C8\uB2E4. \uC774\uBCA4\uD2B8, \uD734\uC2DD, \uC0C1\uC810 \uC2A4\uD14C\uC774\uC9C0\uB97C \uD3EC\uD568\uD569\uB2C8\uB2E4.", "body") },
+                { "item.battle.power_drink.name", new LocalizationEntry("\uD30C\uC6CC \uC74C\uB8CC", "title") },
+                { "item.battle.power_drink.description", new LocalizationEntry("\uD30C\uC6CC 1 \uD68D\uB4DD", "tooltip") },
             };
 
         private static readonly Dictionary<string, LocalizationEntry>
@@ -733,6 +735,8 @@ namespace PS260714.Localization
                 { "roll.sub.exploration.description", new LocalizationEntry("Exploration Club", "body") },
                 { "roll.sub.exploration.passive.stage_attack.name", new LocalizationEntry("Exploration Results", "title") },
                 { "roll.sub.exploration.passive.stage_attack.description", new LocalizationEntry("Gain 1 Attack Power for each completed dungeon stage, including event, rest, and shop stages.", "body") },
+                { "item.battle.power_drink.name", new LocalizationEntry("Power Drink", "title") },
+                { "item.battle.power_drink.description", new LocalizationEntry("Gain Power 1 status", "tooltip") },
             };
 
         private static readonly IReadOnlyDictionary<string, LocalizationEntry>

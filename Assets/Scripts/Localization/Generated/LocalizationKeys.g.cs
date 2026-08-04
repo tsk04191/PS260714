@@ -82,6 +82,8 @@ namespace PS260714.Localization
         public const string EnemyShieldBearerName = "enemy.shield_bearer.name";
         public const string ItemBasicUpgradeMaterialDescription = "item.basic_upgrade_material.description";
         public const string ItemBasicUpgradeMaterialName = "item.basic_upgrade_material.name";
+        public const string ItemBattlePowerDrinkDescription = "item.battle.power_drink.description";
+        public const string ItemBattlePowerDrinkName = "item.battle.power_drink.name";
         public const string ItemFocusEffect = "item.focus.effect";
         public const string ItemFocusName = "item.focus.name";
         public const string ItemFreeCreditDescription = "item.free_credit.description";

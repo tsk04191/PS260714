@@ -868,7 +868,11 @@ public class DungeonPage : MonoBehaviour, IPage
             return false;
         }
 
-        if (!BattleItemUseExecutor.TryApplyToEnemy(item, board, enemy))
+        if (!BattleItemUseExecutor.TryApplyToEnemy(
+                item,
+                board,
+                enemy,
+                _battleManager))
         {
             _battleManager.TryGain(item.EnergyCost);
             return false;
@@ -891,7 +895,11 @@ public class DungeonPage : MonoBehaviour, IPage
             return false;
         }
 
-        if (!BattleItemUseExecutor.TryApplyToTurret(item, turret))
+        if (!BattleItemUseExecutor.TryApplyToTurret(
+                item,
+                board,
+                turret,
+                _battleManager))
         {
             _battleManager.TryGain(item.EnergyCost);
             return false;

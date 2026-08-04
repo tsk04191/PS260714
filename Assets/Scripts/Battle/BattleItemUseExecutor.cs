@@ -7,7 +7,8 @@ public static class BattleItemUseExecutor
     public static bool TryApplyToEnemy(
         BattleItemSO item,
         DungeonBoardView board,
-        EnemyRuntime enemy)
+        EnemyRuntime enemy,
+        IActiveSkillResource resource = null)
     {
         if (item == null || !item.HasCompatibleEffects ||
             board == null || enemy == null ||
@@ -15,6 +16,19 @@ public static class BattleItemUseExecutor
             !board.ContainsTargetableEnemy(enemy))
         {
             return false;
+        }
+
+        if (item.UsesUnifiedAbilityEffects)
+        {
+            BattleEffectContext context =
+                BattleEffectContext.ForBattleItem(
+                    BattleStatusTarget.FromEnemy(enemy),
+                    board,
+                    resource,
+                    CharacterTargetFaction.Enemy,
+                    new[] { enemy },
+                    Array.Empty<IBattleCharacter>());
+            return TryExecuteUnifiedAbility(item, context);
         }
 
         bool applied = false;
@@ -49,10 +63,36 @@ public static class BattleItemUseExecutor
         BattleItemSO item,
         CharacterRuntime turret)
     {
+        return TryApplyToTurret(item, null, turret);
+    }
+
+    public static bool TryApplyToTurret(
+        BattleItemSO item,
+        DungeonBoardView board,
+        CharacterRuntime turret,
+        IActiveSkillResource resource = null)
+    {
         if (item == null || !item.HasCompatibleEffects || turret == null ||
             item.TargetType != BattleItemTargetType.Turret)
         {
             return false;
+        }
+
+        if (item.UsesUnifiedAbilityEffects)
+        {
+            if (board == null)
+                return false;
+
+            BattleEffectContext context =
+                BattleEffectContext.ForBattleItem(
+                    BattleStatusTarget.FromAlly(turret),
+                    board,
+                    resource,
+                    CharacterTargetFaction.Ally,
+                    Array.Empty<EnemyRuntime>(),
+                    new IBattleCharacter[] { turret },
+                    turret.CurrentAttackPower);
+            return TryExecuteUnifiedAbility(item, context);
         }
 
         bool applied = false;
@@ -87,6 +127,19 @@ public static class BattleItemUseExecutor
         }
 
         return applied;
+    }
+
+    private static bool TryExecuteUnifiedAbility(
+        BattleItemSO item,
+        BattleEffectContext context)
+    {
+        if (item == null || !item.UsesUnifiedAbilityEffects)
+            return false;
+
+        BattleEffectResult result = BattleEffectExecutor.ExecuteSequence(
+            context,
+            item.AbilityEffects);
+        return result.Succeeded;
     }
 
     private static bool TryApplyLegacyModifier(

@@ -51,8 +51,9 @@ public static class CharacterRolePresentation
         CharacterRoleSO role,
         CharacterArchetypeSO archetype)
     {
-        return archetype == null ||
-               (role != null && archetype.ParentRole == role);
+        // 세부 직군의 ParentRole은 카탈로그 분류 정보일 뿐,
+        // 캐릭터가 선택할 수 있는 직군 조합을 제한하지 않는다.
+        return true;
     }
 
     public static void Invalidate()

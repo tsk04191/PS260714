@@ -1235,6 +1235,28 @@ public sealed class DungeonItemCardView : MonoBehaviour,
 
     private static string GetEffectScopeText(BattleItemSO item)
     {
+        if (item?.UsesUnifiedAbilityEffects == true)
+        {
+            CharacterEffectDefinition ability = item.AbilityEffects[0];
+            if (ability?.Type != CharacterEffectType.ApplyStatus ||
+                ability.StatusEffect == null)
+            {
+                return string.Empty;
+            }
+
+            string abilityScope = LocalizationService.Get(
+                LocalizationKeys.UiDungeonItemScopeBattle);
+            float resolvedDuration = ability.StatusDuration > 0f
+                ? ability.StatusDuration
+                : ability.StatusEffect.DefaultDuration;
+            string abilityDuration = ability.StatusEffect.DurationMode ==
+                                     StatusEffectDurationMode.Permanent
+                ? LocalizationService.Get(
+                    LocalizationKeys.UiDungeonItemDurationPermanent)
+                : $"{resolvedDuration:0.##}s";
+            return $" · {abilityScope}/{abilityDuration}";
+        }
+
         if (item?.Effects == null || item.Effects.Count == 0)
             return string.Empty;
 

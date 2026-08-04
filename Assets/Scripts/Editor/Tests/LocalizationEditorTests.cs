@@ -224,6 +224,35 @@ public sealed class LocalizationEditorTests
     }
 
     [Test]
+    public void EditorFontRestore_OnlyPersistsProjectAssets()
+    {
+        LocalizationFontCatalog catalog =
+            AssetDatabase.LoadAssetAtPath<LocalizationFontCatalog>(
+                FontCatalogPath);
+        Assert.That(catalog, Is.Not.Null);
+        Assert.That(catalog.GlobalDefaultFont, Is.Not.Null);
+        Assert.That(
+            LocalizationPlayModeGuard.CanPersistEditorReference(
+                catalog.GlobalDefaultFont),
+            Is.True);
+
+        TMP_SpriteAsset runtimeSprite =
+            ScriptableObject.CreateInstance<TMP_SpriteAsset>();
+        try
+        {
+            runtimeSprite.hideFlags = HideFlags.HideAndDontSave;
+            Assert.That(
+                LocalizationPlayModeGuard.CanPersistEditorReference(
+                    runtimeSprite),
+                Is.False);
+        }
+        finally
+        {
+            Object.DestroyImmediate(runtimeSprite);
+        }
+    }
+
+    [Test]
     public void FontResolver_UsesLocaleRoleAndPlayerSelection()
     {
         LocalizationFontCatalog sourceCatalog =

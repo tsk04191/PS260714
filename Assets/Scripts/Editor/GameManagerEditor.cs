@@ -405,7 +405,10 @@ internal static class CommonSettingsEditorGUI
         DrawReadOnlyProperty(serialized, "archetypeId", "세부 직군 ID");
         PS260714AssetReferenceField.Draw(
             serialized.FindProperty("parentRole"),
-            new GUIContent("상위 직군"));
+            new GUIContent(
+                "분류 직군",
+                "세부 직군을 정리하기 위한 분류 정보입니다. " +
+                "캐릭터의 직군 선택을 제한하지 않습니다."));
         PS260714LocalizationKeyField.Draw(
             serialized.FindProperty("nameLocalizationKey"),
             "이름 Localization 키");

@@ -2721,10 +2721,7 @@ public sealed class CharacterSO : ScriptableObject,
     public CharacterGrade Grade =>
         CharacterGradePresentation.Clamp(grade);
     public CharacterRoleSO Role => role;
-    public CharacterArchetypeSO Archetype =>
-        CharacterRolePresentation.IsValidCombination(role, archetype)
-            ? archetype
-            : null;
+    public CharacterArchetypeSO Archetype => archetype;
     public string NameLocalizationKey => nameLocalizationKey;
     public string DescriptionLocalizationKey => descriptionLocalizationKey;
     public string CharacterName => characterName;
@@ -2780,12 +2777,6 @@ public sealed class CharacterSO : ScriptableObject,
         if (string.IsNullOrWhiteSpace(characterId))
             RegenerateCharacterId();
         grade = CharacterGradePresentation.Clamp(grade);
-        if (!CharacterRolePresentation.IsValidCombination(
-                role,
-                archetype))
-        {
-            archetype = null;
-        }
 
         passiveDefinitions ??= new List<CharacterPassiveDefinition>();
         foreach (CharacterPassiveDefinition definition in passiveDefinitions)

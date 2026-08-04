@@ -49,24 +49,11 @@ public sealed class RecruitEditorWindow : EditorWindow
     {
         EditorApplication.hierarchyChanged += HandleHierarchyChanged;
         FindRecruitPage();
-        EditorApplication.delayCall += SyncPreviewAfterReload;
     }
 
     private void OnDisable()
     {
         EditorApplication.hierarchyChanged -= HandleHierarchyChanged;
-        EditorApplication.delayCall -= SyncPreviewAfterReload;
-    }
-
-    private void SyncPreviewAfterReload()
-    {
-        if (this == null ||
-            EditorApplication.isPlayingOrWillChangePlaymode ||
-            _targetPage == null)
-        {
-            return;
-        }
-        SyncTargetPreview(_revealPreviewCount, false);
     }
 
     private void HandleHierarchyChanged()

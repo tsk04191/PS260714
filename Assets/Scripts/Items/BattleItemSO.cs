@@ -146,6 +146,11 @@ public sealed class BattleItemSO : ItemDefinitionSO
     [SerializeField, Min(0f)] private float cooldown;
     [SerializeField] private bool availableAsDungeonReward = true;
     [SerializeField] private bool availableAsStartingItem = true;
+    [SerializeField]
+    private List<CharacterEffectDefinition> abilityEffects = new();
+    [Tooltip(
+        "Legacy battle-item effects. New items use Ability Effects, which " +
+        "share CharacterSkillDefinition's effect model.")]
     [SerializeField] private List<BattleItemEffectDefinition> effects = new();
 
     public BattleItemTargetType TargetType => targetType;
@@ -185,12 +190,25 @@ public sealed class BattleItemSO : ItemDefinitionSO
     public float Cooldown => Mathf.Max(0f, cooldown);
     public bool AvailableAsDungeonReward => availableAsDungeonReward;
     public bool AvailableAsStartingItem => availableAsStartingItem;
+    public IReadOnlyList<CharacterEffectDefinition> AbilityEffects =>
+        abilityEffects ??= new List<CharacterEffectDefinition>();
+    public bool UsesUnifiedAbilityEffects => AbilityEffects.Count > 0;
     public IReadOnlyList<BattleItemEffectDefinition> Effects =>
         effects ??= new List<BattleItemEffectDefinition>();
     public bool HasCompatibleEffects
     {
         get
         {
+            if (UsesUnifiedAbilityEffects)
+            {
+                foreach (CharacterEffectDefinition effect in AbilityEffects)
+                {
+                    if (!IsAbilityEffectCompatible(effect))
+                        return false;
+                }
+                return true;
+            }
+
             if (Effects.Count == 0)
                 return false;
 
@@ -213,26 +231,28 @@ public sealed class BattleItemSO : ItemDefinitionSO
 
     public override string GetLocalizedDescription()
     {
+        CharacterEffectDefinition primaryAbility =
+            AbilityEffects.Count > 0 ? AbilityEffects[0] : null;
         BattleItemEffectDefinition primaryEffect =
             Effects.Count > 0 ? Effects[0] : null;
+        float duration = primaryAbility != null
+            ? primaryAbility.StatusDuration
+            : primaryEffect?.Duration ?? 0f;
+        float interval = primaryAbility?.StatusEffect?.TickInterval ??
+                         primaryEffect?.Interval ?? 0f;
+        int amount = primaryAbility != null
+            ? Mathf.Max(0, Mathf.RoundToInt(primaryAbility.Amount))
+            : primaryEffect?.Amount ?? 0;
         LocalizationArgument[] arguments =
         {
             LocalizationService.Arg("cost", EnergyCost),
-            LocalizationService.Arg(
-                "duration",
-                primaryEffect?.Duration ?? 0f),
-            LocalizationService.Arg(
-                "interval",
-                primaryEffect?.Interval ?? 0f),
+            LocalizationService.Arg("duration", duration),
+            LocalizationService.Arg("interval", interval),
             LocalizationService.Arg(
                 "multiplier",
                 primaryEffect?.Multiplier ?? 0f),
-            LocalizationService.Arg(
-                "damage",
-                primaryEffect?.Amount ?? 0),
-            LocalizationService.Arg(
-                "amount",
-                primaryEffect?.Amount ?? 0),
+            LocalizationService.Arg("damage", amount),
+            LocalizationService.Arg("amount", amount),
             LocalizationService.Arg("uses", UsesPerAcquisition),
         };
         if (TryResolveCurrentLocale(
@@ -244,6 +264,82 @@ public sealed class BattleItemSO : ItemDefinitionSO
         }
 
         return GetDescription(IsCurrentLocaleKorean());
+    }
+
+    public bool IsAbilityEffectCompatible(
+        CharacterEffectDefinition effect)
+    {
+        if (effect == null ||
+            !Enum.IsDefined(typeof(CharacterEffectType), effect.Type) ||
+            !Enum.IsDefined(
+                typeof(CharacterEffectTargetMode),
+                effect.TargetMode) ||
+            !Enum.IsDefined(
+                typeof(CharacterEffectPreconditionFailurePolicy),
+                effect.PreconditionFailurePolicy) ||
+            !Enum.IsDefined(
+                typeof(CharacterEffectFailurePolicy),
+                effect.FailurePolicy) ||
+            !effect.AmountScaling.IsFinite)
+        {
+            return false;
+        }
+
+        bool usesTargets = effect.Type != CharacterEffectType.GainResource &&
+                           effect.Type != CharacterEffectType.SpendResource &&
+                           effect.Type != CharacterEffectType.SpendHealth;
+        CharacterTargetFaction targetFaction = targetType ==
+                                                BattleItemTargetType.Enemy
+            ? CharacterTargetFaction.Enemy
+            : CharacterTargetFaction.Ally;
+        if (usesTargets &&
+            effect.TargetMode == CharacterEffectTargetMode.FreshSelection)
+        {
+            // Enemy-targeted items have no allied character source for the
+            // board's character-skill target selector. Their manually chosen
+            // enemy remains available through InheritAction or Source.
+            if (targetType == BattleItemTargetType.Enemy ||
+                effect.TargetSelector == null ||
+                effect.TargetSelector.Subject ==
+                    CharacterAttackSubject.None ||
+                effect.TargetSelector.Subject ==
+                    CharacterAttackSubject.Manual)
+            {
+                return false;
+            }
+            targetFaction = effect.TargetSelector.TargetFaction;
+        }
+
+        switch (effect.Type)
+        {
+            case CharacterEffectType.Damage:
+                return IsDirectDamageType(effect.DamageType) &&
+                       effect.AmountScaling.HasNonZeroTerm;
+
+            case CharacterEffectType.ApplyStatus:
+                return effect.StatusEffect != null &&
+                       (targetFaction == CharacterTargetFaction.Ally
+                           ? effect.StatusEffect.CanTargetAlly
+                           : effect.StatusEffect.CanTargetEnemy);
+
+            case CharacterEffectType.RemoveStatus:
+                return effect.StatusRemovalTarget !=
+                           CharacterStatusRemovalTarget.Single ||
+                       effect.StatusRemovalSelection.HasExplicitStatus;
+
+            case CharacterEffectType.GainResource:
+            case CharacterEffectType.Heal:
+            case CharacterEffectType.Shield:
+                return effect.AmountScaling.HasNonZeroTerm;
+
+            case CharacterEffectType.SpendResource:
+            case CharacterEffectType.SpendHealth:
+                return effect.AmountMode == CharacterDamageAmountMode.Fixed &&
+                       effect.Amount >= 1f;
+
+            default:
+                return false;
+        }
     }
 
     public bool IsEffectCompatible(BattleItemEffectDefinition effect)
@@ -338,9 +434,20 @@ public sealed class BattleItemSO : ItemDefinitionSO
         maximumRunUses = Mathf.Max(0, maximumRunUses);
         energyCost = Mathf.Max(0, energyCost);
         cooldown = Mathf.Max(0f, cooldown);
+        abilityEffects ??= new List<CharacterEffectDefinition>();
+        foreach (CharacterEffectDefinition effect in abilityEffects)
+            effect?.Validate();
         effects ??= new List<BattleItemEffectDefinition>();
         foreach (BattleItemEffectDefinition effect in effects)
             effect?.Validate();
+    }
+
+    private static bool IsDirectDamageType(
+        CharacterAttackDamageType damageType)
+    {
+        return damageType == CharacterAttackDamageType.Physical ||
+               damageType == CharacterAttackDamageType.Magical ||
+               damageType == CharacterAttackDamageType.Fixed;
     }
 
 }

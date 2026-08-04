@@ -65,6 +65,12 @@ namespace PS260714.Localization.Editor
             EditorApplication.delayCall += GenerateDeferred;
         }
 
+        internal static void CancelQueuedGeneration()
+        {
+            EditorApplication.delayCall -= GenerateDeferred;
+            generationQueued = false;
+        }
+
         private static void GenerateDeferred()
         {
             generationQueued = false;
@@ -112,13 +118,10 @@ namespace PS260714.Localization.Editor
     [InitializeOnLoad]
     internal static class LocalizationPlayModeGuard
     {
-        private static bool fontRestoreQueued;
-
         static LocalizationPlayModeGuard()
         {
             EditorApplication.playModeStateChanged -= HandlePlayModeChanged;
             EditorApplication.playModeStateChanged += HandlePlayModeChanged;
-            QueueEditorTextFontRestore();
         }
 
         [MenuItem(PS260714EditorMenu.ValidateLocalization)]
@@ -177,37 +180,11 @@ namespace PS260714.Localization.Editor
             }
         }
 
-        private static void QueueEditorTextFontRestore()
-        {
-            if (fontRestoreQueued)
-                return;
-
-            fontRestoreQueued = true;
-            EditorApplication.delayCall += RestoreEditorTextFontsWhenReady;
-        }
-
-        private static void RestoreEditorTextFontsWhenReady()
-        {
-            fontRestoreQueued = false;
-            if (EditorApplication.isPlayingOrWillChangePlaymode)
-                return;
-            if (EditorApplication.isCompiling ||
-                EditorApplication.isUpdating)
-            {
-                QueueEditorTextFontRestore();
-                return;
-            }
-
-            RestoreEditorTextFonts();
-        }
-
         private static void RestoreEditorTextFonts()
         {
             LocalizationService.Initialize();
             LocalizationFontCatalog catalog =
                 LocalizationService.FontCatalog;
-            LocalizationMarkupCatalog markupCatalog =
-                LocalizationService.MarkupCatalog;
             TMP_Text[] texts =
                 UnityEngine.Object.FindObjectsByType<TMP_Text>(
                     FindObjectsInactive.Include,
@@ -222,8 +199,6 @@ namespace PS260714.Localization.Editor
                     continue;
                 }
 
-                TMP_FontAsset previousFont = text.font;
-                TMP_SpriteAsset previousSprite = text.spriteAsset;
                 LocalizedText localized =
                     text.GetComponent<LocalizedText>();
                 string fontRole = localized != null
@@ -235,19 +210,15 @@ namespace PS260714.Localization.Editor
                         fontRole,
                         LocalizationService.CurrentFontId)
                     : TMP_Settings.defaultFontAsset;
-                if (editorFont != null)
-                    text.font = editorFont;
-                if (markupCatalog != null &&
-                    markupCatalog.SpriteAsset != null)
-                {
-                    text.spriteAsset = markupCatalog.SpriteAsset;
-                }
-
-                if (text.font == previousFont &&
-                    text.spriteAsset == previousSprite)
-                {
+                if (!CanPersistEditorReference(editorFont) ||
+                    text.font == editorFont)
                     continue;
-                }
+
+                // Runtime markup sprites are HideAndDontSave objects. Assigning
+                // them to a scene component in edit mode makes the scene dirty
+                // after every domain reload because the reference cannot be
+                // serialized. Runtime resolvers apply those sprites in play.
+                text.font = editorFont;
 
                 EditorUtility.SetDirty(text);
                 Scene scene = text.gameObject.scene;
@@ -263,6 +234,12 @@ namespace PS260714.Localization.Editor
                 Canvas.ForceUpdateCanvases();
                 SceneView.RepaintAll();
             }
+        }
+
+        internal static bool CanPersistEditorReference(
+            UnityEngine.Object value)
+        {
+            return value != null && EditorUtility.IsPersistent(value);
         }
     }
 
