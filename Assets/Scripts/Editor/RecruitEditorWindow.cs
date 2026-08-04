@@ -259,27 +259,22 @@ public sealed class RecruitEditorWindow : EditorWindow
                 SerializedProperty banner =
                     pages.GetArrayElementAtIndex(index);
                 string bannerId = GetTrimmedString(banner, "bannerId");
-                string label =
-                    $"{index + 1:00}  {Fallback(bannerId, "banner")}";
-
-                Color previous = GUI.backgroundColor;
-                if (index == _selectedBannerIndex)
-                {
-                    GUI.backgroundColor =
-                        new Color(0.42f, 0.86f, 0.76f, 1f);
-                }
-
-                if (GUILayout.Button(
-                        label,
-                        GUILayout.Height(36f),
-                        GUILayout.ExpandWidth(true)))
+                string ticketGroupId =
+                    GetTrimmedString(banner, "ticketGroupId");
+                Sprite bannerArt = banner.FindPropertyRelative("bannerArt")
+                    ?.objectReferenceValue as Sprite;
+                if (PS260714AssetEditorList.DrawRow(
+                        index == _selectedBannerIndex,
+                        new GUIContent(
+                            $"{index + 1:00}  {Fallback(bannerId, "banner")}\n" +
+                            Fallback(ticketGroupId, "ticket group"),
+                            PS260714AssetEditorList.GetAssetPreview(bannerArt),
+                            bannerId)))
                 {
                     _selectedBannerIndex = index;
                     ClearSimulation();
                     GUI.FocusControl(null);
                 }
-
-                GUI.backgroundColor = previous;
             }
             EditorGUILayout.EndScrollView();
         }

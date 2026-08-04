@@ -232,6 +232,9 @@ public sealed class StatusEffectEditorTests
             StatusEffectEditorWindow.MenuPath,
             Is.EqualTo("PS260714/Status Effect Editor"));
         Assert.That(
+            BattleEditorWindow.MenuPath,
+            Is.EqualTo("PS260714/Battle Editor"));
+        Assert.That(
             PS260714EditorMenu.LocalizationEditor,
             Is.EqualTo(
                 "PS260714/Localization/Localization Editor"));
@@ -245,7 +248,34 @@ public sealed class StatusEffectEditorTests
             typeof(BattleEditorWindow).GetMethod(
                 "OpenFromMenu",
                 BindingFlags.Public | BindingFlags.Static),
-            Is.Null);
+            Is.Not.Null);
+        Assert.That(
+            typeof(PS260714.Localization.Editor.LocalizationEditorWindow)
+                .GetMethod(
+                    "OpenAtKey",
+                    BindingFlags.Public | BindingFlags.Static,
+                    null,
+                    new[] { typeof(string) },
+                    null),
+            Is.Not.Null);
+        AssertEditorOpenOverload(
+            typeof(CharacterEditorWindow),
+            typeof(CharacterSO));
+        AssertEditorOpenOverload(
+            typeof(EnemyEditorWindow),
+            typeof(EnemySO));
+        AssertEditorOpenOverload(
+            typeof(ItemEditorWindow),
+            typeof(ItemDefinitionSO));
+        AssertEditorOpenOverload(
+            typeof(StatusEffectEditorWindow),
+            typeof(StatusEffectSO));
+        AssertEditorOpenOverload(
+            typeof(BattleVfxEditorWindow),
+            typeof(BattleVfxCueSO));
+        AssertEditorOpenOverload(
+            typeof(StageSelectEditorWindow),
+            typeof(DungeonDefinition));
         Assert.That(
             typeof(MenuPageSceneBuilder).GetMethod(
                 "RebuildClientPages",
@@ -391,6 +421,21 @@ public sealed class StatusEffectEditorTests
             field.GetValue(null) as string[],
             Is.EqualTo(expected),
             fieldName);
+    }
+
+    private static void AssertEditorOpenOverload(
+        Type editorType,
+        Type assetType)
+    {
+        Assert.That(
+            editorType.GetMethod(
+                "Open",
+                BindingFlags.Public | BindingFlags.Static,
+                null,
+                new[] { assetType },
+                null),
+            Is.Not.Null,
+            $"{editorType.Name} must open a specific {assetType.Name}.");
     }
 
     private static void InvokePrivateEditorMethod(

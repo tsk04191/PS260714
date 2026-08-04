@@ -1,5 +1,7 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
+using System.Text;
 using UnityEditor;
 using UnityEngine;
 
@@ -51,6 +53,15 @@ namespace PS260714.Localization.Editor
         public static void Open()
         {
             GetWindow<LocalizationEditorWindow>("Localization");
+        }
+
+        public static void OpenAtKey(string key)
+        {
+            LocalizationEditorWindow window =
+                GetWindow<LocalizationEditorWindow>("Localization");
+            window.SelectStringKey(key);
+            window.Show();
+            window.Focus();
         }
 
         private void OnEnable()
@@ -259,24 +270,304 @@ namespace PS260714.Localization.Editor
                         EditorStyles.miniButton,
                         GUILayout.Width(24f)))
                     {
-                        document.Rows.RemoveAt(row);
-                        if (isStrings)
+                        if (TryDeleteRow(document, isStrings, row))
                         {
-                            if (selectedStringRow == row)
+                            if (isStrings)
                             {
-                                selectedStringRow = -1;
-                                ResetTranslationSelection();
+                                if (selectedStringRow == row)
+                                {
+                                    selectedStringRow = -1;
+                                    ResetTranslationSelection();
+                                }
+                                else if (selectedStringRow > row)
+                                    selectedStringRow--;
                             }
-                            else if (selectedStringRow > row)
-                                selectedStringRow--;
+                            dirty = true;
+                            row--;
                         }
-                        dirty = true;
-                        row--;
                     }
                 }
             }
 
             EditorGUILayout.EndScrollView();
+        }
+
+        private bool TryDeleteRow(
+            LocalizationCsvDocument document,
+            bool isStrings,
+            int row)
+        {
+            int identityColumn = isStrings
+                ? ResolveKeyColumn(document)
+                : 0;
+            string identity = document.Get(row, identityColumn).Trim();
+
+            if (isStrings && !string.IsNullOrEmpty(identity))
+            {
+                IReadOnlyList<string> references =
+                    FindLocalizationKeyReferences(identity);
+                if (references.Count > 0)
+                {
+                    EditorUtility.DisplayDialog(
+                        "Delete Localization Key Blocked",
+                        BuildLocalizationReferenceMessage(
+                            identity,
+                            references),
+                        "OK");
+                    return false;
+                }
+            }
+
+            string rowType = isStrings
+                ? "localization key"
+                : "locale row";
+            string displayIdentity = string.IsNullOrEmpty(identity)
+                ? $"row {row + 1}"
+                : identity;
+            if (!EditorUtility.DisplayDialog(
+                    $"Delete {rowType}",
+                    $"Delete '{displayIdentity}' from the CSV?\n\n" +
+                    "The change is not written to disk until Save CSV is used.",
+                    "Delete",
+                    "Cancel"))
+            {
+                return false;
+            }
+
+            document.Rows.RemoveAt(row);
+            return true;
+        }
+
+        private static IReadOnlyList<string> FindLocalizationKeyReferences(
+            string key)
+        {
+            List<string> references = new();
+            string generatedIdentifier =
+                "LocalizationKeys." + ResolveLocalizationIdentifier(key);
+            foreach (string path in AssetDatabase.GetAllAssetPaths())
+            {
+                if (!IsLocalizationReferenceCandidate(path))
+                    continue;
+
+                string content;
+                try
+                {
+                    content = File.ReadAllText(path);
+                }
+                catch (Exception)
+                {
+                    continue;
+                }
+
+                string extension = Path.GetExtension(path);
+                bool found = string.Equals(
+                        extension,
+                        ".cs",
+                        StringComparison.OrdinalIgnoreCase)
+                    ? content.IndexOf(
+                          generatedIdentifier,
+                          StringComparison.Ordinal) >= 0 ||
+                      content.IndexOf(
+                          $"\"{key}\"",
+                          StringComparison.Ordinal) >= 0
+                    : content.IndexOf(
+                          $"\"{key}\"",
+                          StringComparison.Ordinal) >= 0 ||
+                      content.IndexOf(
+                          $"'{key}'",
+                          StringComparison.Ordinal) >= 0 ||
+                      ContainsSerializedString(content, key);
+                if (found)
+                    references.Add(path);
+            }
+
+            references.Sort(StringComparer.OrdinalIgnoreCase);
+            return references;
+        }
+
+        private static bool IsLocalizationReferenceCandidate(string path)
+        {
+            if (string.IsNullOrWhiteSpace(path) ||
+                !path.StartsWith("Assets/", StringComparison.Ordinal) ||
+                string.Equals(
+                    path,
+                    LocalizationCodeGenerator.StringsPath,
+                    StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(
+                    path,
+                    LocalizationCodeGenerator.KeysOutputPath,
+                    StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(
+                    path,
+                    LocalizationCodeGenerator.TablesOutputPath,
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+
+            string extension = Path.GetExtension(path);
+            return string.Equals(extension, ".asset", StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(extension, ".prefab", StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(extension, ".unity", StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(extension, ".controller", StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(extension, ".overrideController", StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(extension, ".playable", StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(extension, ".uxml", StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(extension, ".json", StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(extension, ".cs", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static bool ContainsSerializedString(
+            string content,
+            string key)
+        {
+            using StringReader reader = new(content);
+            string line;
+            while ((line = reader.ReadLine()) != null)
+            {
+                string value = line.Trim();
+                int separator = value.IndexOf(':');
+                if (separator >= 0)
+                    value = value.Substring(separator + 1).Trim();
+                else if (value.StartsWith("- ", StringComparison.Ordinal))
+                    value = value.Substring(2).Trim();
+                else
+                    continue;
+
+                if (value.Length >= 2 &&
+                    ((value[0] == '\"' && value[^1] == '\"') ||
+                     (value[0] == '\'' && value[^1] == '\'')))
+                {
+                    value = value.Substring(1, value.Length - 2);
+                }
+
+                if (string.Equals(value, key, StringComparison.Ordinal))
+                    return true;
+            }
+
+            return false;
+        }
+
+        private static string ResolveLocalizationIdentifier(string key)
+        {
+            string fallback = ToLocalizationIdentifier(key);
+            if (!File.Exists(LocalizationCodeGenerator.KeysOutputPath))
+                return fallback;
+
+            string expectedAssignment = $"= \"{key}\";";
+            try
+            {
+                foreach (string line in File.ReadLines(
+                             LocalizationCodeGenerator.KeysOutputPath))
+                {
+                    string trimmed = line.Trim();
+                    const string declaration = "public const string ";
+                    if (!trimmed.StartsWith(
+                            declaration,
+                            StringComparison.Ordinal) ||
+                        !trimmed.EndsWith(
+                            expectedAssignment,
+                            StringComparison.Ordinal))
+                    {
+                        continue;
+                    }
+
+                    int assignmentIndex = trimmed.IndexOf(
+                        '=',
+                        declaration.Length);
+                    if (assignmentIndex <= declaration.Length)
+                        continue;
+                    return trimmed.Substring(
+                            declaration.Length,
+                            assignmentIndex - declaration.Length)
+                        .Trim();
+                }
+            }
+            catch (Exception)
+            {
+                return fallback;
+            }
+
+            return fallback;
+        }
+
+        private static string ToLocalizationIdentifier(string key)
+        {
+            StringBuilder result = new();
+            bool capitalize = true;
+            foreach (char character in key ?? string.Empty)
+            {
+                if (!char.IsLetterOrDigit(character))
+                {
+                    capitalize = true;
+                    continue;
+                }
+
+                result.Append(capitalize
+                    ? char.ToUpperInvariant(character)
+                    : character);
+                capitalize = false;
+            }
+
+            if (result.Length == 0)
+                result.Append("Key");
+            if (char.IsDigit(result[0]))
+                result.Insert(0, '_');
+            return result.ToString();
+        }
+
+        private static string BuildLocalizationReferenceMessage(
+            string key,
+            IReadOnlyList<string> references)
+        {
+            const int visibleLimit = 10;
+            StringBuilder message = new();
+            message.Append("'").Append(key)
+                .AppendLine("' is still referenced and cannot be deleted.")
+                .AppendLine();
+            int visibleCount = Mathf.Min(references.Count, visibleLimit);
+            for (int index = 0; index < visibleCount; index++)
+                message.Append("• ").AppendLine(references[index]);
+            if (references.Count > visibleCount)
+            {
+                message.Append("… and ")
+                    .Append(references.Count - visibleCount)
+                    .Append(" more");
+            }
+            return message.ToString();
+        }
+
+        private void SelectStringKey(string key)
+        {
+            string normalized = (key ?? string.Empty).Trim();
+            tab = 0;
+            stringCategoryFilter = string.Empty;
+            stringSearchText = normalized;
+            tableScroll = Vector2.zero;
+
+            if (strings == null || string.IsNullOrEmpty(normalized))
+            {
+                Repaint();
+                return;
+            }
+
+            int keyColumn = ResolveKeyColumn(strings);
+            for (int row = 1; row < strings.RowCount; row++)
+            {
+                if (!string.Equals(
+                        strings.Get(row, keyColumn).Trim(),
+                        normalized,
+                        StringComparison.Ordinal))
+                {
+                    continue;
+                }
+
+                selectedStringRow = row;
+                ResetTranslationSelection();
+                break;
+            }
+
+            Repaint();
         }
 
         private void DrawStringFilters(LocalizationCsvDocument document)

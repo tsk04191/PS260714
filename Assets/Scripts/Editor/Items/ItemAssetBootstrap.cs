@@ -25,6 +25,34 @@ public static class ItemAssetBootstrap
     private const string MigrationMenuPath =
         "PS260714/Data/Migrate Battle Item Usage Schema";
 
+    private static readonly string[] RequiredCoreAssetPaths =
+    {
+        CurrencyFolder + "/SoftCredit.asset",
+        CurrencyFolder + "/PaidCredit.asset",
+        CurrencyFolder + "/FreeCredit.asset",
+        TicketFolder + "/StandardRecruitTicket.asset",
+        MaterialFolder + "/BasicUpgradeMaterial.asset",
+        BattleFolder + "/FocusItem.asset",
+        BattleFolder + "/Molotov.asset",
+        BattleFolder + "/PrecisionShot.asset",
+        BattleFolder + "/OverSupply.asset",
+        BattleFolder + "/Overheat.asset",
+    };
+
+    private static readonly string[] RequiredCoreItemIds =
+    {
+        CoreItemIds.SoftCredit,
+        CoreItemIds.PaidCredit,
+        CoreItemIds.FreeCredit,
+        CoreItemIds.StandardRecruitTicket,
+        CoreItemIds.BasicUpgradeMaterial,
+        CoreBattleItemIds.Focus,
+        CoreBattleItemIds.Molotov,
+        CoreBattleItemIds.PrecisionShot,
+        CoreBattleItemIds.OverSupply,
+        CoreBattleItemIds.Overheat,
+    };
+
     static ItemAssetBootstrap()
     {
         EditorApplication.delayCall += CreateRequestedAssets;
@@ -231,10 +259,7 @@ public static class ItemAssetBootstrap
     private static void CreateRequestedAssets()
     {
         bool requested = File.Exists(RequestPath);
-        bool catalogMissing =
-            AssetDatabase.LoadAssetAtPath<ItemCatalogSO>(
-                CatalogPath) == null;
-        if (!requested && !catalogMissing)
+        if (!requested && HasCompleteCoreItemSet())
             return;
 
         if (EditorApplication.isCompiling ||
@@ -247,6 +272,35 @@ public static class ItemAssetBootstrap
         CreateCoreItemAssets();
         if (requested)
             File.Delete(RequestPath);
+    }
+
+    private static bool HasCompleteCoreItemSet()
+    {
+        foreach (string path in RequiredCoreAssetPaths)
+        {
+            if (AssetDatabase.LoadAssetAtPath<ItemDefinitionSO>(path) == null)
+                return false;
+        }
+
+        ItemCatalogSO catalog =
+            AssetDatabase.LoadAssetAtPath<ItemCatalogSO>(CatalogPath);
+        if (catalog == null)
+            return false;
+
+        HashSet<string> registeredIds = new(StringComparer.Ordinal);
+        foreach (ItemDefinitionSO item in catalog.Items)
+        {
+            if (item != null && !string.IsNullOrWhiteSpace(item.ItemId))
+                registeredIds.Add(item.ItemId);
+        }
+
+        foreach (string itemId in RequiredCoreItemIds)
+        {
+            if (!registeredIds.Contains(itemId))
+                return false;
+        }
+
+        return true;
     }
 
     private static void CreateCurrency(

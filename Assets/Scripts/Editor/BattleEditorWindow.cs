@@ -1,74 +1,167 @@
+using System;
 using System.Collections.Generic;
+using System.IO;
 using UnityEditor;
 using UnityEngine;
 
 public sealed class BattleEditorWindow : EditorWindow
 {
+    public const string MenuPath = PS260714EditorMenu.BattleEditor;
+
+    private const string AssetFolder = "Assets/Resources/Battles";
+    private const string RenameControlName = "BattleAssetRenameField";
+
+    private readonly List<BattleSO> _battles = new();
     private BattleSO _battle;
     private SerializedObject _serializedBattle;
+    private Vector2 _listScroll;
     private Vector2 _scrollPosition;
+    private string _searchText = string.Empty;
     private string _balanceMessage;
+    private string _renameAssetName = string.Empty;
+    private bool _isRenaming;
+    private bool _focusRenameField;
+
+    [MenuItem(MenuPath)]
+    public static void OpenFromMenu()
+    {
+        Open(null);
+    }
 
     public static void Open(BattleSO battle)
     {
-        Debug.Log(
-            $"[FirstBattleEditor] Open requested. Battle: " +
-            $"{(battle != null ? battle.name : "None")}");
-
-        // 저장된 레이아웃에 숨은 창이 남아 있으면 GetWindow가 그 인스턴스를
-        // 재사용하므로, 독립된 새 창을 만들기 전에 기존 창을 정리한다.
-        foreach (BattleEditorWindow existingWindow in
-                 Resources.FindObjectsOfTypeAll<BattleEditorWindow>())
-        {
-            existingWindow.Close();
-        }
-
-        BattleEditorWindow window = CreateInstance<BattleEditorWindow>();
-        window.titleContent = new GUIContent("First Battle Editor");
-        window.minSize = new Vector2(460f, 620f);
-        window.SetBattle(battle);
-
-        Rect mainWindow = EditorGUIUtility.GetMainWindowPosition();
-        float width = Mathf.Min(560f, Mathf.Max(460f, mainWindow.width - 40f));
-        float height = Mathf.Min(720f, Mathf.Max(620f, mainWindow.height - 80f));
-        window.position = new Rect(
-            mainWindow.x + (mainWindow.width - width) * 0.5f,
-            mainWindow.y + (mainWindow.height - height) * 0.5f,
-            width,
-            height);
-
-        window.ShowAuxWindow();
+        BattleEditorWindow window = GetWindow<BattleEditorWindow>();
+        window.titleContent = new GUIContent("Battle Editor");
+        window.minSize = new Vector2(820f, 560f);
+        window.RefreshList();
+        if (battle != null)
+            window.SetBattle(battle);
         window.Focus();
         window.Repaint();
+    }
 
-        Debug.Log(
-            $"[FirstBattleEditor] Window shown. Instance: " +
-            $"{window.GetInstanceID()}");
+    [MenuItem(MenuPath, true)]
+    private static bool ValidateOpenFromMenu()
+    {
+        return !EditorApplication.isPlayingOrWillChangePlaymode;
     }
 
     private void OnEnable()
     {
-        titleContent = new GUIContent("First Battle Editor");
-        Debug.Log(
-            $"[FirstBattleEditor] Window enabled. Instance: " +
-            $"{GetInstanceID()}");
+        titleContent = new GUIContent("Battle Editor");
+        minSize = new Vector2(820f, 560f);
+        RefreshList();
+
+        if (Selection.activeObject is BattleSO selected)
+            SetBattle(selected);
+        else if (_battle == null && _battles.Count > 0)
+            SetBattle(_battles[0]);
+    }
+
+    private void OnProjectChange()
+    {
+        RefreshList();
+        Repaint();
+    }
+
+    private void OnSelectionChange()
+    {
+        if (Selection.activeObject is BattleSO selected)
+        {
+            SetBattle(selected);
+            Repaint();
+        }
     }
 
     private void OnGUI()
     {
-        EditorGUI.BeginChangeCheck();
-        BattleSO selectedBattle = (BattleSO)EditorGUILayout.ObjectField(
-            "Battle Asset",
-            _battle,
-            typeof(BattleSO),
-            false);
-        if (EditorGUI.EndChangeCheck())
-            SetBattle(selectedBattle);
+        DrawToolbar();
+        if (_isRenaming)
+            DrawRenameRow();
+
+        using (new EditorGUILayout.HorizontalScope())
+        {
+            DrawBattleList();
+            DrawDetails();
+        }
+    }
+
+    private void DrawToolbar()
+    {
+        PS260714AssetEditorToolbar.Draw(
+            $"Battles: {_battles.Count}",
+            _battle != null,
+            CreateBattle,
+            SaveSelected,
+            DuplicateSelected,
+            BeginRename,
+            DeleteSelected,
+            () => PS260714AssetEditorList.Ping(_battle),
+            RefreshList);
+    }
+
+    private void DrawRenameRow()
+    {
+        using (new EditorGUILayout.HorizontalScope(EditorStyles.helpBox))
+        {
+            EditorGUILayout.LabelField("SO File Name", GUILayout.Width(88f));
+            GUI.SetNextControlName(RenameControlName);
+            _renameAssetName = EditorGUILayout.TextField(_renameAssetName);
+            if (_focusRenameField)
+            {
+                EditorGUI.FocusTextInControl(RenameControlName);
+                _focusRenameField = false;
+            }
+            if (GUILayout.Button("Apply", GUILayout.Width(56f)))
+                RenameSelected();
+            if (GUILayout.Button("Cancel", GUILayout.Width(56f)))
+                CancelRename();
+        }
+    }
+
+    private void DrawBattleList()
+    {
+        using (new EditorGUILayout.VerticalScope(
+                   GUILayout.Width(PS260714AssetEditorList.Width)))
+        {
+            _searchText =
+                PS260714AssetEditorList.DrawSearchField(_searchText);
+            int visibleCount = 0;
+            _listScroll = EditorGUILayout.BeginScrollView(_listScroll);
+            foreach (BattleSO battle in _battles)
+            {
+                if (battle == null || !MatchesSearch(battle))
+                    continue;
+
+                visibleCount++;
+                if (PS260714AssetEditorList.DrawAssetRow(
+                        battle == _battle,
+                        battle,
+                        null,
+                        battle.DisplayName,
+                        $"{battle.BattleId} · {battle.TotalEnemyCount} enemies",
+                        AssetDatabase.GetAssetPath(battle)))
+                {
+                    SetBattle(battle);
+                }
+            }
+            EditorGUILayout.EndScrollView();
+            PS260714AssetEditorList.DrawCountFooter(
+                visibleCount,
+                _battles.Count);
+        }
+    }
+
+    private void DrawDetails()
+    {
+        using (new EditorGUILayout.VerticalScope(
+                   GUILayout.ExpandWidth(true)))
+        {
 
         if (_battle == null || _serializedBattle == null)
         {
             EditorGUILayout.HelpBox(
-                "Select a BattleSO or open this window from DungeonBattleTab.",
+                "Select a BattleSO or create one with New.",
                 MessageType.Info);
             return;
         }
@@ -109,21 +202,256 @@ public sealed class BattleEditorWindow : EditorWindow
 
         using (new EditorGUI.DisabledScope(!_battle.TryValidate(out _)))
         {
-            if (GUILayout.Button("Save First Battle Settings", GUILayout.Height(30f)))
+            if (GUILayout.Button("Save Battle Settings", GUILayout.Height(30f)))
             {
-                EditorUtility.SetDirty(_battle);
-                AssetDatabase.SaveAssets();
+                SaveSelected();
             }
+        }
         }
     }
 
     private void SetBattle(BattleSO battle)
     {
+        if (!ReferenceEquals(_battle, battle))
+            CancelRename();
         _battle = battle;
         _serializedBattle = _battle != null
             ? new SerializedObject(_battle)
             : null;
+        _scrollPosition = Vector2.zero;
         Repaint();
+    }
+
+    private void RefreshList()
+    {
+        string selectedPath = _battle != null
+            ? AssetDatabase.GetAssetPath(_battle)
+            : string.Empty;
+        _battles.Clear();
+        foreach (string guid in AssetDatabase.FindAssets("t:BattleSO"))
+        {
+            string path = AssetDatabase.GUIDToAssetPath(guid);
+            BattleSO battle = AssetDatabase.LoadAssetAtPath<BattleSO>(path);
+            if (battle != null)
+                _battles.Add(battle);
+        }
+
+        _battles.Sort((left, right) => string.Compare(
+            left != null ? left.name : string.Empty,
+            right != null ? right.name : string.Empty,
+            StringComparison.OrdinalIgnoreCase));
+
+        if (!string.IsNullOrEmpty(selectedPath))
+        {
+            BattleSO restored =
+                AssetDatabase.LoadAssetAtPath<BattleSO>(selectedPath);
+            if (restored != null)
+                SetBattle(restored);
+        }
+        else if (_battle == null && _battles.Count > 0)
+        {
+            SetBattle(_battles[0]);
+        }
+    }
+
+    private bool MatchesSearch(BattleSO battle)
+    {
+        string search = (_searchText ?? string.Empty).Trim();
+        return string.IsNullOrEmpty(search) ||
+               battle.name.IndexOf(
+                   search,
+                   StringComparison.OrdinalIgnoreCase) >= 0 ||
+               battle.DisplayName.IndexOf(
+                   search,
+                   StringComparison.OrdinalIgnoreCase) >= 0 ||
+               battle.BattleId.IndexOf(
+                   search,
+                   StringComparison.OrdinalIgnoreCase) >= 0;
+    }
+
+    private void CreateBattle()
+    {
+        EnsureAssetFolder();
+        string path = EditorUtility.SaveFilePanelInProject(
+            "Create Battle",
+            "NewBattle",
+            "asset",
+            "Choose a location for the new BattleSO.",
+            AssetFolder);
+        if (string.IsNullOrEmpty(path))
+            return;
+
+        BattleSO battle = CreateInstance<BattleSO>();
+        battle.name = Path.GetFileNameWithoutExtension(path);
+        AssetDatabase.CreateAsset(battle, path);
+        SetIdentity(
+            battle,
+            CreateUniqueBattleId(NormalizeId(battle.name)),
+            battle.name);
+        AssetDatabase.SaveAssetIfDirty(battle);
+        RefreshList();
+        SetBattle(battle);
+    }
+
+    private void SaveSelected()
+    {
+        if (_battle == null)
+            return;
+
+        _serializedBattle?.ApplyModifiedProperties();
+        EditorUtility.SetDirty(_battle);
+        AssetDatabase.SaveAssetIfDirty(_battle);
+        ShowNotification(new GUIContent($"Saved {_battle.name}.asset"));
+    }
+
+    private void DuplicateSelected()
+    {
+        if (_battle == null)
+            return;
+
+        SaveSelected();
+        string sourcePath = AssetDatabase.GetAssetPath(_battle);
+        string directory = Path.GetDirectoryName(sourcePath)
+            ?.Replace('\\', '/');
+        string fileName = Path.GetFileNameWithoutExtension(sourcePath);
+        string destinationPath = AssetDatabase.GenerateUniqueAssetPath(
+            $"{directory}/{fileName} Copy.asset");
+        if (!AssetDatabase.CopyAsset(sourcePath, destinationPath))
+            return;
+
+        BattleSO duplicate =
+            AssetDatabase.LoadAssetAtPath<BattleSO>(destinationPath);
+        if (duplicate != null)
+        {
+            SetIdentity(
+                duplicate,
+                CreateUniqueBattleId(
+                    NormalizeId(duplicate.BattleId + "_copy")),
+                duplicate.DisplayName + " Copy");
+            AssetDatabase.SaveAssetIfDirty(duplicate);
+        }
+        RefreshList();
+        if (duplicate != null)
+            SetBattle(duplicate);
+    }
+
+    private void BeginRename()
+    {
+        if (_battle == null)
+            return;
+        _renameAssetName = Path.GetFileNameWithoutExtension(
+            AssetDatabase.GetAssetPath(_battle));
+        _isRenaming = true;
+        _focusRenameField = true;
+    }
+
+    private void CancelRename()
+    {
+        _isRenaming = false;
+        _focusRenameField = false;
+        _renameAssetName = string.Empty;
+    }
+
+    private void RenameSelected()
+    {
+        if (_battle == null)
+        {
+            CancelRename();
+            return;
+        }
+
+        string requested = (_renameAssetName ?? string.Empty).Trim();
+        if (string.IsNullOrEmpty(requested) ||
+            requested.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0)
+        {
+            EditorUtility.DisplayDialog(
+                "Rename Battle",
+                "Enter a valid file name.",
+                "OK");
+            _focusRenameField = true;
+            return;
+        }
+
+        string error = AssetDatabase.RenameAsset(
+            AssetDatabase.GetAssetPath(_battle),
+            requested);
+        if (!string.IsNullOrEmpty(error))
+        {
+            EditorUtility.DisplayDialog("Rename Battle", error, "OK");
+            return;
+        }
+
+        CancelRename();
+        AssetDatabase.SaveAssets();
+        RefreshList();
+    }
+
+    private void DeleteSelected()
+    {
+        if (_battle == null)
+            return;
+
+        if (!PS260714SafeAssetDelete.TryMoveToTrash(
+                _battle,
+                "BattleSO"))
+        {
+            return;
+        }
+
+        _battle = null;
+        _serializedBattle = null;
+        CancelRename();
+        RefreshList();
+    }
+
+    private string CreateUniqueBattleId(string baseId)
+    {
+        string candidate = string.IsNullOrWhiteSpace(baseId)
+            ? "battle"
+            : baseId;
+        string root = candidate;
+        int suffix = 2;
+        while (_battles.Exists(battle =>
+                   battle != null &&
+                   string.Equals(
+                       battle.BattleId,
+                       candidate,
+                       StringComparison.OrdinalIgnoreCase)))
+        {
+            candidate = $"{root}_{suffix++}";
+        }
+        return candidate;
+    }
+
+    private static string NormalizeId(string value)
+    {
+        string normalized = (value ?? string.Empty)
+            .Trim()
+            .ToLowerInvariant()
+            .Replace(' ', '_');
+        return string.IsNullOrWhiteSpace(normalized)
+            ? "battle"
+            : normalized;
+    }
+
+    private static void SetIdentity(
+        BattleSO battle,
+        string battleId,
+        string displayName)
+    {
+        SerializedObject serialized = new(battle);
+        serialized.FindProperty("battleId").stringValue = battleId;
+        serialized.FindProperty("displayName").stringValue = displayName;
+        serialized.ApplyModifiedPropertiesWithoutUndo();
+        EditorUtility.SetDirty(battle);
+    }
+
+    private static void EnsureAssetFolder()
+    {
+        if (!AssetDatabase.IsValidFolder("Assets/Resources"))
+            AssetDatabase.CreateFolder("Assets", "Resources");
+        if (!AssetDatabase.IsValidFolder(AssetFolder))
+            AssetDatabase.CreateFolder("Assets/Resources", "Battles");
     }
 
     private void DrawSection(string title, params string[] propertyNames)
@@ -155,14 +483,60 @@ public sealed class BattleEditorWindow : EditorWindow
         EditorGUILayout.PropertyField(
             amount,
             new GUIContent(usesFixedCounts ? "Count" : "Ratio Weight"));
-        EditorGUILayout.PropertyField(
-            rule.FindPropertyRelative("enemyPool"),
-            new GUIContent("Enemy Pool"),
-            true);
+        DrawEnemyPool(rule.FindPropertyRelative("enemyPool"));
         DrawDetailedEnemyCounts(
             rule.FindPropertyRelative("detailedEnemies"),
             usesFixedCounts ? Mathf.Max(0, amount.intValue) : -1);
         EditorGUILayout.EndVertical();
+    }
+
+    private static void DrawEnemyPool(SerializedProperty pool)
+    {
+        if (pool == null)
+            return;
+
+        pool.isExpanded = EditorGUILayout.Foldout(
+            pool.isExpanded,
+            $"Enemy Pool ({pool.arraySize})",
+            true);
+        if (!pool.isExpanded)
+            return;
+
+        int removeIndex = -1;
+        EditorGUI.indentLevel++;
+        for (int index = 0; index < pool.arraySize; index++)
+        {
+            using (new EditorGUILayout.HorizontalScope())
+            {
+                SerializedProperty enemy =
+                    pool.GetArrayElementAtIndex(index);
+                PS260714AssetReferenceField.Draw(
+                    enemy,
+                    new GUIContent($"Enemy {index + 1}"));
+                if (GUILayout.Button("−", GUILayout.Width(24f)))
+                    removeIndex = index;
+            }
+        }
+        EditorGUI.indentLevel--;
+
+        if (removeIndex >= 0)
+            DeleteArrayElement(pool, removeIndex);
+        if (GUILayout.Button("Add Enemy"))
+        {
+            int index = pool.arraySize;
+            pool.InsertArrayElementAtIndex(index);
+            pool.GetArrayElementAtIndex(index).objectReferenceValue = null;
+        }
+    }
+
+    private static void DeleteArrayElement(
+        SerializedProperty array,
+        int index)
+    {
+        int previousSize = array.arraySize;
+        array.DeleteArrayElementAtIndex(index);
+        if (array.arraySize == previousSize)
+            array.DeleteArrayElementAtIndex(index);
     }
 
     private void DrawProgressBalance()
@@ -221,6 +595,15 @@ public sealed class BattleEditorWindow : EditorWindow
 
             EditorGUILayout.BeginHorizontal();
             EditorGUILayout.PropertyField(enemy, GUIContent.none);
+            using (new EditorGUI.DisabledScope(
+                       enemy.objectReferenceValue is not EnemySO))
+            {
+                if (GUILayout.Button("Edit", GUILayout.Width(38f)))
+                {
+                    EnemyEditorWindow.Open(
+                        enemy.objectReferenceValue as EnemySO);
+                }
+            }
             GUILayout.Label("Count", GUILayout.Width(38f));
             EditorGUILayout.PropertyField(
                 count,

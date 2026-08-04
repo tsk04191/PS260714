@@ -9,7 +9,7 @@ namespace PS260714.Localization
 {
     public static class GeneratedLocalizationTables
     {
-        public const string SourceHash = "51cdc859230466a333b20d9efa1989cad70f42a5de0fe0f4e129b3012f42374f";
+        public const string SourceHash = "85627921817f7cb13231e43abb970bb5966656d6c1b39e7d0d5f9bdcdfe89b8d";
         public const string ReferenceLocale = "en-US";
 
         private static readonly LocalizationLocaleInfo[] LocaleData =
@@ -362,14 +362,16 @@ namespace PS260714.Localization
                 { "character.isana.description", new LocalizationEntry("\uC544\uCE74\uB370\uBBF8 \uAE30\uC0AC\uB2E8 \uAD50\uD658\uD559\uC0DD", "body") },
                 { "status.dualside.name", new LocalizationEntry("\uB4C0\uC5BC\uC0AC\uC774\uB4DC", "title") },
                 { "status.dualside.description", new LocalizationEntry("\uB4C0\uC5BC\uC0AC\uC774\uB4DC", "tooltip") },
-                { "roll.vanguard.name", new LocalizationEntry("\uCC99\uD6C4", "title") },
-                { "roll.vanguard.description", new LocalizationEntry("\uCC99\uD6C4", "body") },
+                { "roll.vanguard.name", new LocalizationEntry("\uC804\uC704", "title") },
+                { "roll.vanguard.description", new LocalizationEntry("\uC804\uC704", "body") },
                 { "roll.shooter.name", new LocalizationEntry("\uC0AC\uC218", "title") },
                 { "roll.shooter.description", new LocalizationEntry("\uC0AC\uC218", "body") },
                 { "roll.support.name", new LocalizationEntry("\uC9C0\uC6D0", "title") },
                 { "roll.support.description", new LocalizationEntry("\uC9C0\uC6D0", "body") },
                 { "roll.mage.name", new LocalizationEntry("\uC220\uC0AC", "title") },
                 { "roll.mage.description", new LocalizationEntry("\uC220\uC0AC", "body") },
+                { "roll.scout.name", new LocalizationEntry("\uCC99\uD6C4", "title") },
+                { "roll.scout.description", new LocalizationEntry("\uCC99\uD6C4", "body") },
             };
 
         private static readonly Dictionary<string, LocalizationEntry>
@@ -721,6 +723,8 @@ namespace PS260714.Localization
                 { "roll.support.description", new LocalizationEntry("Support", "body") },
                 { "roll.mage.name", new LocalizationEntry("Mage", "title") },
                 { "roll.mage.description", new LocalizationEntry("Mage", "body") },
+                { "roll.scout.name", new LocalizationEntry("Scount", "title") },
+                { "roll.scout.description", new LocalizationEntry("Scount", "body") },
             };
 
         private static readonly IReadOnlyDictionary<string, LocalizationEntry>

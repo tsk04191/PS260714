@@ -336,11 +336,13 @@ character.isana.name,캐릭터 이름,title,,이사나,Isana
 character.isana.description,캐릭터 설명,body,,아카데미 기사단 교환학생,exchange student of Order
 status.dualside.name,상태 이름,title,,듀얼사이드,DualSide
 status.dualside.description,상태 설명,tooltip,,듀얼사이드,DualSide
-roll.vanguard.name,직군 이름,title,,척후,Vanguard
-roll.vanguard.description,직군 설명,body,,척후,Vanguard
+roll.vanguard.name,직군 이름,title,,전위,Vanguard
+roll.vanguard.description,직군 설명,body,,전위,Vanguard
 roll.shooter.name,직군 이름,title,,사수,Shooter
 roll.shooter.description,직군 설명,body,,사수,Shooter
 roll.support.name,직군 이름,title,,지원,Support
 roll.support.description,직군 설명,body,,지원,Support
 roll.mage.name,직군 이름,title,,술사,Mage
 roll.mage.description,직군 설명,body,,술사,Mage
+roll.scout.name,직군 이름,title,,척후,Scount
+roll.scout.description,직군 설명,body,,척후,Scount

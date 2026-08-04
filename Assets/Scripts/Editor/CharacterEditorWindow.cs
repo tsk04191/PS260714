@@ -9,7 +9,6 @@ public sealed class CharacterEditorWindow : EditorWindow
     public const string MenuPath = PS260714EditorMenu.CharacterEditor;
 
     private const string CharacterFolder = "Assets/Resources/Characters";
-    private const string CharacterLocalizationPrefix = "character.";
     private const string PassiveDefinitionsPropertyName = "passiveDefinitions";
     private const string PassiveSectionsPropertyName = "sections";
     private const string PassiveTriggerPropertyName = "trigger";
@@ -535,9 +534,6 @@ public sealed class CharacterEditorWindow : EditorWindow
     };
 
     private readonly List<CharacterSO> _characters = new();
-    private readonly List<LocalizationKeyOption> _nameKeyOptions = new();
-    private readonly List<LocalizationKeyOption> _descriptionKeyOptions = new();
-
     private CharacterSO _selectedCharacter;
     private SerializedObject _serializedCharacter;
     private Vector2 _listScroll;
@@ -554,19 +550,6 @@ public sealed class CharacterEditorWindow : EditorWindow
     private bool _validationExpanded = true;
     private bool _cumulativeUpgradeExpanded;
     private bool _dungeonUpgradeExpanded;
-    private string _localizationLoadError = string.Empty;
-
-    private readonly struct LocalizationKeyOption
-    {
-        public string Key { get; }
-        public string Label { get; }
-
-        public LocalizationKeyOption(string key, string label)
-        {
-            Key = key;
-            Label = label;
-        }
-    }
 
     [MenuItem(MenuPath)]
     public static void Open()
@@ -576,6 +559,16 @@ public sealed class CharacterEditorWindow : EditorWindow
         window.minSize = new Vector2(780f, 560f);
         window.Show();
         window.Focus();
+    }
+
+    public static void Open(CharacterSO character)
+    {
+        Open();
+        CharacterEditorWindow window = GetWindow<CharacterEditorWindow>();
+        window.RefreshCharacterList();
+        if (character != null)
+            window.SelectCharacter(character);
+        window.Repaint();
     }
 
     [MenuItem(MenuPath, true)]
@@ -724,17 +717,17 @@ public sealed class CharacterEditorWindow : EditorWindow
             PS260714AssetEditorList.DrawSearchField(_searchText);
 
         _listScroll = EditorGUILayout.BeginScrollView(_listScroll);
-        bool hasVisibleCharacter = false;
+        int visibleCount = 0;
         foreach (CharacterSO character in _characters)
         {
             if (character == null || !MatchesSearch(character))
                 continue;
 
-            hasVisibleCharacter = true;
+            visibleCount++;
             DrawCharacterListRow(character);
         }
 
-        if (!hasVisibleCharacter)
+        if (visibleCount == 0)
         {
             EditorGUILayout.HelpBox(
                 string.IsNullOrWhiteSpace(_searchText)
@@ -743,24 +736,26 @@ public sealed class CharacterEditorWindow : EditorWindow
                 MessageType.Info);
         }
         EditorGUILayout.EndScrollView();
+        PS260714AssetEditorList.DrawCountFooter(
+            visibleCount,
+            _characters.Count);
         EditorGUILayout.EndVertical();
     }
 
     private void DrawCharacterListRow(CharacterSO character)
     {
         bool selected = character == _selectedCharacter;
-        string label = character.name + "\n" +
-                       $"G{(int)character.Grade} / " +
-                       $"A{character.AttackDefinitions.Count} / " +
-                       $"P{character.PassiveDefinitions.Count} / " +
-                       $"S{character.SkillDefinitions.Count}";
-        bool clicked = PS260714AssetEditorList.DrawRow(
+        string detail = $"G{(int)character.Grade} / " +
+                        $"A{character.AttackDefinitions.Count} / " +
+                        $"P{character.PassiveDefinitions.Count} / " +
+                        $"S{character.SkillDefinitions.Count}";
+        bool clicked = PS260714AssetEditorList.DrawAssetRow(
             selected,
-            new GUIContent(
-                label,
-                PS260714AssetEditorList.GetAssetPreview(
-                    character.IconSprite),
-                character.CharacterId));
+            character,
+            character.IconSprite,
+            character.name,
+            detail,
+            character.CharacterId);
         if (clicked)
             SelectCharacter(character);
     }
@@ -900,23 +895,14 @@ public sealed class CharacterEditorWindow : EditorWindow
         EditorGUILayout.Space(12f);
 
         EditorGUILayout.BeginVertical(GUILayout.ExpandWidth(true));
-        DrawLocalizationKeyPopup(
-            "nameLocalizationKey",
-            "이름 Localization 키",
-            _nameKeyOptions,
-            ".name");
+        PS260714LocalizationKeyField.Draw(
+            _serializedCharacter.FindProperty("nameLocalizationKey"),
+            "이름 Localization 키");
         EditorGUILayout.Space(4f);
-        DrawLocalizationKeyPopup(
-            "descriptionLocalizationKey",
-            "설명 Localization 키",
-            _descriptionKeyOptions,
-            ".description");
-        if (!string.IsNullOrEmpty(_localizationLoadError))
-        {
-            EditorGUILayout.HelpBox(
-                _localizationLoadError,
-                MessageType.Error);
-        }
+        PS260714LocalizationKeyField.Draw(
+            _serializedCharacter.FindProperty("descriptionLocalizationKey"),
+            "설명 Localization 키");
+        PS260714LocalizationKeyField.DrawLoadError();
         EditorGUILayout.Space(8f);
         DrawProfileProperty("characterName", "이름");
         EditorGUILayout.Space(4f);
@@ -1273,7 +1259,16 @@ public sealed class CharacterEditorWindow : EditorWindow
         {
             DrawRolePopup(roleProperty, archetypeProperty, roles);
             if (GUILayout.Button("공통 직군 설정", GUILayout.Width(108f)))
-                CommonSettingsProjectProvider.Open();
+            {
+                UnityEngine.Object selectedDefinition =
+                    archetypeProperty.objectReferenceValue != null
+                        ? archetypeProperty.objectReferenceValue
+                        : roleProperty.objectReferenceValue;
+                if (selectedDefinition != null)
+                    CommonSettingsProjectProvider.Open(selectedDefinition);
+                else
+                    CommonSettingsProjectProvider.Open();
+            }
         }
 
         CharacterRoleSO selectedRole =
@@ -1406,76 +1401,17 @@ public sealed class CharacterEditorWindow : EditorWindow
         EditorGUILayout.LabelField(
             "전투 생명주기 3D VFX",
             EditorStyles.boldLabel);
-        DrawProfileProperty("spawnVfxCue", "배치 VFX 큐");
-        DrawProfileProperty("deathVfxCue", "사망 VFX 큐");
+        PS260714AssetReferenceField.Draw(
+            _serializedCharacter.FindProperty("spawnVfxCue"),
+            new GUIContent("배치 VFX 큐"));
+        PS260714AssetReferenceField.Draw(
+            _serializedCharacter.FindProperty("deathVfxCue"),
+            new GUIContent("사망 VFX 큐"));
         EditorGUILayout.HelpBox(
             "배치 Cue는 파티가 전투 보드에 등록될 때, 사망 Cue는 체력이 0이 된 위치에서 재생됩니다.",
             MessageType.Info);
         EditorGUILayout.EndVertical();
         EditorGUILayout.Space(8f);
-    }
-
-    private void DrawLocalizationKeyPopup(
-        string propertyName,
-        string label,
-        List<LocalizationKeyOption> options,
-        string requiredSuffix)
-    {
-        SerializedProperty property =
-            _serializedCharacter.FindProperty(propertyName);
-        if (property == null)
-        {
-            EditorGUILayout.HelpBox(
-                $"Property '{propertyName}' was not found.",
-                MessageType.Error);
-            return;
-        }
-
-        string currentKey = (property.stringValue ?? string.Empty).Trim();
-        int currentIndex = 0;
-        string[] labels = new string[options.Count + 1];
-        labels[0] = "(선택 없음)";
-        for (int index = 0; index < options.Count; index++)
-        {
-            LocalizationKeyOption option = options[index];
-            labels[index + 1] = option.Label;
-            if (string.Equals(
-                    option.Key,
-                    currentKey,
-                    StringComparison.Ordinal))
-            {
-                currentIndex = index + 1;
-            }
-        }
-
-        int selectedIndex = EditorGUILayout.Popup(
-            label,
-            currentIndex,
-            labels);
-        if (selectedIndex != currentIndex)
-        {
-            property.stringValue = selectedIndex <= 0
-                ? string.Empty
-                : options[selectedIndex - 1].Key;
-            currentKey = property.stringValue;
-        }
-
-        if (!string.IsNullOrEmpty(currentKey) && currentIndex == 0 &&
-            selectedIndex == currentIndex)
-        {
-            EditorGUILayout.HelpBox(
-                $"현재 키 '{currentKey}'는 " +
-                $"{CharacterLocalizationPrefix}*{requiredSuffix} 필터에 " +
-                "포함되지 않습니다.",
-                MessageType.Warning);
-        }
-        else if (options.Count == 0)
-        {
-            EditorGUILayout.HelpBox(
-                $"{CharacterLocalizationPrefix}*{requiredSuffix} 형식의 " +
-                "Localization 키가 없습니다.",
-                MessageType.Info);
-        }
     }
 
     private static string FormatAspect(float aspect)
@@ -4026,7 +3962,7 @@ public sealed class CharacterEditorWindow : EditorWindow
             CastVfxCuePropertyName);
         if (castVfx != null)
         {
-            EditorGUILayout.PropertyField(
+            PS260714AssetReferenceField.Draw(
                 castVfx,
                 new GUIContent(
                     "시전 VFX 큐",
@@ -4037,7 +3973,7 @@ public sealed class CharacterEditorWindow : EditorWindow
             ProjectileVfxCuePropertyName);
         if (projectileVfx != null)
         {
-            EditorGUILayout.PropertyField(
+            PS260714AssetReferenceField.Draw(
                 projectileVfx,
                 new GUIContent(
                     "투사체 VFX 큐",
@@ -4056,7 +3992,7 @@ public sealed class CharacterEditorWindow : EditorWindow
             ImpactVfxCuePropertyName);
         if (impactVfx != null)
         {
-            EditorGUILayout.PropertyField(
+            PS260714AssetReferenceField.Draw(
                 impactVfx,
                 new GUIContent(
                     "적중 VFX 큐",
@@ -5537,12 +5473,12 @@ public sealed class CharacterEditorWindow : EditorWindow
                 "Select Custom to make the mode explicit.",
                 MessageType.Info);
         }
-        EditorGUILayout.PropertyField(
+        PS260714LocalizationKeyField.Draw(
             titleKey,
-            new GUIContent("Title Localization Key"));
-        EditorGUILayout.PropertyField(
+            "Title Localization Key");
+        PS260714LocalizationKeyField.Draw(
             descriptionKey,
-            new GUIContent("Description Localization Key"));
+            "Description Localization Key");
     }
 
     private static void DrawCumulativeUpgradeModifiers(
@@ -6031,81 +5967,7 @@ public sealed class CharacterEditorWindow : EditorWindow
 
     private void RefreshLocalizationKeys()
     {
-        _nameKeyOptions.Clear();
-        _descriptionKeyOptions.Clear();
-        _localizationLoadError = string.Empty;
-
-        try
-        {
-            LocalizationSourceModel model =
-                LocalizationCodeGenerator.LoadSource();
-            foreach (LocalizationSourceString entry in model.Strings)
-            {
-                string key = (entry.Key ?? string.Empty).Trim();
-                if (!key.StartsWith(
-                        CharacterLocalizationPrefix,
-                        StringComparison.OrdinalIgnoreCase))
-                {
-                    continue;
-                }
-
-                LocalizationKeyOption option = new(
-                    key,
-                    BuildLocalizationOptionLabel(entry, key));
-                if (key.EndsWith(
-                        ".name",
-                        StringComparison.OrdinalIgnoreCase))
-                {
-                    _nameKeyOptions.Add(option);
-                }
-                else if (key.EndsWith(
-                             ".description",
-                             StringComparison.OrdinalIgnoreCase))
-                {
-                    _descriptionKeyOptions.Add(option);
-                }
-            }
-
-            _nameKeyOptions.Sort(CompareLocalizationOptions);
-            _descriptionKeyOptions.Sort(CompareLocalizationOptions);
-        }
-        catch (Exception exception)
-        {
-            _localizationLoadError =
-                "Localization 키를 불러오지 못했습니다: " +
-                exception.Message;
-        }
-    }
-
-    private static int CompareLocalizationOptions(
-        LocalizationKeyOption left,
-        LocalizationKeyOption right)
-    {
-        return string.Compare(
-            left.Key,
-            right.Key,
-            StringComparison.OrdinalIgnoreCase);
-    }
-
-    private static string BuildLocalizationOptionLabel(
-        LocalizationSourceString entry,
-        string key)
-    {
-        entry.Translations.TryGetValue("ko-KR", out string korean);
-        entry.Translations.TryGetValue("en-US", out string english);
-        korean = (korean ?? string.Empty).Trim();
-        english = (english ?? string.Empty).Trim();
-
-        if (!string.IsNullOrEmpty(korean) &&
-            !string.IsNullOrEmpty(english))
-        {
-            return $"{key}  |  {korean} / {english}";
-        }
-        if (!string.IsNullOrEmpty(korean))
-            return $"{key}  |  {korean}";
-        if (!string.IsNullOrEmpty(english))
-            return $"{key}  |  {english}";
-        return key;
+        PS260714LocalizationKeyField.Refresh();
     }
 
     private void RefreshCharacterList()
@@ -6200,36 +6062,11 @@ public sealed class CharacterEditorWindow : EditorWindow
         if (character == null)
             return;
 
-        string assetPath = AssetDatabase.GetAssetPath(character);
-        if (string.IsNullOrEmpty(assetPath) ||
-            !assetPath.StartsWith("Assets/", StringComparison.Ordinal) ||
-            AssetDatabase.LoadMainAssetAtPath(assetPath) != character)
-        {
-            EditorUtility.DisplayDialog(
-                "Delete CharacterSO",
-                "The selected CharacterSO is not a deletable project asset.",
-                "OK");
-            return;
-        }
-
         string assetName = character.name;
-        bool confirmed = EditorUtility.DisplayDialog(
-            "Delete CharacterSO",
-            $"'{assetName}' SO 파일을 삭제합니다.\n\n{assetPath}\n\n" +
-            "이 작업은 Unity Undo로 복구할 수 없습니다.",
-            "OK",
-            "Cancel");
-        if (!confirmed)
+        if (!PS260714SafeAssetDelete.TryMoveToTrash(
+                character,
+                "CharacterSO"))
             return;
-
-        if (!AssetDatabase.DeleteAsset(assetPath))
-        {
-            EditorUtility.DisplayDialog(
-                "Delete CharacterSO",
-                "The CharacterSO asset could not be deleted.",
-                "OK");
-            return;
-        }
 
         CharacterDefinitionCatalog.Invalidate();
 
@@ -6240,7 +6077,8 @@ public sealed class CharacterEditorWindow : EditorWindow
         _serializedCharacter = null;
         RefreshCharacterList();
 
-        ShowNotification(new GUIContent($"Deleted {assetName}.asset"));
+        ShowNotification(new GUIContent(
+            $"Moved {assetName}.asset to Trash"));
         Repaint();
     }
 
@@ -6728,12 +6566,12 @@ internal sealed class CharacterDungeonUpgradeEntryDrawer : PropertyDrawer
 
             if (ShowsCustomKeys(property, preset))
             {
-                DrawProperty(
+                DrawLocalizationKeyProperty(
                     ref y,
                     position,
                     property.FindPropertyRelative("titleLocalizationKey"),
                     new GUIContent("Title Localization Key"));
-                DrawProperty(
+                DrawLocalizationKeyProperty(
                     ref y,
                     position,
                     property.FindPropertyRelative(
@@ -6854,6 +6692,24 @@ internal sealed class CharacterDungeonUpgradeEntryDrawer : PropertyDrawer
             property,
             label,
             includeChildren);
+        y += height + Spacing;
+    }
+
+    private static void DrawLocalizationKeyProperty(
+        ref float y,
+        Rect position,
+        SerializedProperty property,
+        GUIContent label)
+    {
+        if (property == null)
+            return;
+
+        float height = EditorGUIUtility.singleLineHeight;
+        Rect fieldRect = new(position.x, y, position.width, height);
+        PS260714LocalizationKeyField.Draw(
+            fieldRect,
+            property,
+            label);
         y += height + Spacing;
     }
 

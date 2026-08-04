@@ -35,6 +35,16 @@ public sealed class EnemyEditorWindow : EditorWindow
         window.Focus();
     }
 
+    public static void Open(EnemySO enemy)
+    {
+        Open();
+        EnemyEditorWindow window = GetWindow<EnemyEditorWindow>();
+        window.RefreshList();
+        if (enemy != null)
+            window.SelectDefinition(enemy);
+        window.Repaint();
+    }
+
     [MenuItem(MenuPath, true)]
     private static bool ValidateOpen()
     {
@@ -45,6 +55,7 @@ public sealed class EnemyEditorWindow : EditorWindow
     {
         titleContent = new GUIContent("Enemy Editor");
         minSize = new Vector2(900f, 600f);
+        PS260714LocalizationKeyField.Refresh();
         RefreshList();
 
         if (Selection.activeObject is EnemySO selected)
@@ -56,6 +67,7 @@ public sealed class EnemyEditorWindow : EditorWindow
     private void OnProjectChange()
     {
         EnemyDefinitionCatalog.Invalidate();
+        PS260714LocalizationKeyField.Refresh();
         RefreshList();
         Repaint();
     }
@@ -176,11 +188,11 @@ public sealed class EnemyEditorWindow : EditorWindow
             _searchText =
                 PS260714AssetEditorList.DrawSearchField(_searchText);
 
+            int visibleCount = 0;
             using (EditorGUILayout.ScrollViewScope scroll =
                    new(_listScroll))
             {
                 _listScroll = scroll.scrollPosition;
-                int visibleCount = 0;
                 foreach (EnemySO definition in _definitions)
                 {
                     if (definition == null ||
@@ -192,16 +204,16 @@ public sealed class EnemyEditorWindow : EditorWindow
                     visibleCount++;
                     bool selected =
                         ReferenceEquals(definition, _selected);
-                    string label =
-                        $"{definition.name}\n" +
+                    string detail =
                         $"{definition.Type} / " +
                         $"A{definition.Abilities.Count}";
-                    if (PS260714AssetEditorList.DrawRow(
+                    if (PS260714AssetEditorList.DrawAssetRow(
                             selected,
-                            new GUIContent(
-                                label,
-                                null,
-                                definition.EnemyId)))
+                            definition,
+                            definition.IconSprite,
+                            definition.name,
+                            detail,
+                            definition.EnemyId))
                     {
                         SelectDefinition(definition);
                     }
@@ -216,6 +228,9 @@ public sealed class EnemyEditorWindow : EditorWindow
                         MessageType.Info);
                 }
             }
+            PS260714AssetEditorList.DrawCountFooter(
+                visibleCount,
+                _definitions.Count);
         }
     }
 
@@ -371,12 +386,13 @@ public sealed class EnemyEditorWindow : EditorWindow
                 }
             }
 
-            DrawProperty(
-                "nameLocalizationKey",
+            PS260714LocalizationKeyField.Draw(
+                Find("nameLocalizationKey"),
                 "Name Localization Key");
-            DrawProperty(
-                "descriptionLocalizationKey",
+            PS260714LocalizationKeyField.Draw(
+                Find("descriptionLocalizationKey"),
                 "Description Localization Key");
+            PS260714LocalizationKeyField.DrawLoadError();
             DrawProperty("displayName", "Fallback Name");
             DrawProperty("description", "Fallback Description");
             DrawProperty("cardCode", "Card Code");
@@ -501,8 +517,12 @@ public sealed class EnemyEditorWindow : EditorWindow
         {
             DrawProperty("iconSprite", "Codex Icon");
             DrawProperty("boardSprite", "Board Sprite");
-            DrawProperty("spawnVfxCue", "Spawn VFX Cue");
-            DrawProperty("deathVfxCue", "Death VFX Cue");
+            PS260714AssetReferenceField.Draw(
+                Find("spawnVfxCue"),
+                new GUIContent("Spawn VFX Cue"));
+            PS260714AssetReferenceField.Draw(
+                Find("deathVfxCue"),
+                new GUIContent("Death VFX Cue"));
             EditorGUILayout.HelpBox(
                 "Spawn plays after the enemy card is placed. Death uses the cached card anchor after removal.",
                 MessageType.Info);
@@ -512,13 +532,11 @@ public sealed class EnemyEditorWindow : EditorWindow
     private static void DrawAbility(SerializedProperty ability)
     {
         DrawRelative(ability, "abilityId", "Ability ID");
-        DrawRelative(
-            ability,
-            "nameLocalizationKey",
+        PS260714LocalizationKeyField.Draw(
+            ability.FindPropertyRelative("nameLocalizationKey"),
             "Name Localization Key");
-        DrawRelative(
-            ability,
-            "descriptionLocalizationKey",
+        PS260714LocalizationKeyField.Draw(
+            ability.FindPropertyRelative("descriptionLocalizationKey"),
             "Description Localization Key");
         DrawRelative(ability, "fallbackName", "Fallback Name");
         DrawRelative(
@@ -1543,20 +1561,14 @@ public sealed class EnemyEditorWindow : EditorWindow
         if (_selected == null)
             return;
 
-        string path = AssetDatabase.GetAssetPath(_selected);
-        if (!EditorUtility.DisplayDialog(
-                "Delete Enemy",
-                $"Delete '{_selected.name}'?\n\n{path}",
-                "Delete",
-                "Cancel"))
-        {
+        EnemySO selected = _selected;
+        if (!PS260714SafeAssetDelete.TryMoveToTrash(
+                selected,
+                "EnemySO"))
             return;
-        }
 
         _selected = null;
         _serialized = null;
-        AssetDatabase.DeleteAsset(path);
-        AssetDatabase.SaveAssets();
         RefreshList();
     }
 

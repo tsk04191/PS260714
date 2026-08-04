@@ -11,7 +11,6 @@ public sealed class ItemEditorWindow : EditorWindow
 
     private const string AssetRoot = "Assets/Resources/Items";
     private const string RenameControlName = "ItemAssetRenameField";
-    private const string LocalizationPrefix = "item.";
 
     private static readonly string[] CategoryLabels =
     {
@@ -23,9 +22,6 @@ public sealed class ItemEditorWindow : EditorWindow
     };
 
     private readonly List<ItemDefinitionSO> _items = new();
-    private readonly List<LocalizationKeyOption> _nameKeyOptions = new();
-    private readonly List<LocalizationKeyOption>
-        _descriptionKeyOptions = new();
     private ItemDefinitionSO _selected;
     private SerializedObject _serialized;
     private Vector2 _listScroll;
@@ -35,19 +31,6 @@ public sealed class ItemEditorWindow : EditorWindow
     private bool _renaming;
     private bool _focusRenameField;
     private string _renameText = string.Empty;
-    private string _localizationLoadError = string.Empty;
-
-    private readonly struct LocalizationKeyOption
-    {
-        public string Key { get; }
-        public string Label { get; }
-
-        public LocalizationKeyOption(string key, string label)
-        {
-            Key = key;
-            Label = label;
-        }
-    }
 
     [MenuItem(MenuPath)]
     public static void Open()
@@ -58,22 +41,42 @@ public sealed class ItemEditorWindow : EditorWindow
         window.Show();
     }
 
+    public static void Open(ItemDefinitionSO item)
+    {
+        Open();
+        ItemEditorWindow window = GetWindow<ItemEditorWindow>();
+        window.RefreshAssets(true);
+        if (item != null)
+            window.SelectItem(item);
+        window.Repaint();
+    }
+
     private void OnEnable()
     {
         EditorApplication.projectChanged += OnProjectChanged;
+        Selection.selectionChanged += OnSelectionChanged;
         RefreshLocalizationKeys();
         RefreshAssets(true);
+        OnSelectionChanged();
     }
 
     private void OnDisable()
     {
         EditorApplication.projectChanged -= OnProjectChanged;
+        Selection.selectionChanged -= OnSelectionChanged;
     }
 
     private void OnProjectChanged()
     {
         RefreshLocalizationKeys();
         RefreshAssets(true);
+    }
+
+    private void OnSelectionChanged()
+    {
+        if (Selection.activeObject is ItemDefinitionSO item)
+            SelectItem(item);
+        Repaint();
     }
 
     private void OnGUI()
@@ -152,6 +155,7 @@ public sealed class ItemEditorWindow : EditorWindow
             _searchText =
                 PS260714AssetEditorList.DrawSearchField(_searchText);
             _listScroll = EditorGUILayout.BeginScrollView(_listScroll);
+            int visibleCount = 0;
 
             for (int index = 0; index < _items.Count; index++)
             {
@@ -159,21 +163,25 @@ public sealed class ItemEditorWindow : EditorWindow
                 if (item == null || !MatchesSearch(item))
                     continue;
 
+                visibleCount++;
                 string displayName = item.GetDisplayName(true);
                 string category = GetCategoryLabel(item.Category);
-                GUIContent content = new(
-                    $"{displayName}\n{category} · {item.ItemId}",
-                    GetListIcon(item),
-                    item.GetDescription(true));
-                if (PS260714AssetEditorList.DrawRow(
+                if (PS260714AssetEditorList.DrawAssetRow(
                         item == _selected,
-                        content))
+                        item,
+                        item.Icon,
+                        displayName,
+                        $"{category} · {item.ItemId}",
+                        item.GetDescription(true)))
                 {
                     SelectItem(item);
                 }
             }
 
             EditorGUILayout.EndScrollView();
+            PS260714AssetEditorList.DrawCountFooter(
+                visibleCount,
+                _items.Count);
         }
     }
 
@@ -239,9 +247,7 @@ public sealed class ItemEditorWindow : EditorWindow
                     DrawProperty("icon", "아이콘");
                     DrawLocalizationKey(
                         "nameLocalizationKey",
-                        "이름 키",
-                        _nameKeyOptions,
-                        ".name");
+                        "이름 키");
                     DrawProperty(
                         "koreanName",
                         "한글 이름 (Fallback)");
@@ -252,9 +258,7 @@ public sealed class ItemEditorWindow : EditorWindow
             EditorGUILayout.Space(4f);
             DrawLocalizationKey(
                 "descriptionLocalizationKey",
-                "설명 키",
-                _descriptionKeyOptions,
-                ".description / .effect");
+                "설명 키");
             DrawProperty(
                 "koreanDescription",
                 "한글 설명 (Fallback)");
@@ -554,170 +558,20 @@ public sealed class ItemEditorWindow : EditorWindow
                 RefreshLocalizationKeys();
         }
 
-        if (!string.IsNullOrWhiteSpace(_localizationLoadError))
-        {
-            EditorGUILayout.HelpBox(
-                _localizationLoadError,
-                MessageType.Error);
-        }
+        PS260714LocalizationKeyField.DrawLoadError();
     }
 
     private void DrawLocalizationKey(
         string propertyName,
-        string label,
-        List<LocalizationKeyOption> options,
-        string expectedSuffix)
+        string label)
     {
         SerializedProperty property = Find(propertyName);
-        if (property == null)
-        {
-            EditorGUILayout.HelpBox(
-                $"'{propertyName}' 속성을 찾을 수 없습니다.",
-                MessageType.Error);
-            return;
-        }
-
-        property.stringValue = EditorGUILayout.TextField(
-            label,
-            property.stringValue ?? string.Empty);
-        string currentKey = property.stringValue.Trim();
-        int currentIndex = 0;
-        string[] labels = new string[options.Count + 1];
-        labels[0] = "(직접 입력 유지)";
-        for (int index = 0; index < options.Count; index++)
-        {
-            LocalizationKeyOption option = options[index];
-            labels[index + 1] = option.Label;
-            if (string.Equals(
-                    currentKey,
-                    option.Key,
-                    StringComparison.Ordinal))
-            {
-                currentIndex = index + 1;
-            }
-        }
-
-        using (new EditorGUILayout.HorizontalScope())
-        {
-            int selectedIndex = EditorGUILayout.Popup(
-                "목록에서 선택",
-                currentIndex,
-                labels);
-            if (selectedIndex > 0 && selectedIndex != currentIndex)
-            {
-                property.stringValue = options[selectedIndex - 1].Key;
-                currentKey = property.stringValue;
-                currentIndex = selectedIndex;
-            }
-
-            using (new EditorGUI.DisabledScope(
-                       string.IsNullOrEmpty(currentKey)))
-            {
-                if (GUILayout.Button("키 지우기", GUILayout.Width(72f)))
-                {
-                    property.stringValue = string.Empty;
-                    currentKey = string.Empty;
-                    currentIndex = 0;
-                }
-            }
-        }
-
-        if (!string.IsNullOrEmpty(currentKey) && currentIndex == 0)
-        {
-            EditorGUILayout.HelpBox(
-                $"현재 키 '{currentKey}'는 {LocalizationPrefix}*" +
-                $"{expectedSuffix} 목록에 없습니다.",
-                MessageType.Warning);
-        }
-        else if (options.Count == 0 &&
-                 string.IsNullOrWhiteSpace(_localizationLoadError))
-        {
-            EditorGUILayout.HelpBox(
-                $"{LocalizationPrefix}*{expectedSuffix} 형식의 키가 " +
-                "없습니다.",
-                MessageType.Info);
-        }
+        PS260714LocalizationKeyField.Draw(property, label);
     }
 
     private void RefreshLocalizationKeys()
     {
-        _nameKeyOptions.Clear();
-        _descriptionKeyOptions.Clear();
-        _localizationLoadError = string.Empty;
-
-        try
-        {
-            LocalizationSourceModel model =
-                LocalizationCodeGenerator.LoadSource();
-            foreach (LocalizationSourceString entry in model.Strings)
-            {
-                string key = (entry.Key ?? string.Empty).Trim();
-                if (!key.StartsWith(
-                        LocalizationPrefix,
-                        StringComparison.OrdinalIgnoreCase))
-                {
-                    continue;
-                }
-
-                LocalizationKeyOption option = new(
-                    key,
-                    BuildLocalizationOptionLabel(entry, key));
-                if (key.EndsWith(
-                        ".name",
-                        StringComparison.OrdinalIgnoreCase))
-                {
-                    _nameKeyOptions.Add(option);
-                }
-                else if (key.EndsWith(
-                             ".description",
-                             StringComparison.OrdinalIgnoreCase) ||
-                         key.EndsWith(
-                             ".effect",
-                             StringComparison.OrdinalIgnoreCase))
-                {
-                    _descriptionKeyOptions.Add(option);
-                }
-            }
-
-            _nameKeyOptions.Sort(CompareLocalizationOptions);
-            _descriptionKeyOptions.Sort(CompareLocalizationOptions);
-        }
-        catch (Exception exception)
-        {
-            _localizationLoadError =
-                "Localization 키를 불러오지 못했습니다: " +
-                exception.Message;
-        }
-    }
-
-    private static string BuildLocalizationOptionLabel(
-        LocalizationSourceString entry,
-        string key)
-    {
-        entry.Translations.TryGetValue("ko-KR", out string korean);
-        entry.Translations.TryGetValue("en-US", out string english);
-        korean = (korean ?? string.Empty).Trim();
-        english = (english ?? string.Empty).Trim();
-        if (!string.IsNullOrEmpty(korean) &&
-            !string.IsNullOrEmpty(english))
-        {
-            return $"{key}  |  {korean} / {english}";
-        }
-        if (!string.IsNullOrEmpty(korean))
-            return $"{key}  |  {korean}";
-        if (!string.IsNullOrEmpty(english))
-            return $"{key}  |  {english}";
-        return key;
-    }
-
-    private static int CompareLocalizationOptions(
-        LocalizationKeyOption left,
-        LocalizationKeyOption right)
-    {
-        return string.Compare(
-            left.Key,
-            right.Key,
-            StringComparison.OrdinalIgnoreCase);
+        PS260714LocalizationKeyField.Refresh();
     }
 
     private void ShowCreateMenu()
@@ -952,31 +806,17 @@ public sealed class ItemEditorWindow : EditorWindow
         if (_selected == null)
             return;
 
-        string path = AssetDatabase.GetAssetPath(_selected);
-        if (!EditorUtility.DisplayDialog(
-                "아이템 삭제",
-                $"'{_selected.GetDisplayName(true)}' 아이템을 삭제하시겠습니까?\n\n{path}",
-                "삭제",
-                "취소"))
-        {
+        ItemDefinitionSO selected = _selected;
+        if (!PS260714SafeAssetDelete.TryMoveToTrash(
+                selected,
+                "Item"))
             return;
-        }
 
         CancelRename();
         _selected = null;
         _serialized = null;
-        if (!AssetDatabase.DeleteAsset(path))
-        {
-            EditorUtility.DisplayDialog(
-                "Item Editor",
-                "아이템 삭제에 실패했습니다.",
-                "확인");
-            RefreshAssets(false);
-            return;
-        }
 
         RefreshCatalog();
-        AssetDatabase.SaveAssets();
         ItemDefinitionCatalog.Invalidate();
         RefreshAssets(false);
     }

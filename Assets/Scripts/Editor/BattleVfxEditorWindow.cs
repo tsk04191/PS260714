@@ -43,6 +43,17 @@ public sealed class BattleVfxEditorWindow : EditorWindow
         window.Show();
     }
 
+    public static void Open(BattleVfxCueSO cue)
+    {
+        Open();
+        BattleVfxEditorWindow window =
+            GetWindow<BattleVfxEditorWindow>();
+        window.RefreshList();
+        if (cue != null)
+            window.SelectCue(cue);
+        window.Repaint();
+    }
+
     [MenuItem(MenuPath, true)]
     private static bool ValidateOpen()
     {
@@ -120,6 +131,13 @@ public sealed class BattleVfxEditorWindow : EditorWindow
     private void OnProjectChange()
     {
         RefreshList();
+        Repaint();
+    }
+
+    private void OnSelectionChange()
+    {
+        if (Selection.activeObject is BattleVfxCueSO cue)
+            SelectCue(cue);
         Repaint();
     }
 
@@ -232,13 +250,13 @@ public sealed class BattleVfxEditorWindow : EditorWindow
 
                     visibleCount++;
                     bool selected = ReferenceEquals(cue, _selected);
-                    GUIContent content = new(
-                        cue.name,
-                        GetPreviewTexture(cue),
-                        cue.CueId);
-                    if (PS260714AssetEditorList.DrawRow(
+                    if (PS260714AssetEditorList.DrawAssetRow(
                             selected,
-                            content))
+                            cue,
+                            cue.Prefab,
+                            cue.name,
+                            cue.CueId,
+                            AssetDatabase.GetAssetPath(cue)))
                     {
                         SelectCue(cue);
                     }
@@ -254,9 +272,9 @@ public sealed class BattleVfxEditorWindow : EditorWindow
                     MessageType.Info);
             }
 
-            EditorGUILayout.LabelField(
-                $"{visibleCount} / {_cues.Count}",
-                EditorStyles.centeredGreyMiniLabel);
+            PS260714AssetEditorList.DrawCountFooter(
+                visibleCount,
+                _cues.Count);
         }
     }
 
@@ -1152,31 +1170,17 @@ public sealed class BattleVfxEditorWindow : EditorWindow
         if (_selected == null)
             return;
 
-        string path = AssetDatabase.GetAssetPath(_selected);
         string assetName = _selected.name;
-        if (!EditorUtility.DisplayDialog(
-                "Delete Battle VFX Cue",
-                $"'{assetName}' SO 파일을 삭제합니다.\n\n{path}\n\n" +
-                "이 작업은 Unity Undo로 복구할 수 없습니다.",
-                "삭제",
-                "취소"))
-        {
+        if (!PS260714SafeAssetDelete.TryMoveToTrash(
+                _selected,
+                "Battle VFX Cue"))
             return;
-        }
-
-        if (!AssetDatabase.DeleteAsset(path))
-        {
-            EditorUtility.DisplayDialog(
-                "Delete Battle VFX Cue",
-                "SO 파일을 삭제하지 못했습니다.",
-                "확인");
-            return;
-        }
 
         ClearSelection();
         CancelRename();
         RefreshList();
-        ShowNotification(new GUIContent($"Deleted {assetName}.asset"));
+        ShowNotification(new GUIContent(
+            $"Moved {assetName}.asset to Trash"));
     }
 
     private void BeginRename()

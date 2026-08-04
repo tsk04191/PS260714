@@ -106,6 +106,8 @@ namespace PS260714.Localization
         public const string ItemStandardRecruitTicketName = "item.standard_recruit_ticket.name";
         public const string RollMageDescription = "roll.mage.description";
         public const string RollMageName = "roll.mage.name";
+        public const string RollScoutDescription = "roll.scout.description";
+        public const string RollScoutName = "roll.scout.name";
         public const string RollShooterDescription = "roll.shooter.description";
         public const string RollShooterName = "roll.shooter.name";
         public const string RollSupportDescription = "roll.support.description";

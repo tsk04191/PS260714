@@ -44,6 +44,17 @@ public sealed class StageSelectEditorWindow : EditorWindow
         window.Focus();
     }
 
+    public static void Open(DungeonDefinition definition)
+    {
+        Open();
+        StageSelectEditorWindow window =
+            GetWindow<StageSelectEditorWindow>();
+        window.RefreshDefinitions();
+        if (definition != null)
+            window.SelectDefinition(definition);
+        window.Repaint();
+    }
+
     [MenuItem(MenuPath, true)]
     private static bool ValidateOpen()
     {
@@ -56,6 +67,7 @@ public sealed class StageSelectEditorWindow : EditorWindow
         minSize = new Vector2(920f, 620f);
         EditorApplication.projectChanged += HandleProjectChanged;
         EditorApplication.hierarchyChanged += HandleHierarchyChanged;
+        PS260714LocalizationKeyField.Refresh();
         RefreshDefinitions();
         FindStageSelectPage();
 
@@ -84,6 +96,7 @@ public sealed class StageSelectEditorWindow : EditorWindow
 
     private void HandleProjectChanged()
     {
+        PS260714LocalizationKeyField.Refresh();
         RefreshDefinitions();
         Repaint();
     }
@@ -259,28 +272,31 @@ public sealed class StageSelectEditorWindow : EditorWindow
             }
 
             _listScroll = EditorGUILayout.BeginScrollView(_listScroll);
+            int visibleCount = 0;
             foreach (DungeonDefinition definition in _definitions)
             {
                 if (definition == null || !MatchesSearch(definition))
                     continue;
 
+                visibleCount++;
                 string visibility = definition.IsListedInStageSelect
                     ? $"Order {definition.StageOrder}"
                     : "Hidden";
-                GUIContent content = new(
-                    $"{definition.FallbackTitle}\n" +
-                    $"{visibility} - {definition.DungeonId}",
-                    PS260714AssetEditorList.GetAssetPreview(
-                        definition.StageCoverSprite),
-                    AssetDatabase.GetAssetPath(definition));
-                if (PS260714AssetEditorList.DrawRow(
+                if (PS260714AssetEditorList.DrawAssetRow(
                         definition == _selected,
-                        content))
+                        definition,
+                        definition.StageCoverSprite,
+                        definition.FallbackTitle,
+                        $"{visibility} - {definition.DungeonId}",
+                        AssetDatabase.GetAssetPath(definition)))
                 {
                     SelectDefinition(definition);
                 }
             }
             EditorGUILayout.EndScrollView();
+            PS260714AssetEditorList.DrawCountFooter(
+                visibleCount,
+                _definitions.Count);
         }
     }
 
@@ -355,9 +371,10 @@ public sealed class StageSelectEditorWindow : EditorWindow
         {
             DrawProperty("stageSelectVisibility", "Visibility");
             DrawProperty("stageOrder", "Display Order");
-            DrawProperty(
-                "titleLocalizationKey",
+            PS260714LocalizationKeyField.Draw(
+                _serialized.FindProperty("titleLocalizationKey"),
                 "Title Localization Key");
+            PS260714LocalizationKeyField.DrawLoadError();
             DrawProperty("fallbackTitle", "Fallback Title");
             DrawProperty("stageCoverSprite", "Square Stage Banner");
 
@@ -383,7 +400,9 @@ public sealed class StageSelectEditorWindow : EditorWindow
             DrawProperty(
                 "insertEventBetweenBattles",
                 "Events Between Battles");
-            DrawProperty("flowPolicy", "Flow Policy");
+            PS260714AssetReferenceField.Draw(
+                _serialized.FindProperty("flowPolicy"),
+                new GUIContent("Flow Policy"));
         }
         EditorGUILayout.EndFoldoutHeaderGroup();
     }
@@ -418,11 +437,10 @@ public sealed class StageSelectEditorWindow : EditorWindow
             "Encounters");
         if (_encountersExpanded)
         {
-            DrawProperty("fixedBattles", "Fixed Battles", true);
-            DrawProperty(
+            DrawAssetReferenceArray("fixedBattles", "Fixed Battles");
+            DrawAssetReferenceArray(
                 "enemyPoolOverride",
-                "Enemy Pool Override",
-                true);
+                "Enemy Pool Override");
         }
         EditorGUILayout.EndFoldoutHeaderGroup();
     }
@@ -434,9 +452,15 @@ public sealed class StageSelectEditorWindow : EditorWindow
             "Presentation");
         if (_presentationExpanded)
         {
-            DrawProperty("fieldViewPrefab", "Field View Prefab");
-            DrawProperty("theme", "Theme");
-            DrawProperty("tutorial", "Tutorial");
+            PS260714AssetReferenceField.Draw(
+                _serialized.FindProperty("fieldViewPrefab"),
+                new GUIContent("Field View Prefab"));
+            PS260714AssetReferenceField.Draw(
+                _serialized.FindProperty("theme"),
+                new GUIContent("Theme"));
+            PS260714AssetReferenceField.Draw(
+                _serialized.FindProperty("tutorial"),
+                new GUIContent("Tutorial"));
         }
         EditorGUILayout.EndFoldoutHeaderGroup();
     }
@@ -529,6 +553,56 @@ public sealed class StageSelectEditorWindow : EditorWindow
             property,
             new GUIContent(label),
             includeChildren);
+    }
+
+    private void DrawAssetReferenceArray(
+        string propertyName,
+        string label)
+    {
+        SerializedProperty array = _serialized.FindProperty(propertyName);
+        if (array == null || !array.isArray)
+        {
+            EditorGUILayout.HelpBox(
+                $"Missing serialized array: {propertyName}",
+                MessageType.Error);
+            return;
+        }
+
+        array.isExpanded = EditorGUILayout.Foldout(
+            array.isExpanded,
+            $"{label} ({array.arraySize})",
+            true);
+        if (!array.isExpanded)
+            return;
+
+        int removeIndex = -1;
+        EditorGUI.indentLevel++;
+        for (int index = 0; index < array.arraySize; index++)
+        {
+            using (new EditorGUILayout.HorizontalScope())
+            {
+                PS260714AssetReferenceField.Draw(
+                    array.GetArrayElementAtIndex(index),
+                    new GUIContent($"Element {index + 1}"));
+                if (GUILayout.Button("−", GUILayout.Width(24f)))
+                    removeIndex = index;
+            }
+        }
+        EditorGUI.indentLevel--;
+
+        if (removeIndex >= 0)
+        {
+            int previousSize = array.arraySize;
+            array.DeleteArrayElementAtIndex(removeIndex);
+            if (array.arraySize == previousSize)
+                array.DeleteArrayElementAtIndex(removeIndex);
+        }
+        if (GUILayout.Button($"Add {label}"))
+        {
+            int index = array.arraySize;
+            array.InsertArrayElementAtIndex(index);
+            array.GetArrayElementAtIndex(index).objectReferenceValue = null;
+        }
     }
 
     private bool MatchesSearch(DungeonDefinition definition)
@@ -735,26 +809,13 @@ public sealed class StageSelectEditorWindow : EditorWindow
         if (_selected == null)
             return;
 
-        string path = AssetDatabase.GetAssetPath(_selected);
-        if (!EditorUtility.DisplayDialog(
-                "Delete Stage",
-                $"Move '{_selected.name}' to the system trash?\n\n{path}",
-                "Move to Trash",
-                "Cancel"))
-        {
+        if (!PS260714SafeAssetDelete.TryMoveToTrash(
+                _selected,
+                "Stage"))
             return;
-        }
 
         _selected = null;
         _serialized = null;
-        if (!AssetDatabase.MoveAssetToTrash(path))
-        {
-            EditorUtility.DisplayDialog(
-                "Delete Stage",
-                "Failed to move the stage asset to trash.",
-                "OK");
-        }
-        AssetDatabase.SaveAssets();
         RefreshDefinitions();
     }
 

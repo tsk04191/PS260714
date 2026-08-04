@@ -384,27 +384,18 @@ public sealed class CharacterRoleTests
     }
 
     [Test]
-    public void RollLocalizationPicker_FiltersNameAndDescriptionKeys()
+    public void LocalizationPicker_UsesAllKeysAndHierarchicalMenuPaths()
     {
-        PS260714LocalizationKeyPicker.Refresh();
-        var nameKeys = PS260714LocalizationKeyPicker.GetKeys(".name");
-        var descriptionKeys =
-            PS260714LocalizationKeyPicker.GetKeys(".description");
+        PS260714LocalizationKeyField.Refresh();
+        var keys = PS260714LocalizationKeyField.GetKeys();
 
-        Assert.That(nameKeys, Does.Contain("roll.vanguard.name"));
+        Assert.That(keys, Does.Contain("roll.vanguard.name"));
+        Assert.That(keys, Does.Contain("character.suiren.name"));
+        Assert.That(keys, Does.Contain("ui.title.notice"));
         Assert.That(
-            descriptionKeys,
-            Does.Contain("roll.vanguard.description"));
-        foreach (string key in nameKeys)
-        {
-            Assert.That(key, Does.StartWith("roll."));
-            Assert.That(key, Does.EndWith(".name"));
-        }
-        foreach (string key in descriptionKeys)
-        {
-            Assert.That(key, Does.StartWith("roll."));
-            Assert.That(key, Does.EndWith(".description"));
-        }
+            PS260714LocalizationKeyField.GetMenuPath(
+                "character.suiren.name"),
+            Is.EqualTo("character/suiren/name"));
     }
 
     [Test]

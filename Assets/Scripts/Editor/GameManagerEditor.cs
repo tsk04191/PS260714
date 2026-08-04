@@ -335,11 +335,11 @@ internal static class CommonSettingsEditorGUI
         SerializedObject serialized = new(role);
         serialized.UpdateIfRequiredOrScript();
         DrawReadOnlyProperty(serialized, "roleId", "직군 ID");
-        PS260714LocalizationKeyPicker.DrawNameKey(
+        PS260714LocalizationKeyField.Draw(
             serialized.FindProperty("nameLocalizationKey"),
             "이름 Localization 키");
         DrawProperty(serialized, "fallbackName", "이름 fallback");
-        PS260714LocalizationKeyPicker.DrawDescriptionKey(
+        PS260714LocalizationKeyField.Draw(
             serialized.FindProperty("descriptionLocalizationKey"),
             "설명 Localization 키");
         DrawProperty(
@@ -395,12 +395,14 @@ internal static class CommonSettingsEditorGUI
         SerializedObject serialized = new(archetype);
         serialized.UpdateIfRequiredOrScript();
         DrawReadOnlyProperty(serialized, "archetypeId", "세부 직군 ID");
-        DrawProperty(serialized, "parentRole", "상위 직군");
-        PS260714LocalizationKeyPicker.DrawNameKey(
+        PS260714AssetReferenceField.Draw(
+            serialized.FindProperty("parentRole"),
+            new GUIContent("상위 직군"));
+        PS260714LocalizationKeyField.Draw(
             serialized.FindProperty("nameLocalizationKey"),
             "이름 Localization 키");
         DrawProperty(serialized, "fallbackName", "이름 fallback");
-        PS260714LocalizationKeyPicker.DrawDescriptionKey(
+        PS260714LocalizationKeyField.Draw(
             serialized.FindProperty("descriptionLocalizationKey"),
             "설명 Localization 키");
         DrawProperty(
@@ -426,14 +428,14 @@ internal static class CommonSettingsEditorGUI
         using (new EditorGUILayout.HorizontalScope())
         {
             EditorGUILayout.LabelField(
-                "roll.* 키를 strings.csv에서 선택합니다.",
+                "strings.csv 키를 계층형 목록에서 선택합니다.",
                 EditorStyles.miniLabel);
             if (GUILayout.Button("키 새로고침", GUILayout.Width(86f)))
-                PS260714LocalizationKeyPicker.Refresh();
+                PS260714LocalizationKeyField.Refresh();
             if (GUILayout.Button("Localization 편집", GUILayout.Width(112f)))
                 LocalizationEditorWindow.Open();
         }
-        PS260714LocalizationKeyPicker.DrawLoadError();
+        PS260714LocalizationKeyField.DrawLoadError();
     }
 
     private static void ApplyDefinition(
@@ -489,14 +491,14 @@ internal static class CommonSettingsEditorGUI
                 }
 
                 DrawRelativeProperty(passive, "passiveId", "패시브 ID");
-                PS260714LocalizationKeyPicker.DrawNameKey(
+                PS260714LocalizationKeyField.Draw(
                     passive.FindPropertyRelative("nameLocalizationKey"),
                     "이름 Localization 키");
                 DrawRelativeProperty(
                     passive,
                     "fallbackName",
                     "이름 fallback");
-                PS260714LocalizationKeyPicker.DrawDescriptionKey(
+                PS260714LocalizationKeyField.Draw(
                     passive.FindPropertyRelative(
                         "descriptionLocalizationKey"),
                     "설명 Localization 키");
@@ -605,222 +607,13 @@ internal static class CommonSettingsEditorGUI
     }
 }
 
-internal static class PS260714LocalizationKeyPicker
-{
-    private const string Prefix = "roll.";
-    private static readonly List<LocalizationKeyOption> NameOptions = new();
-    private static readonly List<LocalizationKeyOption> DescriptionOptions =
-        new();
-    private static bool _loaded;
-    private static string _loadError = string.Empty;
-
-    private readonly struct LocalizationKeyOption
-    {
-        public string Key { get; }
-        public string Label { get; }
-
-        public LocalizationKeyOption(string key, string label)
-        {
-            Key = key;
-            Label = label;
-        }
-    }
-
-    public static void Refresh()
-    {
-        NameOptions.Clear();
-        DescriptionOptions.Clear();
-        _loadError = string.Empty;
-        _loaded = true;
-
-        try
-        {
-            LocalizationSourceModel source =
-                LocalizationCodeGenerator.LoadSource();
-            foreach (LocalizationSourceString entry in source.Strings)
-            {
-                string key = (entry.Key ?? string.Empty).Trim();
-                if (!key.StartsWith(
-                        Prefix,
-                        StringComparison.OrdinalIgnoreCase))
-                {
-                    continue;
-                }
-
-                LocalizationKeyOption option = new(
-                    key,
-                    BuildLabel(entry, key));
-                if (key.EndsWith(
-                        ".name",
-                        StringComparison.OrdinalIgnoreCase))
-                {
-                    NameOptions.Add(option);
-                }
-                else if (key.EndsWith(
-                             ".description",
-                             StringComparison.OrdinalIgnoreCase))
-                {
-                    DescriptionOptions.Add(option);
-                }
-            }
-
-            NameOptions.Sort(CompareOptions);
-            DescriptionOptions.Sort(CompareOptions);
-        }
-        catch (Exception exception)
-        {
-            _loadError =
-                "Localization 키를 불러오지 못했습니다: " +
-                exception.Message;
-        }
-    }
-
-    public static void DrawNameKey(
-        SerializedProperty property,
-        string label)
-    {
-        Draw(property, label, NameOptions, ".name");
-    }
-
-    public static void DrawDescriptionKey(
-        SerializedProperty property,
-        string label)
-    {
-        Draw(property, label, DescriptionOptions, ".description");
-    }
-
-    public static void DrawLoadError()
-    {
-        EnsureLoaded();
-        if (!string.IsNullOrWhiteSpace(_loadError))
-            EditorGUILayout.HelpBox(_loadError, MessageType.Error);
-    }
-
-    internal static IReadOnlyList<string> GetKeys(string suffix)
-    {
-        EnsureLoaded();
-        List<LocalizationKeyOption> options = string.Equals(
-            suffix,
-            ".description",
-            StringComparison.OrdinalIgnoreCase)
-            ? DescriptionOptions
-            : NameOptions;
-        List<string> keys = new(options.Count);
-        foreach (LocalizationKeyOption option in options)
-            keys.Add(option.Key);
-        return keys;
-    }
-
-    private static void Draw(
-        SerializedProperty property,
-        string label,
-        List<LocalizationKeyOption> options,
-        string suffix)
-    {
-        EnsureLoaded();
-        if (property == null)
-        {
-            EditorGUILayout.HelpBox(
-                $"{label} 속성을 찾을 수 없습니다.",
-                MessageType.Error);
-            return;
-        }
-
-        string currentKey = (property.stringValue ?? string.Empty).Trim();
-        int currentIndex = 0;
-        string[] labels = new string[options.Count + 1];
-        labels[0] = "(선택 없음)";
-        for (int index = 0; index < options.Count; index++)
-        {
-            LocalizationKeyOption option = options[index];
-            labels[index + 1] = option.Label;
-            if (string.Equals(
-                    option.Key,
-                    currentKey,
-                    StringComparison.Ordinal))
-            {
-                currentIndex = index + 1;
-            }
-        }
-
-        EditorGUI.BeginChangeCheck();
-        int selectedIndex = EditorGUILayout.Popup(
-            label,
-            currentIndex,
-            labels);
-        if (EditorGUI.EndChangeCheck())
-        {
-            property.stringValue = selectedIndex <= 0
-                ? string.Empty
-                : options[selectedIndex - 1].Key;
-            currentKey = property.stringValue;
-            currentIndex = selectedIndex;
-        }
-
-        if (!string.IsNullOrEmpty(currentKey) && currentIndex == 0)
-        {
-            using (new EditorGUILayout.HorizontalScope())
-            {
-                EditorGUILayout.HelpBox(
-                    $"현재 키 '{currentKey}'는 {Prefix}*{suffix} " +
-                    "목록에 없습니다.",
-                    MessageType.Warning);
-                if (GUILayout.Button("키 지우기", GUILayout.Width(72f)))
-                    property.stringValue = string.Empty;
-            }
-        }
-        else if (options.Count == 0 &&
-                 string.IsNullOrWhiteSpace(_loadError))
-        {
-            EditorGUILayout.HelpBox(
-                $"{Prefix}*{suffix} 형식의 Localization 키가 없습니다.",
-                MessageType.Info);
-        }
-    }
-
-    private static void EnsureLoaded()
-    {
-        if (!_loaded)
-            Refresh();
-    }
-
-    private static int CompareOptions(
-        LocalizationKeyOption left,
-        LocalizationKeyOption right)
-    {
-        return string.Compare(
-            left.Key,
-            right.Key,
-            StringComparison.OrdinalIgnoreCase);
-    }
-
-    private static string BuildLabel(
-        LocalizationSourceString entry,
-        string key)
-    {
-        entry.Translations.TryGetValue("ko-KR", out string korean);
-        entry.Translations.TryGetValue("en-US", out string english);
-        korean = (korean ?? string.Empty).Trim();
-        english = (english ?? string.Empty).Trim();
-        if (!string.IsNullOrEmpty(korean) &&
-            !string.IsNullOrEmpty(english))
-        {
-            return $"{key}  |  {korean} / {english}";
-        }
-        if (!string.IsNullOrEmpty(korean))
-            return $"{key}  |  {korean}";
-        if (!string.IsNullOrEmpty(english))
-            return $"{key}  |  {english}";
-        return key;
-    }
-}
-
 public sealed class CommonSettingsProjectProvider : SettingsProvider
 {
     public const string SettingsPath =
         "Project/PS260714/Common Settings";
     private const string RoleRenameControlName =
         "CommonSettingsRoleRenameField";
+    private static UnityEngine.Object _pendingRoleSelection;
 
     private CharacterGradePaletteSO _palette;
     private CharacterRoleCatalogSO _roleCatalog;
@@ -866,15 +659,23 @@ public sealed class CommonSettingsProjectProvider : SettingsProvider
         SettingsService.OpenProjectSettings(SettingsPath);
     }
 
+    public static void Open(UnityEngine.Object roleDefinition)
+    {
+        _pendingRoleSelection = roleDefinition;
+        Open();
+    }
+
     public override void OnActivate(
         string searchContext,
         UnityEngine.UIElements.VisualElement rootElement)
     {
         ReloadAssets();
+        ApplyPendingRoleSelection();
     }
 
     public override void OnGUI(string searchContext)
     {
+        ApplyPendingRoleSelection();
         if (_palette == null)
         {
             _palette =
@@ -901,6 +702,19 @@ public sealed class CommonSettingsProjectProvider : SettingsProvider
         EditorGUILayout.Space(16f);
         DrawRoleSettings();
         EditorGUILayout.EndScrollView();
+    }
+
+    private void ApplyPendingRoleSelection()
+    {
+        if (_pendingRoleSelection is not CharacterRoleSO &&
+            _pendingRoleSelection is not CharacterArchetypeSO)
+        {
+            return;
+        }
+
+        _selectedRoleDefinition = _pendingRoleSelection;
+        _pendingRoleSelection = null;
+        CancelRenameSelectedRoleDefinition();
     }
 
     private static void DrawBuildSettings()
@@ -1009,7 +823,7 @@ public sealed class CommonSettingsProjectProvider : SettingsProvider
                 _selectedRoleDefinition),
             () =>
             {
-                PS260714LocalizationKeyPicker.Refresh();
+                PS260714LocalizationKeyField.Refresh();
                 ReloadAssets();
                 EnsureRoleSelection();
             });
@@ -1303,27 +1117,12 @@ public sealed class CommonSettingsProjectProvider : SettingsProvider
             return;
         }
 
-        string path = AssetDatabase.GetAssetPath(selected);
-        if (string.IsNullOrWhiteSpace(path))
-            return;
-        bool confirmed = EditorUtility.DisplayDialog(
-            "직군 에셋 삭제",
-            $"'{selected.name}' 에셋을 삭제합니다.\n\n{path}\n\n" +
-            "이 작업은 Unity Undo로 복구할 수 없습니다.",
-            "삭제",
-            "취소");
-        if (!confirmed)
-            return;
-
         bool wasRole = selected is CharacterRoleSO;
-        if (!AssetDatabase.DeleteAsset(path))
-        {
-            EditorUtility.DisplayDialog(
-                "직군 에셋 삭제",
-                "에셋을 삭제하지 못했습니다.",
-                "확인");
+        if (!PS260714SafeAssetDelete.TryMoveToTrash(
+                selected,
+                "Role Definition",
+                false))
             return;
-        }
 
         CommonSettingsEditorUtility.RemoveMissingAssetReferences(
             _roleCatalog,
@@ -1441,53 +1240,62 @@ public sealed class CommonSettingsProjectProvider : SettingsProvider
                 _roleSearchText =
                     PS260714AssetEditorList.DrawSearchField(
                         _roleSearchText);
-                using EditorGUILayout.ScrollViewScope listScroll = new(
-                    _roleListScroll,
-                    GUILayout.MinHeight(240f),
-                    GUILayout.MaxHeight(520f));
-                _roleListScroll = listScroll.scrollPosition;
-                _rolesExpanded = EditorGUILayout.Foldout(
-                    _rolesExpanded,
-                    "직군",
-                    true,
-                    EditorStyles.foldoutHeader);
-                if (_rolesExpanded)
+                int visibleCount = 0;
+                using (EditorGUILayout.ScrollViewScope listScroll = new(
+                           _roleListScroll,
+                           GUILayout.MinHeight(240f),
+                           GUILayout.MaxHeight(520f)))
                 {
-                    foreach (CharacterRoleSO role in _roleCatalog.Roles)
+                    _roleListScroll = listScroll.scrollPosition;
+                    _rolesExpanded = EditorGUILayout.Foldout(
+                        _rolesExpanded,
+                        "직군",
+                        true,
+                        EditorStyles.foldoutHeader);
+                    if (_rolesExpanded)
                     {
-                        if (role != null && !MatchesRoleSearch(role))
-                            continue;
-                        DrawSelectionButton(
-                            role,
-                            role != null
-                                ? role.GetDisplayName()
-                                : "(비어 있는 직군 참조)");
-                    }
-                }
-
-                EditorGUILayout.Space(6f);
-                _archetypesExpanded = EditorGUILayout.Foldout(
-                    _archetypesExpanded,
-                    "세부 직군",
-                    true,
-                    EditorStyles.foldoutHeader);
-                if (_archetypesExpanded)
-                {
-                    foreach (CharacterArchetypeSO archetype in
-                             _roleCatalog.Archetypes)
-                    {
-                        if (archetype != null &&
-                            !MatchesRoleSearch(archetype))
+                        foreach (CharacterRoleSO role in _roleCatalog.Roles)
                         {
-                            continue;
+                            if (role != null && !MatchesRoleSearch(role))
+                                continue;
+                            visibleCount++;
+                            DrawSelectionButton(
+                                role,
+                                role != null
+                                    ? role.GetDisplayName()
+                                    : "(비어 있는 직군 참조)");
                         }
-                        DrawSelectionButton(
-                            archetype,
-                            archetype != null
-                                ? archetype.GetDisplayName()
-                                : "(비어 있는 세부 직군 참조)");
+                    }
+
+                    EditorGUILayout.Space(6f);
+                    _archetypesExpanded = EditorGUILayout.Foldout(
+                        _archetypesExpanded,
+                        "세부 직군",
+                        true,
+                        EditorStyles.foldoutHeader);
+                    if (_archetypesExpanded)
+                    {
+                        foreach (CharacterArchetypeSO archetype in
+                                 _roleCatalog.Archetypes)
+                        {
+                            if (archetype != null &&
+                                !MatchesRoleSearch(archetype))
+                            {
+                                continue;
+                            }
+                            visibleCount++;
+                            DrawSelectionButton(
+                                archetype,
+                                archetype != null
+                                    ? archetype.GetDisplayName()
+                                    : "(비어 있는 세부 직군 참조)");
+                        }
                     }
                 }
+                PS260714AssetEditorList.DrawCountFooter(
+                    visibleCount,
+                    _roleCatalog.Roles.Count +
+                    _roleCatalog.Archetypes.Count);
             }
 
             using (new EditorGUILayout.VerticalScope(
@@ -1523,19 +1331,25 @@ public sealed class CommonSettingsProjectProvider : SettingsProvider
         {
             bool selected = asset != null &&
                             _selectedRoleDefinition == asset;
-            Texture preview = asset switch
+            UnityEngine.Object preview = asset switch
             {
-                CharacterRoleSO role =>
-                    PS260714AssetEditorList.GetAssetPreview(
-                        role.IconSprite),
-                CharacterArchetypeSO archetype =>
-                    PS260714AssetEditorList.GetAssetPreview(
-                        archetype.IconSprite),
+                CharacterRoleSO role => role.IconSprite,
+                CharacterArchetypeSO archetype => archetype.IconSprite,
                 _ => null
             };
-            bool clicked = PS260714AssetEditorList.DrawRow(
+            string stableId = asset switch
+            {
+                CharacterRoleSO role => role.RoleId,
+                CharacterArchetypeSO archetype => archetype.ArchetypeId,
+                _ => string.Empty
+            };
+            bool clicked = PS260714AssetEditorList.DrawAssetRow(
                 selected,
-                new GUIContent(label, preview));
+                asset,
+                preview,
+                label,
+                stableId,
+                AssetDatabase.GetAssetPath(asset));
             if (clicked && !selected)
             {
                 _selectedRoleDefinition = asset;
@@ -1589,7 +1403,7 @@ public sealed class CommonSettingsProjectProvider : SettingsProvider
             CommonSettingsEditorUtility.LoadGradePalette();
         _roleCatalog =
             CommonSettingsEditorUtility.LoadRoleCatalog();
-        PS260714LocalizationKeyPicker.Refresh();
+        PS260714LocalizationKeyField.Refresh();
         if (_selectedRoleDefinition != null &&
             (_roleCatalog == null ||
              !ContainsDefinition(

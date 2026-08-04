@@ -10,7 +10,6 @@ public sealed class StatusEffectEditorWindow : EditorWindow
     public const string MenuPath = PS260714EditorMenu.StatusEffectEditor;
 
     private const string AssetFolder = "Assets/Resources/StatusEffects";
-    private const string LocalizationPrefix = "status.";
     private const string RenameControlName = "StatusEffectRenameField";
     private static readonly string[] AlignmentOptions =
     {
@@ -167,16 +166,12 @@ public sealed class StatusEffectEditorWindow : EditorWindow
     };
 
     private readonly List<StatusEffectSO> _definitions = new();
-    private readonly List<LocalizationKeyOption> _nameKeys = new();
-    private readonly List<LocalizationKeyOption> _descriptionKeys = new();
-
     private StatusEffectSO _selected;
     private SerializedObject _serialized;
     private Vector2 _listScroll;
     private Vector2 _editorScroll;
     private string _searchText = string.Empty;
     private string _renameAssetName = string.Empty;
-    private string _localizationLoadError = string.Empty;
     private bool _isRenaming;
     private bool _focusRenameField;
     private bool _identityExpanded = true;
@@ -189,17 +184,6 @@ public sealed class StatusEffectEditorWindow : EditorWindow
     private bool _controlEffectsExpanded = true;
     private bool _operationsExpanded;
 
-    private readonly struct LocalizationKeyOption
-    {
-        public string Key { get; }
-        public string Label { get; }
-
-        public LocalizationKeyOption(string key, string label)
-        {
-            Key = key;
-            Label = label;
-        }
-    }
 
     [MenuItem(MenuPath)]
     public static void Open()
@@ -209,6 +193,17 @@ public sealed class StatusEffectEditorWindow : EditorWindow
         window.titleContent = new GUIContent("Status Effects");
         window.minSize = new Vector2(820f, 520f);
         window.Show();
+    }
+
+    public static void Open(StatusEffectSO definition)
+    {
+        Open();
+        StatusEffectEditorWindow window =
+            GetWindow<StatusEffectEditorWindow>();
+        window.RefreshList();
+        if (definition != null)
+            window.SelectDefinition(definition);
+        window.Repaint();
     }
 
     [MenuItem(MenuPath, true)]
@@ -343,13 +338,13 @@ public sealed class StatusEffectEditorWindow : EditorWindow
 
             visibleCount++;
             bool selected = ReferenceEquals(definition, _selected);
-            if (PS260714AssetEditorList.DrawRow(
+            if (PS260714AssetEditorList.DrawAssetRow(
                     selected,
-                    new GUIContent(
-                        definition.name,
-                        GetIconTexture(definition),
-                        definition.StatusId),
-                    TextAnchor.MiddleCenter))
+                    definition,
+                    definition.Icon,
+                    definition.name,
+                    definition.Alignment.ToString(),
+                    definition.StatusId))
             {
                 SelectDefinition(definition);
             }
@@ -365,9 +360,9 @@ public sealed class StatusEffectEditorWindow : EditorWindow
         }
 
         }
-        EditorGUILayout.LabelField(
-            $"{visibleCount} / {_definitions.Count}",
-            EditorStyles.centeredGreyMiniLabel);
+        PS260714AssetEditorList.DrawCountFooter(
+            visibleCount,
+            _definitions.Count);
         }
     }
 
@@ -436,8 +431,7 @@ public sealed class StatusEffectEditorWindow : EditorWindow
                 messageType);
         }
 
-        if (!string.IsNullOrEmpty(_localizationLoadError))
-            EditorGUILayout.HelpBox(_localizationLoadError, MessageType.Warning);
+        PS260714LocalizationKeyField.DrawLoadError();
     }
 
     private void DrawIdentity()
@@ -475,14 +469,10 @@ public sealed class StatusEffectEditorWindow : EditorWindow
 
         DrawLocalizationKey(
             "nameLocalizationKey",
-            "이름 키",
-            _nameKeys,
-            ".name");
+            "이름 키");
         DrawLocalizationKey(
             "descriptionLocalizationKey",
-            "설명 키",
-            _descriptionKeys,
-            ".description");
+            "설명 키");
         DrawEnum("alignment", "분류", AlignmentOptions);
 
         EditorGUILayout.LabelField("적용 가능 대상", EditorStyles.boldLabel);
@@ -1746,43 +1736,10 @@ public sealed class StatusEffectEditorWindow : EditorWindow
 
     private void DrawLocalizationKey(
         string propertyName,
-        string label,
-        List<LocalizationKeyOption> options,
-        string suffix)
+        string label)
     {
         SerializedProperty property = Find(propertyName);
-        property.stringValue = EditorGUILayout.TextField(
-            label,
-            property.stringValue ?? string.Empty);
-
-        string[] labels = new string[options.Count + 1];
-        labels[0] = "(직접 입력 유지)";
-        int currentIndex = 0;
-        for (int index = 0; index < options.Count; index++)
-        {
-            labels[index + 1] = options[index].Label;
-            if (string.Equals(
-                    property.stringValue,
-                    options[index].Key,
-                    StringComparison.Ordinal))
-            {
-                currentIndex = index + 1;
-            }
-        }
-
-        int selectedIndex = EditorGUILayout.Popup(
-            "목록에서 선택",
-            currentIndex,
-            labels);
-        if (selectedIndex > 0 && selectedIndex != currentIndex)
-            property.stringValue = options[selectedIndex - 1].Key;
-
-        if (options.Count == 0)
-        {
-            EditorGUILayout.LabelField(
-                $"{LocalizationPrefix}*{suffix} 키가 없습니다.",
-                EditorStyles.miniLabel);
-        }
+        PS260714LocalizationKeyField.Draw(property, label);
     }
 
     private bool BeginFoldout(ref bool expanded, string title)
@@ -1906,67 +1863,7 @@ public sealed class StatusEffectEditorWindow : EditorWindow
 
     private void RefreshLocalizationKeys()
     {
-        _nameKeys.Clear();
-        _descriptionKeys.Clear();
-        _localizationLoadError = string.Empty;
-        try
-        {
-            LocalizationSourceModel model =
-                LocalizationCodeGenerator.LoadSource();
-            foreach (LocalizationSourceString entry in model.Strings)
-            {
-                string key = (entry.Key ?? string.Empty).Trim();
-                if (!key.StartsWith(
-                        LocalizationPrefix,
-                        StringComparison.OrdinalIgnoreCase))
-                {
-                    continue;
-                }
-
-                LocalizationKeyOption option = new(
-                    key,
-                    BuildLocalizationLabel(entry, key));
-                if (key.EndsWith(".name", StringComparison.OrdinalIgnoreCase))
-                    _nameKeys.Add(option);
-                else if (key.EndsWith(
-                             ".description",
-                             StringComparison.OrdinalIgnoreCase))
-                    _descriptionKeys.Add(option);
-            }
-
-            _nameKeys.Sort(CompareLocalizationKeys);
-            _descriptionKeys.Sort(CompareLocalizationKeys);
-        }
-        catch (Exception exception)
-        {
-            _localizationLoadError =
-                "Localization 키를 불러오지 못했습니다: " +
-                exception.Message;
-        }
-    }
-
-    private static string BuildLocalizationLabel(
-        LocalizationSourceString entry,
-        string key)
-    {
-        entry.Translations.TryGetValue("ko-KR", out string korean);
-        entry.Translations.TryGetValue("en-US", out string english);
-        string preview = !string.IsNullOrWhiteSpace(korean)
-            ? korean.Trim()
-            : !string.IsNullOrWhiteSpace(english)
-                ? english.Trim()
-                : string.Empty;
-        return string.IsNullOrEmpty(preview) ? key : $"{key} — {preview}";
-    }
-
-    private static int CompareLocalizationKeys(
-        LocalizationKeyOption left,
-        LocalizationKeyOption right)
-    {
-        return string.Compare(
-            left.Key,
-            right.Key,
-            StringComparison.OrdinalIgnoreCase);
+        PS260714LocalizationKeyField.Refresh();
     }
 
     private void CreateDefinition()
@@ -2037,32 +1934,18 @@ public sealed class StatusEffectEditorWindow : EditorWindow
         if (_selected == null)
             return;
 
-        string path = AssetDatabase.GetAssetPath(_selected);
         string assetName = _selected.name;
-        if (!EditorUtility.DisplayDialog(
-                "Delete StatusEffectSO",
-                $"'{assetName}' SO 파일을 삭제합니다.\n\n{path}\n\n" +
-                "이 작업은 Unity Undo로 복구할 수 없습니다.",
-                "OK",
-                "Cancel"))
-        {
+        if (!PS260714SafeAssetDelete.TryMoveToTrash(
+                _selected,
+                "StatusEffectSO"))
             return;
-        }
-
-        if (!AssetDatabase.DeleteAsset(path))
-        {
-            EditorUtility.DisplayDialog(
-                "Delete StatusEffectSO",
-                "SO 파일을 삭제하지 못했습니다.",
-                "OK");
-            return;
-        }
 
         _selected = null;
         _serialized = null;
         CancelRename();
         RefreshList();
-        ShowNotification(new GUIContent($"Deleted {assetName}.asset"));
+        ShowNotification(new GUIContent(
+            $"Moved {assetName}.asset to Trash"));
     }
 
     private void BeginRename()

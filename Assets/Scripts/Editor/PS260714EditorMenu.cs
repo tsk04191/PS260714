@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using UnityEditor;
 using UnityEngine;
 
@@ -21,6 +22,8 @@ internal static class PS260714EditorMenu
         Root + "Enemy Editor";
     public const string StatusEffectEditor =
         Root + "Status Effect Editor";
+    public const string BattleEditor =
+        Root + "Battle Editor";
     public const string BattleVfxEditor =
         Root + "Effects/Battle VFX Editor";
     public const string ValidateBattleVfx =
@@ -209,6 +212,44 @@ internal static class PS260714AssetEditorList
                AssetPreview.GetMiniThumbnail(asset);
     }
 
+    internal static Texture GetAssetPreview(
+        UnityEngine.Object preferredPreview,
+        UnityEngine.Object fallbackAsset)
+    {
+        Texture preview = GetAssetPreview(preferredPreview);
+        if (preview != null)
+            return preview;
+        if (fallbackAsset == null)
+            return null;
+        return AssetPreview.GetMiniTypeThumbnail(fallbackAsset.GetType());
+    }
+
+    internal static bool DrawAssetRow(
+        bool selected,
+        UnityEngine.Object asset,
+        UnityEngine.Object preferredPreview,
+        string title,
+        string detail,
+        string tooltip = null)
+    {
+        string text = string.IsNullOrWhiteSpace(detail)
+            ? title ?? string.Empty
+            : $"{title}\n{detail}";
+        return DrawRow(
+            selected,
+            new GUIContent(
+                text,
+                GetAssetPreview(preferredPreview, asset),
+                tooltip ?? AssetDatabase.GetAssetPath(asset)));
+    }
+
+    internal static void DrawCountFooter(int visibleCount, int totalCount)
+    {
+        EditorGUILayout.LabelField(
+            $"{visibleCount} / {totalCount}",
+            EditorStyles.centeredGreyMiniLabel);
+    }
+
     internal static void Ping(UnityEngine.Object asset)
     {
         if (asset != null)
@@ -229,6 +270,257 @@ internal static class PS260714AssetEditorList
             clipping = TextClipping.Clip,
             wordWrap = false
         };
+    }
+}
+
+internal static class PS260714AssetEditorRegistry
+{
+    internal static bool CanOpen(UnityEngine.Object asset)
+    {
+        return asset is CharacterSO or
+            EnemySO or
+            ItemDefinitionSO or
+            StatusEffectSO or
+            BattleVfxCueSO or
+            DungeonDefinition or
+            BattleSO or
+            CharacterRoleSO or
+            CharacterArchetypeSO;
+    }
+
+    internal static bool Open(UnityEngine.Object asset)
+    {
+        switch (asset)
+        {
+            case CharacterSO character:
+                CharacterEditorWindow.Open(character);
+                return true;
+            case EnemySO enemy:
+                EnemyEditorWindow.Open(enemy);
+                return true;
+            case ItemDefinitionSO item:
+                ItemEditorWindow.Open(item);
+                return true;
+            case StatusEffectSO status:
+                StatusEffectEditorWindow.Open(status);
+                return true;
+            case BattleVfxCueSO cue:
+                BattleVfxEditorWindow.Open(cue);
+                return true;
+            case DungeonDefinition dungeon:
+                StageSelectEditorWindow.Open(dungeon);
+                return true;
+            case BattleSO battle:
+                BattleEditorWindow.Open(battle);
+                return true;
+            case CharacterRoleSO:
+            case CharacterArchetypeSO:
+                CommonSettingsProjectProvider.Open(asset);
+                return true;
+            default:
+                return false;
+        }
+    }
+}
+
+internal static class PS260714AssetReferenceField
+{
+    internal static void Draw(
+        SerializedProperty property,
+        GUIContent label,
+        bool allowSceneObjects = false)
+    {
+        if (property == null ||
+            property.propertyType != SerializedPropertyType.ObjectReference)
+        {
+            EditorGUILayout.HelpBox(
+                $"'{label?.text ?? "Asset"}' reference field was not found.",
+                MessageType.Error);
+            return;
+        }
+
+        EditorGUILayout.BeginHorizontal();
+        EditorGUILayout.PropertyField(property, label);
+        UnityEngine.Object value = property.objectReferenceValue;
+        using (new EditorGUI.DisabledScope(value == null))
+        {
+            if (GUILayout.Button("Ping", GUILayout.Width(42f)))
+            {
+                Selection.activeObject = value;
+                EditorGUIUtility.PingObject(value);
+            }
+
+            using (new EditorGUI.DisabledScope(
+                       !PS260714AssetEditorRegistry.CanOpen(value)))
+            {
+                if (GUILayout.Button("Edit", GUILayout.Width(42f)))
+                    PS260714AssetEditorRegistry.Open(value);
+            }
+
+            if (GUILayout.Button("Clear", GUILayout.Width(46f)))
+                property.objectReferenceValue = null;
+        }
+        EditorGUILayout.EndHorizontal();
+    }
+}
+
+internal static class PS260714SafeAssetDelete
+{
+    private const int VisibleReferenceLimit = 10;
+
+    internal static bool TryMoveToTrash(
+        UnityEngine.Object asset,
+        string assetLabel,
+        bool checkReferences = true)
+    {
+        if (!TryGetDeletablePath(asset, out string path))
+        {
+            EditorUtility.DisplayDialog(
+                $"Delete {assetLabel}",
+                "The selected object is not a deletable project asset.",
+                "OK");
+            return false;
+        }
+
+        if (checkReferences)
+        {
+            IReadOnlyList<string> references = FindReferences(asset);
+            if (references.Count > 0)
+            {
+                EditorUtility.DisplayDialog(
+                    $"Delete {assetLabel} Blocked",
+                    BuildReferenceMessage(references),
+                    "OK");
+                return false;
+            }
+        }
+
+        if (!EditorUtility.DisplayDialog(
+                $"Delete {assetLabel}",
+                $"Move '{asset.name}' to the system trash?\n\n{path}\n\n" +
+                "The asset can be restored from the system trash.",
+                "Move to Trash",
+                "Cancel"))
+        {
+            return false;
+        }
+
+        if (!AssetDatabase.MoveAssetToTrash(path))
+        {
+            EditorUtility.DisplayDialog(
+                $"Delete {assetLabel}",
+                "Failed to move the asset to the system trash.",
+                "OK");
+            return false;
+        }
+
+        AssetDatabase.SaveAssets();
+        return true;
+    }
+
+    internal static IReadOnlyList<string> FindReferences(
+        UnityEngine.Object asset)
+    {
+        if (!TryGetDeletablePath(asset, out string targetPath))
+            return Array.Empty<string>();
+
+        List<string> references = new();
+        string[] allPaths = AssetDatabase.GetAllAssetPaths();
+        foreach (string candidatePath in allPaths)
+        {
+            if (!IsReferenceCandidate(candidatePath, targetPath))
+                continue;
+            if (asset is ItemDefinitionSO &&
+                string.Equals(
+                    candidatePath,
+                    "Assets/Resources/ItemCatalog.asset",
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            string[] dependencies;
+            try
+            {
+                dependencies = AssetDatabase.GetDependencies(
+                    candidatePath,
+                    false);
+            }
+            catch (Exception)
+            {
+                continue;
+            }
+
+            foreach (string dependency in dependencies)
+            {
+                if (!string.Equals(
+                        dependency,
+                        targetPath,
+                        StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                references.Add(candidatePath);
+                break;
+            }
+        }
+
+        references.Sort(StringComparer.OrdinalIgnoreCase);
+        return references;
+    }
+
+    private static bool TryGetDeletablePath(
+        UnityEngine.Object asset,
+        out string path)
+    {
+        path = asset != null
+            ? AssetDatabase.GetAssetPath(asset)
+            : string.Empty;
+        return !string.IsNullOrWhiteSpace(path) &&
+               path.StartsWith("Assets/", StringComparison.Ordinal) &&
+               AssetDatabase.LoadMainAssetAtPath(path) == asset;
+    }
+
+    private static bool IsReferenceCandidate(
+        string candidatePath,
+        string targetPath)
+    {
+        if (string.IsNullOrWhiteSpace(candidatePath) ||
+            string.Equals(
+                candidatePath,
+                targetPath,
+                StringComparison.OrdinalIgnoreCase) ||
+            !candidatePath.StartsWith("Assets/", StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        string extension = Path.GetExtension(candidatePath);
+        return string.Equals(extension, ".asset", StringComparison.OrdinalIgnoreCase) ||
+               string.Equals(extension, ".prefab", StringComparison.OrdinalIgnoreCase) ||
+               string.Equals(extension, ".unity", StringComparison.OrdinalIgnoreCase) ||
+               string.Equals(extension, ".controller", StringComparison.OrdinalIgnoreCase) ||
+               string.Equals(extension, ".overrideController", StringComparison.OrdinalIgnoreCase) ||
+               string.Equals(extension, ".playable", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string BuildReferenceMessage(
+        IReadOnlyList<string> references)
+    {
+        int visibleCount = Math.Min(
+            references.Count,
+            VisibleReferenceLimit);
+        string message =
+            "The asset is still referenced and cannot be deleted.\n\n";
+        for (int index = 0; index < visibleCount; index++)
+            message += $"• {references[index]}\n";
+        if (references.Count > visibleCount)
+        {
+            message +=
+                $"• {references.Count - visibleCount} more reference(s)";
+        }
+        return message;
     }
 }
 
@@ -321,6 +613,11 @@ internal static class PS260714StatusEffectSelection
                     statusEffect.serializedObject.targetObject,
                     statusEffect.propertyPath,
                     options));
+        }
+        using (new EditorGUI.DisabledScope(selected == null))
+        {
+            if (GUILayout.Button("Edit", GUILayout.Width(42f)))
+                StatusEffectEditorWindow.Open(selected);
         }
         EditorGUILayout.EndHorizontal();
 
@@ -421,6 +718,16 @@ internal static class PS260714StatusEffectSelection
                 definition,
                 typeof(StatusEffectSO),
                 false);
+        }
+        using (new EditorGUI.DisabledScope(definition == null))
+        {
+            if (GUILayout.Button(
+                    "Edit",
+                    EditorStyles.miniButton,
+                    GUILayout.Width(40f)))
+            {
+                StatusEffectEditorWindow.Open(definition);
+            }
         }
         if (GUILayout.Button("×", EditorStyles.miniButton, GUILayout.Width(24f)))
             remove?.Invoke();
