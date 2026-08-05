@@ -648,7 +648,8 @@ public enum CharacterPassiveStatusTarget
 {
     Enemy,
     Ally,
-    All
+    All,
+    Self
 }
 
 public enum CharacterSkillSectionType

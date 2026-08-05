@@ -818,6 +818,8 @@ public static class CharacterDefinitionValidator
                     status.CanTargetAlly,
                 CharacterPassiveStatusTarget.All =>
                     status.CanTargetEnemy || status.CanTargetAlly,
+                CharacterPassiveStatusTarget.Self =>
+                    status.CanTargetAlly,
                 _ => false
             };
             if (!canReachTarget)
@@ -897,7 +899,8 @@ public static class CharacterDefinitionValidator
             definition.Trigger == CharacterPassiveTrigger.OnKill)
             return null;
 
-        if (definition.StatusTarget == CharacterPassiveStatusTarget.Ally)
+        if (definition.StatusTarget == CharacterPassiveStatusTarget.Ally ||
+            definition.StatusTarget == CharacterPassiveStatusTarget.Self)
             return CharacterTargetFaction.Ally;
         if (definition.StatusTarget == CharacterPassiveStatusTarget.Enemy)
             return CharacterTargetFaction.Enemy;

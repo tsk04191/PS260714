@@ -1803,6 +1803,51 @@ public sealed class CharacterP0RegressionTests
     }
 
     [Test]
+    public void StatusPassive_SelfTrigger_IgnoresOtherAllies()
+    {
+        CharacterSO definition = CreateSuirenFeatureFixture();
+        SerializedObject serialized = new(definition);
+        SerializedProperty cleanse = serialized
+            .FindProperty("passiveDefinitions")
+            .GetArrayElementAtIndex(1);
+        cleanse.FindPropertyRelative("statusTarget").enumValueIndex =
+            (int)CharacterPassiveStatusTarget.Self;
+        serialized.ApplyModifiedPropertiesWithoutUndo();
+
+        CharacterRuntime owner = CreateCharacter(definition);
+        CharacterRuntime ally = CreateCharacter(
+            CreateBaseCharacterFixture("SelfTriggerOtherAllyFixture"));
+        StatusEffectSO emergencyKit =
+            LoadAsset<StatusEffectSO>(EmergencyKitAssetPath);
+        StatusEffectSO stun = LoadAsset<StatusEffectSO>(StunAssetPath);
+        FakeBattleBoard board = new();
+        owner.BindBattle(null, board);
+        ally.BindBattle(null, board);
+
+        Assert.That(
+            owner.ApplyStatusEffect(emergencyKit, 1f, 2),
+            Is.True);
+        Assert.That(ally.ApplyStatusEffect(stun, 5f, 1), Is.True);
+
+        Assert.That(ally.HasStatusEffect(stun), Is.True);
+        Assert.That(
+            owner.GetStatusStackCount(emergencyKit),
+            Is.EqualTo(2),
+            "Another ally acquiring the status must not trigger Self.");
+
+        Assert.That(owner.ApplyStatusEffect(stun, 5f, 1), Is.True);
+
+        Assert.That(owner.HasStatusEffect(stun), Is.False);
+        Assert.That(ally.HasStatusEffect(stun), Is.True);
+        Assert.That(
+            owner.GetStatusStackCount(emergencyKit),
+            Is.EqualTo(1));
+        Assert.That(
+            board.LastAlliedStatusRemovalTargets,
+            Is.EquivalentTo(new IBattleCharacter[] { owner }));
+    }
+
+    [Test]
     public void StatusPassive_MultiFilterTriggersForEitherSelectedStatus()
     {
         CharacterSO definition = CreateSuirenFeatureFixture();

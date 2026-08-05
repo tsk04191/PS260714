@@ -18,6 +18,14 @@ public static class BattleItemUseExecutor
             return false;
         }
 
+        IReadOnlyList<EnemyRuntime> targets =
+            board.ExpandCharacterAreaTargets(
+                new[] { enemy },
+                item.EnemyTargeting.AreaOffsets,
+                item.EnemyTargeting.IncludeCenterTarget);
+        if (targets.Count == 0)
+            return false;
+
         if (item.UsesUnifiedAbilityEffects)
         {
             BattleEffectContext context =
@@ -26,7 +34,7 @@ public static class BattleItemUseExecutor
                     board,
                     resource,
                     CharacterTargetFaction.Enemy,
-                    new[] { enemy },
+                    targets,
                     Array.Empty<IBattleCharacter>(),
                     statusEffectsLastUntilBattleEnd:
                         item.StatusEffectsLastUntilBattleEnd);
@@ -39,23 +47,29 @@ public static class BattleItemUseExecutor
             if (effect == null)
                 continue;
 
-            bool current = effect.EffectType switch
+            foreach (EnemyRuntime target in targets)
             {
-                BattleItemEffectType.ForcePriorityTarget =>
-                    board.TryForcePriorityTarget(
-                        enemy,
-                        effect.RuntimeDuration),
-                BattleItemEffectType.ApplyFire =>
-                    board.TryApplyFireToEnemy(
-                        enemy,
-                        effect.RuntimeDuration,
-                        effect.Interval,
-                        Mathf.Max(1, effect.Amount)),
-                BattleItemEffectType.FixedDamage =>
-                    board.TryDamageEnemy(enemy, effect.Amount) > 0,
-                _ => false,
-            };
-            applied |= current;
+                if (target == null)
+                    continue;
+
+                bool current = effect.EffectType switch
+                {
+                    BattleItemEffectType.ForcePriorityTarget =>
+                        board.TryForcePriorityTarget(
+                            target,
+                            effect.RuntimeDuration),
+                    BattleItemEffectType.ApplyFire =>
+                        board.TryApplyFireToEnemy(
+                            target,
+                            effect.RuntimeDuration,
+                            effect.Interval,
+                            Mathf.Max(1, effect.Amount)),
+                    BattleItemEffectType.FixedDamage =>
+                        board.TryDamageEnemy(target, effect.Amount) > 0,
+                    _ => false,
+                };
+                applied |= current;
+            }
         }
 
         return applied;

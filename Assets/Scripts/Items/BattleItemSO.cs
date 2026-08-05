@@ -57,6 +57,51 @@ public enum BattleItemEffectType
     CharacterModifier = 5,
 }
 
+[Serializable]
+public sealed class BattleItemEnemyTargeting
+{
+    [Tooltip(
+        "When enabled, the enemy clicked as the range anchor also receives " +
+        "the item effects.")]
+    [SerializeField]
+    private bool includeCenterTarget = true;
+    [Tooltip(
+        "Board cells affected relative to the clicked enemy. The center " +
+        "cell is controlled separately by Include Center Target.")]
+    [SerializeField]
+    private List<CharacterTargetAreaOffset> areaOffsets = new();
+
+    public bool IncludeCenterTarget => includeCenterTarget;
+    public IReadOnlyList<CharacterTargetAreaOffset> AreaOffsets =>
+        areaOffsets != null
+            ? areaOffsets
+            : Array.Empty<CharacterTargetAreaOffset>();
+    public bool HasAnyTargetCell
+    {
+        get
+        {
+            if (includeCenterTarget)
+                return true;
+
+            foreach (CharacterTargetAreaOffset offset in AreaOffsets)
+            {
+                if (offset != null && !offset.IsCenter)
+                    return true;
+            }
+
+            return false;
+        }
+    }
+
+    public void Validate()
+    {
+        areaOffsets ??= new List<CharacterTargetAreaOffset>();
+        CharacterTargetAreaOffset.ValidateList(
+            areaOffsets,
+            DungeonBoardView.MaximumGridSize / 2);
+    }
+}
+
 public static class CoreBattleItemIds
 {
     public const string Focus = "battle.item.focus";
@@ -139,6 +184,8 @@ public sealed class BattleItemSO : ItemDefinitionSO
 {
     [Header("Battle Item")]
     [SerializeField] private BattleItemTargetType targetType;
+    [SerializeField]
+    private BattleItemEnemyTargeting enemyTargeting = new();
     [SerializeField] private BattleItemUsePolicy usePolicy;
     [SerializeField, HideInInspector]
     private int usageSchemaVersion;
@@ -165,6 +212,11 @@ public sealed class BattleItemSO : ItemDefinitionSO
     [SerializeField] private List<BattleItemEffectDefinition> effects = new();
 
     public BattleItemTargetType TargetType => targetType;
+    public BattleItemEnemyTargeting EnemyTargeting =>
+        enemyTargeting ??= new BattleItemEnemyTargeting();
+    public bool HasUsableTargetArea =>
+        targetType != BattleItemTargetType.Enemy ||
+        EnemyTargeting.HasAnyTargetCell;
     public BattleItemUsePolicy UsePolicy => UsesLegacyUsagePolicy
         ? usePolicy
         : lifecycle == BattleItemLifecycle.Disposable
@@ -215,6 +267,9 @@ public sealed class BattleItemSO : ItemDefinitionSO
     {
         get
         {
+            if (!HasUsableTargetArea)
+                return false;
+
             if (UsesUnifiedAbilityEffects)
             {
                 foreach (CharacterEffectDefinition effect in AbilityEffects)
@@ -457,6 +512,8 @@ public sealed class BattleItemSO : ItemDefinitionSO
             appliedStatusDurationMode =
                 BattleItemStatusDurationMode.EffectDuration;
         }
+        enemyTargeting ??= new BattleItemEnemyTargeting();
+        enemyTargeting.Validate();
         abilityEffects ??= new List<CharacterEffectDefinition>();
         foreach (CharacterEffectDefinition effect in abilityEffects)
             effect?.Validate();

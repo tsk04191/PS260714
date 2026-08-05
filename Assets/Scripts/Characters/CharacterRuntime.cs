@@ -2776,7 +2776,7 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
                 CharacterPassiveTrigger.OnStatusAcquired ||
                 !MatchesStatusTarget(
                     definition.StatusTarget,
-                    eventData.Target.Faction) ||
+                    eventData.Target) ||
                 !MatchesTriggerStatus(
                     definition.TriggerStatusScope,
                     definition.TriggerStatusSelection,
@@ -2883,15 +2883,17 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
                    System.StringComparison.Ordinal);
     }
 
-    private static bool MatchesStatusTarget(
+    private bool MatchesStatusTarget(
         CharacterPassiveStatusTarget configuredTarget,
-        CharacterTargetFaction acquiredFaction)
+        BattleStatusTarget acquiredTarget)
     {
         return configuredTarget == CharacterPassiveStatusTarget.All ||
                (configuredTarget == CharacterPassiveStatusTarget.Ally &&
-                acquiredFaction == CharacterTargetFaction.Ally) ||
+                acquiredTarget.Faction == CharacterTargetFaction.Ally) ||
                (configuredTarget == CharacterPassiveStatusTarget.Enemy &&
-                acquiredFaction == CharacterTargetFaction.Enemy);
+                acquiredTarget.Faction == CharacterTargetFaction.Enemy) ||
+               (configuredTarget == CharacterPassiveStatusTarget.Self &&
+                ReferenceEquals(acquiredTarget.Ally, this));
     }
 
     private static bool MatchesTriggerStatus(

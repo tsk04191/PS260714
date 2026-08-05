@@ -68,6 +68,51 @@ public sealed class EnemyP0RegressionTests
     }
 
     [Test]
+    public void BattleItemEnemyArea_ExcludesCenterAndDamagesSelectedCell()
+    {
+        EnemyRuntime center = LoadEnemy("Basic").CreateRuntime(20);
+        EnemyRuntime adjacent = LoadEnemy("Basic").CreateRuntime(20);
+        DungeonBoardView board = CreateBoard(
+            (1, 1, center),
+            (1, 2, adjacent));
+        BattleItemSO item = ScriptableObject.CreateInstance<BattleItemSO>();
+        item.hideFlags = HideFlags.HideAndDontSave;
+        _createdObjects.Add(item);
+
+        SerializedObject serialized = new(item);
+        serialized.FindProperty("targetType").enumValueIndex =
+            (int)BattleItemTargetType.Enemy;
+        SerializedProperty targeting =
+            serialized.FindProperty("enemyTargeting");
+        targeting.FindPropertyRelative("includeCenterTarget").boolValue =
+            false;
+        SerializedProperty offsets =
+            targeting.FindPropertyRelative("areaOffsets");
+        offsets.arraySize = 1;
+        SerializedProperty offset = offsets.GetArrayElementAtIndex(0);
+        offset.FindPropertyRelative("rowOffset").intValue = 0;
+        offset.FindPropertyRelative("columnOffset").intValue = 1;
+        SerializedProperty effects = serialized.FindProperty("effects");
+        effects.arraySize = 1;
+        SerializedProperty effect = effects.GetArrayElementAtIndex(0);
+        effect.FindPropertyRelative("effectType").enumValueIndex =
+            (int)BattleItemEffectType.FixedDamage;
+        effect.FindPropertyRelative("amount").intValue = 5;
+        serialized.ApplyModifiedPropertiesWithoutUndo();
+
+        int centerHealth = center.Health;
+        int adjacentHealth = adjacent.Health;
+        bool applied = BattleItemUseExecutor.TryApplyToEnemy(
+            item,
+            board,
+            center);
+
+        Assert.That(applied, Is.True);
+        Assert.That(center.Health, Is.EqualTo(centerHealth));
+        Assert.That(adjacent.Health, Is.EqualTo(adjacentHealth - 5));
+    }
+
+    [Test]
     public void StatusCondition_BuffAndDebuffScopesCountActiveStatuses()
     {
         StatusEffectSO firstBuff =

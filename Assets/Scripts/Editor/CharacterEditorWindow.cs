@@ -186,7 +186,8 @@ public sealed class CharacterEditorWindow : EditorWindow
     {
         "적",
         "아군",
-        "전체"
+        "전체",
+        "자신"
     };
 
     private static readonly string[] PassiveAttackTargetRelationOptions =
@@ -1779,6 +1780,8 @@ public sealed class CharacterEditorWindow : EditorWindow
                                 (int)CharacterPassiveStatusTarget.Enemy =>
                                     CharacterTargetFaction.Enemy,
                                 (int)CharacterPassiveStatusTarget.Ally =>
+                                    CharacterTargetFaction.Ally,
+                                (int)CharacterPassiveStatusTarget.Self =>
                                     CharacterTargetFaction.Ally,
                                 _ => null
                             };
@@ -3406,10 +3409,11 @@ public sealed class CharacterEditorWindow : EditorWindow
                 : faction);
     }
 
-    private static void DrawTargetAreaEditor(
+    internal static void DrawTargetAreaEditor(
         SerializedProperty definition,
         UnityEngine.Object owner,
-        CharacterTargetFaction faction)
+        CharacterTargetFaction faction,
+        string includeCenterPropertyName = null)
     {
         SerializedProperty offsets = definition.FindPropertyRelative(
             AreaOffsetsPropertyName);
@@ -3421,6 +3425,13 @@ public sealed class CharacterEditorWindow : EditorWindow
             return;
         }
 
+        SerializedProperty includeCenter =
+            string.IsNullOrWhiteSpace(includeCenterPropertyName)
+                ? null
+                : definition.FindPropertyRelative(
+                    includeCenterPropertyName);
+        int selectedCellCount = offsets.arraySize +
+                                (includeCenter?.boolValue == false ? 0 : 1);
         bool targetsAllies = faction == CharacterTargetFaction.Ally;
         bool showAreaEditor;
         Rect buttonRect;
@@ -3430,7 +3441,7 @@ public sealed class CharacterEditorWindow : EditorWindow
         {
             showAreaEditor = GUILayout.Button(
                 new GUIContent(
-                    $"Area ({offsets.arraySize + 1}칸)",
+                    $"Area ({selectedCellCount} cells)",
                     targetsAllies
                         ? "아군은 던전 격자 좌표가 없어 Area를 사용할 수 없습니다."
                         : "타겟 칸을 기준으로 범위를 편집합니다."),
@@ -3445,7 +3456,8 @@ public sealed class CharacterEditorWindow : EditorWindow
                 buttonRect,
                 new TargetAreaPopup(
                     owner,
-                    definition.propertyPath));
+                    definition.propertyPath,
+                    includeCenterPropertyName));
         }
     }
 
@@ -6627,13 +6639,16 @@ public sealed class CharacterEditorWindow : EditorWindow
 
         private readonly UnityEngine.Object _owner;
         private readonly string _definitionPropertyPath;
+        private readonly string _includeCenterPropertyName;
 
         public TargetAreaPopup(
             UnityEngine.Object owner,
-            string definitionPropertyPath)
+            string definitionPropertyPath,
+            string includeCenterPropertyName = null)
         {
             _owner = owner;
             _definitionPropertyPath = definitionPropertyPath;
+            _includeCenterPropertyName = includeCenterPropertyName;
         }
 
         public override Vector2 GetWindowSize()
@@ -6642,7 +6657,10 @@ public sealed class CharacterEditorWindow : EditorWindow
                              (CellSize + CellSpacing) - CellSpacing;
             return new Vector2(
                 gridSize + HorizontalPadding * 2f,
-                gridSize + VerticalPadding * 2f + 64f);
+                gridSize + VerticalPadding * 2f +
+                (string.IsNullOrWhiteSpace(_includeCenterPropertyName)
+                    ? 64f
+                    : 86f));
         }
 
         public override void OnGUI(Rect rect)
@@ -6666,6 +6684,26 @@ public sealed class CharacterEditorWindow : EditorWindow
                 return;
             }
 
+            SerializedProperty includeCenter = FindIncludeCenterTarget(
+                serializedOwner);
+            bool centerIncluded = includeCenter?.boolValue ?? true;
+            if (includeCenter != null)
+            {
+                EditorGUI.BeginChangeCheck();
+                bool nextCenterIncluded = EditorGUILayout.ToggleLeft(
+                    "Include Center Target",
+                    centerIncluded);
+                if (EditorGUI.EndChangeCheck())
+                {
+                    Undo.RecordObject(
+                        _owner,
+                        "Change Center Target Inclusion");
+                    includeCenter.boolValue = nextCenterIncluded;
+                    ApplyChanges(serializedOwner);
+                    centerIncluded = nextCenterIncluded;
+                }
+            }
+
             int gridSize = DungeonBoardView.MaximumGridSize;
             int center = gridSize / 2;
             float pixelSize = gridSize * (CellSize + CellSpacing) -
@@ -6681,10 +6719,12 @@ public sealed class CharacterEditorWindow : EditorWindow
                     int rowOffset = row - center;
                     int columnOffset = column - center;
                     bool isCenter = rowOffset == 0 && columnOffset == 0;
-                    bool isSelected = isCenter || ContainsOffset(
-                        offsets,
-                        rowOffset,
-                        columnOffset);
+                    bool isSelected = isCenter
+                        ? centerIncluded
+                        : ContainsOffset(
+                            offsets,
+                            rowOffset,
+                            columnOffset);
                     Rect cellRect = new(
                         gridRect.x + column * (CellSize + CellSpacing),
                         gridRect.y + row * (CellSize + CellSpacing),
@@ -6692,7 +6732,7 @@ public sealed class CharacterEditorWindow : EditorWindow
                         CellSize);
                     EditorGUI.DrawRect(
                         cellRect,
-                        isCenter
+                        isCenter && centerIncluded
                             ? Color.white
                             : isSelected
                                 ? new Color(0.82f, 0.25f, 0.2f)
@@ -6703,7 +6743,12 @@ public sealed class CharacterEditorWindow : EditorWindow
                         GUIStyle centerStyle = new(EditorStyles.miniBoldLabel)
                         {
                             alignment = TextAnchor.MiddleCenter,
-                            normal = { textColor = Color.black }
+                            normal =
+                            {
+                                textColor = centerIncluded
+                                    ? Color.black
+                                    : Color.white
+                            }
                         };
                         GUI.Label(cellRect, "T", centerStyle);
                         continue;
@@ -6723,7 +6768,10 @@ public sealed class CharacterEditorWindow : EditorWindow
             }
 
             EditorGUILayout.Space(4f);
-            if (GUILayout.Button("초기화 (타겟 칸만 유지)"))
+            if (GUILayout.Button(
+                    includeCenter != null
+                        ? "Clear Area Cells"
+                        : "초기화 (타겟 칸만 유지)"))
             {
                 ClearOffsets();
                 GUIUtility.ExitGUI();
@@ -6752,6 +6800,22 @@ public sealed class CharacterEditorWindow : EditorWindow
             SerializedProperty definition = serializedOwner.FindProperty(
                 _definitionPropertyPath);
             return definition?.FindPropertyRelative(AreaOffsetsPropertyName);
+        }
+
+        private SerializedProperty FindIncludeCenterTarget(
+            SerializedObject serializedOwner)
+        {
+            if (serializedOwner == null ||
+                string.IsNullOrWhiteSpace(_definitionPropertyPath) ||
+                string.IsNullOrWhiteSpace(_includeCenterPropertyName))
+            {
+                return null;
+            }
+
+            SerializedProperty definition = serializedOwner.FindProperty(
+                _definitionPropertyPath);
+            return definition?.FindPropertyRelative(
+                _includeCenterPropertyName);
         }
 
         private static bool ContainsOffset(

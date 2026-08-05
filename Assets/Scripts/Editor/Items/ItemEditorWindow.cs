@@ -442,6 +442,37 @@ public sealed class ItemEditorWindow : EditorWindow
                     "Battle Item Settings",
                     EditorStyles.boldLabel);
                 DrawProperty("targetType", "Target");
+                SerializedProperty targetType = Find("targetType");
+                if (targetType != null &&
+                    targetType.enumValueIndex ==
+                    (int)BattleItemTargetType.Enemy)
+                {
+                    SerializedProperty enemyTargeting =
+                        Find("enemyTargeting");
+                    EditorGUILayout.LabelField(
+                        "Enemy Target Area",
+                        EditorStyles.miniBoldLabel);
+                    EditorGUILayout.HelpBox(
+                        "The clicked enemy is the center anchor. Select the " +
+                        "board cells that receive this item's effects; the " +
+                        "center can be included or excluded in the area " +
+                        "popup.",
+                        MessageType.Info);
+                    if (enemyTargeting != null)
+                    {
+                        CharacterEditorWindow.DrawTargetAreaEditor(
+                            enemyTargeting,
+                            _selected,
+                            CharacterTargetFaction.Enemy,
+                            "includeCenterTarget");
+                    }
+                    else
+                    {
+                        EditorGUILayout.HelpBox(
+                            "Enemy targeting data could not be found.",
+                            MessageType.Error);
+                    }
+                }
                 DrawProperty("lifecycle", "Deck Lifecycle");
                 SerializedProperty lifecycle = Find("lifecycle");
                 bool disposable = lifecycle != null &&
@@ -544,6 +575,14 @@ public sealed class ItemEditorWindow : EditorWindow
             {
                 EditorGUILayout.HelpBox(
                     "Battle items require at least one ability effect.",
+                    MessageType.Error);
+            }
+            else if (!battleItem.HasUsableTargetArea)
+            {
+                EditorGUILayout.HelpBox(
+                    "Enemy items require at least one selected target area " +
+                    "cell. Include the center target or select a surrounding " +
+                    "cell.",
                     MessageType.Error);
             }
             else if (!battleItem.HasCompatibleEffects)

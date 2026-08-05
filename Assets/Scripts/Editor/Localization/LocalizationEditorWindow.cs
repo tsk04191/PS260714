@@ -279,7 +279,7 @@ namespace PS260714.Localization.Editor
                         EditorStyles.miniButton,
                         GUILayout.Width(24f)))
                     {
-                        if (TryDeleteRow(document, isStrings, row))
+                        if (TryStageRowDeletion(document, row))
                         {
                             if (isStrings)
                             {
@@ -301,32 +301,17 @@ namespace PS260714.Localization.Editor
             EditorGUILayout.EndScrollView();
         }
 
-        private bool TryDeleteRow(
+        /// <summary>
+        /// Removes a row from the editor's in-memory document. The deletion is
+        /// validated and written together with every other pending edit when
+        /// Save &amp; Apply is used.
+        /// </summary>
+        internal static bool TryStageRowDeletion(
             LocalizationCsvDocument document,
-            bool isStrings,
             int row)
         {
-            int identityColumn = isStrings
-                ? ResolveKeyColumn(document)
-                : 0;
-            string identity = document.Get(row, identityColumn).Trim();
-
-            string rowType = isStrings
-                ? "localization key"
-                : "locale row";
-            string displayIdentity = string.IsNullOrEmpty(identity)
-                ? $"row {row + 1}"
-                : identity;
-            if (!EditorUtility.DisplayDialog(
-                    $"Delete {rowType}",
-                    $"Delete '{displayIdentity}' from the CSV?\n\n" +
-                    "The deletion will be checked and written when " +
-                    "Save & Apply is used.",
-                    "Delete",
-                    "Cancel"))
-            {
+            if (document == null || row <= 0 || row >= document.RowCount)
                 return false;
-            }
 
             document.Rows.RemoveAt(row);
             return true;

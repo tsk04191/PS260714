@@ -777,6 +777,8 @@ public static class CharacterLocalization
                         UsesKoreanLocale ? "아군" : "an ally",
                     CharacterPassiveStatusTarget.Enemy =>
                         UsesKoreanLocale ? "적" : "an enemy",
+                    CharacterPassiveStatusTarget.Self =>
+                        UsesKoreanLocale ? "자신" : "self",
                     _ => UsesKoreanLocale ? "누군가" : "any combatant"
                 };
                 CharacterStatusSelection triggerStatuses =

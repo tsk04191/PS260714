@@ -9,30 +9,16 @@ status.opening.name,상태 이름,title,,빈틈,Opening
 status.opening.description,상태 설명,tooltip,,받는 피해가 10% 증가합니다.,Takes 10% more damage.
 ui.settings.language,설정 UI,body,,언어,Language
 ui.settings.font,설정 UI,body,,글꼴,Font
-item.soft_credit.name,아이템 이름,title,,인게임 크레딧,In-Game Credit
-item.soft_credit.description,아이템 설명,tooltip,,게임 플레이에서 획득하고 사용하는 기본 재화입니다.,Basic currency earned and spent through gameplay.
-item.paid_credit.name,아이템 이름,title,,유료 크레딧,Paid Credit
-item.paid_credit.description,아이템 설명,tooltip,,결제를 통해 획득하는 유료 재화입니다.,Premium currency obtained through purchases.
-item.free_credit.name,아이템 이름,title,,무료 크레딧,Free Credit
-item.free_credit.description,아이템 설명,tooltip,,게임 보상으로 획득하는 무료 프리미엄 재화입니다.,Free premium currency earned as gameplay rewards.
-item.standard_recruit_ticket.name,아이템 이름,title,,일반 모집권,Standard Recruit Ticket
-item.standard_recruit_ticket.description,아이템 설명,tooltip,,일반 모집에서 1회 사용할 수 있는 모집권입니다.,A ticket used for one standard recruitment.
-item.basic_upgrade_material.name,아이템 이름,title,,기초 강화 재료,Basic Upgrade Material
-item.basic_upgrade_material.description,아이템 설명,tooltip,,대원과 장비 강화에 사용하는 기초 재료입니다.,A basic material used for operator and equipment upgrades.
-item.focus.name,아이템 이름,title,,집중 표식,Focus Marker
-item.focus.effect,아이템 설명,tooltip,최우선 공격 대상,선택한 적을 {duration:0.#}초 동안 최우선 공격 대상으로 지정합니다.,Mark the selected enemy as the highest-priority target for {duration:0.#} seconds.
-item.molotov.name,아이템 이름,title,,화염병,Molotov
-item.molotov.effect,아이템 설명,tooltip,화염 지속시간,선택한 적에게 [icon=fire] [style=fire]화염[/style]을 {duration:0.#}초 부여합니다.,Apply [icon=fire] [style=fire]Fire[/style] to the selected enemy for {duration:0.#} seconds.
-item.molotov.usage,아이템 사용 정보,number,에너지 코스트,[style=energy]코스트 {cost}[/style] | 소모형,[style=energy]Cost {cost}[/style] | Consumable
-item.precision_shot.name,아이템 이름,title,,지정 사격,Precision Shot
-item.precision_shot.effect,아이템 설명,tooltip,직접 피해,선택한 적에게 [icon=damage] [style=damage]{damage} 피해[/style]를 즉시 줍니다.,Immediately deal [icon=damage] [style=damage]{damage} damage[/style] to the selected enemy.
-item.precision_shot.usage,아이템 사용 정보,number,에너지 코스트,[style=energy]코스트 {cost}[/style] | 소모형,[style=energy]Cost {cost}[/style] | Consumable
-item.over_supply.name,아이템 이름,title,,과잉 보급,Over Supply
-item.over_supply.effect,아이템 설명,tooltip,공격 속도 강화,선택한 터렛의 [icon=speed] [style=positive]공격 속도를 {multiplier:0.#}배[/style]로 {duration:0.#}초 동안 증가시킵니다.,Increase the selected turret's [icon=speed] [style=positive]attack speed to x{multiplier:0.#}[/style] for {duration:0.#} seconds.
-item.over_supply.usage,아이템 사용 정보,number,에너지 코스트,[style=energy]코스트 {cost}[/style] | 소모형,[style=energy]Cost {cost}[/style] | Consumable
-item.overheat.name,아이템 이름,title,,과열,Overheat
-item.overheat.effect,아이템 설명,tooltip,공격력 강화,선택한 터렛의 [style=damage]공격력을 {multiplier:0.#}배[/style]로 {duration:0.#}초 동안 증가시킵니다.,Increase the selected turret's [style=damage]attack power to x{multiplier:0.#}[/style] for {duration:0.#} seconds.
-item.overheat.usage,아이템 사용 정보,number,에너지 코스트,[style=energy]코스트 {cost}[/style] | 소모형,[style=energy]Cost {cost}[/style] | Consumable
+item.client.soft_credit.name,아이템 이름,title,,인게임 크레딧,In-Game Credit
+item.client.soft_credit.description,아이템 설명,tooltip,,게임 플레이에서 획득하고 사용하는 기본 재화입니다.,Basic currency earned and spent through gameplay.
+item.client.paid_credit.name,아이템 이름,title,,유료 크레딧,Paid Credit
+item.client.paid_credit.description,아이템 설명,tooltip,,결제를 통해 획득하는 유료 재화입니다.,Premium currency obtained through purchases.
+item.client.free_credit.name,아이템 이름,title,,무료 크레딧,Free Credit
+item.client.free_credit.description,아이템 설명,tooltip,,게임 보상으로 획득하는 무료 프리미엄 재화입니다.,Free premium currency earned as gameplay rewards.
+item.client.standard_recruit_ticket.name,아이템 이름,title,,일반 모집권,Standard Recruit Ticket
+item.client.standard_recruit_ticket.description,아이템 설명,tooltip,,일반 모집에서 1회 사용할 수 있는 모집권입니다.,A ticket used for one standard recruitment.
+item.client.basic_upgrade_material.name,아이템 이름,title,,기초 강화 재료,Basic Upgrade Material
+item.client.basic_upgrade_material.description,아이템 설명,tooltip,,대원과 장비 강화에 사용하는 기초 재료입니다.,A basic material used for operator and equipment upgrades.
 codex.skill.title,기술 도감 제목,title,,기술 도감,Skill Codex
 codex.skill.description,기술 도감 설명,body,,재사용 가능한 전투 기술,Reusable Battle Skills
 codex.item.title,아이템 도감 제목,title,,아이템 도감,Item Codex
@@ -354,3 +340,5 @@ item.battle.power_drink.name,아이템 이름,title,,파워 음료,Power Drink
 item.battle.power_drink.description,아이템 설명,tooltip,,[icon=power] 파워 1 획득,Gain [icon=power] Power 1 status
 item.battle.speed_drink.name,아이템 이름,title,,스피드 음료,Speed Drink
 item.battle.speed_drink.description,아이템 설명,tooltip,,[icon=speed] 스피드 1 획득,Gain [icon=speed]  Speed 1 status
+item.battle.boom.name,아이템 이름,title,,폭탄,Boom
+item.battle.boom.description,아이템 설명,tooltip,,[icon=damage] 피해량을 3X3 범위로 부여,Give [icon=damage] damage to 3X3

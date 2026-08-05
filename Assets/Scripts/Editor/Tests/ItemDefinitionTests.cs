@@ -334,6 +334,8 @@ public sealed class ItemDefinitionTests
     [Test]
     public void LocalizationKeys_OverrideFallbackAndMissingKeysUseFallback()
     {
+        using TemporaryLocalizationFixture fixture = new(
+            "Localized fixture text");
         GeneralItemSO item =
             ScriptableObject.CreateInstance<GeneralItemSO>();
         try
@@ -342,10 +344,10 @@ public sealed class ItemDefinitionTests
             serialized.FindProperty("itemId").stringValue =
                 "test.localized";
             serialized.FindProperty("nameLocalizationKey").stringValue =
-                LocalizationKeys.ItemSoftCreditName;
+                fixture.Key;
             serialized.FindProperty(
                     "descriptionLocalizationKey").stringValue =
-                LocalizationKeys.ItemSoftCreditDescription;
+                fixture.Key;
             serialized.FindProperty("koreanName").stringValue =
                 "한글 대체 이름";
             serialized.FindProperty("englishName").stringValue =
@@ -356,19 +358,24 @@ public sealed class ItemDefinitionTests
                 "English fallback description";
             serialized.ApplyModifiedPropertiesWithoutUndo();
 
-            Assert.That(item.GetDisplayName(true), Is.EqualTo(
-                "인게임 크레딧"));
-            Assert.That(item.GetDisplayName(false), Is.EqualTo(
-                "In-Game Credit"));
-            Assert.That(item.GetDescription(false), Is.EqualTo(
-                "Basic currency earned and spent through gameplay."));
+            Assert.That(
+                item.GetDisplayName(true),
+                Is.EqualTo(fixture.Text));
+            Assert.That(
+                item.GetDisplayName(false),
+                Is.EqualTo(fixture.Text));
+            Assert.That(
+                item.GetDescription(false),
+                Is.EqualTo(fixture.Text));
 
             serialized.Update();
+            string missingKey =
+                $"test.missing.{System.Guid.NewGuid():N}";
             serialized.FindProperty("nameLocalizationKey").stringValue =
-                "item.missing.name";
+                missingKey + ".name";
             serialized.FindProperty(
                     "descriptionLocalizationKey").stringValue =
-                "item.missing.description";
+                missingKey + ".description";
             serialized.ApplyModifiedPropertiesWithoutUndo();
 
             Assert.That(item.GetDisplayName(true), Is.EqualTo(
@@ -421,6 +428,8 @@ public sealed class ItemDefinitionTests
         BattleItemSO item =
             ScriptableObject.CreateInstance<BattleItemSO>();
         string previousLocale = LocalizationService.CurrentLocale;
+        using TemporaryLocalizationFixture fixture = new(
+            "Effect lasts {duration:0.#} seconds.");
         try
         {
             ConfigureBattleItem(
@@ -433,7 +442,7 @@ public sealed class ItemDefinitionTests
             SerializedObject serialized = new(item);
             serialized.FindProperty(
                     "descriptionLocalizationKey").stringValue =
-                LocalizationKeys.ItemFocusEffect;
+                fixture.Key;
             SerializedProperty effects =
                 serialized.FindProperty("effects");
             effects.arraySize = 1;
@@ -446,11 +455,14 @@ public sealed class ItemDefinitionTests
                 LocalizationService.SetLocale("en-US", false),
                 Is.True);
 
+            string expected = LocalizationService.Get(
+                fixture.Key,
+                LocalizationService.Arg("duration", 5f));
             Assert.That(
                 item.GetLocalizedDescription(),
-                Is.EqualTo(
-                    "Mark the selected enemy as the highest-priority " +
-                    "target for 5 seconds."));
+                Is.EqualTo(expected));
+            Assert.That(expected, Does.Contain("5"));
+            Assert.That(expected, Does.Not.Contain("{duration"));
         }
         finally
         {
@@ -520,6 +532,37 @@ public sealed class ItemDefinitionTests
                 item.AppliedStatusDurationMode,
                 Is.EqualTo(BattleItemStatusDurationMode.UntilBattleEnd));
             Assert.That(item.StatusEffectsLastUntilBattleEnd, Is.True);
+        }
+        finally
+        {
+            Object.DestroyImmediate(item);
+        }
+    }
+
+    [Test]
+    public void EnemyBattleItemTargetArea_CanExcludeCenterTarget()
+    {
+        BattleItemSO item = ScriptableObject.CreateInstance<BattleItemSO>();
+        try
+        {
+            SerializedObject serialized = new(item);
+            serialized.FindProperty("targetType").enumValueIndex =
+                (int)BattleItemTargetType.Enemy;
+            SerializedProperty targeting =
+                serialized.FindProperty("enemyTargeting");
+            targeting.FindPropertyRelative("includeCenterTarget")
+                .boolValue = false;
+            SerializedProperty offsets =
+                targeting.FindPropertyRelative("areaOffsets");
+            offsets.arraySize = 1;
+            SerializedProperty offset = offsets.GetArrayElementAtIndex(0);
+            offset.FindPropertyRelative("rowOffset").intValue = 0;
+            offset.FindPropertyRelative("columnOffset").intValue = 1;
+            serialized.ApplyModifiedPropertiesWithoutUndo();
+
+            Assert.That(item.EnemyTargeting.IncludeCenterTarget, Is.False);
+            Assert.That(item.EnemyTargeting.AreaOffsets, Has.Count.EqualTo(1));
+            Assert.That(item.HasUsableTargetArea, Is.True);
         }
         finally
         {
@@ -1071,6 +1114,51 @@ public sealed class ItemDefinitionTests
             maximumRunUses;
         serialized.FindProperty("cooldown").floatValue = cooldown;
         serialized.ApplyModifiedPropertiesWithoutUndo();
+    }
+
+    private sealed class TemporaryLocalizationFixture : System.IDisposable
+    {
+        private readonly List<Dictionary<string, LocalizationEntry>>
+            _localeTables = new();
+
+        public string Key { get; } =
+            $"test.localization.{System.Guid.NewGuid():N}";
+        public string Text { get; }
+
+        public TemporaryLocalizationFixture(string text)
+        {
+            Text = text ?? string.Empty;
+            FieldInfo[] fields = typeof(GeneratedLocalizationTables)
+                .GetFields(BindingFlags.Static | BindingFlags.NonPublic);
+            foreach (FieldInfo field in fields)
+            {
+                if (field.GetValue(null) is not
+                    Dictionary<string, LocalizationEntry> table)
+                {
+                    continue;
+                }
+
+                table.Add(Key, new LocalizationEntry(Text, "body"));
+                _localeTables.Add(table);
+            }
+
+            if (_localeTables.Count == 0)
+            {
+                throw new System.InvalidOperationException(
+                    "Generated localization locale tables were not found.");
+            }
+        }
+
+        public void Dispose()
+        {
+            foreach (Dictionary<string, LocalizationEntry> table in
+                     _localeTables)
+            {
+                table.Remove(Key);
+            }
+
+            _localeTables.Clear();
+        }
     }
 
     private static void ConfigureModernBattleItem(

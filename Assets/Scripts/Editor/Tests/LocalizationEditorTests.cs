@@ -137,6 +137,32 @@ public sealed class LocalizationEditorTests
     }
 
     [Test]
+    public void StageRowDeletion_RemovesOnlyRequestedInMemoryRow()
+    {
+        LocalizationCsvDocument document = CreateStringsDocument("First");
+        document.Rows.Add(new List<string>
+        {
+            "test.editor.second",
+            "Editor test",
+            "body",
+            string.Empty,
+            "Second",
+        });
+
+        bool deleted = LocalizationEditorWindow.TryStageRowDeletion(
+            document,
+            1);
+
+        Assert.That(deleted, Is.True);
+        Assert.That(document.RowCount, Is.EqualTo(2));
+        Assert.That(document.Get(1, 0), Is.EqualTo("test.editor.second"));
+        Assert.That(
+            LocalizationEditorWindow.TryStageRowDeletion(document, 0),
+            Is.False,
+            "The CSV header must not be deletable.");
+    }
+
+    [Test]
     public void MarkupCatalog_ProvidesEditorStyleAndIconOptions()
     {
         LocalizationMarkupCatalog catalog =

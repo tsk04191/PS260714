@@ -1398,6 +1398,17 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
         IReadOnlyList<EnemyRuntime> centerTargets,
         IReadOnlyList<CharacterTargetAreaOffset> areaOffsets)
     {
+        return ExpandCharacterAreaTargets(
+            centerTargets,
+            areaOffsets,
+            true);
+    }
+
+    public IReadOnlyList<EnemyRuntime> ExpandCharacterAreaTargets(
+        IReadOnlyList<EnemyRuntime> centerTargets,
+        IReadOnlyList<CharacterTargetAreaOffset> areaOffsets,
+        bool includeCenterTargets)
+    {
         if (centerTargets == null || centerTargets.Count == 0)
             return Array.Empty<EnemyRuntime>();
 
@@ -1421,7 +1432,8 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
             if (!TryFindEnemyTile(centerTarget, out DungeonTileView centerTile))
                 continue;
 
-            AddAreaTile(centerTile);
+            if (includeCenterTargets)
+                AddAreaTile(centerTile);
             if (areaOffsets == null)
                 continue;
 
