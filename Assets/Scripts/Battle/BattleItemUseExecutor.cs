@@ -27,7 +27,9 @@ public static class BattleItemUseExecutor
                     resource,
                     CharacterTargetFaction.Enemy,
                     new[] { enemy },
-                    Array.Empty<IBattleCharacter>());
+                    Array.Empty<IBattleCharacter>(),
+                    statusEffectsLastUntilBattleEnd:
+                        item.StatusEffectsLastUntilBattleEnd);
             return TryExecuteUnifiedAbility(item, context);
         }
 
@@ -91,7 +93,8 @@ public static class BattleItemUseExecutor
                     CharacterTargetFaction.Ally,
                     Array.Empty<EnemyRuntime>(),
                     new IBattleCharacter[] { turret },
-                    turret.CurrentAttackPower);
+                    turret.CurrentAttackPower,
+                    item.StatusEffectsLastUntilBattleEnd);
             return TryExecuteUnifiedAbility(item, context);
         }
 

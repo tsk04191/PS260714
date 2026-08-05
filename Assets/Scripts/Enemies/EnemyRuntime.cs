@@ -1063,8 +1063,11 @@ public sealed class EnemyRuntime
         StatusEffectSO definition,
         float duration)
     {
-        if (definition.DurationMode == StatusEffectDurationMode.Permanent)
+        if (definition.DurationMode == StatusEffectDurationMode.Permanent ||
+            float.IsPositiveInfinity(duration))
+        {
             return float.PositiveInfinity;
+        }
 
         return TimePrecision.Normalize(
             duration > 0f ? duration : definition.DefaultDuration,

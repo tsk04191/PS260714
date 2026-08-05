@@ -2,9 +2,11 @@ using System.Collections.Generic;
 using System.Reflection;
 using NUnit.Framework;
 using PS260714.Localization;
+using TMPro;
 using UnityEditor;
 using UnityEngine;
 using UnityEngine.TestTools;
+using UnityEngine.UI;
 
 public sealed class ItemDefinitionTests
 {
@@ -61,6 +63,272 @@ public sealed class ItemDefinitionTests
         }
 
         PlayerPrefs.Save();
+    }
+
+    [Test]
+    public void PresentationSprites_ExposeIconAndCardIllustration()
+    {
+        GeneralItemSO item =
+            ScriptableObject.CreateInstance<GeneralItemSO>();
+        Texture2D texture = new(2, 2);
+        Sprite icon = Sprite.Create(
+            texture,
+            new Rect(0f, 0f, 1f, 1f),
+            Vector2.one * 0.5f);
+        Sprite illustration = Sprite.Create(
+            texture,
+            new Rect(1f, 0f, 1f, 2f),
+            Vector2.one * 0.5f);
+        try
+        {
+            SerializedObject serialized = new(item);
+            serialized.FindProperty("icon").objectReferenceValue = icon;
+            serialized.FindProperty("illustration").objectReferenceValue =
+                illustration;
+            serialized.ApplyModifiedPropertiesWithoutUndo();
+
+            Assert.That(item.Icon, Is.SameAs(icon));
+            Assert.That(item.Illustration, Is.SameAs(illustration));
+        }
+        finally
+        {
+            Object.DestroyImmediate(icon);
+            Object.DestroyImmediate(illustration);
+            Object.DestroyImmediate(texture);
+            Object.DestroyImmediate(item);
+        }
+    }
+
+    [Test]
+    public void BattleItemCardPrefab_UsesFiveBySevenArtworkLayout()
+    {
+        BattleItemSO item =
+            ScriptableObject.CreateInstance<BattleItemSO>();
+        Texture2D texture = new(4, 4);
+        Sprite icon = Sprite.Create(
+            texture,
+            new Rect(0f, 0f, 2f, 2f),
+            Vector2.one * 0.5f);
+        Sprite illustration = Sprite.Create(
+            texture,
+            new Rect(0f, 0f, 4f, 4f),
+            Vector2.one * 0.5f);
+        GameObject prefab = Resources.Load<GameObject>(
+            "Presentation/BattleItemCard");
+        Assert.That(prefab, Is.Not.Null);
+        GameObject cardObject = Object.Instantiate(prefab);
+        try
+        {
+            SerializedObject serialized = new(item);
+            serialized.FindProperty("itemId").stringValue = "test.card";
+            serialized.FindProperty("koreanName").stringValue = "테스트 카드";
+            serialized.FindProperty("englishName").stringValue = "Test Card";
+            serialized.FindProperty("icon").objectReferenceValue = icon;
+            serialized.FindProperty("illustration").objectReferenceValue =
+                illustration;
+            serialized.FindProperty("energyCost").intValue = 2;
+            serialized.ApplyModifiedPropertiesWithoutUndo();
+
+            RectTransform cardRect = cardObject.transform as RectTransform;
+            DungeonItemCardView card =
+                cardObject.GetComponent<DungeonItemCardView>();
+            Assert.That(card, Is.Not.Null);
+            Assert.That(card.HasRequiredPrefabReferences(), Is.True);
+            Assert.That(card.Initialize(item, _ => { }), Is.True);
+
+            Image artwork = cardObject.transform
+                .Find("imgItemIllustration")
+                .GetComponent<Image>();
+            RectTransform iconFrame = cardObject.transform
+                .Find("grpItemIcon") as RectTransform;
+            Image iconImage = iconFrame.Find("imgItemIcon")
+                .GetComponent<Image>();
+            RectTransform nameBand = cardObject.transform
+                .Find("grpItemNameBand") as RectTransform;
+
+            Assert.That(
+                cardRect.rect.height / cardRect.rect.width,
+                Is.EqualTo(1.4f).Within(0.001f));
+            Assert.That(artwork.sprite, Is.SameAs(illustration));
+            Assert.That(iconImage.sprite, Is.SameAs(icon));
+            Assert.That(
+                iconFrame.rect.width,
+                Is.EqualTo(iconFrame.rect.height));
+            Assert.That(nameBand.anchorMax.y, Is.EqualTo(0f));
+            Assert.That(
+                cardObject.transform.Find("grpItemPopup")
+                    .gameObject.activeSelf,
+                Is.False);
+        }
+        finally
+        {
+            Object.DestroyImmediate(cardObject);
+            Object.DestroyImmediate(icon);
+            Object.DestroyImmediate(illustration);
+            Object.DestroyImmediate(texture);
+            Object.DestroyImmediate(item);
+        }
+    }
+
+    [Test]
+    public void BattleItemCardPrefab_LeavesMissingSpritesBlank()
+    {
+        BattleItemSO item =
+            ScriptableObject.CreateInstance<BattleItemSO>();
+        GameObject prefab = Resources.Load<GameObject>(
+            "Presentation/BattleItemCard");
+        Assert.That(prefab, Is.Not.Null);
+        GameObject cardObject = Object.Instantiate(prefab);
+        try
+        {
+            SerializedObject serialized = new(item);
+            serialized.FindProperty("itemId").stringValue =
+                "test.blank-card";
+            serialized.FindProperty("englishName").stringValue =
+                "Blank Card";
+            serialized.ApplyModifiedPropertiesWithoutUndo();
+
+            DungeonItemCardView card =
+                cardObject.GetComponent<DungeonItemCardView>();
+            Assert.That(card.Initialize(item, _ => { }), Is.True);
+
+            Image artwork = cardObject.transform
+                .Find("imgItemIllustration")
+                .GetComponent<Image>();
+            Image iconImage = cardObject.transform
+                .Find("grpItemIcon/imgItemIcon")
+                .GetComponent<Image>();
+            Assert.That(artwork.sprite, Is.Null);
+            Assert.That(artwork.enabled, Is.False);
+            Assert.That(iconImage.sprite, Is.Null);
+            Assert.That(iconImage.enabled, Is.False);
+        }
+        finally
+        {
+            Object.DestroyImmediate(cardObject);
+            Object.DestroyImmediate(item);
+        }
+    }
+
+    [Test]
+    public void BattleItemHand_ShowsOneCardPerRemainingUseWithoutCountText()
+    {
+        BattleItemSO item =
+            ScriptableObject.CreateInstance<BattleItemSO>();
+        GameObject prefab = Resources.Load<GameObject>(
+            "Presentation/BattleItemCard");
+        GameObject cardObject = Object.Instantiate(prefab);
+        try
+        {
+            ConfigureBattleItem(
+                item,
+                "test.multiple-visible-cards",
+                BattleItemUsePolicy.LimitedUse,
+                3,
+                0,
+                0f);
+            MethodInfo resolveVisibleCardCount =
+                typeof(DungeonItemHandView).GetMethod(
+                    "ResolveVisibleCardCount",
+                    BindingFlags.Static | BindingFlags.NonPublic);
+            Assert.That(resolveVisibleCardCount, Is.Not.Null);
+            Assert.That(
+                resolveVisibleCardCount.Invoke(
+                    null,
+                    new object[] { item, true, 3 }),
+                Is.EqualTo(3));
+            Assert.That(
+                resolveVisibleCardCount.Invoke(
+                    null,
+                    new object[] { item, true, 0 }),
+                Is.Zero,
+                "A consumed finite-use card must disappear from the hand.");
+
+            DungeonItemCardView card =
+                cardObject.GetComponent<DungeonItemCardView>();
+            Assert.That(card.Initialize(item, _ => { }), Is.True);
+            card.Refresh(3, 10, true, 0f, false);
+            TextMeshProUGUI stateText = cardObject.transform
+                .Find("grpItemNameBand/txtItemState")
+                .GetComponent<TextMeshProUGUI>();
+            Assert.That(
+                stateText.text,
+                Is.Empty,
+                "Duplicate quantity is represented by card instances, not xN text.");
+        }
+        finally
+        {
+            Object.DestroyImmediate(cardObject);
+            Object.DestroyImmediate(item);
+        }
+    }
+
+    [Test]
+    public void ActiveSkillResourceHud_ShowsRadialCooldownAndHoverTooltip()
+    {
+        Texture2D texture = new(2, 2);
+        Sprite resourceIcon = Sprite.Create(
+            texture,
+            new Rect(0f, 0f, 2f, 2f),
+            Vector2.one * 0.5f);
+        GameObject root = new(
+            "TestActiveSkillResource",
+            typeof(RectTransform),
+            typeof(CanvasRenderer),
+            typeof(Image),
+            typeof(DungeonActiveSkillResourceView));
+        GameObject amountObject = new(
+            "txtAmount",
+            typeof(RectTransform),
+            typeof(TextMeshProUGUI));
+        amountObject.transform.SetParent(root.transform, false);
+        try
+        {
+            DungeonActiveSkillResourceView view =
+                root.GetComponent<DungeonActiveSkillResourceView>();
+            TextMeshProUGUI amount =
+                amountObject.GetComponent<TextMeshProUGUI>();
+            view.Configure(resourceIcon, amount);
+            view.Refresh(2, 5, 2f, 8f, "Recharge 2.0s");
+
+            Image cooldownOverlay = root.transform
+                .Find("grpResourceIcon/imgResourceCooldownOverlay")
+                .GetComponent<Image>();
+            GameObject tooltip = root.transform
+                .Find("grpResourceTooltip")
+                .gameObject;
+            TextMeshProUGUI tooltipText = tooltip.transform
+                .Find("txtResourceTooltip")
+                .GetComponent<TextMeshProUGUI>();
+
+            Assert.That(amount.text, Is.EqualTo("2/5"));
+            Assert.That(cooldownOverlay.sprite, Is.SameAs(resourceIcon));
+            Assert.That(cooldownOverlay.type, Is.EqualTo(Image.Type.Filled));
+            Assert.That(
+                cooldownOverlay.fillMethod,
+                Is.EqualTo(Image.FillMethod.Radial360));
+            Assert.That(
+                cooldownOverlay.fillOrigin,
+                Is.EqualTo((int)Image.Origin360.Top));
+            Assert.That(cooldownOverlay.fillClockwise, Is.True);
+            Assert.That(cooldownOverlay.fillAmount, Is.EqualTo(0.25f));
+            Assert.That(cooldownOverlay.enabled, Is.True);
+            Assert.That(
+                root.transform.Find("grpResourceRechargeGauge"),
+                Is.Null);
+            Assert.That(tooltip.activeSelf, Is.False);
+            view.OnPointerEnter(null);
+            Assert.That(tooltip.activeSelf, Is.True);
+            Assert.That(tooltipText.text, Is.EqualTo("Recharge 2.0s"));
+            view.OnPointerExit(null);
+            Assert.That(tooltip.activeSelf, Is.False);
+        }
+        finally
+        {
+            Object.DestroyImmediate(root);
+            Object.DestroyImmediate(resourceIcon);
+            Object.DestroyImmediate(texture);
+        }
     }
 
     [Test]
@@ -229,6 +497,29 @@ public sealed class ItemDefinitionTests
                 item.AbilityEffects[0].Type,
                 Is.EqualTo(CharacterEffectType.Damage));
             Assert.That(item.HasCompatibleEffects, Is.True);
+        }
+        finally
+        {
+            Object.DestroyImmediate(item);
+        }
+    }
+
+    [Test]
+    public void BattleItemStatusDuration_CanBeConfiguredUntilBattleEnd()
+    {
+        BattleItemSO item = ScriptableObject.CreateInstance<BattleItemSO>();
+        try
+        {
+            SerializedObject serialized = new(item);
+            serialized.FindProperty("appliedStatusDurationMode")
+                .enumValueIndex =
+                (int)BattleItemStatusDurationMode.UntilBattleEnd;
+            serialized.ApplyModifiedPropertiesWithoutUndo();
+
+            Assert.That(
+                item.AppliedStatusDurationMode,
+                Is.EqualTo(BattleItemStatusDurationMode.UntilBattleEnd));
+            Assert.That(item.StatusEffectsLastUntilBattleEnd, Is.True);
         }
         finally
         {

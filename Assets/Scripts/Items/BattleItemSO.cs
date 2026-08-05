@@ -41,6 +41,12 @@ public enum BattleItemEffectDurationMode
     Permanent = 2,
 }
 
+public enum BattleItemStatusDurationMode
+{
+    EffectDuration = 0,
+    UntilBattleEnd = 1,
+}
+
 public enum BattleItemEffectType
 {
     ForcePriorityTarget = 0,
@@ -146,6 +152,11 @@ public sealed class BattleItemSO : ItemDefinitionSO
     [SerializeField, Min(0f)] private float cooldown;
     [SerializeField] private bool availableAsDungeonReward = true;
     [SerializeField] private bool availableAsStartingItem = true;
+    [Tooltip(
+        "Controls the lifetime of Apply Status ability effects created by " +
+        "this item. Until Battle End is cleared by the next battle reset.")]
+    [SerializeField]
+    private BattleItemStatusDurationMode appliedStatusDurationMode;
     [SerializeField]
     private List<CharacterEffectDefinition> abilityEffects = new();
     [Tooltip(
@@ -190,6 +201,11 @@ public sealed class BattleItemSO : ItemDefinitionSO
     public float Cooldown => Mathf.Max(0f, cooldown);
     public bool AvailableAsDungeonReward => availableAsDungeonReward;
     public bool AvailableAsStartingItem => availableAsStartingItem;
+    public BattleItemStatusDurationMode AppliedStatusDurationMode =>
+        appliedStatusDurationMode;
+    public bool StatusEffectsLastUntilBattleEnd =>
+        appliedStatusDurationMode ==
+        BattleItemStatusDurationMode.UntilBattleEnd;
     public IReadOnlyList<CharacterEffectDefinition> AbilityEffects =>
         abilityEffects ??= new List<CharacterEffectDefinition>();
     public bool UsesUnifiedAbilityEffects => AbilityEffects.Count > 0;
@@ -434,6 +450,13 @@ public sealed class BattleItemSO : ItemDefinitionSO
         maximumRunUses = Mathf.Max(0, maximumRunUses);
         energyCost = Mathf.Max(0, energyCost);
         cooldown = Mathf.Max(0f, cooldown);
+        if (!Enum.IsDefined(
+                typeof(BattleItemStatusDurationMode),
+                appliedStatusDurationMode))
+        {
+            appliedStatusDurationMode =
+                BattleItemStatusDurationMode.EffectDuration;
+        }
         abilityEffects ??= new List<CharacterEffectDefinition>();
         foreach (CharacterEffectDefinition effect in abilityEffects)
             effect?.Validate();

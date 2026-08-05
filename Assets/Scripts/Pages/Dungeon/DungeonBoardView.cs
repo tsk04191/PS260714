@@ -650,11 +650,12 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
             return;
 
         size = Mathf.Max(1f, size);
-        boardRect.anchorMin = new Vector2(0.5f, 0.5f);
-        boardRect.anchorMax = new Vector2(0.5f, 0.5f);
-        boardRect.pivot = new Vector2(0.5f, 0.5f);
-        boardRect.anchoredPosition = Vector2.zero;
-        boardRect.sizeDelta = new Vector2(size, size);
+        boardRect.SetSizeWithCurrentAnchors(
+            RectTransform.Axis.Horizontal,
+            size);
+        boardRect.SetSizeWithCurrentAnchors(
+            RectTransform.Axis.Vertical,
+            size);
         RefreshLayout();
     }
 

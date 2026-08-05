@@ -9,8 +9,6 @@ using UnityEngine.UI;
 internal enum CharacterAbilityIconKind
 {
     Details,
-    Role,
-    Archetype,
     Passive,
     Active,
 }
@@ -80,6 +78,48 @@ internal sealed class CharacterInfoHoverView : MonoBehaviour,
     }
 }
 
+public class CharacterBuffIconView : MonoBehaviour
+{
+    [SerializeField] private Image icon;
+    [SerializeField] private Image durationOverlay;
+    [SerializeField] private Image valueBackground;
+    [SerializeField] private TextMeshProUGUI valueText;
+
+    public bool HasRequiredPrefabReferences()
+    {
+        return icon != null &&
+               durationOverlay != null &&
+               valueBackground != null &&
+               valueText != null;
+    }
+
+    public void Refresh(
+        Sprite sprite,
+        int value,
+        bool hasFiniteDuration,
+        float remainingDuration,
+        float totalDuration)
+    {
+        if (!HasRequiredPrefabReferences())
+            return;
+
+        icon.sprite = sprite;
+        icon.enabled = sprite != null;
+
+        float remainingRatio = hasFiniteDuration && totalDuration > 0f
+            ? Mathf.Clamp01(remainingDuration / totalDuration)
+            : 0f;
+        durationOverlay.sprite = sprite;
+        durationOverlay.fillAmount = remainingRatio;
+        durationOverlay.enabled = sprite != null &&
+                                  hasFiniteDuration &&
+                                  remainingRatio > 0f;
+
+        valueBackground.enabled = true;
+        valueText.text = Mathf.Max(0, value).ToString();
+    }
+}
+
 [DisallowMultipleComponent]
 [RequireComponent(typeof(AudioSource))]
 public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
@@ -88,46 +128,12 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
     IPointerEnterHandler,
     IPointerExitHandler
 {
+    private const string DefaultBuffIconPrefabResourcePath =
+        "Presentation/CharacterBuffIcon";
     private const float AttackSdDisplayDuration = 0.45f;
     private const float PassiveSdDisplayDuration = 0.7f;
     private const float SkillSdDisplayDuration = 0.9f;
     private const int MaximumStatusChangesPerDispatch = 128;
-    private const float AbilityIconSize = 48f;
-    private static readonly Color AbilityIconFrameColor =
-        new(0.055f, 0.07f, 0.062f, 0.98f);
-    private static readonly Color UnavailableAbilityIconColor =
-        new(0.28f, 0.28f, 0.28f, 1f);
-
-    private struct RectLayout
-    {
-        public Vector2 AnchorMin;
-        public Vector2 AnchorMax;
-        public Vector2 Pivot;
-        public Vector2 AnchoredPosition;
-        public Vector2 SizeDelta;
-
-        public static RectLayout Capture(RectTransform rect)
-        {
-            return new RectLayout
-            {
-                AnchorMin = rect.anchorMin,
-                AnchorMax = rect.anchorMax,
-                Pivot = rect.pivot,
-                AnchoredPosition = rect.anchoredPosition,
-                SizeDelta = rect.sizeDelta,
-            };
-        }
-
-        public void Apply(RectTransform rect)
-        {
-            rect.anchorMin = AnchorMin;
-            rect.anchorMax = AnchorMax;
-            rect.pivot = Pivot;
-            rect.anchoredPosition = AnchoredPosition;
-            rect.sizeDelta = SizeDelta;
-        }
-    }
-
     private readonly struct AbilityTargetSelection
     {
         public CharacterTargetFaction Faction { get; }
@@ -336,6 +342,32 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
     [SerializeField] private AudioSource attackSfxSpeaker;
     [SerializeField] private Image sdImage;
 
+    [Header("Designer Prefab References")]
+    [SerializeField] private Image passiveIconFrame;
+    [SerializeField] private Image passiveIconImage;
+    [SerializeField] private Image activeSkillIconFrame;
+    [SerializeField] private Image activeSkillIconImage;
+    [SerializeField] private GameObject skillTooltip;
+    [SerializeField] private TextMeshProUGUI skillTooltipText;
+    [SerializeField] private RectTransform buffIconContainer;
+    [SerializeField] private CharacterBuffIconView buffIconPrefab;
+
+    [Header("Designer Prefab Settings")]
+    [SerializeField] private Color abilityIconFrameColor =
+        new(0.055f, 0.07f, 0.062f, 0.98f);
+    [SerializeField] private Color unavailableAbilityIconColor =
+        new(0.28f, 0.28f, 0.28f, 1f);
+    [SerializeField] private Color unavailableAbilityOutlineColor =
+        new(0.18f, 0.18f, 0.18f, 1f);
+    [SerializeField, Range(0f, 1f)]
+    private float availableFrameEffectBlend = 0.2f;
+    [SerializeField] private Vector2 detailTooltipSize =
+        new(520f, 430f);
+    [SerializeField] private Vector2 abilityTooltipSize =
+        new(420f, 220f);
+    [SerializeField, Min(0f)] private float tooltipGap = 12f;
+    [SerializeField, Min(0f)] private float tooltipEdgePadding = 12f;
+
     private bool _initialized;
     private int _currentHealth;
     private int _currentShield;
@@ -363,25 +395,16 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
     private bool _manualTargetSelected;
     private System.Func<CharacterRuntime, bool> _manualTargetHandler;
     private System.Func<CharacterRuntime, bool> _itemTargetHandler;
-    private GameObject _skillTooltip;
-    private TextMeshProUGUI _skillTooltipText;
     private CharacterAbilityIconKind _skillTooltipKind =
         CharacterAbilityIconKind.Active;
-    private Image _passiveIconFrame;
-    private Image _passiveIconImage;
-    private Image _activeSkillIconFrame;
-    private Image _activeSkillIconImage;
-    private Image _roleIconFrame;
-    private Image _roleIconImage;
-    private Image _archetypeIconFrame;
-    private Image _archetypeIconImage;
-    private bool _infoLayoutCached;
-    private bool _sdLayoutEnabled;
-    private RectTransform _cooldownTrack;
-    private RectLayout _nameLayout;
-    private RectLayout _attackLayout;
-    private RectLayout _cooldownLayout;
-    private RectLayout _cooldownTrackLayout;
+    private readonly Dictionary<string, CharacterBuffIconView>
+        _buffIconViews = new(System.StringComparer.Ordinal);
+    private readonly HashSet<string> _activeBuffIconIds =
+        new(System.StringComparer.Ordinal);
+    private readonly List<string> _staleBuffIconIds = new();
+    private readonly List<StatusEffectRuntimeState> _displayedBuffStates =
+        new();
+    private bool _buffIconPrefabErrorLogged;
     private readonly Dictionary<CharacterPassiveDefinition, float>
         _passiveCooldowns = new();
     private bool _lastAttackAttempted;
@@ -662,7 +685,8 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
     private void OnDisable()
     {
         LocalizationService.LocaleChanged -= HandleLocaleChanged;
-        _skillTooltip?.SetActive(false);
+        if (skillTooltip != null)
+            skillTooltip.SetActive(false);
     }
 
     public void BindBattle(
@@ -1504,8 +1528,11 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
         StatusEffectSO definition,
         float duration)
     {
-        if (definition.DurationMode == StatusEffectDurationMode.Permanent)
+        if (definition.DurationMode == StatusEffectDurationMode.Permanent ||
+            float.IsPositiveInfinity(duration))
+        {
             return float.PositiveInfinity;
+        }
 
         return TimePrecision.Normalize(
             duration > 0f ? duration : definition.DefaultDuration,
@@ -1702,7 +1729,8 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
 
     public void OnPointerExit(PointerEventData eventData)
     {
-        _skillTooltip?.SetActive(false);
+        if (skillTooltip != null)
+            skillTooltip.SetActive(false);
     }
 
     internal void ShowAbilityTooltip(CharacterAbilityIconKind kind)
@@ -1714,13 +1742,14 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
         EnsureSkillTooltip();
         RefreshSkillTooltip();
         PositionSkillTooltip();
-        _skillTooltip?.SetActive(true);
+        if (skillTooltip != null)
+            skillTooltip.SetActive(true);
     }
 
     internal void HideAbilityTooltip(CharacterAbilityIconKind kind)
     {
-        if (_skillTooltipKind == kind)
-            _skillTooltip?.SetActive(false);
+        if (_skillTooltipKind == kind && skillTooltip != null)
+            skillTooltip.SetActive(false);
     }
 
     internal void HandleAbilityIconClick(CharacterAbilityIconKind kind)
@@ -4613,75 +4642,17 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
 
     private void EnsureSkillTooltip()
     {
-        if (_skillTooltip != null && _skillTooltipText != null)
+        if (skillTooltip == null || skillTooltipText == null)
             return;
 
-        Transform existing = transform.Find("grpSkillTooltip");
-        if (existing != null)
-            _skillTooltip = existing.gameObject;
-        if (_skillTooltip == null)
-        {
-            _skillTooltip = new GameObject(
-                "grpSkillTooltip",
-                typeof(RectTransform),
-                typeof(Canvas),
-                typeof(CanvasRenderer),
-                typeof(CanvasGroup),
-                typeof(Image));
-            _skillTooltip.transform.SetParent(transform, false);
-        }
-
-        RectTransform tooltipRect =
-            (RectTransform)_skillTooltip.transform;
-        tooltipRect.sizeDelta = new Vector2(420f, 220f);
-        tooltipRect.localScale = Vector3.one;
-
-        Canvas tooltipCanvas = _skillTooltip.GetComponent<Canvas>();
-        tooltipCanvas.overrideSorting = true;
-        tooltipCanvas.sortingOrder = 200;
-
-        CanvasGroup tooltipGroup = _skillTooltip.GetComponent<CanvasGroup>();
-        tooltipGroup.interactable = false;
-        tooltipGroup.blocksRaycasts = false;
-
-        Image tooltipBackground = _skillTooltip.GetComponent<Image>();
-        tooltipBackground.color = new Color(0.045f, 0.06f, 0.052f, 0.98f);
-        tooltipBackground.raycastTarget = false;
-
-        Transform textTransform = tooltipRect.Find("txtSkillTooltip");
-        if (textTransform != null)
-            _skillTooltipText = textTransform.GetComponent<TextMeshProUGUI>();
-        if (_skillTooltipText == null)
-        {
-            GameObject textObject = new(
-                "txtSkillTooltip",
-                typeof(RectTransform),
-                typeof(TextMeshProUGUI));
-            textObject.transform.SetParent(tooltipRect, false);
-            _skillTooltipText = textObject.GetComponent<TextMeshProUGUI>();
-        }
-
-        LocalizationFontResolver.ApplyGameDefault(_skillTooltipText);
-        RectTransform textRect = _skillTooltipText.rectTransform;
-        textRect.anchorMin = Vector2.zero;
-        textRect.anchorMax = Vector2.one;
-        textRect.offsetMin = new Vector2(16f, 12f);
-        textRect.offsetMax = new Vector2(-16f, -12f);
-        _skillTooltipText.fontSize = 17f;
-        _skillTooltipText.enableAutoSizing = true;
-        _skillTooltipText.fontSizeMin = 12f;
-        _skillTooltipText.fontSizeMax = 17f;
-        _skillTooltipText.fontStyle = FontStyles.Bold;
-        _skillTooltipText.color = new Color(0.94f, 0.91f, 0.78f, 1f);
-        _skillTooltipText.alignment = TextAlignmentOptions.MidlineLeft;
-        _skillTooltipText.textWrappingMode = TextWrappingModes.Normal;
-        _skillTooltipText.raycastTarget = false;
-        _skillTooltip.SetActive(false);
+        LocalizationFontResolver.ApplyGameDefault(skillTooltipText);
+        skillTooltipText.raycastTarget = false;
+        skillTooltip.SetActive(false);
     }
 
     private void PositionSkillTooltip()
     {
-        if (_skillTooltip == null)
+        if (skillTooltip == null)
             return;
 
         bool openToLeft = true;
@@ -4700,11 +4671,13 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
             openToLeft = canvasLocalCenter.x > canvasRect.rect.center.x;
 
             RectTransform measuredTooltipRect =
-                (RectTransform)_skillTooltip.transform;
+                (RectTransform)skillTooltip.transform;
             float halfHeight =
                 measuredTooltipRect.rect.height * 0.5f;
-            float minimumCenter = canvasRect.rect.yMin + halfHeight + 12f;
-            float maximumCenter = canvasRect.rect.yMax - halfHeight - 12f;
+            float minimumCenter =
+                canvasRect.rect.yMin + halfHeight + tooltipEdgePadding;
+            float maximumCenter =
+                canvasRect.rect.yMax - halfHeight - tooltipEdgePadding;
             if (minimumCenter <= maximumCenter)
             {
                 float clampedCenter = Mathf.Clamp(
@@ -4717,51 +4690,35 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
         }
 
         RectTransform tooltipRect =
-            (RectTransform)_skillTooltip.transform;
+            (RectTransform)skillTooltip.transform;
         float anchorX = openToLeft ? 0f : 1f;
         tooltipRect.anchorMin = new Vector2(anchorX, 0.5f);
         tooltipRect.anchorMax = new Vector2(anchorX, 0.5f);
         tooltipRect.pivot = new Vector2(openToLeft ? 1f : 0f, 0.5f);
         tooltipRect.anchoredPosition = new Vector2(
-            openToLeft ? -12f : 12f,
+            openToLeft ? -tooltipGap : tooltipGap,
             verticalOffset);
         tooltipRect.SetAsLastSibling();
     }
 
     private void RefreshSkillTooltip()
     {
-        if (_skillTooltipText == null || Data == null)
+        if (skillTooltipText == null || Data == null)
             return;
 
         if (_skillTooltipKind == CharacterAbilityIconKind.Details)
         {
-            ResizeSkillTooltip(new Vector2(520f, 430f));
-            _skillTooltipText.text = BuildCharacterDetailTooltip();
+            ResizeSkillTooltip(detailTooltipSize);
+            skillTooltipText.text = BuildCharacterDetailTooltip();
             return;
         }
 
-        ResizeSkillTooltip(new Vector2(420f, 220f));
-        if (_skillTooltipKind == CharacterAbilityIconKind.Role)
-        {
-            _skillTooltipText.text =
-                $"<b>{CharacterRolePresentation.GetRoleName(Data.Role)}</b>\n" +
-                (Data.Role?.GetDescription() ?? string.Empty);
-            return;
-        }
-
-        if (_skillTooltipKind == CharacterAbilityIconKind.Archetype)
-        {
-            _skillTooltipText.text =
-                $"<b>{CharacterRolePresentation.GetArchetypeName(Data.Archetype)}</b>\n" +
-                (Data.Archetype?.GetDescription() ?? string.Empty);
-            return;
-        }
-
+        ResizeSkillTooltip(abilityTooltipSize);
         if (_skillTooltipKind == CharacterAbilityIconKind.Passive)
         {
             string passiveTitle = LocalizationService.Get(
                 LocalizationKeys.CodexCharacterPassive);
-            _skillTooltipText.text =
+            skillTooltipText.text =
                 $"<b>{passiveTitle}</b>\n" +
                 CharacterLocalization.GetPassiveDescription(Data);
             return;
@@ -4773,7 +4730,7 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
         string status = CharacterLocalization.GetTurretStatus(
             false,
             hasEnoughEnergy);
-        _skillTooltipText.text =
+        skillTooltipText.text =
             CharacterLocalization.GetTurretSkillHeader(
                 Data.ActiveSkillCost,
                 status) + "\n" +
@@ -4783,8 +4740,8 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
 
     private void ResizeSkillTooltip(Vector2 size)
     {
-        if (_skillTooltip != null)
-            ((RectTransform)_skillTooltip.transform).sizeDelta = size;
+        if (skillTooltip != null)
+            ((RectTransform)skillTooltip.transform).sizeDelta = size;
     }
 
     private string BuildCharacterDetailTooltip()
@@ -4840,8 +4797,6 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
 
     private void EnsureSdInfoView()
     {
-        CacheInfoLayout();
-
         bool hasSdSprite = Data != null &&
             (Data.WaitingSdSprite != null ||
              Data.AttackSdSprite != null ||
@@ -4853,213 +4808,62 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
         if (!hasSdSprite)
         {
             if (sdImage != null)
+            {
+                sdImage.sprite = null;
+                sdImage.enabled = false;
                 sdImage.gameObject.SetActive(false);
-            ApplySdInfoLayout(true);
+            }
             return;
         }
 
         if (sdImage == null)
-        {
-            Transform existing = transform.Find("imgCharacterSd");
-            if (existing != null)
-                sdImage = existing.GetComponent<Image>();
-        }
+            return;
 
-        if (sdImage == null)
-        {
-            GameObject imageObject = new(
-                "imgCharacterSd",
-                typeof(RectTransform),
-                typeof(CanvasRenderer),
-                typeof(Image));
-            imageObject.transform.SetParent(transform, false);
-            sdImage = imageObject.GetComponent<Image>();
-        }
-
-        RectTransform imageRect = sdImage.rectTransform;
-        imageRect.anchorMin = Vector2.zero;
-        imageRect.anchorMax = Vector2.zero;
-        imageRect.pivot = Vector2.zero;
-        imageRect.anchoredPosition = new Vector2(-10f, 18f);
-        imageRect.sizeDelta = new Vector2(168f, 168f);
-        imageRect.localScale = Vector3.one;
-        sdImage.preserveAspect = true;
-        sdImage.raycastTarget = true;
-        sdImage.type = Image.Type.Simple;
         CharacterInfoHoverView interaction =
             sdImage.GetComponent<CharacterInfoHoverView>() ??
             sdImage.gameObject.AddComponent<CharacterInfoHoverView>();
         interaction.Configure(this);
         sdImage.gameObject.SetActive(true);
-        imageRect.SetAsFirstSibling();
-
-        ApplySdInfoLayout(true);
+        sdImage.enabled = true;
         RefreshSdImage();
-    }
-
-    private void CacheInfoLayout()
-    {
-        if (_infoLayoutCached)
-            return;
-
-        _cooldownTrack = cooldownFill != null
-            ? cooldownFill.rectTransform.parent as RectTransform
-            : null;
-        if (nameText == null || attackText == null ||
-            cooldownText == null || _cooldownTrack == null)
-        {
-            return;
-        }
-
-        _nameLayout = RectLayout.Capture(nameText.rectTransform);
-        _attackLayout = RectLayout.Capture(attackText.rectTransform);
-        _cooldownLayout = RectLayout.Capture(cooldownText.rectTransform);
-        _cooldownTrackLayout = RectLayout.Capture(_cooldownTrack);
-        _infoLayoutCached = true;
-    }
-
-    private void ApplySdInfoLayout(bool enabled)
-    {
-        if (!_infoLayoutCached || _sdLayoutEnabled == enabled)
-            return;
-
-        if (!enabled)
-        {
-            nameText.gameObject.SetActive(true);
-            attackText.gameObject.SetActive(true);
-            cooldownText.gameObject.SetActive(true);
-            _nameLayout.Apply(nameText.rectTransform);
-            _attackLayout.Apply(attackText.rectTransform);
-            _cooldownLayout.Apply(cooldownText.rectTransform);
-            _cooldownTrackLayout.Apply(_cooldownTrack);
-            _sdLayoutEnabled = false;
-            return;
-        }
-
-        nameText.gameObject.SetActive(false);
-        attackText.gameObject.SetActive(false);
-        cooldownText.gameObject.SetActive(false);
-
-        _cooldownTrack.anchorMin = Vector2.zero;
-        _cooldownTrack.anchorMax = new Vector2(1f, 0f);
-        _cooldownTrack.pivot = new Vector2(0.5f, 0.5f);
-        _cooldownTrack.offsetMin = new Vector2(6f, 4f);
-        _cooldownTrack.offsetMax = new Vector2(-6f, 14f);
-        _sdLayoutEnabled = true;
     }
 
     private void EnsureAbilityIconView()
     {
-        _roleIconImage = EnsureAbilityIcon(
-            "grpRoleIcon",
-            "imgRoleIcon",
-            new Vector2(6f, -6f),
-            CharacterAbilityIconKind.Role,
-            out _roleIconFrame,
-            true);
-        _archetypeIconImage = EnsureAbilityIcon(
-            "grpArchetypeIcon",
-            "imgArchetypeIcon",
-            new Vector2(60f, -6f),
-            CharacterAbilityIconKind.Archetype,
-            out _archetypeIconFrame,
-            true);
-        _passiveIconImage = EnsureAbilityIcon(
-            "grpPassiveAbilityIcon",
-            "imgPassiveAbilityIcon",
-            new Vector2(-62f, -6f),
-            CharacterAbilityIconKind.Passive,
-            out _passiveIconFrame);
-        _activeSkillIconImage = EnsureAbilityIcon(
-            "grpActiveAbilityIcon",
-            "imgActiveAbilityIcon",
-            new Vector2(-8f, -6f),
-            CharacterAbilityIconKind.Active,
-            out _activeSkillIconFrame);
+        Transform legacyRoleIcon = transform.Find("grpRoleIcon");
+        if (legacyRoleIcon != null)
+            legacyRoleIcon.gameObject.SetActive(false);
+
+        Transform legacyArchetypeIcon =
+            transform.Find("grpArchetypeIcon");
+        if (legacyArchetypeIcon != null)
+            legacyArchetypeIcon.gameObject.SetActive(false);
+
+        ConfigureAbilityIcon(
+            passiveIconFrame,
+            passiveIconImage,
+            CharacterAbilityIconKind.Passive);
+        ConfigureAbilityIcon(
+            activeSkillIconFrame,
+            activeSkillIconImage,
+            CharacterAbilityIconKind.Active);
         RefreshAbilityIcons();
     }
 
-    private Image EnsureAbilityIcon(
-        string frameName,
-        string imageName,
-        Vector2 anchoredPosition,
-        CharacterAbilityIconKind kind,
-        out Image frameImage,
-        bool alignLeft = false)
+    private void ConfigureAbilityIcon(
+        Image frameImage,
+        Image iconImage,
+        CharacterAbilityIconKind kind)
     {
-        Transform existingFrame = transform.Find(frameName);
-        GameObject frameObject = existingFrame != null
-            ? existingFrame.gameObject
-            : new GameObject(
-                frameName,
-                typeof(RectTransform),
-                typeof(CanvasRenderer),
-                typeof(Image),
-                typeof(Outline),
-                typeof(CharacterAbilityIconView));
-        if (existingFrame == null)
-            frameObject.transform.SetParent(transform, false);
-        frameObject.layer = gameObject.layer;
-
-        RectTransform frameRect =
-            (RectTransform)frameObject.transform;
-        Vector2 topAnchor = alignLeft
-            ? new Vector2(0f, 1f)
-            : Vector2.one;
-        frameRect.anchorMin = topAnchor;
-        frameRect.anchorMax = topAnchor;
-        frameRect.pivot = topAnchor;
-        frameRect.anchoredPosition = anchoredPosition;
-        frameRect.sizeDelta = new Vector2(
-            AbilityIconSize,
-            AbilityIconSize);
-        frameRect.localScale = Vector3.one;
-
-        frameImage = frameObject.GetComponent<Image>() ??
-                     frameObject.AddComponent<Image>();
-        frameImage.color = AbilityIconFrameColor;
-        frameImage.raycastTarget = true;
-
-        Outline outline = frameObject.GetComponent<Outline>() ??
-                          frameObject.AddComponent<Outline>();
-        outline.effectColor = new Color(
-            EffectColor.r,
-            EffectColor.g,
-            EffectColor.b,
-            0.9f);
-        outline.effectDistance = new Vector2(2f, -2f);
-        outline.useGraphicAlpha = true;
+        if (frameImage == null)
+            return;
 
         CharacterAbilityIconView interaction =
-            frameObject.GetComponent<CharacterAbilityIconView>() ??
-            frameObject.AddComponent<CharacterAbilityIconView>();
+            frameImage.GetComponent<CharacterAbilityIconView>() ??
+            frameImage.gameObject.AddComponent<CharacterAbilityIconView>();
         interaction.Configure(this, kind);
-
-        Transform existingImage = frameRect.Find(imageName);
-        GameObject imageObject = existingImage != null
-            ? existingImage.gameObject
-            : new GameObject(
-                imageName,
-                typeof(RectTransform),
-                typeof(CanvasRenderer),
-                typeof(Image));
-        if (existingImage == null)
-            imageObject.transform.SetParent(frameRect, false);
-        imageObject.layer = gameObject.layer;
-
-        Image iconImage = imageObject.GetComponent<Image>() ??
-                          imageObject.AddComponent<Image>();
-        RectTransform iconRect = iconImage.rectTransform;
-        iconRect.anchorMin = Vector2.zero;
-        iconRect.anchorMax = Vector2.one;
-        iconRect.offsetMin = new Vector2(4f, 4f);
-        iconRect.offsetMax = new Vector2(-4f, -4f);
-        iconRect.localScale = Vector3.one;
-        iconImage.type = Image.Type.Simple;
-        iconImage.preserveAspect = true;
-        iconImage.raycastTarget = false;
-        frameRect.SetAsLastSibling();
-        return iconImage;
+        if (iconImage != null)
+            iconImage.raycastTarget = false;
     }
 
     private void RefreshAbilityIcons()
@@ -5067,82 +4871,164 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
         if (Data == null)
             return;
 
-        RefreshClassificationIcon(
-            _roleIconFrame,
-            _roleIconImage,
-            Data.Role?.IconSprite);
-        RefreshClassificationIcon(
-            _archetypeIconFrame,
-            _archetypeIconImage,
-            Data.Archetype?.IconSprite);
-
         bool hasPassive = Data.HasCustomPassiveDefinitions;
-        if (_passiveIconFrame != null)
-            _passiveIconFrame.gameObject.SetActive(hasPassive);
-        if (_passiveIconImage != null)
+        if (passiveIconFrame != null)
+            passiveIconFrame.gameObject.SetActive(hasPassive);
+        if (passiveIconImage != null)
         {
             CharacterPassiveDefinition displayedPassive =
                 ResolveDisplayedPassiveDefinition();
-            _passiveIconImage.sprite =
+            passiveIconImage.sprite =
                 Data.GetPassiveAbilityIconSprite(displayedPassive);
-            _passiveIconImage.enabled =
-                _passiveIconImage.sprite != null;
-            _passiveIconImage.color = Color.white;
+            passiveIconImage.enabled =
+                passiveIconImage.sprite != null;
+            passiveIconImage.color = Color.white;
         }
 
         bool hasActiveSkill = Data.HasCustomSkillDefinitions;
-        if (_activeSkillIconFrame != null)
-            _activeSkillIconFrame.gameObject.SetActive(hasActiveSkill);
-        if (_activeSkillIconImage != null)
+        if (activeSkillIconFrame != null)
+            activeSkillIconFrame.gameObject.SetActive(hasActiveSkill);
+        if (activeSkillIconImage != null)
         {
             CharacterSkillDefinition displayedSkill =
                 ResolveDisplayedSkillDefinition();
-            _activeSkillIconImage.sprite =
+            activeSkillIconImage.sprite =
                 Data.GetActiveAbilityIconSprite(displayedSkill);
-            _activeSkillIconImage.enabled =
-                _activeSkillIconImage.sprite != null;
-            _activeSkillIconImage.color = CanActivateActiveSkill()
+            activeSkillIconImage.enabled =
+                activeSkillIconImage.sprite != null;
+            activeSkillIconImage.color = CanActivateActiveSkill()
                 ? Color.white
-                : UnavailableAbilityIconColor;
+                : unavailableAbilityIconColor;
         }
 
-        if (_passiveIconFrame != null)
+        if (passiveIconFrame != null)
         {
             Outline passiveOutline =
-                _passiveIconFrame.GetComponent<Outline>();
+                passiveIconFrame.GetComponent<Outline>();
             if (passiveOutline != null)
                 passiveOutline.effectColor = EffectColor;
         }
-        if (_activeSkillIconFrame != null)
+        if (activeSkillIconFrame != null)
         {
             bool available = CanActivateActiveSkill();
-            _activeSkillIconFrame.color = available
-                ? Color.Lerp(AbilityIconFrameColor, EffectColor, 0.2f)
-                : AbilityIconFrameColor;
+            activeSkillIconFrame.color = available
+                ? Color.Lerp(
+                    abilityIconFrameColor,
+                    EffectColor,
+                    availableFrameEffectBlend)
+                : abilityIconFrameColor;
             Outline activeOutline =
-                _activeSkillIconFrame.GetComponent<Outline>();
+                activeSkillIconFrame.GetComponent<Outline>();
             if (activeOutline != null)
             {
                 activeOutline.effectColor = available
                     ? EffectColor
-                    : new Color(0.18f, 0.18f, 0.18f, 1f);
+                    : unavailableAbilityOutlineColor;
             }
         }
     }
 
-    private static void RefreshClassificationIcon(
-        Image frame,
-        Image icon,
-        Sprite sprite)
+    private void RefreshBuffIcons()
     {
-        if (frame != null)
-            frame.gameObject.SetActive(sprite != null);
-        if (icon == null)
+        if (buffIconContainer == null)
             return;
 
-        icon.sprite = sprite;
-        icon.enabled = sprite != null;
-        icon.color = Color.white;
+        CharacterBuffIconView resolvedPrefab = ResolveBuffIconPrefab();
+        if (resolvedPrefab == null)
+            return;
+
+        _displayedBuffStates.Clear();
+        foreach (StatusEffectRuntimeState state in _statusEffects.Values)
+        {
+            if (state?.Definition == null || !state.HasStacks ||
+                state.Definition.Alignment != StatusEffectAlignment.Buff)
+            {
+                continue;
+            }
+
+            _displayedBuffStates.Add(state);
+        }
+
+        _displayedBuffStates.Sort((left, right) => string.Compare(
+            left.Definition.StatusId,
+            right.Definition.StatusId,
+            System.StringComparison.Ordinal));
+        _activeBuffIconIds.Clear();
+        for (int index = 0; index < _displayedBuffStates.Count; index++)
+        {
+            StatusEffectRuntimeState state = _displayedBuffStates[index];
+            string statusId = state.Definition.StatusId;
+            _activeBuffIconIds.Add(statusId);
+            if (!_buffIconViews.TryGetValue(
+                    statusId,
+                    out CharacterBuffIconView view) ||
+                view == null)
+            {
+                view = Instantiate(
+                    resolvedPrefab,
+                    buffIconContainer,
+                    false);
+                view.name = $"icoBuff_{statusId.Replace('.', '_')}";
+                _buffIconViews[statusId] = view;
+            }
+
+            view.transform.SetSiblingIndex(index);
+            view.Refresh(
+                state.Definition.Icon,
+                state.StackCount,
+                !state.IsPermanent,
+                state.RemainingDuration,
+                state.TotalDuration);
+        }
+
+        _staleBuffIconIds.Clear();
+        foreach (string statusId in _buffIconViews.Keys)
+        {
+            if (!_activeBuffIconIds.Contains(statusId))
+                _staleBuffIconIds.Add(statusId);
+        }
+
+        foreach (string statusId in _staleBuffIconIds)
+        {
+            CharacterBuffIconView view = _buffIconViews[statusId];
+            _buffIconViews.Remove(statusId);
+            if (view == null)
+                continue;
+
+            view.gameObject.SetActive(false);
+            if (Application.isPlaying)
+                Destroy(view.gameObject);
+            else
+                DestroyImmediate(view.gameObject);
+        }
+    }
+
+    private CharacterBuffIconView ResolveBuffIconPrefab()
+    {
+        if (buffIconPrefab == null)
+        {
+            GameObject prefabObject = Resources.Load<GameObject>(
+                DefaultBuffIconPrefabResourcePath);
+            buffIconPrefab = prefabObject != null
+                ? prefabObject.GetComponent<CharacterBuffIconView>()
+                : null;
+        }
+
+        if (buffIconPrefab != null &&
+            buffIconPrefab.HasRequiredPrefabReferences())
+        {
+            return buffIconPrefab;
+        }
+
+        if (!_buffIconPrefabErrorLogged)
+        {
+            Debug.LogError(
+                $"Character buff icon prefab is missing or incomplete at " +
+                $"Resources/{DefaultBuffIconPrefabResourcePath}.",
+                this);
+            _buffIconPrefabErrorLogged = true;
+        }
+        return null;
     }
 
     private CharacterPassiveDefinition ResolveDisplayedPassiveDefinition()
@@ -5293,21 +5179,6 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
         return enemies != null && enemies.Count > 0;
     }
 
-    private static void SetAnchoredRect(
-        RectTransform rect,
-        Vector2 anchorMin,
-        Vector2 anchorMax,
-        Vector2 pivot,
-        Vector2 anchoredPosition,
-        Vector2 sizeDelta)
-    {
-        rect.anchorMin = anchorMin;
-        rect.anchorMax = anchorMax;
-        rect.pivot = pivot;
-        rect.anchoredPosition = anchoredPosition;
-        rect.sizeDelta = sizeDelta;
-    }
-
     private void RefreshSdImage()
     {
         if (sdImage == null || Data == null ||
@@ -5360,8 +5231,9 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
         RefreshManualTargetHighlight();
 
         RefreshAbilityIcons();
+        RefreshBuffIcons();
 
-        if (_skillTooltip != null && _skillTooltip.activeSelf)
+        if (skillTooltip != null && skillTooltip.activeSelf)
             RefreshSkillTooltip();
     }
 

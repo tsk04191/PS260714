@@ -49,6 +49,7 @@ public abstract class ItemDefinitionSO : ScriptableObject
 
     [Header("Presentation")]
     [SerializeField] private Sprite icon;
+    [SerializeField] private Sprite illustration;
 
     [Header("Inventory")]
     [SerializeField, Min(0)] private long maximumStack;
@@ -64,6 +65,7 @@ public abstract class ItemDefinitionSO : ScriptableObject
     public string DescriptionLocalizationKey =>
         descriptionLocalizationKey ?? string.Empty;
     public Sprite Icon => icon;
+    public Sprite Illustration => illustration;
     public long MaximumStack => Math.Max(0L, maximumStack);
     public bool HasUnlimitedStack => MaximumStack == 0L;
     public long InitialAmount => ClampAmount(

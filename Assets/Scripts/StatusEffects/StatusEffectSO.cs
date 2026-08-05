@@ -636,6 +636,7 @@ internal sealed class StatusEffectRuntimeBatch
 {
     public int Stacks { get; set; }
     public float RemainingDuration { get; set; }
+    public float TotalDuration { get; }
     public float TickInterval { get; }
     public IBattleCharacter Source { get; }
 
@@ -643,10 +644,14 @@ internal sealed class StatusEffectRuntimeBatch
         int stacks,
         float remainingDuration,
         float tickInterval,
-        IBattleCharacter source)
+        IBattleCharacter source,
+        float totalDuration = -1f)
     {
         Stacks = Mathf.Max(1, stacks);
         RemainingDuration = remainingDuration;
+        TotalDuration = totalDuration >= 0f
+            ? totalDuration
+            : remainingDuration;
         TickInterval = TimePrecision.Normalize(
             tickInterval,
             TimePrecision.Step);
@@ -685,6 +690,28 @@ internal sealed class StatusEffectRuntimeState
 
     public StatusEffectSO Definition { get; }
     public bool HasStacks => _batches.Count > 0;
+    public bool IsPermanent
+    {
+        get
+        {
+            if (Definition.DurationMode ==
+                StatusEffectDurationMode.Permanent)
+            {
+                return true;
+            }
+
+            foreach (StatusEffectRuntimeBatch batch in _batches)
+            {
+                if (batch != null && float.IsPositiveInfinity(
+                        batch.RemainingDuration))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+    }
     public StatusEffectRuntimeBatch ActiveBatch =>
         _batches.Count > 0 ? _batches[0] : null;
     public int StackCount
@@ -710,6 +737,22 @@ internal sealed class StatusEffectRuntimeState
             float total = 0f;
             foreach (StatusEffectRuntimeBatch batch in _batches)
                 total += Mathf.Max(0f, batch.RemainingDuration);
+            return total;
+        }
+    }
+    public float TotalDuration
+    {
+        get
+        {
+            if (Definition.DurationMode ==
+                StatusEffectDurationMode.Permanent)
+            {
+                return float.PositiveInfinity;
+            }
+
+            float total = 0f;
+            foreach (StatusEffectRuntimeBatch batch in _batches)
+                total += Mathf.Max(0f, batch.TotalDuration);
             return total;
         }
     }
@@ -765,21 +808,27 @@ internal sealed class StatusEffectRuntimeState
         StatusEffectRuntimeBatch active = ActiveBatch;
         int previousStacks = active.Stacks;
         float previousDuration = active.RemainingDuration;
+        float previousTotalDuration = active.TotalDuration;
         int nextStacks = Definition.StackMode ==
                          StatusEffectStackMode.Replace
             ? stacks
             : ClampTotalStacks(active.Stacks + stacks);
         float nextDuration = previousDuration;
+        float nextTotalDuration = previousTotalDuration;
         if (Definition.DurationMode ==
-            StatusEffectDurationMode.Permanent)
+                StatusEffectDurationMode.Permanent ||
+            IsPermanent ||
+            float.IsPositiveInfinity(remainingDuration))
         {
             nextDuration = float.PositiveInfinity;
+            nextTotalDuration = float.PositiveInfinity;
         }
         else if (Definition.StackMode !=
                      StatusEffectStackMode.AddKeepDuration ||
                  Definition.RefreshDurationOnReapply)
         {
             nextDuration = remainingDuration;
+            nextTotalDuration = remainingDuration;
         }
 
         bool changed = nextStacks != previousStacks ||
@@ -788,7 +837,12 @@ internal sealed class StatusEffectRuntimeState
             return default;
 
         _batches.Clear();
-        AddBatch(nextStacks, nextDuration, tickInterval, source);
+        AddBatch(
+            nextStacks,
+            nextDuration,
+            tickInterval,
+            source,
+            nextTotalDuration);
         return new StatusEffectRuntimeMutation(
             true,
             previousTotalStacks,
@@ -907,13 +961,15 @@ internal sealed class StatusEffectRuntimeState
         int stacks,
         float remainingDuration,
         float tickInterval,
-        IBattleCharacter source)
+        IBattleCharacter source,
+        float totalDuration = -1f)
     {
         _batches.Add(new StatusEffectRuntimeBatch(
             stacks,
             remainingDuration,
             tickInterval,
-            source));
+            source,
+            totalDuration));
     }
 
     private int ClampIncomingStacks(int stacks)

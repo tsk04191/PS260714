@@ -229,6 +229,144 @@ public sealed class CharacterP0RegressionTests
     }
 
     [Test]
+    public void LegacyCharacterInfo_DisablesWithMissingTooltipReference()
+    {
+        GameObject root = new(
+            "LegacyCharacterInfoSlot",
+            typeof(RectTransform),
+            typeof(AudioSource));
+        _createdObjects.Add(root);
+        CharacterRuntime character =
+            root.AddComponent<CharacterRuntime>();
+        GameObject destroyedTooltip = new("DestroyedSkillTooltip");
+        SerializedObject serialized = new(character);
+        serialized.FindProperty("skillTooltip").objectReferenceValue =
+            destroyedTooltip;
+        serialized.ApplyModifiedPropertiesWithoutUndo();
+        UnityEngine.Object.DestroyImmediate(destroyedTooltip);
+
+        Assert.DoesNotThrow(() => root.SetActive(false));
+    }
+
+    [Test]
+    public void DungeonCharacterInfo_UsesDesignerEditablePrefab()
+    {
+        GameObject prefab = Resources.Load<GameObject>(
+            "Presentation/CharacterInfo");
+
+        Assert.That(prefab, Is.Not.Null);
+        Assert.That(
+            prefab.GetComponent<CharacterRuntime>(),
+            Is.Not.Null);
+        Assert.That(
+            ((RectTransform)prefab.transform).sizeDelta,
+            Is.EqualTo(new Vector2(460f, 144f)));
+
+        SerializedObject serialized = new(
+            prefab.GetComponent<CharacterRuntime>());
+        string[] designerReferences =
+        {
+            "sdImage",
+            "passiveIconFrame",
+            "passiveIconImage",
+            "activeSkillIconFrame",
+            "activeSkillIconImage",
+            "skillTooltip",
+            "skillTooltipText",
+            "buffIconContainer",
+        };
+        foreach (string propertyName in designerReferences)
+        {
+            Assert.That(
+                serialized.FindProperty(propertyName)
+                    .objectReferenceValue,
+                Is.Not.Null,
+                $"CharacterInfo prefab reference '{propertyName}' is missing.");
+        }
+    }
+
+    [Test]
+    public void DungeonCharacterInfo_ShowsBuffValueAndTimedRadialOverlay()
+    {
+        Texture2D texture = new(4, 4, TextureFormat.RGBA32, false);
+        Sprite icon = Sprite.Create(
+            texture,
+            new Rect(0f, 0f, 4f, 4f),
+            new Vector2(0.5f, 0.5f));
+        _createdObjects.Add(texture);
+        _createdObjects.Add(icon);
+
+        StatusEffectSO buff = CreateRuntimeStatus(
+            "character-info-visible-buff",
+            canTargetEnemy: false,
+            canTargetAlly: true,
+            StatusEffectStackMode.AddAndRefreshDuration,
+            operationCount: 0);
+        StatusEffectSO debuff = CreateRuntimeStatus(
+            "character-info-hidden-debuff",
+            canTargetEnemy: false,
+            canTargetAlly: true,
+            StatusEffectStackMode.AddAndRefreshDuration,
+            operationCount: 0);
+        ConfigureStatusRemovalMetadata(
+            buff,
+            StatusEffectAlignment.Buff,
+            true);
+        ConfigureStatusRemovalMetadata(
+            debuff,
+            StatusEffectAlignment.Debuff,
+            true);
+        SerializedObject serializedBuff = new(buff);
+        serializedBuff.FindProperty("icon").objectReferenceValue = icon;
+        serializedBuff.ApplyModifiedPropertiesWithoutUndo();
+
+        CharacterRuntime character = CreateCharacter(
+            CreateBaseCharacterFixture("CharacterInfoBuffFixture"));
+        Assert.That(
+            character.ApplyStatusEffect(buff, 5f, 3),
+            Is.True);
+        Assert.That(
+            character.ApplyStatusEffect(debuff, 5f, 2),
+            Is.True);
+
+        Transform container = character.transform.Find("grpBuffIcons");
+        Assert.That(container, Is.Not.Null);
+        Assert.That(
+            container.GetComponent<HorizontalLayoutGroup>()
+                .reverseArrangement,
+            Is.True);
+        Assert.That(container.childCount, Is.EqualTo(1));
+        Transform buffIcon = container.GetChild(0);
+        CharacterBuffIconView view =
+            buffIcon.GetComponent<CharacterBuffIconView>();
+        Image overlay = buffIcon.Find("imgBuffDurationOverlay")
+            .GetComponent<Image>();
+        RectTransform valueRect = buffIcon.Find("txtBuffValue")
+            as RectTransform;
+        TextMeshProUGUI valueText =
+            valueRect.GetComponent<TextMeshProUGUI>();
+
+        Assert.That(view, Is.Not.Null);
+        Assert.That(view.HasRequiredPrefabReferences(), Is.True);
+        Assert.That(valueText.text, Is.EqualTo("3"));
+        Assert.That(valueRect.anchorMin, Is.EqualTo(new Vector2(0.5f, 0f)));
+        Assert.That(valueRect.anchorMax, Is.EqualTo(new Vector2(1f, 0.5f)));
+        Assert.That(overlay.sprite, Is.SameAs(icon));
+        Assert.That(overlay.type, Is.EqualTo(Image.Type.Filled));
+        Assert.That(
+            overlay.fillMethod,
+            Is.EqualTo(Image.FillMethod.Radial360));
+        Assert.That(
+            overlay.fillOrigin,
+            Is.EqualTo((int)Image.Origin360.Top));
+        Assert.That(overlay.fillClockwise, Is.True);
+        Assert.That(overlay.fillAmount, Is.EqualTo(1f));
+
+        character.TickBattle(1f, new FakeBattleBoard());
+        Assert.That(overlay.fillAmount, Is.EqualTo(0.8f).Within(0.001f));
+    }
+
+    [Test]
     public void DungeonCharacterInfo_UsesOverflowSdAndFullWidthCooldown()
     {
         CharacterRuntime character = CreateCharacter(
@@ -268,8 +406,12 @@ public sealed class CharacterP0RegressionTests
 
         Assert.That(passiveIcon, Is.Not.Null);
         Assert.That(activeIcon, Is.Not.Null);
-        Assert.That(roleIcon, Is.Not.Null);
-        Assert.That(archetypeIcon, Is.Not.Null);
+        Assert.That(
+            roleIcon == null || !roleIcon.gameObject.activeSelf,
+            Is.True);
+        Assert.That(
+            archetypeIcon == null || !archetypeIcon.gameObject.activeSelf,
+            Is.True);
         Assert.That(
             passiveIcon.anchoredPosition,
             Is.EqualTo(new Vector2(-62f, -6f)));
@@ -282,12 +424,6 @@ public sealed class CharacterP0RegressionTests
         Assert.That(
             passiveIcon.anchoredPosition.x,
             Is.LessThan(activeIcon.anchoredPosition.x));
-        Assert.That(
-            roleIcon.anchoredPosition,
-            Is.EqualTo(new Vector2(6f, -6f)));
-        Assert.That(
-            archetypeIcon.anchoredPosition,
-            Is.EqualTo(new Vector2(60f, -6f)));
         Assert.That(
             sdRect.GetComponent<Image>().raycastTarget,
             Is.True);
@@ -446,7 +582,7 @@ public sealed class CharacterP0RegressionTests
     }
 
     [Test]
-    public void DungeonCharacterInfo_ShowsRoleAndArchetypeIcons()
+    public void DungeonCharacterInfo_HidesRoleAndArchetypeIcons()
     {
         CharacterRoleSO role =
             ScriptableObject.CreateInstance<CharacterRoleSO>();
@@ -486,15 +622,13 @@ public sealed class CharacterP0RegressionTests
         Transform roleFrame = character.transform.Find("grpRoleIcon");
         Transform archetypeFrame =
             character.transform.Find("grpArchetypeIcon");
-        Image roleImage = roleFrame.Find("imgRoleIcon")
-            .GetComponent<Image>();
-        Image archetypeImage = archetypeFrame.Find("imgArchetypeIcon")
-            .GetComponent<Image>();
 
-        Assert.That(roleFrame.gameObject.activeSelf, Is.True);
-        Assert.That(archetypeFrame.gameObject.activeSelf, Is.True);
-        Assert.That(roleImage.sprite, Is.SameAs(roleIcon));
-        Assert.That(archetypeImage.sprite, Is.SameAs(archetypeIcon));
+        Assert.That(
+            roleFrame == null || !roleFrame.gameObject.activeSelf,
+            Is.True);
+        Assert.That(
+            archetypeFrame == null || !archetypeFrame.gameObject.activeSelf,
+            Is.True);
     }
 
     [Test]
@@ -7019,6 +7153,59 @@ public sealed class CharacterP0RegressionTests
     }
 
     [Test]
+    public void BattleItemStatusDuration_PersistsUntilBattleReset()
+    {
+        StatusEffectSO status = CreateRuntimeStatus(
+            "test_battle_item_persistent_status",
+            false,
+            true,
+            StatusEffectStackMode.AddKeepDuration,
+            0);
+        CharacterRuntime character = CreateCharacter(SuirenAssetPath);
+        FakeBattleBoard board = new();
+        CharacterEffectDefinition effect = new();
+        SetPrivateField(effect, "type", CharacterEffectType.ApplyStatus);
+        SetPrivateField(
+            effect,
+            "targetMode",
+            CharacterEffectTargetMode.InheritAction);
+        SetPrivateField(effect, "statusEffect", status);
+        SetPrivateField(effect, "statusDuration", 1f);
+        SetPrivateField(effect, "statusStacks", 1f);
+        BattleEffectContext context = BattleEffectContext.ForBattleItem(
+            BattleStatusTarget.FromAlly(character),
+            board,
+            null,
+            CharacterTargetFaction.Ally,
+            Array.Empty<EnemyRuntime>(),
+            new IBattleCharacter[] { character },
+            character.CurrentAttackPower,
+            statusEffectsLastUntilBattleEnd: true);
+
+        BattleEffectResult result = BattleEffectExecutor.ExecuteSequence(
+            context,
+            new IBattleEffectDefinition[] { effect });
+
+        Assert.That(result.Succeeded, Is.True);
+        Assert.That(character.GetActiveStatusEffects(), Has.Count.EqualTo(1));
+        Assert.That(
+            character.GetActiveStatusEffects()[0].IsPermanent,
+            Is.True);
+
+        character.TickBattle(120f, board);
+        Assert.That(character.HasStatusEffect(status), Is.True);
+
+        Assert.That(character.ApplyStatusEffect(status, 1f, 1), Is.True);
+        Assert.That(
+            character.GetActiveStatusEffects()[0].IsPermanent,
+            Is.True,
+            "A timed reapplication must not shorten a battle-long item buff.");
+
+        character.ResetRuntime();
+        Assert.That(character.HasStatusEffect(status), Is.False);
+    }
+
+    [Test]
     public void FireCompatibilityWrapper_PublishesGenericStatusLifecycle()
     {
         StatusEffectSO fire = LoadAsset<StatusEffectSO>(FireAssetPath);
@@ -8416,48 +8603,19 @@ public sealed class CharacterP0RegressionTests
 
     private CharacterRuntime CreateCharacter(CharacterSO definition)
     {
-        GameObject root = new(
-            $"Test_{definition.name}",
-            typeof(RectTransform),
-            typeof(CanvasRenderer),
-            typeof(Image),
-            typeof(AudioSource));
+        GameObject prefab = Resources.Load<GameObject>(
+            "Presentation/CharacterInfo");
+        Assert.That(
+            prefab,
+            Is.Not.Null,
+            "Character info prefab is missing from Resources/Presentation.");
+        GameObject root = UnityEngine.Object.Instantiate(prefab);
+        root.name = $"Test_{definition.name}";
         _createdObjects.Add(root);
 
-        CharacterRuntime character = root.AddComponent<CharacterRuntime>();
-        TextMeshProUGUI nameText = CreateText(root.transform, "txtName");
-        TextMeshProUGUI attackText = CreateText(
-            root.transform,
-            "txtAttack");
-        TextMeshProUGUI cooldownText = CreateText(
-            root.transform,
-            "txtCooldown");
-        GameObject cooldownTrack = new(
-            "grpCooldown",
-            typeof(RectTransform));
-        cooldownTrack.transform.SetParent(root.transform, false);
-        GameObject cooldownFillObject = new(
-            "imgCooldownFill",
-            typeof(RectTransform),
-            typeof(CanvasRenderer),
-            typeof(Image));
-        cooldownFillObject.transform.SetParent(
-            cooldownTrack.transform,
-            false);
-
-        SerializedObject serializedCharacter = new(character);
-        serializedCharacter.FindProperty("nameText").objectReferenceValue =
-            nameText;
-        serializedCharacter.FindProperty("attackText").objectReferenceValue =
-            attackText;
-        serializedCharacter.FindProperty("cooldownText").objectReferenceValue =
-            cooldownText;
-        serializedCharacter.FindProperty("cooldownFill").objectReferenceValue =
-            cooldownFillObject.GetComponent<Image>();
-        serializedCharacter.FindProperty(
-            "attackSfxSpeaker").objectReferenceValue =
-            root.GetComponent<AudioSource>();
-        serializedCharacter.ApplyModifiedPropertiesWithoutUndo();
+        CharacterRuntime character =
+            root.GetComponent<CharacterRuntime>();
+        Assert.That(character, Is.Not.Null);
 
         Assert.That(
             character.ConfigureDefinition(definition),

@@ -272,6 +272,8 @@ public static class BattleEffectExecutor
                         actionId,
                         effectId)
                     : effect.StatusDuration;
+                if (effectContext.StatusEffectsLastUntilBattleEnd)
+                    duration = float.PositiveInfinity;
                 float resolvedStacks = sourceData != null
                     ? sourceData.ResolveStatusStacks(
                         effect.StatusStacks,
@@ -1198,7 +1200,8 @@ public readonly struct BattleStatusSnapshot
     public bool IsValid => Definition != null && StackCount > 0;
     public bool IsPermanent =>
         IsValid &&
-        Definition.DurationMode == StatusEffectDurationMode.Permanent;
+        (Definition.DurationMode == StatusEffectDurationMode.Permanent ||
+         float.IsPositiveInfinity(RemainingDuration));
 
     public BattleStatusSnapshot(
         StatusEffectSO definition,

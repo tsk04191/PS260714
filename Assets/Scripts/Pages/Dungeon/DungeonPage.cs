@@ -84,6 +84,8 @@ public class DungeonPage : MonoBehaviour, IPage
     private const float TutorialTargetAutoClearDuration = 34f;
     private const float TutorialDamageBudgetRatio = 0.9f;
     private const int StartingChoiceSeedSalt = unchecked((int)0x5A17C0DE);
+    private const string DefaultCharacterInfoPrefabResourcePath =
+        "Presentation/CharacterInfo";
 
     private static readonly Color[] DefaultPartySlotColors =
     {
@@ -121,6 +123,7 @@ public class DungeonPage : MonoBehaviour, IPage
     [SerializeField] private GameObject stageSelectPage;
 
     [Header("Player Party")]
+    [SerializeField] private CharacterRuntime characterInfoPrefab;
     [SerializeField] private CharacterRuntime[] playerCharacters =
         new CharacterRuntime[MaximumPartySize];
     [SerializeField, ColorUsage(false, false)]
@@ -149,6 +152,7 @@ public class DungeonPage : MonoBehaviour, IPage
     private float baselineSoloDamageBudgetRatio = 0.93f;
 
     private bool _initialized;
+    private bool _characterInfoInstancesPrepared;
     private bool _flowEventsBound;
     private bool _battleEventsBound;
     private bool _eventRewardPending;
@@ -450,6 +454,7 @@ public class DungeonPage : MonoBehaviour, IPage
             return;
         }
 
+        EnsureCharacterInfoInstances();
         board.Initialize(initialGridSize, maximumStackSize);
         InitializePlayerCharacters();
 
@@ -2377,6 +2382,96 @@ public class DungeonPage : MonoBehaviour, IPage
             playerCharacters = new CharacterRuntime[MaximumPartySize];
         else if (playerCharacters.Length != MaximumPartySize)
             System.Array.Resize(ref playerCharacters, MaximumPartySize);
+    }
+
+    private void EnsureCharacterInfoInstances()
+    {
+        if (_characterInfoInstancesPrepared)
+            return;
+
+        EnsurePlayerCharacterSlots();
+        CharacterRuntime prefab = characterInfoPrefab;
+        if (prefab == null)
+        {
+            GameObject prefabObject = Resources.Load<GameObject>(
+                DefaultCharacterInfoPrefabResourcePath);
+            if (prefabObject != null)
+                prefab = prefabObject.GetComponent<CharacterRuntime>();
+        }
+
+        if (prefab == null)
+        {
+            Debug.LogError(
+                $"Character info prefab was not found at Resources/{DefaultCharacterInfoPrefabResourcePath}.",
+                this);
+            return;
+        }
+
+        Transform slotParent = null;
+        for (int index = 0; index < playerCharacters.Length; index++)
+        {
+            if (playerCharacters[index] != null &&
+                playerCharacters[index].transform.parent != null)
+            {
+                slotParent = playerCharacters[index].transform.parent;
+                break;
+            }
+        }
+
+        if (slotParent == null && battleTab != null)
+        {
+            slotParent = battleTab.transform.Find(
+                "grpPlayerPartyInfo/grpPlayerPartySlots");
+        }
+
+        if (slotParent == null)
+        {
+            Debug.LogError(
+                "DungeonPage could not resolve the player character info container.",
+                this);
+            return;
+        }
+
+        CharacterSO[] definitions =
+            new CharacterSO[MaximumPartySize];
+        CharacterRuntime[] previousSlots = playerCharacters;
+        for (int index = 0; index < previousSlots.Length; index++)
+        {
+            if (previousSlots[index] != null)
+                definitions[index] = previousSlots[index].Definition;
+        }
+
+        CharacterRuntime[] instances =
+            new CharacterRuntime[MaximumPartySize];
+        for (int index = 0; index < instances.Length; index++)
+        {
+            CharacterRuntime instance = Instantiate(
+                prefab,
+                slotParent,
+                false);
+            instance.name = $"grpPlayerCharacterSlot_{index + 1}";
+            instance.transform.SetSiblingIndex(index);
+            if (definitions[index] != null)
+                instance.ConfigureDefinition(definitions[index]);
+            instances[index] = instance;
+        }
+
+        playerCharacters = instances;
+        characterInfoPrefab = prefab;
+        _characterInfoInstancesPrepared = true;
+
+        for (int index = 0; index < previousSlots.Length; index++)
+        {
+            CharacterRuntime previous = previousSlots[index];
+            if (previous == null)
+                continue;
+
+            previous.gameObject.SetActive(false);
+            if (Application.isPlaying)
+                Destroy(previous.gameObject);
+            else
+                DestroyImmediate(previous.gameObject);
+        }
     }
 
     private void EnsurePartySlotColors()

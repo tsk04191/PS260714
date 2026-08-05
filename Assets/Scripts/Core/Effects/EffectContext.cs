@@ -418,6 +418,7 @@ public readonly struct BattleEffectContext
     public int RemovedStacks =>
         Math.Max(0, PreviousStacks - CurrentStacks);
     public int OccurrenceCount { get; }
+    public bool StatusEffectsLastUntilBattleEnd { get; }
     public EffectContext CharacterContext => _characterContext;
 
     private BattleEffectContext(
@@ -426,7 +427,8 @@ public readonly struct BattleEffectContext
         BattleStatusTarget sourceTarget,
         int previousStacks,
         int currentStacks,
-        int occurrenceCount)
+        int occurrenceCount,
+        bool statusEffectsLastUntilBattleEnd = false)
     {
         _characterContext = characterContext;
         OriginKind = originKind;
@@ -434,6 +436,8 @@ public readonly struct BattleEffectContext
         PreviousStacks = Math.Max(0, previousStacks);
         CurrentStacks = Math.Max(0, currentStacks);
         OccurrenceCount = Math.Max(1, occurrenceCount);
+        StatusEffectsLastUntilBattleEnd =
+            statusEffectsLastUntilBattleEnd;
     }
 
     public static BattleEffectContext FromCharacter(
@@ -483,7 +487,8 @@ public readonly struct BattleEffectContext
         CharacterTargetFaction targetFaction,
         IReadOnlyList<EnemyRuntime> enemyTargets,
         IReadOnlyList<IBattleCharacter> allyTargets,
-        float sourceAttackPower = 0f)
+        float sourceAttackPower = 0f,
+        bool statusEffectsLastUntilBattleEnd = false)
     {
         EffectContext context = new(
             selectedTarget,
@@ -500,7 +505,8 @@ public readonly struct BattleEffectContext
             selectedTarget,
             0,
             0,
-            1);
+            1,
+            statusEffectsLastUntilBattleEnd);
     }
 
     public static BattleEffectContext ForPreview(
@@ -617,7 +623,8 @@ public readonly struct BattleEffectContext
             SourceTarget,
             previousStacks,
             currentStacks,
-            occurrenceCount);
+            occurrenceCount,
+            StatusEffectsLastUntilBattleEnd);
     }
 
     private BattleEffectContext Copy(EffectContext context)
@@ -628,7 +635,8 @@ public readonly struct BattleEffectContext
             SourceTarget,
             PreviousStacks,
             CurrentStacks,
-            OccurrenceCount);
+            OccurrenceCount,
+            StatusEffectsLastUntilBattleEnd);
     }
 
     private static BattleEffectOriginKind ToOriginKind(

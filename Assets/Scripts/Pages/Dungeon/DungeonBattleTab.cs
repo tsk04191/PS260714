@@ -28,6 +28,7 @@ public sealed class DungeonBattleTab : MonoBehaviour
 
     [Header("Active Skill Resource")]
     [SerializeField] private TextMeshProUGUI activeSkillResourceText;
+    [SerializeField] private Sprite activeSkillResourceIcon;
 
     [Header("Enemy Spawn Queue")]
     [SerializeField] private DungeonSpawnQueueView spawnQueueView;
@@ -40,6 +41,7 @@ public sealed class DungeonBattleTab : MonoBehaviour
     private BattleManager _battleManager;
     private DungeonPage _page;
     private DungeonItemHandView _itemHandView;
+    private DungeonActiveSkillResourceView _activeSkillResourceView;
     private TextMeshProUGUI _pauseOverlayText;
     private bool _initialized;
     private bool _controlEventsBound;
@@ -159,6 +161,9 @@ public sealed class DungeonBattleTab : MonoBehaviour
 
             activeSkillResourceText = text;
         }
+
+        ConfigurePlayerPartyLayout();
+        EnsureActiveSkillResourceView();
 
         if (settingsButton != null)
         {
@@ -692,7 +697,7 @@ public sealed class DungeonBattleTab : MonoBehaviour
             : LocalizationService.Get(
                 LocalizationKeys.UiDungeonEnergyRecharge,
                 LocalizationService.Arg("seconds", rechargeRemaining));
-        activeSkillResourceText.text = _page != null
+        string tooltip = _page != null
             ? LocalizationService.Get(
                 LocalizationKeys.UiDungeonEnergyScale,
                 LocalizationService.Arg("current", resource),
@@ -706,6 +711,97 @@ public sealed class DungeonBattleTab : MonoBehaviour
                 LocalizationService.Arg("current", resource),
                 LocalizationService.Arg("max", maximumResource),
                 LocalizationService.Arg("recharge", recharge));
+
+        float rechargeDuration = _battleManager != null
+            ? _battleManager.ActiveSkillRechargeDuration
+            : 0f;
+        if (_activeSkillResourceView != null)
+        {
+            _activeSkillResourceView.Refresh(
+                resource,
+                maximumResource,
+                rechargeRemaining,
+                rechargeDuration,
+                tooltip);
+        }
+        else
+        {
+            activeSkillResourceText.text =
+                $"{resource}/{maximumResource}";
+        }
+    }
+
+    private void ConfigurePlayerPartyLayout()
+    {
+        Transform partyInfo = transform.Find("grpPlayerPartyInfo");
+        if (partyInfo == null && activeSkillResourceText != null)
+            partyInfo = activeSkillResourceText.transform.parent;
+        if (partyInfo == null)
+            return;
+
+        RectTransform partyRect = partyInfo as RectTransform;
+        if (partyRect != null)
+            partyRect.sizeDelta = new Vector2(partyRect.sizeDelta.x, 152f);
+
+        HorizontalLayoutGroup layout =
+            partyInfo.GetComponentInChildren<HorizontalLayoutGroup>(true);
+        if (layout == null)
+            return;
+
+        layout.padding = new RectOffset(16, 16, 4, 4);
+        layout.spacing = 16f;
+        layout.childAlignment = TextAnchor.MiddleCenter;
+        layout.childControlWidth = false;
+        layout.childControlHeight = false;
+        layout.childForceExpandWidth = false;
+        layout.childForceExpandHeight = false;
+
+        LayoutRebuilder.MarkLayoutForRebuild(
+            layout.transform as RectTransform);
+    }
+
+    private void EnsureActiveSkillResourceView()
+    {
+        if (activeSkillResourceText == null)
+            return;
+
+        if (_activeSkillResourceView == null)
+        {
+            _activeSkillResourceView =
+                GetComponentInChildren<DungeonActiveSkillResourceView>(true);
+        }
+
+        Transform partyInfo = transform.Find("grpPlayerPartyInfo");
+        if (_activeSkillResourceView == null)
+        {
+            GameObject resourceObject = new(
+                "grpActiveSkillResource",
+                typeof(RectTransform),
+                typeof(CanvasRenderer),
+                typeof(Image),
+                typeof(Outline),
+                typeof(DungeonActiveSkillResourceView));
+            resourceObject.transform.SetParent(transform, false);
+            _activeSkillResourceView =
+                resourceObject.GetComponent<DungeonActiveSkillResourceView>();
+            if (partyInfo != null)
+            {
+                resourceObject.transform.SetSiblingIndex(
+                    partyInfo.GetSiblingIndex());
+            }
+        }
+
+        RectTransform resourceRect =
+            _activeSkillResourceView.transform as RectTransform;
+        resourceRect.anchorMin = Vector2.zero;
+        resourceRect.anchorMax = Vector2.zero;
+        resourceRect.pivot = Vector2.zero;
+        resourceRect.anchoredPosition = new Vector2(24f, 164f);
+        resourceRect.sizeDelta = new Vector2(104f, 104f);
+        resourceRect.localScale = Vector3.one;
+        _activeSkillResourceView.Configure(
+            activeSkillResourceIcon,
+            activeSkillResourceText);
     }
 
     private void EnsureItemHandView()
@@ -730,10 +826,254 @@ public sealed class DungeonBattleTab : MonoBehaviour
 }
 
 [DisallowMultipleComponent]
+public sealed class DungeonActiveSkillResourceView : MonoBehaviour,
+    IPointerEnterHandler,
+    IPointerExitHandler
+{
+    private Image _iconImage;
+    private Image _cooldownOverlay;
+    private TextMeshProUGUI _fallbackIconText;
+    private TextMeshProUGUI _amountText;
+    private TextMeshProUGUI _tooltipText;
+    private GameObject _tooltip;
+
+    public void Configure(
+        Sprite iconSprite,
+        TextMeshProUGUI amountText)
+    {
+        Image hitArea = GetComponent<Image>() ??
+                        gameObject.AddComponent<Image>();
+        hitArea.color = Color.clear;
+        hitArea.raycastTarget = true;
+
+        Outline outline = GetComponent<Outline>() ??
+                          gameObject.AddComponent<Outline>();
+        outline.effectColor = new Color(0.2f, 0.78f, 0.58f, 0.75f);
+        outline.effectDistance = new Vector2(1f, -1f);
+
+        Image iconFrame = EnsureImage(transform, "grpResourceIcon");
+        RectTransform iconFrameRect = iconFrame.rectTransform;
+        iconFrameRect.anchorMin = Vector2.zero;
+        iconFrameRect.anchorMax = Vector2.zero;
+        iconFrameRect.pivot = Vector2.zero;
+        iconFrameRect.anchoredPosition = Vector2.zero;
+        iconFrameRect.sizeDelta = new Vector2(104f, 104f);
+        iconFrame.color = new Color(0.035f, 0.075f, 0.065f, 0.96f);
+
+        _iconImage = EnsureImage(iconFrameRect, "imgResourceIcon");
+        RectTransform iconRect = _iconImage.rectTransform;
+        iconRect.anchorMin = Vector2.zero;
+        iconRect.anchorMax = Vector2.one;
+        iconRect.offsetMin = new Vector2(10f, 10f);
+        iconRect.offsetMax = new Vector2(-10f, -10f);
+        _iconImage.sprite = iconSprite;
+        _iconImage.preserveAspect = true;
+        _iconImage.enabled = iconSprite != null;
+        _iconImage.color = new Color(0.35f, 0.92f, 0.68f, 0.72f);
+
+        _fallbackIconText = EnsureText(iconFrameRect, "txtResourceIcon");
+        RectTransform fallbackIconRect = _fallbackIconText.rectTransform;
+        fallbackIconRect.anchorMin = Vector2.zero;
+        fallbackIconRect.anchorMax = Vector2.one;
+        fallbackIconRect.offsetMin = Vector2.zero;
+        fallbackIconRect.offsetMax = Vector2.zero;
+        _fallbackIconText.text = "◆";
+        _fallbackIconText.fontSize = 68f;
+        _fallbackIconText.color =
+            new Color(0.35f, 0.92f, 0.68f, 0.38f);
+        _fallbackIconText.alignment = TextAlignmentOptions.Center;
+        _fallbackIconText.raycastTarget = false;
+        _fallbackIconText.enabled = iconSprite == null;
+        LocalizationFontResolver.ApplyGameDefault(_fallbackIconText);
+
+        _cooldownOverlay =
+            EnsureImage(iconFrameRect, "imgResourceCooldownOverlay");
+        RectTransform overlayRect = _cooldownOverlay.rectTransform;
+        overlayRect.anchorMin = Vector2.zero;
+        overlayRect.anchorMax = Vector2.one;
+        overlayRect.offsetMin = new Vector2(10f, 10f);
+        overlayRect.offsetMax = new Vector2(-10f, -10f);
+        _cooldownOverlay.sprite = iconSprite;
+        _cooldownOverlay.preserveAspect = true;
+        _cooldownOverlay.color = new Color(0f, 0f, 0f, 0.68f);
+        _cooldownOverlay.type = Image.Type.Filled;
+        _cooldownOverlay.fillMethod = Image.FillMethod.Radial360;
+        _cooldownOverlay.fillOrigin = (int)Image.Origin360.Top;
+        _cooldownOverlay.fillClockwise = true;
+        _cooldownOverlay.fillAmount = 0f;
+        _cooldownOverlay.enabled = false;
+
+        _amountText = amountText;
+        _amountText.transform.SetParent(iconFrameRect, false);
+        RectTransform amountRect = _amountText.rectTransform;
+        amountRect.anchorMin = Vector2.zero;
+        amountRect.anchorMax = Vector2.one;
+        amountRect.offsetMin = new Vector2(4f, 4f);
+        amountRect.offsetMax = new Vector2(-4f, -4f);
+        amountRect.localScale = Vector3.one;
+        _amountText.alignment = TextAlignmentOptions.Center;
+        _amountText.fontSize = 25f;
+        _amountText.fontStyle = FontStyles.Bold;
+        _amountText.enableAutoSizing = true;
+        _amountText.fontSizeMin = 16f;
+        _amountText.fontSizeMax = 25f;
+        _amountText.color = Color.white;
+        _amountText.raycastTarget = false;
+        LocalizationFontResolver.ApplyGameDefault(_amountText);
+        _amountText.transform.SetAsLastSibling();
+
+        Transform legacyGauge = transform.Find("grpResourceRechargeGauge");
+        if (legacyGauge != null)
+            legacyGauge.gameObject.SetActive(false);
+
+        EnsureTooltip();
+    }
+
+    public void Refresh(
+        int current,
+        int maximum,
+        float rechargeRemaining,
+        float rechargeDuration,
+        string tooltip)
+    {
+        maximum = Mathf.Max(0, maximum);
+        current = Mathf.Clamp(current, 0, maximum);
+        if (_amountText != null)
+            _amountText.text = $"{current}/{maximum}";
+
+        if (_cooldownOverlay != null)
+        {
+            float remainingRatio = current < maximum &&
+                                   rechargeDuration > 0f
+                ? Mathf.Clamp01(rechargeRemaining / rechargeDuration)
+                : 0f;
+            _cooldownOverlay.fillAmount = remainingRatio;
+            _cooldownOverlay.enabled =
+                _cooldownOverlay.sprite != null && remainingRatio > 0f;
+        }
+
+        if (_tooltipText != null)
+            _tooltipText.text = tooltip ?? string.Empty;
+    }
+
+    public void OnPointerEnter(PointerEventData eventData)
+    {
+        _tooltip?.SetActive(true);
+    }
+
+    public void OnPointerExit(PointerEventData eventData)
+    {
+        _tooltip?.SetActive(false);
+    }
+
+    private void OnDisable()
+    {
+        _tooltip?.SetActive(false);
+    }
+
+    private void EnsureTooltip()
+    {
+        if (_tooltip != null)
+            return;
+
+        Transform existing = transform.Find("grpResourceTooltip");
+        _tooltip = existing != null
+            ? existing.gameObject
+            : new GameObject(
+                "grpResourceTooltip",
+                typeof(RectTransform),
+                typeof(CanvasRenderer),
+                typeof(Image));
+        if (existing == null)
+            _tooltip.transform.SetParent(transform, false);
+
+        RectTransform tooltipRect = _tooltip.transform as RectTransform;
+        tooltipRect.anchorMin = new Vector2(0f, 0.5f);
+        tooltipRect.anchorMax = new Vector2(0f, 0.5f);
+        tooltipRect.pivot = new Vector2(0f, 0.5f);
+        tooltipRect.anchoredPosition = new Vector2(114f, 0f);
+        tooltipRect.sizeDelta = new Vector2(360f, 118f);
+        Image tooltipImage = _tooltip.GetComponent<Image>() ??
+                             _tooltip.AddComponent<Image>();
+        tooltipImage.color = new Color(0.035f, 0.055f, 0.045f, 0.99f);
+        tooltipImage.raycastTarget = false;
+
+        Transform existingText = tooltipRect.Find("txtResourceTooltip");
+        if (existingText != null)
+        {
+            _tooltipText = existingText.GetComponent<TextMeshProUGUI>();
+        }
+        else
+        {
+            GameObject textObject = new(
+                "txtResourceTooltip",
+                typeof(RectTransform),
+                typeof(TextMeshProUGUI));
+            textObject.transform.SetParent(tooltipRect, false);
+            _tooltipText = textObject.GetComponent<TextMeshProUGUI>();
+        }
+
+        RectTransform textRect = _tooltipText.rectTransform;
+        textRect.anchorMin = Vector2.zero;
+        textRect.anchorMax = Vector2.one;
+        textRect.offsetMin = new Vector2(12f, 10f);
+        textRect.offsetMax = new Vector2(-12f, -10f);
+        LocalizationFontResolver.ApplyGameDefault(_tooltipText);
+        _tooltipText.fontSize = 17f;
+        _tooltipText.fontStyle = FontStyles.Bold;
+        _tooltipText.color = new Color(0.94f, 0.91f, 0.78f, 1f);
+        _tooltipText.alignment = TextAlignmentOptions.MidlineLeft;
+        _tooltipText.raycastTarget = false;
+        _tooltip.SetActive(false);
+    }
+
+    private static Image EnsureImage(Transform parent, string objectName)
+    {
+        Transform existing = parent.Find(objectName);
+        GameObject imageObject = existing != null
+            ? existing.gameObject
+            : new GameObject(
+                objectName,
+                typeof(RectTransform),
+                typeof(CanvasRenderer),
+                typeof(Image));
+        if (existing == null)
+            imageObject.transform.SetParent(parent, false);
+        Image image = imageObject.GetComponent<Image>() ??
+                      imageObject.AddComponent<Image>();
+        image.raycastTarget = false;
+        return image;
+    }
+
+    private static TextMeshProUGUI EnsureText(
+        Transform parent,
+        string objectName)
+    {
+        Transform existing = parent.Find(objectName);
+        GameObject textObject = existing != null
+            ? existing.gameObject
+            : new GameObject(
+                objectName,
+                typeof(RectTransform),
+                typeof(TextMeshProUGUI));
+        if (existing == null)
+            textObject.transform.SetParent(parent, false);
+        return textObject.GetComponent<TextMeshProUGUI>() ??
+               textObject.AddComponent<TextMeshProUGUI>();
+    }
+}
+
+[DisallowMultipleComponent]
 public sealed class DungeonItemHandView : MonoBehaviour
 {
-    private readonly Dictionary<BattleItemSO, DungeonItemCardView> _cards =
-        new();
+    private const string DefaultCardPrefabResourcePath =
+        "Presentation/BattleItemCard";
+    private const float HandHeight = 620f;
+    private const float MaximumCardStep = 132f;
+
+    [SerializeField] private DungeonItemCardView cardPrefab;
+
+    private readonly List<DungeonItemCardView> _cards = new();
     private readonly List<CharacterRuntime> _boundTurrets = new();
     private DungeonPage _page;
     private BattleManager _battleManager;
@@ -745,7 +1085,7 @@ public sealed class DungeonItemHandView : MonoBehaviour
     {
         get
         {
-            foreach (DungeonItemCardView card in _cards.Values)
+            foreach (DungeonItemCardView card in _cards)
             {
                 if (card != null && card.gameObject.activeInHierarchy)
                 {
@@ -836,8 +1176,8 @@ public sealed class DungeonItemHandView : MonoBehaviour
         root.anchorMin = new Vector2(0f, 0.5f);
         root.anchorMax = new Vector2(0f, 0.5f);
         root.pivot = new Vector2(0f, 0.5f);
-        root.anchoredPosition = new Vector2(18f, 0f);
-        root.sizeDelta = new Vector2(132f, 620f);
+        root.anchoredPosition = new Vector2(18f, 56f);
+        root.sizeDelta = new Vector2(176f, HandHeight);
         root.SetAsLastSibling();
 
         if (_instructionText != null)
@@ -869,7 +1209,7 @@ public sealed class DungeonItemHandView : MonoBehaviour
         if (!_initialized || _page == null)
             return;
 
-        foreach (DungeonItemCardView card in _cards.Values)
+        foreach (DungeonItemCardView card in _cards)
         {
             if (card != null)
             {
@@ -879,47 +1219,108 @@ public sealed class DungeonItemHandView : MonoBehaviour
         }
         _cards.Clear();
 
+        DungeonItemCardView resolvedCardPrefab = ResolveCardPrefab();
+        if (resolvedCardPrefab == null)
+        {
+            Debug.LogError(
+                $"Battle item card prefab was not found at Resources/" +
+                $"{DefaultCardPrefabResourcePath}.",
+                this);
+            return;
+        }
+
+        RectTransform prefabRect =
+            resolvedCardPrefab.transform as RectTransform;
+        float cardHeight = prefabRect != null
+            ? Mathf.Max(1f, prefabRect.sizeDelta.y)
+            : 1f;
+
         int visibleCount = 0;
         foreach (BattleItemSO item in BattleItemCatalog.GetAll())
         {
-            if (_page.IsBattleItemOwned(item))
-                visibleCount++;
+            visibleCount += GetVisibleCardCount(item);
         }
 
         int visibleIndex = 0;
+        float cardStep = visibleCount > 1
+            ? Mathf.Min(
+                MaximumCardStep,
+                (HandHeight - cardHeight) / (visibleCount - 1))
+            : 0f;
         foreach (BattleItemSO item in BattleItemCatalog.GetAll())
         {
-            if (item == null || !_page.IsBattleItemOwned(item))
+            int itemCardCount = GetVisibleCardCount(item);
+            if (itemCardCount <= 0)
                 continue;
 
-            GameObject cardObject = new(
-                $"crdBattleItem_{item.ItemId.Replace('.', '_')}",
-                typeof(RectTransform),
-                typeof(CanvasRenderer),
-                typeof(Image),
-                typeof(DungeonItemCardView));
-            cardObject.transform.SetParent(transform, false);
-            RectTransform cardRect = (RectTransform)cardObject.transform;
-            cardRect.anchorMin = new Vector2(0f, 0.5f);
-            cardRect.anchorMax = new Vector2(0f, 0.5f);
-            cardRect.pivot = new Vector2(0f, 0.5f);
-            float top = (visibleCount - 1) * 39f;
-            cardRect.anchoredPosition = new Vector2(
-                0f,
-                top - visibleIndex * 78f);
-            cardRect.sizeDelta = new Vector2(124f, 94f);
+            for (int copyIndex = 0; copyIndex < itemCardCount; copyIndex++)
+            {
+                DungeonItemCardView card = Instantiate(
+                    resolvedCardPrefab,
+                    transform,
+                    false);
+                card.name =
+                    $"crdBattleItem_{item.ItemId.Replace('.', '_')}_" +
+                    $"{copyIndex + 1}";
+                RectTransform cardRect =
+                    card.transform as RectTransform;
+                cardRect.anchorMin = new Vector2(0f, 0.5f);
+                cardRect.anchorMax = new Vector2(0f, 0.5f);
+                cardRect.pivot = new Vector2(0f, 0.5f);
+                float top =
+                    (visibleCount - 1) * cardStep * 0.5f;
+                cardRect.anchoredPosition = new Vector2(
+                    0f,
+                    top - visibleIndex * cardStep);
 
-            DungeonItemCardView card =
-                cardObject.GetComponent<DungeonItemCardView>();
-            card.Initialize(
-                item,
-                HandleCardClicked);
-            _cards[item] = card;
-            visibleIndex++;
+                if (!card.Initialize(item, HandleCardClicked))
+                {
+                    Destroy(card.gameObject);
+                    continue;
+                }
+                _cards.Add(card);
+                visibleIndex++;
+            }
         }
 
         RefreshTurretBindings();
         RefreshCards();
+    }
+
+    private DungeonItemCardView ResolveCardPrefab()
+    {
+        if (cardPrefab == null)
+        {
+            GameObject prefabObject = Resources.Load<GameObject>(
+                DefaultCardPrefabResourcePath);
+            cardPrefab = prefabObject != null
+                ? prefabObject.GetComponent<DungeonItemCardView>()
+                : null;
+        }
+
+        return cardPrefab;
+    }
+
+    private int GetVisibleCardCount(BattleItemSO item)
+    {
+        if (item == null)
+            return 0;
+
+        return ResolveVisibleCardCount(
+            item,
+            _page.IsBattleItemOwned(item),
+            _page.GetBattleItemCount(item));
+    }
+
+    private static int ResolveVisibleCardCount(
+        BattleItemSO item,
+        bool isOwned,
+        int remainingUses)
+    {
+        if (item == null || !isOwned)
+            return 0;
+
+        return item.HasUnlimitedUses ? 1 : Mathf.Max(0, remainingUses);
     }
 
     private void RefreshCards()
@@ -927,11 +1328,14 @@ public sealed class DungeonItemHandView : MonoBehaviour
         if (_page == null || _battleManager == null)
             return;
 
-        foreach ((BattleItemSO item, DungeonItemCardView card) in _cards)
+        foreach (DungeonItemCardView card in _cards)
         {
             if (card == null)
                 continue;
 
+            BattleItemSO item = card.Item;
+            if (item == null)
+                continue;
             float cooldown = _page.GetBattleItemCooldown(item);
             card.Refresh(
                 _page.GetBattleItemCount(item),
@@ -1097,81 +1501,82 @@ public sealed class DungeonItemHandView : MonoBehaviour
 }
 
 [DisallowMultipleComponent]
-public sealed class DungeonItemCardView : MonoBehaviour,
+public class DungeonItemCardView : MonoBehaviour,
     IPointerEnterHandler,
     IPointerExitHandler,
     IPointerClickHandler
 {
-    private static readonly Color AvailableColor =
+    [Header("Prefab References")]
+    [SerializeField] private Image background;
+    [SerializeField] private Image illustration;
+    [SerializeField] private Image statusOverlay;
+    [SerializeField] private Image icon;
+    [SerializeField] private TextMeshProUGUI nameText;
+    [SerializeField] private TextMeshProUGUI stateText;
+    [SerializeField] private TextMeshProUGUI costText;
+    [SerializeField] private GameObject popup;
+    [SerializeField] private TextMeshProUGUI detailText;
+
+    [Header("State Colors")]
+    [SerializeField] private Color availableColor =
         new(0.18f, 0.28f, 0.22f, 0.98f);
-    private static readonly Color SelectedColor =
+    [SerializeField] private Color selectedColor =
         new(0.22f, 0.48f, 0.3f, 1f);
-    private static readonly Color DisabledColor =
+    [SerializeField] private Color disabledColor =
         new(0.08f, 0.1f, 0.09f, 0.92f);
+    [SerializeField] private Color selectedOverlayColor =
+        new(0.1f, 0.45f, 0.22f, 0.3f);
+    [SerializeField] private Color disabledOverlayColor =
+        new(0.015f, 0.02f, 0.018f, 0.68f);
+
+    [Header("Interaction")]
+    [SerializeField, Min(1f)] private float hoverScale = 1.12f;
+    [SerializeField, Min(0f)] private float hoverResponse = 18f;
 
     private BattleItemSO _item;
     private System.Action<BattleItemSO> _clicked;
-    private Image _background;
-    private TextMeshProUGUI _summaryText;
-    private GameObject _popup;
     private bool _hovered;
 
-    public void Initialize(
+    public BattleItemSO Item => _item;
+
+    public bool Initialize(
         BattleItemSO item,
         System.Action<BattleItemSO> clicked)
     {
+        if (item == null || !HasRequiredPrefabReferences())
+        {
+            Debug.LogError(
+                "DungeonItemCardView prefab references are incomplete.",
+                this);
+            return false;
+        }
+
         _item = item;
         _clicked = clicked;
-        _background = GetComponent<Image>();
-        _background.color = AvailableColor;
-        _background.raycastTarget = true;
+        background.color = availableColor;
+        illustration.sprite = item.Illustration;
+        illustration.enabled = item.Illustration != null;
+        icon.sprite = item.Icon;
+        icon.enabled = item.Icon != null;
+        nameText.text = item.GetLocalizedDisplayName();
+        costText.text = item.EnergyCost.ToString();
+        statusOverlay.color = Color.clear;
+        RefreshDetailText(string.Empty);
+        popup.SetActive(false);
+        return true;
+    }
 
-        _summaryText = CreateText(
-            transform,
-            "txtItemSummary",
-            Vector2.zero,
-            new Vector2(1f, 1f),
-            new Vector2(8f, 6f),
-            new Vector2(-8f, -6f),
-            15f,
-            TextAlignmentOptions.Center);
-
-        _popup = new GameObject(
-            "grpItemPopup",
-            typeof(RectTransform),
-            typeof(CanvasRenderer),
-            typeof(Image));
-        _popup.transform.SetParent(transform, false);
-        RectTransform popupRect = (RectTransform)_popup.transform;
-        popupRect.anchorMin = new Vector2(0f, 0.5f);
-        popupRect.anchorMax = new Vector2(0f, 0.5f);
-        popupRect.pivot = new Vector2(0f, 0.5f);
-        popupRect.anchoredPosition = new Vector2(132f, 0f);
-        popupRect.sizeDelta = new Vector2(300f, 108f);
-        Image popupImage = _popup.GetComponent<Image>();
-        popupImage.color = new Color(0.055f, 0.075f, 0.062f, 0.99f);
-        popupImage.raycastTarget = false;
-        TextMeshProUGUI detailText = CreateText(
-            popupRect,
-            "txtItemDetail",
-            Vector2.zero,
-            Vector2.one,
-            new Vector2(12f, 8f),
-            new Vector2(-12f, -8f),
-            17f,
-            TextAlignmentOptions.MidlineLeft);
-        string header = LocalizationService.Get(
-            LocalizationKeys.UiDungeonItemCardHeader,
-            LocalizationService.Arg(
-                "name",
-                item.GetLocalizedDisplayName()),
-            LocalizationService.Arg("cost", item.EnergyCost));
-        string footer = GetLifecycleText(item);
-        string effectScope = GetEffectScopeText(item);
-        detailText.text =
-            $"{header}\n{item.GetLocalizedDescription()}\n" +
-            $"{footer}{effectScope}";
-        _popup.SetActive(false);
+    public bool HasRequiredPrefabReferences()
+    {
+        return background != null &&
+               illustration != null &&
+               statusOverlay != null &&
+               icon != null &&
+               nameText != null &&
+               stateText != null &&
+               costText != null &&
+               popup != null &&
+               detailText != null;
     }
 
     public void Refresh(
@@ -1185,11 +1590,16 @@ public sealed class DungeonItemCardView : MonoBehaviour,
                          energy >= _item.EnergyCost &&
                          cooldown <= 0f &&
                          (_item.HasUnlimitedUses || count > 0);
-        _background.color = selected
-            ? SelectedColor
+        background.color = selected
+            ? selectedColor
             : available
-                ? AvailableColor
-                : DisabledColor;
+                ? availableColor
+                : disabledColor;
+        statusOverlay.color = selected
+            ? selectedOverlayColor
+            : available
+                ? Color.clear
+                : disabledOverlayColor;
 
         string state = cooldown > 0f
             ? LocalizationService.Get(
@@ -1199,21 +1609,27 @@ public sealed class DungeonItemCardView : MonoBehaviour,
                     TimePrecision.FloorToTenth(cooldown)))
             : _item.HasUnlimitedUses
                 ? "∞"
-                : LocalizationService.Get(
-                    LocalizationKeys.UiDungeonItemCount,
-                    LocalizationService.Arg("count", count));
-        if (_item.IsReusable && !_item.HasUnlimitedUses && count <= 0)
-        {
-            state += " · " + LocalizationService.Get(
-                LocalizationKeys.UiDungeonItemRestoreNextBattle);
-        }
+                : string.Empty;
+        nameText.text = _item.GetLocalizedDisplayName();
+        stateText.text = state;
+        costText.text = _item.EnergyCost.ToString();
+        RefreshDetailText(state);
+    }
+
+    private void RefreshDetailText(string state)
+    {
         string header = LocalizationService.Get(
             LocalizationKeys.UiDungeonItemCardHeader,
             LocalizationService.Arg(
                 "name",
                 _item.GetLocalizedDisplayName()),
             LocalizationService.Arg("cost", _item.EnergyCost));
-        _summaryText.text = $"{header}\n{state}";
+        string footer = GetLifecycleText(_item);
+        string effectScope = GetEffectScopeText(_item);
+        detailText.text =
+            $"{header}\n{_item.GetLocalizedDescription()}\n" +
+            $"{footer}{effectScope}" +
+            (string.IsNullOrWhiteSpace(state) ? string.Empty : $"\n{state}");
     }
 
     private static string GetLifecycleText(BattleItemSO item)
@@ -1249,8 +1665,10 @@ public sealed class DungeonItemCardView : MonoBehaviour,
             float resolvedDuration = ability.StatusDuration > 0f
                 ? ability.StatusDuration
                 : ability.StatusEffect.DefaultDuration;
-            string abilityDuration = ability.StatusEffect.DurationMode ==
-                                     StatusEffectDurationMode.Permanent
+            string abilityDuration =
+                item.StatusEffectsLastUntilBattleEnd ||
+                ability.StatusEffect.DurationMode ==
+                    StatusEffectDurationMode.Permanent
                 ? LocalizationService.Get(
                     LocalizationKeys.UiDungeonItemDurationPermanent)
                 : $"{resolvedDuration:0.##}s";
@@ -1284,25 +1702,25 @@ public sealed class DungeonItemCardView : MonoBehaviour,
     private void Update()
     {
         Vector3 targetScale = _hovered
-            ? new Vector3(1.12f, 1.12f, 1f)
+            ? new Vector3(hoverScale, hoverScale, 1f)
             : Vector3.one;
         transform.localScale = Vector3.Lerp(
             transform.localScale,
             targetScale,
-            1f - Mathf.Exp(-18f * Time.unscaledDeltaTime));
+            1f - Mathf.Exp(-hoverResponse * Time.unscaledDeltaTime));
     }
 
     public void OnPointerEnter(PointerEventData eventData)
     {
         _hovered = true;
         transform.SetAsLastSibling();
-        _popup?.SetActive(true);
+        popup?.SetActive(true);
     }
 
     public void OnPointerExit(PointerEventData eventData)
     {
         _hovered = false;
-        _popup?.SetActive(false);
+        popup?.SetActive(false);
     }
 
     public void OnPointerClick(PointerEventData eventData)
@@ -1314,33 +1732,4 @@ public sealed class DungeonItemCardView : MonoBehaviour,
         }
     }
 
-    private static TextMeshProUGUI CreateText(
-        Transform parent,
-        string objectName,
-        Vector2 anchorMin,
-        Vector2 anchorMax,
-        Vector2 offsetMin,
-        Vector2 offsetMax,
-        float fontSize,
-        TextAlignmentOptions alignment)
-    {
-        GameObject textObject = new(
-            objectName,
-            typeof(RectTransform),
-            typeof(TextMeshProUGUI));
-        textObject.transform.SetParent(parent, false);
-        RectTransform rect = (RectTransform)textObject.transform;
-        rect.anchorMin = anchorMin;
-        rect.anchorMax = anchorMax;
-        rect.offsetMin = offsetMin;
-        rect.offsetMax = offsetMax;
-        TextMeshProUGUI text = textObject.GetComponent<TextMeshProUGUI>();
-        LocalizationFontResolver.ApplyGameDefault(text);
-        text.fontSize = fontSize;
-        text.fontStyle = FontStyles.Bold;
-        text.color = new Color(0.94f, 0.91f, 0.78f, 1f);
-        text.alignment = alignment;
-        text.raycastTarget = false;
-        return text;
-    }
 }

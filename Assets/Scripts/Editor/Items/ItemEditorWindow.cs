@@ -244,10 +244,27 @@ public sealed class ItemEditorWindow : EditorWindow
 
             using (new EditorGUILayout.HorizontalScope())
             {
-                DrawIconPreview();
+                using (new EditorGUILayout.VerticalScope(
+                           GUILayout.Width(112f)))
+                {
+                    DrawSpritePreview(
+                        "illustration",
+                        "CARD ART",
+                        96f,
+                        134f);
+                    EditorGUILayout.Space(4f);
+                    DrawSpritePreview(
+                        "icon",
+                        "ICON",
+                        64f,
+                        64f);
+                }
                 using (new EditorGUILayout.VerticalScope())
                 {
                     DrawProperty("icon", "아이콘");
+                    DrawProperty(
+                        "illustration",
+                        "카드 일러스트");
                     DrawLocalizationKey(
                         "nameLocalizationKey",
                         "이름 키");
@@ -300,30 +317,34 @@ public sealed class ItemEditorWindow : EditorWindow
         }
     }
 
-    private void DrawIconPreview()
+    private void DrawSpritePreview(
+        string propertyName,
+        string fallbackLabel,
+        float width,
+        float height)
     {
         Rect previewRect = GUILayoutUtility.GetRect(
-            96f,
-            96f,
-            GUILayout.Width(96f),
-            GUILayout.Height(96f));
+            width,
+            height,
+            GUILayout.Width(width),
+            GUILayout.Height(height));
         EditorGUI.DrawRect(
             previewRect,
             new Color(0.12f, 0.13f, 0.15f, 1f));
 
-        Sprite icon = Find("icon")?.objectReferenceValue as Sprite;
-        if (icon == null)
+        Sprite sprite = Find(propertyName)?.objectReferenceValue as Sprite;
+        if (sprite == null)
         {
             GUI.Label(
                 previewRect,
-                "ICON",
+                fallbackLabel,
                 EditorStyles.centeredGreyMiniLabel);
             return;
         }
 
         Texture preview =
-            AssetPreview.GetAssetPreview(icon) ??
-            AssetPreview.GetMiniThumbnail(icon);
+            AssetPreview.GetAssetPreview(sprite) ??
+            AssetPreview.GetMiniThumbnail(sprite);
         if (preview != null)
         {
             GUI.DrawTexture(
@@ -457,6 +478,9 @@ public sealed class ItemEditorWindow : EditorWindow
                     "사용합니다. 선택한 적 또는 터렛은 '행동 대상 상속' " +
                     "대상으로 전달됩니다.",
                     MessageType.Info);
+                DrawProperty(
+                    "appliedStatusDurationMode",
+                    "Applied Status Duration");
                 SerializedProperty abilityEffects = Find("abilityEffects");
                 CharacterEditorWindow.DrawEmbeddedEffectList(
                     abilityEffects,

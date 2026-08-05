@@ -122,6 +122,31 @@ public sealed class BattleVfxP4Tests
     }
 
     [Test]
+    public void BoardPixelSize_PreservesDesignerRectTransformPlacement()
+    {
+        DungeonBoardView board = CreateBoard();
+        RectTransform boardRect = (RectTransform)board.transform;
+        Vector2 designerAnchorMin = new(0.15f, 0.2f);
+        Vector2 designerAnchorMax = new(0.65f, 0.8f);
+        Vector2 designerPivot = new(0.25f, 0.75f);
+        Vector2 designerPosition = new(43f, -27f);
+        boardRect.anchorMin = designerAnchorMin;
+        boardRect.anchorMax = designerAnchorMax;
+        boardRect.pivot = designerPivot;
+        boardRect.anchoredPosition = designerPosition;
+        SetField(board, "boardRect", boardRect);
+
+        board.SetPixelSize(420f);
+
+        Assert.That(boardRect.anchorMin, Is.EqualTo(designerAnchorMin));
+        Assert.That(boardRect.anchorMax, Is.EqualTo(designerAnchorMax));
+        Assert.That(boardRect.pivot, Is.EqualTo(designerPivot));
+        Assert.That(boardRect.anchoredPosition, Is.EqualTo(designerPosition));
+        Assert.That(boardRect.rect.width, Is.EqualTo(420f).Within(0.01f));
+        Assert.That(boardRect.rect.height, Is.EqualTo(420f).Within(0.01f));
+    }
+
+    [Test]
     public void LethalEffect_PublishesDeathAtImpactDelay()
     {
         BattleVfxCueSO death = CreateCue("Death");
