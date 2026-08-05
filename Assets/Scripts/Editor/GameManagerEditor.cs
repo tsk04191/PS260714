@@ -734,7 +734,10 @@ public sealed class CommonSettingsProjectProvider : SettingsProvider
             });
     }
 
-    [MenuItem(PS260714EditorMenu.CommonSettings)]
+    [MenuItem(
+        PS260714EditorMenu.CommonSettings,
+        false,
+        PS260714EditorMenu.CommonSettingsPriority)]
     public static void Open()
     {
         SettingsService.OpenProjectSettings(SettingsPath);

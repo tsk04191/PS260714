@@ -22,7 +22,10 @@ public sealed class BattleEditorWindow : EditorWindow
     private bool _isRenaming;
     private bool _focusRenameField;
 
-    [MenuItem(MenuPath)]
+    [MenuItem(
+        MenuPath,
+        false,
+        PS260714EditorMenu.BattleEditorPriority)]
     public static void OpenFromMenu()
     {
         Open(null);
@@ -40,7 +43,10 @@ public sealed class BattleEditorWindow : EditorWindow
         window.Repaint();
     }
 
-    [MenuItem(MenuPath, true)]
+    [MenuItem(
+        MenuPath,
+        true,
+        PS260714EditorMenu.BattleEditorPriority)]
     private static bool ValidateOpenFromMenu()
     {
         return !EditorApplication.isPlayingOrWillChangePlaymode;

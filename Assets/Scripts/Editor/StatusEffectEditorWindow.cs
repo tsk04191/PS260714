@@ -185,7 +185,10 @@ public sealed class StatusEffectEditorWindow : EditorWindow
     private bool _operationsExpanded;
 
 
-    [MenuItem(MenuPath)]
+    [MenuItem(
+        MenuPath,
+        false,
+        PS260714EditorMenu.StatusEffectEditorPriority)]
     public static void Open()
     {
         StatusEffectEditorWindow window =
@@ -206,7 +209,10 @@ public sealed class StatusEffectEditorWindow : EditorWindow
         window.Repaint();
     }
 
-    [MenuItem(MenuPath, true)]
+    [MenuItem(
+        MenuPath,
+        true,
+        PS260714EditorMenu.StatusEffectEditorPriority)]
     private static bool ValidateOpen()
     {
         return !EditorApplication.isPlayingOrWillChangePlaymode;

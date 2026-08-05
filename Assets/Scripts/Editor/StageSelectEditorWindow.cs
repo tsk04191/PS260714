@@ -33,7 +33,10 @@ public sealed class StageSelectEditorWindow : EditorWindow
     private bool _modifiersExpanded;
     private bool _validationExpanded = true;
 
-    [MenuItem(MenuPath)]
+    [MenuItem(
+        MenuPath,
+        false,
+        PS260714EditorMenu.StageSelectEditorPriority)]
     public static void Open()
     {
         StageSelectEditorWindow window =
@@ -55,7 +58,10 @@ public sealed class StageSelectEditorWindow : EditorWindow
         window.Repaint();
     }
 
-    [MenuItem(MenuPath, true)]
+    [MenuItem(
+        MenuPath,
+        true,
+        PS260714EditorMenu.StageSelectEditorPriority)]
     private static bool ValidateOpen()
     {
         return !EditorApplication.isPlayingOrWillChangePlaymode;

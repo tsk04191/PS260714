@@ -32,7 +32,10 @@ public sealed class ItemEditorWindow : EditorWindow
     private bool _focusRenameField;
     private string _renameText = string.Empty;
 
-    [MenuItem(MenuPath)]
+    [MenuItem(
+        MenuPath,
+        false,
+        PS260714EditorMenu.ItemEditorPriority)]
     public static void Open()
     {
         ItemEditorWindow window = GetWindow<ItemEditorWindow>();

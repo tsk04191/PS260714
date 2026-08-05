@@ -227,7 +227,10 @@ public sealed class StatusEffectEditorTests
             Is.EqualTo("PS260714/Enemy Editor"));
         Assert.That(
             StageSelectEditorWindow.MenuPath,
-            Is.EqualTo("PS260714/Stage Select Editor"));
+            Is.EqualTo("PS260714/UI/Stage Select Editor"));
+        Assert.That(
+            PS260714EditorMenu.RecruitEditor,
+            Is.EqualTo("PS260714/UI/Recruit Editor"));
         Assert.That(
             StatusEffectEditorWindow.MenuPath,
             Is.EqualTo("PS260714/Status Effect Editor"));
@@ -305,6 +308,102 @@ public sealed class StatusEffectEditorTests
                 "FireStatusEffectAssetGenerator"),
             Is.Null,
             "Legacy 2D fire VFX generator must not return.");
+    }
+
+    [Test]
+    public void EditorMenus_HaveStableUniquePriorities()
+    {
+        Dictionary<string, int> prioritiesByPath =
+            new(StringComparer.Ordinal);
+        foreach (Type type in typeof(PS260714EditorMenu).Assembly.GetTypes())
+        {
+            foreach (MethodInfo method in type.GetMethods(
+                         BindingFlags.Public |
+                         BindingFlags.NonPublic |
+                         BindingFlags.Static))
+            {
+                foreach (CustomAttributeData attribute in
+                         method.CustomAttributes)
+                {
+                    if (attribute.AttributeType != typeof(MenuItem) ||
+                        attribute.ConstructorArguments.Count == 0)
+                    {
+                        continue;
+                    }
+
+                    string path = attribute.ConstructorArguments[0].Value
+                        as string;
+                    if (path == null || !path.StartsWith(
+                            PS260714EditorMenu.Root,
+                            StringComparison.Ordinal))
+                    {
+                        continue;
+                    }
+
+                    Assert.That(
+                        attribute.ConstructorArguments.Count,
+                        Is.EqualTo(3),
+                        $"{path} must declare an explicit priority.");
+                    int priority =
+                        (int)attribute.ConstructorArguments[2].Value;
+                    if (prioritiesByPath.TryGetValue(
+                            path,
+                            out int registeredPriority))
+                    {
+                        Assert.That(
+                            priority,
+                            Is.EqualTo(registeredPriority),
+                            $"{path} action and validation priorities " +
+                            "must match.");
+                    }
+                    else
+                    {
+                        prioritiesByPath.Add(path, priority);
+                    }
+                }
+            }
+        }
+
+        Assert.That(
+            prioritiesByPath,
+            Does.Not.ContainKey("PS260714/UI/Apply Main Lobby Layout"));
+        Assert.That(prioritiesByPath.Count, Is.EqualTo(17));
+
+        HashSet<int> uniquePriorities = new();
+        foreach (KeyValuePair<string, int> menu in prioritiesByPath)
+        {
+            Assert.That(
+                uniquePriorities.Add(menu.Value),
+                Is.True,
+                $"{menu.Key} reuses priority {menu.Value}.");
+        }
+
+        Assert.That(
+            new[]
+            {
+                PS260714EditorMenu.CommonSettingsPriority,
+                PS260714EditorMenu.CharacterEditorPriority,
+                PS260714EditorMenu.ItemEditorPriority,
+                PS260714EditorMenu.EnemyEditorPriority,
+                PS260714EditorMenu.StatusEffectEditorPriority,
+                PS260714EditorMenu.BattleEditorPriority,
+                PS260714EditorMenu.BattleVfxEditorPriority,
+                PS260714EditorMenu.ValidateBattleVfxPriority,
+                PS260714EditorMenu.LocalizationEditorPriority,
+                PS260714EditorMenu.ValidateLocalizationPriority,
+                PS260714EditorMenu.GenerateLocalizationPriority,
+                PS260714EditorMenu.StageSelectEditorPriority,
+                PS260714EditorMenu.RecruitEditorPriority,
+                PS260714EditorMenu.ValidateDesignerUiPriority,
+                PS260714EditorMenu.MigrateRuntimeUiPriority,
+                PS260714EditorMenu.MigrateBattleItemUsagePriority,
+                PS260714EditorMenu.MigrateCharacterModifierIdsPriority,
+            },
+            Is.EqualTo(new[]
+            {
+                100, 101, 102, 103, 104, 105, 106, 107, 108,
+                109, 110, 111, 112, 113, 114, 115, 116,
+            }));
     }
 
     [Test]

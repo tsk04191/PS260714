@@ -124,7 +124,10 @@ namespace PS260714.Localization.Editor
             EditorApplication.playModeStateChanged += HandlePlayModeChanged;
         }
 
-        [MenuItem(PS260714EditorMenu.ValidateLocalization)]
+        [MenuItem(
+            PS260714EditorMenu.ValidateLocalization,
+            false,
+            PS260714EditorMenu.ValidateLocalizationPriority)]
         private static void ValidateMenu()
         {
             LocalizationValidationResult result =
@@ -132,7 +135,10 @@ namespace PS260714.Localization.Editor
             LocalizationPipelineLog.Write(result, "manual validation");
         }
 
-        [MenuItem(PS260714EditorMenu.GenerateLocalization)]
+        [MenuItem(
+            PS260714EditorMenu.GenerateLocalization,
+            false,
+            PS260714EditorMenu.GenerateLocalizationPriority)]
         private static void GenerateMenu()
         {
             LocalizationValidationResult result =

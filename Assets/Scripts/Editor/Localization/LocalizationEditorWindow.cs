@@ -51,7 +51,10 @@ namespace PS260714.Localization.Editor
         private int translationSelectIndex = -1;
         private bool restoreTranslationSelection;
 
-        [MenuItem(PS260714EditorMenu.LocalizationEditor)]
+        [MenuItem(
+            PS260714EditorMenu.LocalizationEditor,
+            false,
+            PS260714EditorMenu.LocalizationEditorPriority)]
         public static void Open()
         {
             GetWindow<LocalizationEditorWindow>("Localization");

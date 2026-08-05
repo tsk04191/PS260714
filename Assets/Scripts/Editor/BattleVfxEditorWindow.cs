@@ -33,7 +33,10 @@ public sealed class BattleVfxEditorWindow : EditorWindow
     private bool _poolExpanded = true;
     private int _selectedClipIndex = -1;
 
-    [MenuItem(MenuPath)]
+    [MenuItem(
+        MenuPath,
+        false,
+        PS260714EditorMenu.BattleVfxEditorPriority)]
     public static void Open()
     {
         BattleVfxEditorWindow window =
@@ -54,13 +57,19 @@ public sealed class BattleVfxEditorWindow : EditorWindow
         window.Repaint();
     }
 
-    [MenuItem(MenuPath, true)]
+    [MenuItem(
+        MenuPath,
+        true,
+        PS260714EditorMenu.BattleVfxEditorPriority)]
     private static bool ValidateOpen()
     {
         return !EditorApplication.isPlayingOrWillChangePlaymode;
     }
 
-    [MenuItem(ValidateMenuPath)]
+    [MenuItem(
+        ValidateMenuPath,
+        false,
+        PS260714EditorMenu.ValidateBattleVfxPriority)]
     public static void ValidateProject()
     {
         List<BattleVfxCueSO> cues = LoadAllAssets<BattleVfxCueSO>();
@@ -116,7 +125,10 @@ public sealed class BattleVfxEditorWindow : EditorWindow
             "OK");
     }
 
-    [MenuItem(ValidateMenuPath, true)]
+    [MenuItem(
+        ValidateMenuPath,
+        true,
+        PS260714EditorMenu.ValidateBattleVfxPriority)]
     private static bool ValidateProjectMenu()
     {
         return !EditorApplication.isPlayingOrWillChangePlaymode;

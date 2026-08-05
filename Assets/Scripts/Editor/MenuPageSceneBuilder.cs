@@ -18,13 +18,12 @@ public static class MenuPageSceneBuilder
         "btnBASE",
         "btnSTORAGE",
     };
-    private const string ValidateDesignerUiMenuPath =
-        "PS260714/UI/Validate Designer UI";
-    private const string MigrateRuntimeUiMenuPath =
-        "PS260714/UI/Migrate Runtime UI For Designer";
     private static readonly bool LegacyBuilderDisabled = true;
 
-    [MenuItem(ValidateDesignerUiMenuPath)]
+    [MenuItem(
+        PS260714EditorMenu.ValidateDesignerUi,
+        false,
+        PS260714EditorMenu.ValidateDesignerUiPriority)]
     private static void ValidateDesignerUi()
     {
         Scene scene = SceneManager.GetActiveScene();
@@ -49,7 +48,10 @@ public static class MenuPageSceneBuilder
             string.Join("\n- ", issues));
     }
 
-    [MenuItem(MigrateRuntimeUiMenuPath)]
+    [MenuItem(
+        PS260714EditorMenu.MigrateRuntimeUi,
+        false,
+        PS260714EditorMenu.MigrateRuntimeUiPriority)]
     private static void MigrateRuntimeUiFromMenu()
     {
         Scene scene = SceneManager.GetActiveScene();

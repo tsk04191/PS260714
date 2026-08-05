@@ -25,7 +25,10 @@ public sealed class EnemyEditorWindow : EditorWindow
     private bool _presentationExpanded = true;
     private bool _abilitiesExpanded = true;
 
-    [MenuItem(MenuPath)]
+    [MenuItem(
+        MenuPath,
+        false,
+        PS260714EditorMenu.EnemyEditorPriority)]
     public static void Open()
     {
         EnemyEditorWindow window = GetWindow<EnemyEditorWindow>();
@@ -45,7 +48,10 @@ public sealed class EnemyEditorWindow : EditorWindow
         window.Repaint();
     }
 
-    [MenuItem(MenuPath, true)]
+    [MenuItem(
+        MenuPath,
+        true,
+        PS260714EditorMenu.EnemyEditorPriority)]
     private static bool ValidateOpen()
     {
         return !EditorApplication.isPlayingOrWillChangePlaymode;

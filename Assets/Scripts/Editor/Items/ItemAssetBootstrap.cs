@@ -8,10 +8,10 @@ public static class ItemAssetBootstrap
     private const string ItemRoot = "Assets/Resources/Items";
     private const string CatalogPath =
         "Assets/Resources/ItemCatalog.asset";
-    private const string MigrationMenuPath =
-        "PS260714/Data/Migrate Battle Item Usage Schema";
-
-    [MenuItem(MigrationMenuPath)]
+    [MenuItem(
+        PS260714EditorMenu.MigrateBattleItemUsage,
+        false,
+        PS260714EditorMenu.MigrateBattleItemUsagePriority)]
     public static void MigrateBattleItemAssets()
     {
         foreach (string guid in AssetDatabase.FindAssets(

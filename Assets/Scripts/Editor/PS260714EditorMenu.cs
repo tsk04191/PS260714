@@ -7,15 +7,37 @@ using UnityEngine;
 internal static class PS260714EditorMenu
 {
     public const string Root = "PS260714/";
+    private const string EffectsRoot = Root + "Effects/";
+    private const string LocalizationRoot = Root + "Localization/";
+    private const string UiRoot = Root + "UI/";
+    private const string DataRoot = Root + "Data/";
+
+    public const int CommonSettingsPriority = 100;
+    public const int CharacterEditorPriority = 101;
+    public const int ItemEditorPriority = 102;
+    public const int EnemyEditorPriority = 103;
+    public const int StatusEffectEditorPriority = 104;
+    public const int BattleEditorPriority = 105;
+    public const int BattleVfxEditorPriority = 106;
+    public const int ValidateBattleVfxPriority = 107;
+    public const int LocalizationEditorPriority = 108;
+    public const int ValidateLocalizationPriority = 109;
+    public const int GenerateLocalizationPriority = 110;
+    public const int StageSelectEditorPriority = 111;
+    public const int RecruitEditorPriority = 112;
+    public const int ValidateDesignerUiPriority = 113;
+    public const int MigrateRuntimeUiPriority = 114;
+    public const int MigrateBattleItemUsagePriority = 115;
+    public const int MigrateCharacterModifierIdsPriority = 116;
 
     public const string CharacterEditor =
         Root + "Character Editor";
     public const string CommonSettings =
         Root + "Common Settings";
     public const string RecruitEditor =
-        Root + "Recruit Editor";
+        UiRoot + "Recruit Editor";
     public const string StageSelectEditor =
-        Root + "Stage Select Editor";
+        UiRoot + "Stage Select Editor";
     public const string ItemEditor =
         Root + "Item Editor";
     public const string EnemyEditor =
@@ -25,15 +47,23 @@ internal static class PS260714EditorMenu
     public const string BattleEditor =
         Root + "Battle Editor";
     public const string BattleVfxEditor =
-        Root + "Effects/Battle VFX Editor";
+        EffectsRoot + "Battle VFX Editor";
     public const string ValidateBattleVfx =
-        Root + "Effects/Validate Battle VFX";
+        EffectsRoot + "Validate Battle VFX";
     public const string LocalizationEditor =
-        Root + "Localization/Localization Editor";
+        LocalizationRoot + "Localization Editor";
     public const string ValidateLocalization =
-        Root + "Localization/Validate CSV";
+        LocalizationRoot + "Validate CSV";
     public const string GenerateLocalization =
-        Root + "Localization/Generate C#";
+        LocalizationRoot + "Generate C#";
+    public const string ValidateDesignerUi =
+        UiRoot + "Validate Designer UI";
+    public const string MigrateRuntimeUi =
+        UiRoot + "Migrate Runtime UI For Designer";
+    public const string MigrateBattleItemUsage =
+        DataRoot + "Migrate Battle Item Usage Schema";
+    public const string MigrateCharacterModifierIds =
+        DataRoot + "Migrate Character Modifier IDs";
 }
 
 internal static class PS260714AssetEditorToolbar

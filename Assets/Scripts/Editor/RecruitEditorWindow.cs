@@ -29,7 +29,10 @@ public sealed class RecruitEditorWindow : EditorWindow
     private readonly List<SimulationResult> _simulationResults = new();
     [SerializeField] private int _revealPreviewCount;
 
-    [MenuItem(PS260714EditorMenu.RecruitEditor)]
+    [MenuItem(
+        PS260714EditorMenu.RecruitEditor,
+        false,
+        PS260714EditorMenu.RecruitEditorPriority)]
     public static void Open()
     {
         RecruitEditorWindow window = GetWindow<RecruitEditorWindow>();
@@ -39,7 +42,10 @@ public sealed class RecruitEditorWindow : EditorWindow
         window.Focus();
     }
 
-    [MenuItem(PS260714EditorMenu.RecruitEditor, true)]
+    [MenuItem(
+        PS260714EditorMenu.RecruitEditor,
+        true,
+        PS260714EditorMenu.RecruitEditorPriority)]
     private static bool ValidateOpen()
     {
         return !EditorApplication.isPlayingOrWillChangePlaymode;

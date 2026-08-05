@@ -15,8 +15,6 @@ public static class MainLobbySceneUpdater
         "Assets/Scenes/ClientScene.unity";
     private const string RequestPath =
         "Temp/ApplyMainLobbyLayout.request";
-    private const string ApplyMenuPath =
-        "PS260714/UI/Apply Main Lobby Layout";
     private const string CharacterSpritePath =
         "Assets/Sprite/Characters/SUIREN/3_Standing.png";
 
@@ -44,7 +42,6 @@ public static class MainLobbySceneUpdater
         EditorApplication.delayCall += ApplyRequestedLayout;
     }
 
-    [MenuItem(ApplyMenuPath)]
     public static void ApplyMainLobbyLayout()
     {
         ApplyLayout(openAdditively: true);
@@ -91,7 +88,7 @@ public static class MainLobbySceneUpdater
             Debug.LogWarning(
                 "Main lobby layout was not applied because ClientScene " +
                 "contains unsaved editor changes. Save or discard those " +
-                "changes, then run " + ApplyMenuPath + ".");
+                "changes before applying the layout.");
             return false;
         }
 

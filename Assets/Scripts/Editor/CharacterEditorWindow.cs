@@ -600,7 +600,10 @@ public sealed class CharacterEditorWindow : EditorWindow
         }
     }
 
-    [MenuItem(MenuPath)]
+    [MenuItem(
+        MenuPath,
+        false,
+        PS260714EditorMenu.CharacterEditorPriority)]
     public static void Open()
     {
         CharacterEditorWindow window = GetWindow<CharacterEditorWindow>();
@@ -620,7 +623,10 @@ public sealed class CharacterEditorWindow : EditorWindow
         window.Repaint();
     }
 
-    [MenuItem(MenuPath, true)]
+    [MenuItem(
+        MenuPath,
+        true,
+        PS260714EditorMenu.CharacterEditorPriority)]
     private static bool ValidateOpen()
     {
         return !EditorApplication.isPlayingOrWillChangePlaymode;
@@ -7066,7 +7072,10 @@ internal static class CharacterModifierIdMigration
         EditorApplication.delayCall += MigrateMissingIds;
     }
 
-    [MenuItem("PS260714/Data/Migrate Character Modifier IDs")]
+    [MenuItem(
+        PS260714EditorMenu.MigrateCharacterModifierIds,
+        false,
+        PS260714EditorMenu.MigrateCharacterModifierIdsPriority)]
     private static void MigrateMissingIds()
     {
         foreach (string guid in AssetDatabase.FindAssets(
