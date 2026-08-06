@@ -563,6 +563,8 @@ public class DungeonPage : MonoBehaviour, IPage
         EDungeonCompletionDestination destination =
             _session.Definition.CompletionDestination;
 
+        RequestDungeonBgmExit(EDungeonBgmExitReason.Clear);
+
         if (_battleManager != null && _battleManager.HasSession)
             _battleManager.EndBattle(board);
         board?.ClearAllStacks();
@@ -596,6 +598,11 @@ public class DungeonPage : MonoBehaviour, IPage
         IReadOnlyList<EDungeonPhase> phases =
             definition.BuildPhaseSequence(battleCount, runSeed);
         _session.Begin(definition, runSeed, battleCount, phases);
+        StartDungeonBgm(
+            definition,
+            phases != null && phases.Count > 0
+                ? phases[0]
+                : EDungeonPhase.Battle);
         fieldView?.ApplyTheme(definition.Theme);
         GenerateBattlePlans(battleCount, runSeed);
         _eventRewardPending = false;
@@ -636,6 +643,8 @@ public class DungeonPage : MonoBehaviour, IPage
                 this);
             return;
         }
+
+        RequestDungeonBgmExit(EDungeonBgmExitReason.Aborted);
 
         PageControl.PagToPag(
             gameObject,
@@ -1728,6 +1737,8 @@ public class DungeonPage : MonoBehaviour, IPage
 
     private void HandleDungeonPhaseChanged(EDungeonPhase phase, int _)
     {
+        GameManager.Instance?.Audio?.SetDungeonBgmPhase(phase);
+
         if (!TryResolveBattleManager())
             return;
 
@@ -2286,6 +2297,7 @@ public class DungeonPage : MonoBehaviour, IPage
 
     private void ResetCurrentRunForNavigation()
     {
+        RequestDungeonBgmExit(EDungeonBgmExitReason.Aborted);
         _tutorialController?.StopTutorial();
         _eventRewardPending = false;
         _startingCharacterSelectionPending = false;
@@ -2325,6 +2337,11 @@ public class DungeonPage : MonoBehaviour, IPage
 
     private void NotifyRunEnded(EDungeonRunResult result)
     {
+        RequestDungeonBgmExit(
+            result == EDungeonRunResult.Clear
+                ? EDungeonBgmExitReason.Clear
+                : EDungeonBgmExitReason.Defeat);
+
         if (result == EDungeonRunResult.Clear &&
             _session.Definition != null)
         {
@@ -2334,6 +2351,33 @@ public class DungeonPage : MonoBehaviour, IPage
 
         ForEachModifier(modifier =>
             modifier.OnRunEnded(GetRuntimeContext(), result));
+    }
+
+    private static void StartDungeonBgm(
+        DungeonDefinition definition,
+        EDungeonPhase initialPhase)
+    {
+        AudioManager audioManager = GameManager.Instance?.Audio;
+        DungeonThemeDefinition theme = definition != null
+            ? definition.Theme
+            : null;
+        if (audioManager == null || theme == null)
+            return;
+
+        if (theme.BgmProfile != null &&
+            audioManager.PlayDungeonBgm(theme.BgmProfile, initialPhase))
+        {
+            return;
+        }
+
+        if (theme.Music != null)
+            audioManager.PlayBgm(theme.Music);
+    }
+
+    private static void RequestDungeonBgmExit(
+        EDungeonBgmExitReason reason)
+    {
+        GameManager.Instance?.Audio?.RequestDungeonBgmExit(reason);
     }
 
     private DungeonRuntimeContext GetRuntimeContext()

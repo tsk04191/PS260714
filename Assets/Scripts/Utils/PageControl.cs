@@ -30,7 +30,7 @@ public static class PageControl
         }
 
         pageFrom.Close();
-        pageTo.Open(mode);
+        OpenPage(pagTo, pageTo, mode);
     }
 
     public static void TabInTabs(GameObject[] tabs, GameObject tabTo)
@@ -56,7 +56,7 @@ public static class PageControl
         for (int i = 0; i < pages.Length; i++)
         {
             if (i == tabTo)
-                pages[i].Open();
+                OpenPage(tabs[i], pages[i], PageOpenMode.Fresh);
             else
                 pages[i].Close();
         }
@@ -71,7 +71,7 @@ public static class PageControl
         {
             if (i == 0)
             {
-                pages[i].Open(mode);
+                OpenPage(tabs[i], pages[i], mode);
             }
             else
             {
@@ -85,7 +85,7 @@ public static class PageControl
         if (!TryGetPage(pop, out IPage page))
             return;
 
-        page.Open();
+        OpenPage(pop, page, PageOpenMode.Fresh);
     }
 
     public static void DropdownInit(TMP_Dropdown drd, List<string> options)
@@ -160,6 +160,24 @@ public static class PageControl
     {
         page = null;
         return target != null && target.TryGetComponent(out page);
+    }
+
+    private static void OpenPage(
+        GameObject target,
+        IPage page,
+        PageOpenMode mode)
+    {
+        page.Open(mode);
+        // Dungeon music is selected by the active dungeon theme so that its
+        // intro/phase loops/exit sequence cannot be replaced by a page track.
+        if (page is DungeonPage)
+            return;
+
+        if (target != null &&
+            target.TryGetComponent(out PageBgmSelection selection))
+        {
+            selection.RequestSelectedBgm();
+        }
     }
 
     private static bool TryResolvePages(GameObject[] targets, out IPage[] pages)

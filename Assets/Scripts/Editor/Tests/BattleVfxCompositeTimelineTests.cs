@@ -545,3 +545,276 @@ public sealed class BattleVfxCompositeTimelineTests
         field.SetValue(target, value);
     }
 }
+
+public sealed class PageBgmTests
+{
+    private GameObject _selectionObject;
+    private GameObject _audioManagerObject;
+    private GameObject _gameManagerObject;
+    private GameObject _dataManagerObject;
+    private GameObject _speakerObject;
+    private AudioClip _clip;
+
+    [TearDown]
+    public void TearDown()
+    {
+        DestroyImmediate(_selectionObject);
+        DestroyImmediate(_audioManagerObject);
+        DestroyImmediate(_gameManagerObject);
+        DestroyImmediate(_dataManagerObject);
+        DestroyImmediate(_speakerObject);
+        if (_clip != null)
+            Object.DestroyImmediate(_clip);
+    }
+
+    [Test]
+    public void PageSelection_RequestsConfiguredMusicListName()
+    {
+        _selectionObject = new GameObject("Page");
+        PageBgmSelection selection =
+            _selectionObject.AddComponent<PageBgmSelection>();
+        SerializedObject serialized = new(selection);
+        serialized.FindProperty("bgmClipName").stringValue =
+            "  Page Track  ";
+        serialized.ApplyModifiedPropertiesWithoutUndo();
+        GameEventManager events = new();
+        string requestedName = null;
+        events.BgmRequested += name => requestedName = name;
+
+        bool requested = selection.RequestSelectedBgm(events);
+
+        Assert.That(requested, Is.True);
+        Assert.That(requestedName, Is.EqualTo("Page Track"));
+    }
+
+    [Test]
+    public void PageSelection_KeepCurrent_DoesNotRequestBgm()
+    {
+        _selectionObject = new GameObject("Page");
+        PageBgmSelection selection =
+            _selectionObject.AddComponent<PageBgmSelection>();
+        GameEventManager events = new();
+        int requestCount = 0;
+        events.BgmRequested += _ => requestCount++;
+
+        bool requested = selection.RequestSelectedBgm(events);
+
+        Assert.That(requested, Is.False);
+        Assert.That(requestCount, Is.Zero);
+    }
+
+    [Test]
+    public void AudioManager_Setup_DoesNotAutoPlayLegacyAudioTest()
+    {
+        AudioManager manager = CreateAudioManager(
+            dataReady: true,
+            clipName: "Audio Test");
+
+        Assert.That(manager.main_speakers.MainMusic.clip, Is.Null);
+    }
+
+    [Test]
+    public void AudioManager_PendingPageBgm_PlaysWhenDataBecomesReady()
+    {
+        AudioManager manager = CreateAudioManager(
+            dataReady: false,
+            clipName: "Page Track");
+
+        manager.PlayBgm("Page Track");
+        Assert.That(manager.main_speakers.MainMusic.clip, Is.Null);
+
+        _gameManagerObject.GetComponent<GameManager>()
+            .Data.IsSetupDone = true;
+        MethodInfo playPending = typeof(AudioManager).GetMethod(
+            "PlayPendingBgm",
+            BindingFlags.Instance | BindingFlags.NonPublic);
+        Assert.That(playPending, Is.Not.Null);
+        playPending.Invoke(manager, null);
+
+        Assert.That(
+            manager.main_speakers.MainMusic.clip,
+            Is.SameAs(_clip));
+        Assert.That(manager.main_speakers.MainMusic.loop, Is.True);
+    }
+
+    private AudioManager CreateAudioManager(
+        bool dataReady,
+        string clipName)
+    {
+        _clip = AudioClip.Create("PageTrackClip", 64, 1, 44100, false);
+
+        _dataManagerObject = new GameObject("DataManager");
+        DataManager data = _dataManagerObject.AddComponent<DataManager>();
+        data.IsSetupDone = dataReady;
+        data.MusicList.Add(clipName, _clip);
+
+        _gameManagerObject = new GameObject("GameManager");
+        _gameManagerObject.SetActive(false);
+        GameManager gameManager =
+            _gameManagerObject.AddComponent<GameManager>();
+        gameManager.Data = data;
+
+        _speakerObject = new GameObject("MusicSpeaker");
+        AudioSource speaker = _speakerObject.AddComponent<AudioSource>();
+        _audioManagerObject = new GameObject("AudioManager");
+        AudioManager manager =
+            _audioManagerObject.AddComponent<AudioManager>();
+        manager.main_speakers = new Speakers
+        {
+            MainMusic = speaker
+        };
+        manager.Setup(gameManager);
+        return manager;
+    }
+
+    private static void DestroyImmediate(Object target)
+    {
+        if (target != null)
+            Object.DestroyImmediate(target);
+    }
+}
+
+public sealed class DungeonBgmProfileTests
+{
+    private readonly List<Object> _createdObjects = new();
+
+    [TearDown]
+    public void TearDown()
+    {
+        for (int index = _createdObjects.Count - 1; index >= 0; index--)
+        {
+            if (_createdObjects[index] != null)
+                Object.DestroyImmediate(_createdObjects[index]);
+        }
+        _createdObjects.Clear();
+    }
+
+    [Test]
+    public void Profile_ResolvesPhaseOverrideAndExitVariants()
+    {
+        DungeonBgmProfile profile = CreateProfile();
+
+        Assert.That(
+            profile.ResolveLoopClipName(EDungeonPhase.Battle),
+            Is.EqualTo("Battle Loop"));
+        Assert.That(
+            profile.ResolveLoopClipName(EDungeonPhase.Event),
+            Is.EqualTo("Event Loop"));
+        Assert.That(
+            profile.ResolveLoopClipName(EDungeonPhase.Rest),
+            Is.EqualTo("Battle Loop"));
+        Assert.That(
+            profile.ResolveExitClipName(EDungeonBgmExitReason.Clear),
+            Is.EqualTo("Clear Exit"));
+        Assert.That(
+            profile.ResolveExitClipName(EDungeonBgmExitReason.Defeat),
+            Is.EqualTo("Defeat Exit"));
+        Assert.That(
+            profile.ResolveExitClipName(EDungeonBgmExitReason.Aborted),
+            Is.EqualTo("Abort Exit"));
+    }
+
+    [Test]
+    public void AudioManager_DungeonSequence_AssignsIntroLoopPhaseAndExit()
+    {
+        AudioClip intro = CreateClip("IntroClip");
+        AudioClip battle = CreateClip("BattleClip");
+        AudioClip eventLoop = CreateClip("EventClip");
+        AudioClip clearExit = CreateClip("ClearExitClip");
+        DungeonBgmProfile profile = CreateProfile();
+
+        GameObject dataObject = CreateObject("DataManager");
+        DataManager data = dataObject.AddComponent<DataManager>();
+        data.IsSetupDone = true;
+        data.MusicList.Add("Intro", intro);
+        data.MusicList.Add("Battle Loop", battle);
+        data.MusicList.Add("Event Loop", eventLoop);
+        data.MusicList.Add("Clear Exit", clearExit);
+
+        GameObject gameManagerObject = CreateObject("GameManager");
+        gameManagerObject.SetActive(false);
+        GameManager gameManager =
+            gameManagerObject.AddComponent<GameManager>();
+        gameManager.Data = data;
+
+        GameObject primaryObject = CreateObject("Primary Music");
+        AudioSource primary = primaryObject.AddComponent<AudioSource>();
+        GameObject audioObject = CreateObject("AudioManager");
+        AudioManager audioManager = audioObject.AddComponent<AudioManager>();
+        audioManager.main_speakers = new Speakers { MainMusic = primary };
+        audioManager.Setup(gameManager);
+
+        Assert.That(
+            audioManager.PlayDungeonBgm(profile, EDungeonPhase.Battle),
+            Is.True);
+        AudioSource secondary = GetSecondaryMusicSource(audioManager);
+        Assert.That(primary.clip, Is.SameAs(intro));
+        Assert.That(primary.loop, Is.False);
+        Assert.That(secondary.clip, Is.SameAs(battle));
+        Assert.That(secondary.loop, Is.True);
+        Assert.That(audioManager.IsDungeonBgmActive, Is.True);
+
+        Assert.That(
+            audioManager.SetDungeonBgmPhase(EDungeonPhase.Event),
+            Is.True);
+        Assert.That(secondary.clip, Is.SameAs(eventLoop));
+        Assert.That(secondary.loop, Is.True);
+
+        Assert.That(
+            audioManager.RequestDungeonBgmExit(
+                EDungeonBgmExitReason.Clear),
+            Is.True);
+        Assert.That(secondary.clip, Is.SameAs(clearExit));
+        Assert.That(secondary.loop, Is.False);
+    }
+
+    private DungeonBgmProfile CreateProfile()
+    {
+        DungeonBgmProfile profile =
+            ScriptableObject.CreateInstance<DungeonBgmProfile>();
+        _createdObjects.Add(profile);
+        SerializedObject serialized = new(profile);
+        serialized.FindProperty("introClipName").stringValue = "Intro";
+        serialized.FindProperty("defaultLoopClipName").stringValue =
+            "Battle Loop";
+        serialized.FindProperty("clearExitClipName").stringValue =
+            "Clear Exit";
+        serialized.FindProperty("defeatExitClipName").stringValue =
+            "Defeat Exit";
+        serialized.FindProperty("abortedExitClipName").stringValue =
+            "Abort Exit";
+        SerializedProperty phaseLoops = serialized.FindProperty("phaseLoops");
+        phaseLoops.arraySize = 1;
+        SerializedProperty entry = phaseLoops.GetArrayElementAtIndex(0);
+        entry.FindPropertyRelative("phase").enumValueIndex =
+            (int)EDungeonPhase.Event;
+        entry.FindPropertyRelative("clipName").stringValue = "Event Loop";
+        serialized.ApplyModifiedPropertiesWithoutUndo();
+        return profile;
+    }
+
+    private AudioClip CreateClip(string name)
+    {
+        AudioClip clip = AudioClip.Create(name, 44100, 1, 44100, false);
+        _createdObjects.Add(clip);
+        return clip;
+    }
+
+    private GameObject CreateObject(string name)
+    {
+        GameObject created = new(name);
+        _createdObjects.Add(created);
+        return created;
+    }
+
+    private static AudioSource GetSecondaryMusicSource(AudioManager manager)
+    {
+        FieldInfo field = typeof(AudioManager).GetField(
+            "_secondaryMusicSource",
+            BindingFlags.Instance | BindingFlags.NonPublic);
+        Assert.That(field, Is.Not.Null);
+        AudioSource source = field.GetValue(manager) as AudioSource;
+        Assert.That(source, Is.Not.Null);
+        return source;
+    }
+}
