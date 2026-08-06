@@ -9,7 +9,7 @@ namespace PS260714.Localization
 {
     public static class GeneratedLocalizationTables
     {
-        public const string SourceHash = "cd451262d375b9a8fd3958815cbb543be354e910f172ce4d6659b9ff0a531cd8";
+        public const string SourceHash = "1a842a3d6e9f3a2d7094cecb5cde94b7b7b596564f9ce52d1bbfd07737dc2d8b";
         public const string ReferenceLocale = "en-US";
 
         private static readonly LocalizationLocaleInfo[] LocaleData =
@@ -92,7 +92,7 @@ namespace PS260714.Localization
                 { "ui.main.description", new LocalizationEntry("\uB85C\uBE44 \uBA54\uB274\uB97C \uC120\uD0DD\uD558\uC138\uC694", "body") },
                 { "ui.main.attendance", new LocalizationEntry("\uCD9C\uC11D\uCCB4\uD06C", "body") },
                 { "ui.attendance.title", new LocalizationEntry("\uCD9C\uC11D \uBCF4\uC0C1", "title") },
-                { "ui.attendance.description", new LocalizationEntry("\uB9E4\uC77C \uC811\uC18D\uD558\uACE0 \uC21C\uC11C\uB300\uB85C \uBCF4\uC0C1\uC744 \uBC1B\uC73C\uC138\uC694", "body") },
+                { "ui.attendance.description", new LocalizationEntry("\uB9E4\uC77C \uC811\uC18D\uD558\uACE0 \uB2EC\uB825\uC758 \uC624\uB298 \uBCF4\uC0C1\uC744 \uBC1B\uC73C\uC138\uC694", "body") },
                 { "ui.attendance.day", new LocalizationEntry("{day}\uC77C\uCC28", "number") },
                 { "ui.attendance.claim", new LocalizationEntry("\uBCF4\uC0C1 \uBC1B\uAE30", "body") },
                 { "ui.attendance.claimed", new LocalizationEntry("\uC218\uB839 \uC644\uB8CC", "body") },
@@ -271,6 +271,13 @@ namespace PS260714.Localization
                 { "ui.dungeon.start.error_title", new LocalizationEntry("\uC2DC\uC791 \uD130\uB81B \uC124\uC815 \uC624\uB958", "title") },
                 { "ui.dungeon.start.error_description", new LocalizationEntry("\uC11C\uB85C \uB2E4\uB978 \uD130\uB81B 3\uAC1C\uAC00 \uD544\uC694\uD569\uB2C8\uB2E4.[br]\uC0AC\uC6A9 \uAC00\uB2A5\uD55C \uC815\uC758: {count}", "body") },
                 { "ui.dungeon.start.retry", new LocalizationEntry("\uB2E4\uC2DC \uC2DC\uB3C4", "body") },
+                { "ui.dungeon.starting_items.title", new LocalizationEntry("\uC2A4\uD0C0\uD305 \uC544\uC774\uD15C \uAD6C\uC131", "title") },
+                { "ui.dungeon.starting_items.description", new LocalizationEntry("\uC544\uC774\uD15C\uBCC4 \uB9AC\uB864: {rerolls}\uD68C. \uD655\uC815\uD558\uBA74 {count}\uAC1C\uB97C \uBAA8\uB450 \uD68D\uB4DD\uD569\uB2C8\uB2E4.", "body") },
+                { "ui.dungeon.starting_items.reroll", new LocalizationEntry("\uB9AC\uB864 ({count})", "number") },
+                { "ui.dungeon.starting_items.reroll_used", new LocalizationEntry("\uB9AC\uB864 \uC0AC\uC6A9 \uC644\uB8CC", "body") },
+                { "ui.dungeon.starting_items.confirm", new LocalizationEntry("\uC544\uC774\uD15C \uD655\uC815", "body") },
+                { "ui.dungeon.starting_items.error_title", new LocalizationEntry("\uC2A4\uD0C0\uD305 \uC544\uC774\uD15C \uC124\uC815 \uC624\uB958", "title") },
+                { "ui.dungeon.starting_items.error_description", new LocalizationEntry("\uB9AC\uB864 \uAC00\uB2A5\uD55C \uC911\uBCF5 \uC5C6\uB294 \uAD6C\uC131\uC744 \uC704\uD574 {required}\uAC1C\uC758 \uC2A4\uD0C0\uD305 \uC544\uC774\uD15C\uC774 \uD544\uC694\uD569\uB2C8\uB2E4.[br]\uD604\uC7AC \uC0AC\uC6A9 \uAC00\uB2A5: {available}", "body") },
                 { "ui.dungeon.result.clear_title", new LocalizationEntry("\uB358\uC804 \uD074\uB9AC\uC5B4", "title") },
                 { "ui.dungeon.result.clear_description", new LocalizationEntry("\uBAA8\uB4E0 \uC804\uD22C {count}\uD68C\uB97C \uD074\uB9AC\uC5B4\uD588\uC2B5\uB2C8\uB2E4.", "body") },
                 { "ui.dungeon.result.reset_description", new LocalizationEntry("\uC774\uBC88 \uC9C4\uD589\uC774 \uCD08\uAE30\uD654\uB418\uC5C8\uC2B5\uB2C8\uB2E4.[br]\uC0C8 \uC2DC\uC791 \uD130\uB81B\uC744 \uC120\uD0DD\uD558\uC138\uC694.", "body") },
@@ -368,6 +375,8 @@ namespace PS260714.Localization
                 { "item.battle.speed_drink.description", new LocalizationEntry("[icon=speed] \uC2A4\uD53C\uB4DC 1 \uD68D\uB4DD", "tooltip") },
                 { "item.battle.boom.name", new LocalizationEntry("\uD3ED\uD0C4", "title") },
                 { "item.battle.boom.description", new LocalizationEntry("[icon=damage] \uD53C\uD574\uB7C9\uC744 3X3 \uBC94\uC704\uB85C \uBD80\uC5EC", "tooltip") },
+                { "item.battle.blood_dagger.name", new LocalizationEntry("\uCD9C\uD608 \uB2E8\uAC80", "title") },
+                { "item.battle.blood_dagger.description", new LocalizationEntry("[icon=damage] \uD53C\uD574\uB7C9\uACFC [icon=blood] \uB97C 5\uCD08 \uBD80\uC5EC", "tooltip") },
             };
 
         private static readonly Dictionary<string, LocalizationEntry>
@@ -441,7 +450,7 @@ namespace PS260714.Localization
                 { "ui.main.description", new LocalizationEntry("SELECT A LOBBY MENU", "body") },
                 { "ui.main.attendance", new LocalizationEntry("ATTENDANCE", "body") },
                 { "ui.attendance.title", new LocalizationEntry("ATTENDANCE REWARDS", "title") },
-                { "ui.attendance.description", new LocalizationEntry("Log in each day and claim rewards in order.", "body") },
+                { "ui.attendance.description", new LocalizationEntry("Log in each day and claim today's calendar reward.", "body") },
                 { "ui.attendance.day", new LocalizationEntry("DAY {day}", "number") },
                 { "ui.attendance.claim", new LocalizationEntry("CLAIM REWARD", "body") },
                 { "ui.attendance.claimed", new LocalizationEntry("CLAIMED", "body") },
@@ -620,6 +629,13 @@ namespace PS260714.Localization
                 { "ui.dungeon.start.error_title", new LocalizationEntry("STARTING TURRET SETUP ERROR", "title") },
                 { "ui.dungeon.start.error_description", new LocalizationEntry("3 DIFFERENT TURRETS ARE REQUIRED[br]AVAILABLE DEFINITIONS: {count}", "body") },
                 { "ui.dungeon.start.retry", new LocalizationEntry("RETRY", "body") },
+                { "ui.dungeon.starting_items.title", new LocalizationEntry("STARTING ITEM LOADOUT", "title") },
+                { "ui.dungeon.starting_items.description", new LocalizationEntry("REROLLS PER ITEM: {rerolls}. CONFIRM TO TAKE ALL {count} ITEMS.", "body") },
+                { "ui.dungeon.starting_items.reroll", new LocalizationEntry("REROLL ({count})", "number") },
+                { "ui.dungeon.starting_items.reroll_used", new LocalizationEntry("REROLL USED", "body") },
+                { "ui.dungeon.starting_items.confirm", new LocalizationEntry("CONFIRM ITEMS", "body") },
+                { "ui.dungeon.starting_items.error_title", new LocalizationEntry("STARTING ITEM SETUP ERROR", "title") },
+                { "ui.dungeon.starting_items.error_description", new LocalizationEntry("{required} UNIQUE STARTING ITEMS ARE REQUIRED FOR REROLLS.[br]CURRENTLY AVAILABLE: {available}", "body") },
                 { "ui.dungeon.result.clear_title", new LocalizationEntry("DUNGEON CLEAR", "title") },
                 { "ui.dungeon.result.clear_description", new LocalizationEntry("ALL {count} BATTLES CLEARED", "body") },
                 { "ui.dungeon.result.reset_description", new LocalizationEntry("THE RUN WAS RESET[br]CHOOSE A NEW STARTING TURRET", "body") },
@@ -717,6 +733,8 @@ namespace PS260714.Localization
                 { "item.battle.speed_drink.description", new LocalizationEntry("Gain [icon=speed]  Speed 1 status", "tooltip") },
                 { "item.battle.boom.name", new LocalizationEntry("Boom", "title") },
                 { "item.battle.boom.description", new LocalizationEntry("Give [icon=damage] damage to 3X3", "tooltip") },
+                { "item.battle.blood_dagger.name", new LocalizationEntry("Bloody dagger", "title") },
+                { "item.battle.blood_dagger.description", new LocalizationEntry("Give [icon=damage] damange and [icon=blood] 5 sec", "tooltip") },
             };
 
         private static readonly IReadOnlyDictionary<string, LocalizationEntry>

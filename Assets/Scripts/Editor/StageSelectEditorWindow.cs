@@ -424,8 +424,11 @@ public sealed class StageSelectEditorWindow : EditorWindow
                 "selectStartingCharacter",
                 "Select Starting Character");
             DrawProperty(
-                "includeStartingConsumable",
-                "Include Starting Consumable");
+                "selectStartingItems",
+                "Select Starting Items");
+            DrawProperty(
+                "startingItemRule",
+                "Starting Item Rule");
             DrawProperty(
                 "useIntroBattleBalance",
                 "Use Intro Battle Balance");
@@ -444,6 +447,7 @@ public sealed class StageSelectEditorWindow : EditorWindow
         if (_encountersExpanded)
         {
             DrawAssetReferenceArray("fixedBattles", "Fixed Battles");
+            DrawAssetReferenceArray("fixedEvents", "Fixed Events");
             DrawAssetReferenceArray(
                 "enemyPoolOverride",
                 "Enemy Pool Override");
@@ -464,6 +468,9 @@ public sealed class StageSelectEditorWindow : EditorWindow
             PS260714AssetReferenceField.Draw(
                 _serialized.FindProperty("theme"),
                 new GUIContent("Theme"));
+            PS260714AssetReferenceField.Draw(
+                _serialized.FindProperty("bgmProfile"),
+                new GUIContent("Dungeon BGM Profile"));
             PS260714AssetReferenceField.Draw(
                 _serialized.FindProperty("tutorial"),
                 new GUIContent("Tutorial"));
@@ -493,6 +500,15 @@ public sealed class StageSelectEditorWindow : EditorWindow
                 EditorGUILayout.HelpBox(
                     "Dungeon definition is valid.",
                     MessageType.Info);
+
+                if (_selected.SelectStartingItems &&
+                    !_selected.StartingItemRule.TryValidate(
+                        out string startingItemError))
+                {
+                    EditorGUILayout.HelpBox(
+                        startingItemError,
+                        MessageType.Warning);
+                }
             }
             else
             {

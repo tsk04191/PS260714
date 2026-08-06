@@ -1,0 +1,33 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: bdf811745ea84983b4fe9c94006db5de, type: 3}
+  m_Name: BasicUpgradeMaterial
+  m_EditorClassIdentifier: Assembly-CSharp::UpgradeMaterialItemSO
+  itemId: material.upgrade.basic
+  category: 2
+  rarity: 0
+  sortOrder: 50
+  nameLocalizationKey: item.client.basic_upgrade_material.name
+  descriptionLocalizationKey: item.client.basic_upgrade_material.description
+  koreanName: "\uAE30\uCD08 \uAC15\uD654 \uC7AC\uB8CC"
+  englishName: BASIC UPGRADE MATERIAL
+  koreanDescription: "\uB300\uC6D0\uACFC \uC7A5\uBE44 \uAC15\uD654\uC5D0 \uC0AC\uC6A9\uD558\uB294
+    \uAE30\uCD08 \uC7AC\uB8CC\uC785\uB2C8\uB2E4."
+  englishDescription: A basic material used for operator and equipment upgrades.
+  icon: {fileID: 21300000, guid: 011c00be8d9f74948851e410ef431c70, type: 3}
+  illustration: {fileID: 0}
+  maximumStack: 0
+  initialAmount: 0
+  hiddenInStorage: 0
+  target: 0
+  grade: 1
+  upgradeValue: 0

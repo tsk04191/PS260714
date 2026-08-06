@@ -80,6 +80,8 @@ namespace PS260714.Localization
         public const string EnemyMedicName = "enemy.medic.name";
         public const string EnemyPointmanName = "enemy.pointman.name";
         public const string EnemyShieldBearerName = "enemy.shield_bearer.name";
+        public const string ItemBattleBloodDaggerDescription = "item.battle.blood_dagger.description";
+        public const string ItemBattleBloodDaggerName = "item.battle.blood_dagger.name";
         public const string ItemBattleBoomDescription = "item.battle.boom.description";
         public const string ItemBattleBoomName = "item.battle.boom.name";
         public const string ItemBattlePowerDrinkDescription = "item.battle.power_drink.description";
@@ -260,6 +262,13 @@ namespace PS260714.Localization
         public const string UiDungeonStartErrorTitle = "ui.dungeon.start.error_title";
         public const string UiDungeonStartRetry = "ui.dungeon.start.retry";
         public const string UiDungeonStartTitle = "ui.dungeon.start.title";
+        public const string UiDungeonStartingItemsConfirm = "ui.dungeon.starting_items.confirm";
+        public const string UiDungeonStartingItemsDescription = "ui.dungeon.starting_items.description";
+        public const string UiDungeonStartingItemsErrorDescription = "ui.dungeon.starting_items.error_description";
+        public const string UiDungeonStartingItemsErrorTitle = "ui.dungeon.starting_items.error_title";
+        public const string UiDungeonStartingItemsReroll = "ui.dungeon.starting_items.reroll";
+        public const string UiDungeonStartingItemsRerollUsed = "ui.dungeon.starting_items.reroll_used";
+        public const string UiDungeonStartingItemsTitle = "ui.dungeon.starting_items.title";
         public const string UiMainAttendance = "ui.main.attendance";
         public const string UiMainDescription = "ui.main.description";
         public const string UiMainTitle = "ui.main.title";

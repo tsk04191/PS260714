@@ -983,21 +983,31 @@ public static class MainLobbySceneUpdater
         if (attendance == null)
             return;
 
-        GameObject badge = GetOrCreateImage(
-            attendance,
-            "imgAttendanceAvailable");
-        RectTransform badgeRect = (RectTransform)badge.transform;
-        ConfigureRect(
-            badgeRect,
-            Vector2.one,
-            Vector2.one,
-            new Vector2(0.5f, 0.5f),
-            new Vector2(-4f, -4f),
-            new Vector2(18f, 18f));
-        Image badgeImage = badge.GetComponent<Image>();
-        badgeImage.color = new Color(0.95f, 0.3f, 0.2f, 1f);
-        badgeImage.raycastTarget = false;
-        badge.SetActive(false);
+        Transform legacyBadge = attendance.Find("imgAttendanceAvailable");
+        if (legacyBadge != null)
+            UnityEngine.Object.DestroyImmediate(legacyBadge.gameObject);
+
+        NotificationDotView badge =
+            attendance.GetComponentInChildren<NotificationDotView>(true);
+        if (badge == null)
+        {
+            NotificationDotView prefab = AssetDatabase
+                .LoadAssetAtPath<NotificationDotView>(
+                    "Assets/Resources/Presentation/" +
+                    "NotificationDot.prefab");
+            if (prefab != null)
+            {
+                GameObject instance = (GameObject)PrefabUtility
+                    .InstantiatePrefab(prefab.gameObject);
+                instance.transform.SetParent(attendance, false);
+                badge = instance.GetComponent<NotificationDotView>();
+            }
+        }
+        if (badge != null)
+        {
+            badge.ApplyLayout(attendance as RectTransform);
+            badge.gameObject.SetActive(false);
+        }
     }
 
     private static void ConfigureMainUtilityButton(

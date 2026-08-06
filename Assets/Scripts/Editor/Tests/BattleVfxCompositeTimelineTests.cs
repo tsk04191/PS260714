@@ -690,46 +690,259 @@ public sealed class DungeonBgmProfileTests
     }
 
     [Test]
-    public void Profile_ResolvesPhaseOverrideAndExitVariants()
+    public void Profile_ResolvesDefaultsAndEncounterOverrides()
     {
-        DungeonBgmProfile profile = CreateProfile();
+        AudioClip ready = CreateClip("ReadyClip");
+        AudioClip battle = CreateClip("BattleClip");
+        AudioClip rest = CreateClip("RestClip");
+        AudioClip encounterOverride = CreateClip("OverrideClip");
+        DungeonBgmProfile profile = CreateProfile(ready, battle, rest);
 
         Assert.That(
-            profile.ResolveLoopClipName(EDungeonPhase.Battle),
-            Is.EqualTo("Battle Loop"));
+            profile.ResolveClip(EDungeonBgmState.Ready),
+            Is.SameAs(ready));
         Assert.That(
-            profile.ResolveLoopClipName(EDungeonPhase.Event),
-            Is.EqualTo("Event Loop"));
+            profile.ResolveClip(EDungeonBgmState.Battle),
+            Is.SameAs(battle));
         Assert.That(
-            profile.ResolveLoopClipName(EDungeonPhase.Rest),
-            Is.EqualTo("Battle Loop"));
+            profile.ResolveClip(EDungeonBgmState.Rest),
+            Is.SameAs(rest));
         Assert.That(
-            profile.ResolveExitClipName(EDungeonBgmExitReason.Clear),
-            Is.EqualTo("Clear Exit"));
-        Assert.That(
-            profile.ResolveExitClipName(EDungeonBgmExitReason.Defeat),
-            Is.EqualTo("Defeat Exit"));
-        Assert.That(
-            profile.ResolveExitClipName(EDungeonBgmExitReason.Aborted),
-            Is.EqualTo("Abort Exit"));
+            profile.ResolveClip(
+                EDungeonBgmState.Battle,
+                encounterOverride),
+            Is.SameAs(encounterOverride));
     }
 
     [Test]
-    public void AudioManager_DungeonSequence_AssignsIntroLoopPhaseAndExit()
+    public void Profile_ResolvesClampedStateVolumePercentages()
     {
-        AudioClip intro = CreateClip("IntroClip");
-        AudioClip battle = CreateClip("BattleClip");
-        AudioClip eventLoop = CreateClip("EventClip");
-        AudioClip clearExit = CreateClip("ClearExitClip");
-        DungeonBgmProfile profile = CreateProfile();
+        DungeonBgmProfile profile = CreateProfile(
+            CreateClip("ReadyClip"),
+            CreateClip("BattleClip"),
+            CreateClip("RestClip"),
+            -10,
+            65,
+            140);
 
+        Assert.That(
+            profile.ResolveVolumePercent(EDungeonBgmState.Ready),
+            Is.Zero);
+        Assert.That(
+            profile.ResolveVolumeScale(EDungeonBgmState.Battle),
+            Is.EqualTo(0.65f).Within(0.001f));
+        Assert.That(
+            profile.ResolveVolumePercent(EDungeonBgmState.Rest),
+            Is.EqualTo(100));
+    }
+
+    [Test]
+    public void AudioManager_DifferentClip_FadesOutThenFadesIn()
+    {
+        AudioClip ready = CreateClip("ReadyClip");
+        AudioClip battle = CreateClip("BattleClip");
+        AudioClip rest = CreateClip("RestClip");
+        DungeonBgmProfile profile = CreateProfile(ready, battle, rest);
+        AudioManager audioManager = CreateAudioManager(out AudioSource source);
+
+        Assert.That(audioManager.PlayDungeonBgm(
+            profile,
+            EDungeonBgmState.Ready), Is.True);
+        Assert.That(source.clip, Is.SameAs(ready));
+        TickMusic(audioManager, 0.5f);
+        Assert.That(source.volume, Is.EqualTo(0.8f).Within(0.001f));
+
+        Assert.That(audioManager.PlayDungeonBgm(
+            profile,
+            EDungeonBgmState.Battle), Is.True);
+        Assert.That(source.clip, Is.SameAs(ready));
+        TickMusic(audioManager, 0.25f);
+        Assert.That(source.clip, Is.SameAs(ready));
+        Assert.That(source.volume, Is.EqualTo(0.4f).Within(0.001f));
+
+        TickMusic(audioManager, 0.25f);
+        Assert.That(source.clip, Is.SameAs(battle));
+        Assert.That(source.volume, Is.Zero.Within(0.001f));
+        Assert.That(source.loop, Is.True);
+        TickMusic(audioManager, 0.5f);
+        Assert.That(source.volume, Is.EqualTo(0.8f).Within(0.001f));
+        Assert.That(audioManager.IsMusicTransitioning, Is.False);
+    }
+
+    [Test]
+    public void AudioManager_SameClip_DoesNotRestartTransition()
+    {
+        AudioClip ready = CreateClip("ReadyClip");
+        DungeonBgmProfile profile = CreateProfile(
+            ready,
+            CreateClip("BattleClip"),
+            CreateClip("RestClip"));
+        AudioManager audioManager = CreateAudioManager(out AudioSource source);
+
+        Assert.That(audioManager.PlayDungeonBgm(
+            profile,
+            EDungeonBgmState.Ready), Is.True);
+        TickMusic(audioManager, 0.5f);
+        Assert.That(audioManager.IsMusicTransitioning, Is.False);
+
+        Assert.That(audioManager.PlayDungeonBgm(
+            profile,
+            EDungeonBgmState.Ready), Is.True);
+        Assert.That(source.clip, Is.SameAs(ready));
+        Assert.That(audioManager.IsMusicTransitioning, Is.False);
+    }
+
+    [Test]
+    public void AudioManager_ProfileVolumeMultipliesBaseSourceVolume()
+    {
+        AudioClip shared = CreateClip("SharedClip");
+        DungeonBgmProfile profile = CreateProfile(
+            shared,
+            shared,
+            CreateClip("RestClip"),
+            50,
+            25,
+            0);
+        AudioManager audioManager = CreateAudioManager(out AudioSource source);
+
+        Assert.That(audioManager.PlayDungeonBgm(
+            profile,
+            EDungeonBgmState.Ready), Is.True);
+        TickMusic(audioManager, 0.5f);
+        Assert.That(source.volume, Is.EqualTo(0.4f).Within(0.001f));
+
+        Assert.That(audioManager.PlayDungeonBgm(
+            profile,
+            EDungeonBgmState.Battle), Is.True);
+        Assert.That(source.clip, Is.SameAs(shared));
+        TickMusic(audioManager, 0.5f);
+        Assert.That(source.clip, Is.SameAs(shared));
+        Assert.That(source.volume, Is.EqualTo(0.2f).Within(0.001f));
+        Assert.That(audioManager.IsMusicTransitioning, Is.False);
+
+        Assert.That(audioManager.PlayDungeonBgm(
+            profile,
+            EDungeonBgmState.Rest), Is.True);
+        TickMusic(audioManager, 0.5f);
+        TickMusic(audioManager, 0.5f);
+        Assert.That(source.clip.name, Is.EqualTo("RestClip"));
+        Assert.That(source.volume, Is.Zero.Within(0.001f));
+        Assert.That(audioManager.IsMusicTransitioning, Is.False);
+    }
+
+    [Test]
+    public void AudioManager_OverrideClipInheritsStateVolume()
+    {
+        AudioClip overrideClip = CreateClip("BattleOverride");
+        DungeonBgmProfile profile = CreateProfile(
+            CreateClip("ReadyClip"),
+            CreateClip("BattleClip"),
+            CreateClip("RestClip"),
+            100,
+            30,
+            100);
+        AudioManager audioManager = CreateAudioManager(out AudioSource source);
+
+        Assert.That(audioManager.PlayDungeonBgm(
+            profile,
+            EDungeonBgmState.Battle,
+            overrideClip), Is.True);
+        TickMusic(audioManager, 0.5f);
+
+        Assert.That(source.clip, Is.SameAs(overrideClip));
+        Assert.That(source.volume, Is.EqualTo(0.24f).Within(0.001f));
+    }
+
+    [Test]
+    public void AudioManager_LatestRequestWinsDuringFadeOut()
+    {
+        AudioClip ready = CreateClip("ReadyClip");
+        AudioClip battle = CreateClip("BattleClip");
+        AudioClip rest = CreateClip("RestClip");
+        DungeonBgmProfile profile = CreateProfile(ready, battle, rest);
+        AudioManager audioManager = CreateAudioManager(out AudioSource source);
+        audioManager.PlayDungeonBgm(profile, EDungeonBgmState.Ready);
+        TickMusic(audioManager, 0.5f);
+
+        audioManager.PlayDungeonBgm(profile, EDungeonBgmState.Battle);
+        audioManager.PlayDungeonBgm(profile, EDungeonBgmState.Rest);
+        TickMusic(audioManager, 0.5f);
+
+        Assert.That(source.clip, Is.SameAs(rest));
+        Assert.That(source.clip, Is.Not.SameAs(battle));
+    }
+
+    [Test]
+    public void EncounterAssets_ExposeDirectBgmOverrides()
+    {
+        AudioClip battleClip = CreateClip("BattleOverride");
+        AudioClip eventClip = CreateClip("EventOverride");
+        BattleSO battle = ScriptableObject.CreateInstance<BattleSO>();
+        DungeonEventSO dungeonEvent =
+            ScriptableObject.CreateInstance<DungeonEventSO>();
+        DungeonDefinition dungeon =
+            ScriptableObject.CreateInstance<DungeonDefinition>();
+        _createdObjects.Add(battle);
+        _createdObjects.Add(dungeonEvent);
+        _createdObjects.Add(dungeon);
+
+        SerializedObject battleSerialized = new(battle);
+        battleSerialized.FindProperty("bgmOverride").objectReferenceValue =
+            battleClip;
+        battleSerialized.ApplyModifiedPropertiesWithoutUndo();
+
+        SerializedObject eventSerialized = new(dungeonEvent);
+        eventSerialized.FindProperty("bgmOverride").objectReferenceValue =
+            eventClip;
+        eventSerialized.ApplyModifiedPropertiesWithoutUndo();
+
+        SerializedObject dungeonSerialized = new(dungeon);
+        SerializedProperty fixedEvents =
+            dungeonSerialized.FindProperty("fixedEvents");
+        fixedEvents.arraySize = 1;
+        fixedEvents.GetArrayElementAtIndex(0).objectReferenceValue =
+            dungeonEvent;
+        dungeonSerialized.ApplyModifiedPropertiesWithoutUndo();
+
+        Assert.That(battle.BgmOverride, Is.SameAs(battleClip));
+        Assert.That(dungeonEvent.BgmOverride, Is.SameAs(eventClip));
+        Assert.That(dungeon.TryGetFixedEvent(0, out DungeonEventSO resolved),
+            Is.True);
+        Assert.That(resolved, Is.SameAs(dungeonEvent));
+    }
+
+    private DungeonBgmProfile CreateProfile(
+        AudioClip ready,
+        AudioClip battle,
+        AudioClip rest,
+        int readyVolumePercent = 100,
+        int battleVolumePercent = 100,
+        int restVolumePercent = 100)
+    {
+        DungeonBgmProfile profile =
+            ScriptableObject.CreateInstance<DungeonBgmProfile>();
+        _createdObjects.Add(profile);
+        SerializedObject serialized = new(profile);
+        serialized.FindProperty("readyClip").objectReferenceValue = ready;
+        serialized.FindProperty("battleClip").objectReferenceValue = battle;
+        serialized.FindProperty("restClip").objectReferenceValue = rest;
+        serialized.FindProperty("readyVolumePercent").intValue =
+            readyVolumePercent;
+        serialized.FindProperty("battleVolumePercent").intValue =
+            battleVolumePercent;
+        serialized.FindProperty("restVolumePercent").intValue =
+            restVolumePercent;
+        serialized.FindProperty("fadeOutDuration").floatValue = 0.5f;
+        serialized.FindProperty("fadeInDuration").floatValue = 0.5f;
+        serialized.ApplyModifiedPropertiesWithoutUndo();
+        return profile;
+    }
+
+    private AudioManager CreateAudioManager(out AudioSource source)
+    {
         GameObject dataObject = CreateObject("DataManager");
         DataManager data = dataObject.AddComponent<DataManager>();
         data.IsSetupDone = true;
-        data.MusicList.Add("Intro", intro);
-        data.MusicList.Add("Battle Loop", battle);
-        data.MusicList.Add("Event Loop", eventLoop);
-        data.MusicList.Add("Clear Exit", clearExit);
 
         GameObject gameManagerObject = CreateObject("GameManager");
         gameManagerObject.SetActive(false);
@@ -737,65 +950,33 @@ public sealed class DungeonBgmProfileTests
             gameManagerObject.AddComponent<GameManager>();
         gameManager.Data = data;
 
-        GameObject primaryObject = CreateObject("Primary Music");
-        AudioSource primary = primaryObject.AddComponent<AudioSource>();
+        GameObject sourceObject = CreateObject("Primary Music");
+        source = sourceObject.AddComponent<AudioSource>();
+        source.volume = 0.8f;
         GameObject audioObject = CreateObject("AudioManager");
         AudioManager audioManager = audioObject.AddComponent<AudioManager>();
-        audioManager.main_speakers = new Speakers { MainMusic = primary };
+        audioManager.main_speakers = new Speakers { MainMusic = source };
         audioManager.Setup(gameManager);
-
-        Assert.That(
-            audioManager.PlayDungeonBgm(profile, EDungeonPhase.Battle),
-            Is.True);
-        AudioSource secondary = GetSecondaryMusicSource(audioManager);
-        Assert.That(primary.clip, Is.SameAs(intro));
-        Assert.That(primary.loop, Is.False);
-        Assert.That(secondary.clip, Is.SameAs(battle));
-        Assert.That(secondary.loop, Is.True);
-        Assert.That(audioManager.IsDungeonBgmActive, Is.True);
-
-        Assert.That(
-            audioManager.SetDungeonBgmPhase(EDungeonPhase.Event),
-            Is.True);
-        Assert.That(secondary.clip, Is.SameAs(eventLoop));
-        Assert.That(secondary.loop, Is.True);
-
-        Assert.That(
-            audioManager.RequestDungeonBgmExit(
-                EDungeonBgmExitReason.Clear),
-            Is.True);
-        Assert.That(secondary.clip, Is.SameAs(clearExit));
-        Assert.That(secondary.loop, Is.False);
+        return audioManager;
     }
 
-    private DungeonBgmProfile CreateProfile()
+    private static void TickMusic(AudioManager manager, float deltaTime)
     {
-        DungeonBgmProfile profile =
-            ScriptableObject.CreateInstance<DungeonBgmProfile>();
-        _createdObjects.Add(profile);
-        SerializedObject serialized = new(profile);
-        serialized.FindProperty("introClipName").stringValue = "Intro";
-        serialized.FindProperty("defaultLoopClipName").stringValue =
-            "Battle Loop";
-        serialized.FindProperty("clearExitClipName").stringValue =
-            "Clear Exit";
-        serialized.FindProperty("defeatExitClipName").stringValue =
-            "Defeat Exit";
-        serialized.FindProperty("abortedExitClipName").stringValue =
-            "Abort Exit";
-        SerializedProperty phaseLoops = serialized.FindProperty("phaseLoops");
-        phaseLoops.arraySize = 1;
-        SerializedProperty entry = phaseLoops.GetArrayElementAtIndex(0);
-        entry.FindPropertyRelative("phase").enumValueIndex =
-            (int)EDungeonPhase.Event;
-        entry.FindPropertyRelative("clipName").stringValue = "Event Loop";
-        serialized.ApplyModifiedPropertiesWithoutUndo();
-        return profile;
+        MethodInfo method = typeof(AudioManager).GetMethod(
+            "TickMusicTransition",
+            BindingFlags.Instance | BindingFlags.NonPublic);
+        Assert.That(method, Is.Not.Null);
+        method.Invoke(manager, new object[] { deltaTime });
     }
 
     private AudioClip CreateClip(string name)
     {
-        AudioClip clip = AudioClip.Create(name, 44100, 1, 44100, false);
+        AudioClip clip = AudioClip.Create(
+            name,
+            44100,
+            1,
+            44100,
+            false);
         _createdObjects.Add(clip);
         return clip;
     }
@@ -805,16 +986,5 @@ public sealed class DungeonBgmProfileTests
         GameObject created = new(name);
         _createdObjects.Add(created);
         return created;
-    }
-
-    private static AudioSource GetSecondaryMusicSource(AudioManager manager)
-    {
-        FieldInfo field = typeof(AudioManager).GetField(
-            "_secondaryMusicSource",
-            BindingFlags.Instance | BindingFlags.NonPublic);
-        Assert.That(field, Is.Not.Null);
-        AudioSource source = field.GetValue(manager) as AudioSource;
-        Assert.That(source, Is.Not.Null);
-        return source;
     }
 }

@@ -1536,6 +1536,7 @@ public class DungeonItemCardView : MonoBehaviour,
     private BattleItemSO _item;
     private System.Action<BattleItemSO> _clicked;
     private bool _hovered;
+    private PopupLayerPlacement _popupLayerPlacement;
 
     public BattleItemSO Item => _item;
 
@@ -1559,6 +1560,7 @@ public class DungeonItemCardView : MonoBehaviour,
         icon.sprite = item.Icon;
         icon.enabled = item.Icon != null;
         nameText.text = item.GetLocalizedDisplayName();
+        stateText.text = string.Empty;
         costText.text = item.EnergyCost.ToString();
         statusOverlay.color = Color.clear;
         RefreshDetailText(string.Empty);
@@ -1714,13 +1716,19 @@ public class DungeonItemCardView : MonoBehaviour,
     {
         _hovered = true;
         transform.SetAsLastSibling();
-        popup?.SetActive(true);
+        if (popup != null)
+        {
+            popup.SetActive(true);
+            _popupLayerPlacement = PopupLayerUtility.MoveToPopupLayer(
+                popup.transform as RectTransform,
+                transform as RectTransform);
+        }
     }
 
     public void OnPointerExit(PointerEventData eventData)
     {
         _hovered = false;
-        popup?.SetActive(false);
+        HidePopup();
     }
 
     public void OnPointerClick(PointerEventData eventData)
@@ -1730,6 +1738,22 @@ public class DungeonItemCardView : MonoBehaviour,
         {
             _clicked?.Invoke(_item);
         }
+    }
+
+    private void OnDisable()
+    {
+        _hovered = false;
+        HidePopup();
+        transform.localScale = Vector3.one;
+    }
+
+    private void HidePopup()
+    {
+        if (popup != null)
+            popup.SetActive(false);
+        if (_popupLayerPlacement.IsActive)
+            PopupLayerUtility.Restore(_popupLayerPlacement);
+        _popupLayerPlacement = default;
     }
 
 }

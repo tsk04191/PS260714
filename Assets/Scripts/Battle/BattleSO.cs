@@ -91,6 +91,12 @@ public sealed class BattleSO : ScriptableObject
     [Header("Time Limit")]
     [SerializeField, Min(1f)] private float timeLimit = DefaultTimeLimit;
 
+    [Header("Presentation Override")]
+    [SerializeField, Tooltip(
+        "Optional music used during this battle. When empty, the dungeon's " +
+        "default Battle Clip is used.")]
+    private AudioClip bgmOverride;
+
     public string BattleId => battleId;
     public string DisplayName => displayName;
     public int DifficultyPercent => difficultyPercent;
@@ -103,6 +109,7 @@ public sealed class BattleSO : ScriptableObject
     public float SpawnInterval => TimePrecision.Normalize(spawnInterval, 0.1f);
     public EEnemyCompositionMode CompositionMode => compositionMode;
     public float TimeLimit => TimePrecision.Normalize(timeLimit, 1f);
+    public AudioClip BgmOverride => bgmOverride;
 
     public IReadOnlyList<EnemySO> GetAllEnemyDefinitions()
     {

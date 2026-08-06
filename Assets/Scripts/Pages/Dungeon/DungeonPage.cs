@@ -84,8 +84,11 @@ public class DungeonPage : MonoBehaviour, IPage
     private const float TutorialTargetAutoClearDuration = 34f;
     private const float TutorialDamageBudgetRatio = 0.9f;
     private const int StartingChoiceSeedSalt = unchecked((int)0x5A17C0DE);
+    private const int StartingItemSeedSalt = unchecked((int)0x1E7A51A9);
     private const string DefaultCharacterInfoPrefabResourcePath =
         "Presentation/CharacterInfo";
+    private const string DefaultStartingItemCardResourcePath =
+        "Presentation/BattleItemCard";
 
     private static readonly Color[] DefaultPartySlotColors =
     {
@@ -129,6 +132,12 @@ public class DungeonPage : MonoBehaviour, IPage
     [SerializeField, ColorUsage(false, false)]
     private Color[] partySlotColors = new Color[MaximumPartySize];
 
+    [Header("Starting Item Selection")]
+    [SerializeField, Tooltip(
+        "Designer-editable card prefab used by the starting-item screen. " +
+        "Falls back to Resources/Presentation/BattleItemCard.")]
+    private DungeonItemCardView startingItemCardPrefab;
+
     [Header("First Battle")]
     [SerializeField, HideInInspector] private BattleSO firstBattle;
 
@@ -157,6 +166,7 @@ public class DungeonPage : MonoBehaviour, IPage
     private bool _battleEventsBound;
     private bool _eventRewardPending;
     private bool _startingCharacterSelectionPending;
+    private bool _startingItemSelectionPending;
     private BattleManager _battleManager;
     private DungeonEventTab _eventTab;
     private DungeonTutorialController _tutorialController;
@@ -170,6 +180,8 @@ public class DungeonPage : MonoBehaviour, IPage
     private readonly HashSet<string> _acquiredCharacterIds =
         new(StringComparer.Ordinal);
     private readonly List<CharacterSO> _startingCharacterChoices = new();
+    private readonly DungeonStartingItemSelectionState
+        _startingItemSelection = new();
     private readonly CharacterSO[] _slotDefaultDefinitions =
         new CharacterSO[MaximumPartySize];
     private DungeonBattlePlan[] _battlePlans = Array.Empty<DungeonBattlePlan>();
@@ -205,15 +217,21 @@ public class DungeonPage : MonoBehaviour, IPage
     public IReadOnlyList<CharacterSO> AvailableTurrets => _availableTurrets;
     public IReadOnlyList<CharacterSO> StartingCharacterChoices =>
         _startingCharacterChoices;
+    public IReadOnlyList<BattleItemSO> StartingItemChoices =>
+        _startingItemSelection.Items;
     public IReadOnlyList<DungeonBattlePlan> BattlePlans => _battlePlans;
     public DungeonBoardView Board => board;
     public int MaximumEnergy => _maximumEnergy;
     public float EnergyRechargeDuration => _energyRechargeDuration;
     public bool IsStartingCharacterSelectionPending =>
         _startingCharacterSelectionPending;
+    public bool IsStartingItemSelectionPending =>
+        _startingItemSelectionPending;
     public bool IsTutorialBattle =>
         _session.IsActive && _session.Definition != null &&
         _session.Definition.HasTutorial;
+    public DungeonItemCardView StartingItemCardPrefab =>
+        ResolveStartingItemCardPrefab();
 
     public IReadOnlyList<EnemySO> GetCodexEnemyDefinitions()
     {
@@ -397,6 +415,11 @@ public class DungeonPage : MonoBehaviour, IPage
                 _eventTab?.ShowRunResult(_session.Result);
             }
         }
+        else if (_startingItemSelectionPending)
+        {
+            flowController?.ShowEventTab();
+            _eventTab?.ShowStartingItemSelection();
+        }
         else if (_startingCharacterSelectionPending)
         {
             flowController?.ShowEventTab();
@@ -486,6 +509,7 @@ public class DungeonPage : MonoBehaviour, IPage
     public bool AdvanceDungeonPhase()
     {
         if (_startingCharacterSelectionPending ||
+            _startingItemSelectionPending ||
             CurrentPhase == EDungeonPhase.Event && _eventRewardPending)
         {
             return false;
@@ -563,13 +587,11 @@ public class DungeonPage : MonoBehaviour, IPage
         EDungeonCompletionDestination destination =
             _session.Definition.CompletionDestination;
 
-        RequestDungeonBgmExit(EDungeonBgmExitReason.Clear);
-
         if (_battleManager != null && _battleManager.HasSession)
             _battleManager.EndBattle(board);
         board?.ClearAllStacks();
         ClearPlayerParty();
-        ResetRunResourcesAndItems(includeStartingConsumable: false);
+        ResetRunResourcesAndItems();
         _session.Reset();
         _pendingDefinition = null;
 
@@ -589,7 +611,7 @@ public class DungeonPage : MonoBehaviour, IPage
             _battleManager.EndBattle(board);
 
         ClearPlayerParty();
-        ResetRunResourcesAndItems(definition.IncludeStartingConsumable);
+        ResetRunResourcesAndItems();
         board.ClearAllStacks();
         _tutorialController?.StopTutorial();
         int runSeed = Environment.TickCount ^
@@ -598,11 +620,9 @@ public class DungeonPage : MonoBehaviour, IPage
         IReadOnlyList<EDungeonPhase> phases =
             definition.BuildPhaseSequence(battleCount, runSeed);
         _session.Begin(definition, runSeed, battleCount, phases);
-        StartDungeonBgm(
+        RequestDungeonBgm(
             definition,
-            phases != null && phases.Count > 0
-                ? phases[0]
-                : EDungeonPhase.Battle);
+            EDungeonBgmState.Ready);
         fieldView?.ApplyTheme(definition.Theme);
         GenerateBattlePlans(battleCount, runSeed);
         _eventRewardPending = false;
@@ -643,8 +663,6 @@ public class DungeonPage : MonoBehaviour, IPage
                 this);
             return;
         }
-
-        RequestDungeonBgmExit(EDungeonBgmExitReason.Aborted);
 
         PageControl.PagToPag(
             gameObject,
@@ -714,6 +732,140 @@ public class DungeonPage : MonoBehaviour, IPage
         _acquiredCharacterIds.Clear();
         RecordAcquiredCharacter(definition);
         _startingCharacterSelectionPending = false;
+
+        if (_session.Definition != null &&
+            _session.Definition.SelectStartingItems)
+        {
+            return PrepareStartingItemSelection();
+        }
+
+        return BeginPreparedDungeonFlow();
+    }
+
+    public int GetStartingItemRerollsRemaining(int slotIndex)
+    {
+        return _startingItemSelection.GetRerollsRemaining(slotIndex);
+    }
+
+    public bool CanRerollStartingItem(int slotIndex)
+    {
+        return _startingItemSelectionPending &&
+               _startingItemSelection.CanReroll(slotIndex);
+    }
+
+    public bool TryRerollStartingItem(int slotIndex)
+    {
+        if (!_startingItemSelectionPending ||
+            !_startingItemSelection.TryReroll(slotIndex))
+        {
+            return false;
+        }
+
+        _eventTab?.ShowStartingItemSelection();
+        return true;
+    }
+
+    public bool TryConfirmStartingItems()
+    {
+        if (!_startingItemSelectionPending ||
+            _battleItems.Count > 0)
+        {
+            return false;
+        }
+
+        Dictionary<string, BattleItemSO> grantedDefinitions =
+            new(StringComparer.Ordinal);
+        Dictionary<string, int> grantedCounts =
+            new(StringComparer.Ordinal);
+        IReadOnlyList<BattleItemSO> selectedItems =
+            _startingItemSelection.Items;
+        for (int index = 0; index < selectedItems.Count; index++)
+        {
+            BattleItemSO item = selectedItems[index];
+            if (item == null || !item.AvailableAsStartingItem ||
+                string.IsNullOrWhiteSpace(item.ItemId))
+            {
+                return false;
+            }
+
+            grantedDefinitions.TryAdd(item.ItemId, item);
+            grantedCounts[item.ItemId] =
+                grantedCounts.TryGetValue(item.ItemId, out int count)
+                    ? count + 1
+                    : 1;
+        }
+
+        Dictionary<string, BattleItemRunState> grantedItems =
+            new(StringComparer.Ordinal);
+        foreach (KeyValuePair<string, BattleItemSO> pair in
+                 grantedDefinitions)
+        {
+            BattleItemRunState state = new(pair.Value);
+            if (!state.AcquireCopies(
+                    pair.Value,
+                    grantedCounts[pair.Key]))
+            {
+                return false;
+            }
+            grantedItems.Add(pair.Key, state);
+        }
+
+        if (!_startingItemSelection.TryConfirm())
+            return false;
+
+        foreach (KeyValuePair<string, BattleItemRunState> pair in grantedItems)
+            _battleItems.Add(pair.Key, pair.Value);
+        _startingItemSelectionPending = false;
+        BattleItemsChanged?.Invoke();
+        return BeginPreparedDungeonFlow();
+    }
+
+    private bool PrepareStartingItemSelection()
+    {
+        DungeonStartingItemRule rule =
+            _session.Definition?.StartingItemRule;
+        List<BattleItemSO> pool = rule?.ResolveEligibleItems() ?? new();
+        int requiredCount = rule?.MinimumRequiredPoolSize ?? 0;
+        string error = "Starting item rule is not configured.";
+        if (rule == null || !_startingItemSelection.TryPrepare(
+                pool,
+                rule.ItemCount,
+                rule.RerollsPerSlot,
+                _session.RunSeed ^ StartingItemSeedSalt,
+                out error))
+        {
+            _startingItemSelectionPending = false;
+            _session.Finish(EDungeonRunResult.Defeat);
+            flowController?.ShowEventTab();
+            _eventTab?.ShowStartingItemConfigurationError(
+                pool.Count,
+                requiredCount);
+            Debug.LogError(error, this);
+            return false;
+        }
+
+        _startingItemSelectionPending = true;
+        _session.SetActivity(EDungeonRunActivity.StartingItemSelection);
+        flowController.ShowEventTab();
+        _eventTab?.ShowStartingItemSelection();
+        _tutorialController?.PauseForStartingItemSelection();
+        return true;
+    }
+
+    private bool BeginPreparedDungeonFlow()
+    {
+        if (_session.Definition?.SelectStartingItems == true &&
+            (_session.PhaseSequence == null ||
+             _session.PhaseSequence.Count == 0 ||
+             _session.PhaseSequence[0] != EDungeonPhase.Battle))
+        {
+            ClearPlayerParty();
+            _session.Finish(EDungeonRunResult.Defeat);
+            Debug.LogError(
+                "A prepared dungeon run must begin with a Battle phase.",
+                this);
+            return false;
+        }
 
         if (flowController.StartRun(_session.PhaseSequence))
         {
@@ -828,7 +980,9 @@ public class DungeonPage : MonoBehaviour, IPage
             return 0;
         }
 
-        return item.HasUnlimitedUses ? 1 : state.RemainingUses;
+        return item.HasUnlimitedUses
+            ? Mathf.Max(1, state.OwnedCopies)
+            : state.RemainingUses;
     }
 
     public float GetBattleItemCooldown(BattleItemSO item)
@@ -1118,10 +1272,11 @@ public class DungeonPage : MonoBehaviour, IPage
         BattleSetup setup;
         string error;
         bool setupCreated;
+        BattleSO fixedBattle = null;
         if (_session.Definition != null &&
             _session.Definition.TryGetFixedBattle(
                 battleIndex,
-                out BattleSO fixedBattle))
+                out fixedBattle))
         {
             setupCreated = fixedBattle.TryCreateSetup(
                 plan.RandomSeed,
@@ -1161,7 +1316,13 @@ public class DungeonPage : MonoBehaviour, IPage
             setup.TimeLimit,
             setup.InitialEnemyCount);
         if (started)
+        {
+            RequestDungeonBgm(
+                _session.Definition,
+                EDungeonBgmState.Battle,
+                fixedBattle != null ? fixedBattle.BgmOverride : null);
             NotifyBattleStarted();
+        }
         return started;
     }
 
@@ -1737,8 +1898,6 @@ public class DungeonPage : MonoBehaviour, IPage
 
     private void HandleDungeonPhaseChanged(EDungeonPhase phase, int _)
     {
-        GameManager.Instance?.Audio?.SetDungeonBgmPhase(phase);
-
         if (!TryResolveBattleManager())
             return;
 
@@ -1765,7 +1924,30 @@ public class DungeonPage : MonoBehaviour, IPage
             if (phase == EDungeonPhase.Event)
             {
                 _eventRewardPending = true;
+                int eventIndex = GetCurrentEventIndex();
+                if (_session.Definition != null &&
+                    _session.Definition.TryGetFixedEvent(
+                        eventIndex,
+                        out DungeonEventSO dungeonEvent))
+                {
+                    RequestDungeonBgm(
+                        _session.Definition,
+                        EDungeonBgmState.Rest,
+                        dungeonEvent.BgmOverride);
+                }
+                else
+                {
+                    RequestDungeonBgm(
+                        _session.Definition,
+                        EDungeonBgmState.Ready);
+                }
                 _eventTab?.ShowUpgradeEvent();
+            }
+            else
+            {
+                RequestDungeonBgm(
+                    _session.Definition,
+                    EDungeonBgmState.Rest);
             }
         }
 
@@ -1800,13 +1982,7 @@ public class DungeonPage : MonoBehaviour, IPage
         if (_session.Definition != null &&
             _session.Definition.HasTutorial)
         {
-            _eventRewardPending = false;
-            _startingCharacterSelectionPending = false;
-            _session.Finish(EDungeonRunResult.Clear);
-            NotifyRunEnded(EDungeonRunResult.Clear);
-            RunEnded?.Invoke(EDungeonRunResult.Clear);
-            ApplyBattlePauseState();
-            _tutorialController?.ShowCompletion();
+            CompleteTutorialRun();
             return;
         }
 
@@ -1823,6 +1999,14 @@ public class DungeonPage : MonoBehaviour, IPage
             return;
 
         NotifyBattleEnded(result);
+        if (result == EBattleResult.Timeout &&
+            _session.Definition != null &&
+            _session.Definition.HasTutorial)
+        {
+            CompleteTutorialRun();
+            return;
+        }
+
         if (result == EBattleResult.Victory)
             return;
 
@@ -1832,11 +2016,29 @@ public class DungeonPage : MonoBehaviour, IPage
         _battleManager?.EndBattle(board);
         board?.ClearAllStacks();
         ClearPlayerParty();
-        ResetRunResourcesAndItems(includeStartingConsumable: false);
+        ResetRunResourcesAndItems();
         flowController?.ShowEventTab();
         _eventTab?.ShowRunResult(_session.Result);
         NotifyRunEnded(_session.Result);
         RunEnded?.Invoke(_session.Result);
+    }
+
+    private void CompleteTutorialRun()
+    {
+        if (!_session.IsActive || _session.Definition == null ||
+            !_session.Definition.HasTutorial)
+        {
+            return;
+        }
+
+        _eventRewardPending = false;
+        _startingCharacterSelectionPending = false;
+        _startingItemSelectionPending = false;
+        _session.Finish(EDungeonRunResult.Clear);
+        NotifyRunEnded(EDungeonRunResult.Clear);
+        RunEnded?.Invoke(EDungeonRunResult.Clear);
+        ApplyBattlePauseState();
+        _tutorialController?.ShowCompletion();
     }
 
     private void HandleDungeonFlowCompleted()
@@ -1931,7 +2133,7 @@ public class DungeonPage : MonoBehaviour, IPage
         BattleItemsChanged?.Invoke();
     }
 
-    private void ResetRunResourcesAndItems(bool includeStartingConsumable)
+    private void ResetRunResourcesAndItems()
     {
         foreach (CharacterRuntime turret in _ownedTurrets)
         {
@@ -1944,24 +2146,6 @@ public class DungeonPage : MonoBehaviour, IPage
         _energyRechargeDuration =
             BattleManager.DefaultEnergyRechargeDuration;
         _battleItems.Clear();
-        if (includeStartingConsumable)
-        {
-            List<BattleItemSO> startingItems = new();
-            foreach (BattleItemSO item in BattleItemCatalog.GetAll())
-            {
-                if (item != null && item.AvailableAsStartingItem)
-                    startingItems.Add(item);
-            }
-
-            if (startingItems.Count > 0)
-            {
-                int randomIndex = UnityEngine.Random.Range(
-                    0,
-                    startingItems.Count);
-                BattleItemSO startingItem = startingItems[randomIndex];
-                GetOrCreateBattleItemState(startingItem)?.Acquire(startingItem);
-            }
-        }
         _battleManager?.ConfigureActiveSkillResource(
             _maximumEnergy,
             _energyRechargeDuration);
@@ -2117,7 +2301,9 @@ public class DungeonPage : MonoBehaviour, IPage
         _acquiredCharacterIds.Clear();
         _startingTurret = null;
         _startingCharacterSelectionPending = false;
+        _startingItemSelectionPending = false;
         _startingCharacterChoices.Clear();
+        _startingItemSelection.Clear();
         for (int index = 0; index < playerCharacters.Length; index++)
         {
             CharacterRuntime character = playerCharacters[index];
@@ -2297,7 +2483,6 @@ public class DungeonPage : MonoBehaviour, IPage
 
     private void ResetCurrentRunForNavigation()
     {
-        RequestDungeonBgmExit(EDungeonBgmExitReason.Aborted);
         _tutorialController?.StopTutorial();
         _eventRewardPending = false;
         _startingCharacterSelectionPending = false;
@@ -2305,7 +2490,7 @@ public class DungeonPage : MonoBehaviour, IPage
             _battleManager.EndBattle(board);
         board?.ClearAllStacks();
         ClearPlayerParty();
-        ResetRunResourcesAndItems(includeStartingConsumable: false);
+        ResetRunResourcesAndItems();
         _session.Reset();
         _pendingDefinition = null;
         battleTab?.Refresh();
@@ -2337,10 +2522,9 @@ public class DungeonPage : MonoBehaviour, IPage
 
     private void NotifyRunEnded(EDungeonRunResult result)
     {
-        RequestDungeonBgmExit(
-            result == EDungeonRunResult.Clear
-                ? EDungeonBgmExitReason.Clear
-                : EDungeonBgmExitReason.Defeat);
+        RequestDungeonBgm(
+            _session.Definition,
+            EDungeonBgmState.Ready);
 
         if (result == EDungeonRunResult.Clear &&
             _session.Definition != null)
@@ -2353,31 +2537,38 @@ public class DungeonPage : MonoBehaviour, IPage
             modifier.OnRunEnded(GetRuntimeContext(), result));
     }
 
-    private static void StartDungeonBgm(
-        DungeonDefinition definition,
-        EDungeonPhase initialPhase)
+    private int GetCurrentEventIndex()
     {
-        AudioManager audioManager = GameManager.Instance?.Audio;
-        DungeonThemeDefinition theme = definition != null
-            ? definition.Theme
-            : null;
-        if (audioManager == null || theme == null)
-            return;
+        IReadOnlyList<EDungeonPhase> phases = _session.PhaseSequence;
+        if (phases == null || flowController == null)
+            return 0;
 
-        if (theme.BgmProfile != null &&
-            audioManager.PlayDungeonBgm(theme.BgmProfile, initialPhase))
+        int eventCount = 0;
+        int end = Mathf.Min(
+            flowController.CurrentStepIndex,
+            phases.Count - 1);
+        for (int index = 0; index <= end; index++)
         {
-            return;
+            if (phases[index] == EDungeonPhase.Event)
+                eventCount++;
         }
 
-        if (theme.Music != null)
-            audioManager.PlayBgm(theme.Music);
+        return Mathf.Max(0, eventCount - 1);
     }
 
-    private static void RequestDungeonBgmExit(
-        EDungeonBgmExitReason reason)
+    private static void RequestDungeonBgm(
+        DungeonDefinition definition,
+        EDungeonBgmState state,
+        AudioClip overrideClip = null)
     {
-        GameManager.Instance?.Audio?.RequestDungeonBgmExit(reason);
+        AudioManager audioManager = GameManager.Instance?.Audio;
+        DungeonBgmProfile profile = definition != null
+            ? definition.BgmProfile
+            : null;
+        if (audioManager == null || profile == null)
+            return;
+
+        audioManager.PlayDungeonBgm(profile, state, overrideClip);
     }
 
     private DungeonRuntimeContext GetRuntimeContext()
@@ -2426,6 +2617,22 @@ public class DungeonPage : MonoBehaviour, IPage
             playerCharacters = new CharacterRuntime[MaximumPartySize];
         else if (playerCharacters.Length != MaximumPartySize)
             System.Array.Resize(ref playerCharacters, MaximumPartySize);
+    }
+
+    private DungeonItemCardView ResolveStartingItemCardPrefab()
+    {
+        if (startingItemCardPrefab != null)
+            return startingItemCardPrefab;
+
+        GameObject prefabObject = Resources.Load<GameObject>(
+            DefaultStartingItemCardResourcePath);
+        if (prefabObject != null)
+        {
+            startingItemCardPrefab =
+                prefabObject.GetComponent<DungeonItemCardView>();
+        }
+
+        return startingItemCardPrefab;
     }
 
     private void EnsureCharacterInfoInstances()
@@ -2583,7 +2790,9 @@ public sealed class DungeonEventTab
     {
         None,
         StartingSelection,
+        StartingItemSelection,
         StartingConfigurationError,
+        StartingItemConfigurationError,
         RunResult,
         RewardSelection,
         ReplacementSelection,
@@ -2718,6 +2927,8 @@ public sealed class DungeonEventTab
     private readonly List<CharacterSO> _startingChoices = new();
     private EViewMode _viewMode;
     private int _startingAvailableCount;
+    private int _startingItemAvailableCount;
+    private int _startingItemRequiredCount;
     private EDungeonRunResult _currentRunResult;
     private CharacterSO _replacementDefinition;
     private bool _initialized;
@@ -2757,6 +2968,8 @@ public sealed class DungeonEventTab
         _startingChoices.Clear();
         _currentRewardOptions.Clear();
         _replacementDefinition = null;
+        _startingItemAvailableCount = 0;
+        _startingItemRequiredCount = 0;
         _viewMode = EViewMode.None;
         _initialized = false;
         _titleText = null;
@@ -2796,6 +3009,28 @@ public sealed class DungeonEventTab
         RenderStartingCharacterSelection();
     }
 
+    public void ShowStartingItemSelection()
+    {
+        if (!EnsureInitialized())
+            return;
+
+        _viewMode = EViewMode.StartingItemSelection;
+        RenderStartingItemSelection();
+    }
+
+    public void ShowStartingItemConfigurationError(
+        int availableCount,
+        int requiredCount)
+    {
+        if (!EnsureInitialized())
+            return;
+
+        _startingItemAvailableCount = Mathf.Max(0, availableCount);
+        _startingItemRequiredCount = Mathf.Max(0, requiredCount);
+        _viewMode = EViewMode.StartingItemConfigurationError;
+        RenderStartingItemConfigurationError();
+    }
+
     private void RenderStartingCharacterSelection()
     {
         if (!EnsureInitialized())
@@ -2824,6 +3059,61 @@ public sealed class DungeonEventTab
             if (_firstStartingChoiceRect == null)
                 _firstStartingChoiceRect = cardRect;
         }
+    }
+
+    private void RenderStartingItemSelection()
+    {
+        if (!EnsureInitialized())
+            return;
+
+        ClearButtons();
+        SetStartingItemMode();
+        RefreshRuntimeLayout();
+        _titleText.text = LocalizationService.Get(
+            LocalizationKeys.UiDungeonStartingItemsTitle);
+        _descriptionText.text = LocalizationService.Get(
+            LocalizationKeys.UiDungeonStartingItemsDescription,
+            LocalizationService.Arg(
+                "count",
+                _page.StartingItemChoices.Count),
+            LocalizationService.Arg(
+                "rerolls",
+                _page.CurrentDungeon?.StartingItemRule
+                    .RerollsPerSlot ?? 0));
+
+        IReadOnlyList<BattleItemSO> items = _page.StartingItemChoices;
+        for (int index = 0; index < items.Count; index++)
+        {
+            CreateStartingItemSlot(index, items[index]);
+        }
+
+        CreateButton(
+            LocalizationService.Get(
+                LocalizationKeys.UiDungeonStartingItemsConfirm),
+            () => _page.TryConfirmStartingItems());
+    }
+
+    private void RenderStartingItemConfigurationError()
+    {
+        if (!EnsureInitialized())
+            return;
+
+        ClearButtons();
+        SetRewardCardMode(false);
+        RefreshRuntimeLayout();
+        _titleText.text = LocalizationService.Get(
+            LocalizationKeys.UiDungeonStartingItemsErrorTitle);
+        _descriptionText.text = LocalizationService.Get(
+            LocalizationKeys.UiDungeonStartingItemsErrorDescription,
+            LocalizationService.Arg(
+                "required",
+                _startingItemRequiredCount),
+            LocalizationService.Arg(
+                "available",
+                _startingItemAvailableCount));
+        CreateButton(
+            LocalizationService.Get(LocalizationKeys.UiDungeonStartRetry),
+            _page.StartNewDungeonRun);
     }
 
     public void ShowStartingCharacterConfigurationError(int availableCount)
@@ -3289,8 +3579,14 @@ public sealed class DungeonEventTab
             case EViewMode.StartingSelection:
                 RenderStartingCharacterSelection();
                 break;
+            case EViewMode.StartingItemSelection:
+                RenderStartingItemSelection();
+                break;
             case EViewMode.StartingConfigurationError:
                 RenderStartingCharacterConfigurationError();
+                break;
+            case EViewMode.StartingItemConfigurationError:
+                RenderStartingItemConfigurationError();
                 break;
             case EViewMode.RunResult:
                 RenderRunResult();
@@ -3405,10 +3701,44 @@ public sealed class DungeonEventTab
 
     private void SetRewardCardMode(bool showRewardCards)
     {
+        if (_rewardCardLayout != null)
+            _rewardCardLayout.constraintCount = RewardChoiceCount;
         if (_rewardCardRoot != null)
             _rewardCardRoot.gameObject.SetActive(showRewardCards);
         if (_buttonRoot != null)
+        {
             _buttonRoot.gameObject.SetActive(!showRewardCards);
+            LayoutElement layout =
+                _buttonRoot.GetComponent<LayoutElement>();
+            if (layout != null)
+            {
+                layout.preferredHeight = 420f;
+                layout.flexibleHeight = 1f;
+            }
+        }
+    }
+
+    private void SetStartingItemMode()
+    {
+        if (_rewardCardLayout != null)
+        {
+            _rewardCardLayout.constraintCount = Mathf.Max(
+                1,
+                _page?.StartingItemChoices?.Count ?? RewardChoiceCount);
+        }
+        if (_rewardCardRoot != null)
+            _rewardCardRoot.gameObject.SetActive(true);
+        if (_buttonRoot != null)
+        {
+            _buttonRoot.gameObject.SetActive(true);
+            LayoutElement layout =
+                _buttonRoot.GetComponent<LayoutElement>();
+            if (layout != null)
+            {
+                layout.preferredHeight = 64f;
+                layout.flexibleHeight = 0f;
+            }
+        }
     }
 
     private void RefreshRuntimeLayout()
@@ -3426,30 +3756,148 @@ public sealed class DungeonEventTab
             ? rootRect.rect.height
             : 700f;
         float panelWidth = Mathf.Min(900f, Mathf.Max(540f, rootWidth - 48f));
-        float panelHeight = Mathf.Min(650f, Mathf.Max(500f, rootHeight - 48f));
+        float maximumPanelHeight =
+            _viewMode == EViewMode.StartingItemSelection ? 760f : 650f;
+        float panelHeight = Mathf.Min(
+            maximumPanelHeight,
+            Mathf.Max(500f, rootHeight - 48f));
         _panel.sizeDelta = new Vector2(panelWidth, panelHeight);
 
         if (_rewardCardLayout == null || _rewardCardRoot == null)
             return;
 
         const float horizontalPadding = 64f;
-        const float totalCardSpacing = 40f;
         const float reservedHeaderHeight = 228f;
+        bool startingItems =
+            _viewMode == EViewMode.StartingItemSelection;
+        int columnCount = startingItems
+            ? Mathf.Max(1, _page?.StartingItemChoices?.Count ?? 1)
+            : RewardChoiceCount;
+        float totalCardSpacing = Mathf.Max(0, columnCount - 1) *
+                                 _rewardCardLayout.spacing.x;
         float widthBound =
             (panelWidth - horizontalPadding - totalCardSpacing) /
-            RewardChoiceCount;
+            columnCount;
+        float buttonAllowance = startingItems ? 62f : 0f;
         float heightBound =
-            Mathf.Max(140f, panelHeight - reservedHeaderHeight) / 1.4f;
+            Mathf.Max(140f, panelHeight - reservedHeaderHeight -
+                            buttonAllowance) / 1.4f;
         float cardWidth = Mathf.Clamp(
             Mathf.Min(widthBound, heightBound),
             140f,
             250f);
         float cardHeight = cardWidth * 1.4f;
-        _rewardCardLayout.cellSize = new Vector2(cardWidth, cardHeight);
+        float cellHeight = cardHeight + buttonAllowance;
+        _rewardCardLayout.cellSize = new Vector2(cardWidth, cellHeight);
         LayoutElement rewardLayout =
             _rewardCardRoot.GetComponent<LayoutElement>();
         if (rewardLayout != null)
-            rewardLayout.preferredHeight = cardHeight;
+            rewardLayout.preferredHeight = cellHeight;
+    }
+
+    private void CreateStartingItemSlot(int slotIndex, BattleItemSO item)
+    {
+        if (_rewardCardRoot == null || item == null)
+            return;
+
+        GameObject slotObject = new(
+            $"grpStartingItem{slotIndex + 1}",
+            typeof(RectTransform));
+        RectTransform slotRect = (RectTransform)slotObject.transform;
+        slotRect.SetParent(_rewardCardRoot, false);
+
+        DungeonItemCardView prefab = _page.StartingItemCardPrefab;
+        if (prefab == null)
+        {
+            Debug.LogError(
+                "Starting item selection requires a DungeonItemCardView " +
+                "prefab on DungeonPage or at Resources/" +
+                "Presentation/BattleItemCard.");
+            return;
+        }
+
+        DungeonItemCardView card = UnityEngine.Object.Instantiate(
+            prefab,
+            slotRect,
+            false);
+        card.name = $"StartingItemCard{slotIndex + 1}";
+        RectTransform cardRect = card.transform as RectTransform;
+        float cardWidth = Mathf.Max(
+            1f,
+            _rewardCardLayout != null
+                ? _rewardCardLayout.cellSize.x
+                : 220f);
+        float cardHeight = cardWidth * 1.4f;
+        cardRect.anchorMin = new Vector2(0.5f, 1f);
+        cardRect.anchorMax = new Vector2(0.5f, 1f);
+        cardRect.pivot = new Vector2(0.5f, 1f);
+        cardRect.anchoredPosition = Vector2.zero;
+        cardRect.sizeDelta = new Vector2(cardWidth, cardHeight);
+        card.Initialize(item, null);
+
+        int remaining = _page.GetStartingItemRerollsRemaining(slotIndex);
+        bool canReroll = _page.CanRerollStartingItem(slotIndex);
+        string label = remaining > 0
+            ? LocalizationService.Get(
+                LocalizationKeys.UiDungeonStartingItemsReroll,
+                LocalizationService.Arg("count", remaining))
+            : LocalizationService.Get(
+                LocalizationKeys.UiDungeonStartingItemsRerollUsed);
+        CreateStartingItemRerollButton(
+            slotRect,
+            label,
+            canReroll,
+            () => _page.TryRerollStartingItem(slotIndex));
+    }
+
+    private void CreateStartingItemRerollButton(
+        RectTransform parent,
+        string label,
+        bool interactable,
+        Action action)
+    {
+        GameObject buttonObject = new(
+            "btnStartingItemReroll",
+            typeof(RectTransform),
+            typeof(Image),
+            typeof(Button));
+        RectTransform buttonRect =
+            (RectTransform)buttonObject.transform;
+        buttonRect.SetParent(parent, false);
+        buttonRect.anchorMin = new Vector2(0f, 0f);
+        buttonRect.anchorMax = new Vector2(1f, 0f);
+        buttonRect.pivot = new Vector2(0.5f, 0f);
+        buttonRect.anchoredPosition = Vector2.zero;
+        buttonRect.sizeDelta = new Vector2(0f, 52f);
+
+        Image image = buttonObject.GetComponent<Image>();
+        image.color = interactable
+            ? _buttonColor
+            : Color.Lerp(_buttonColor, Color.black, 0.55f);
+        Button button = buttonObject.GetComponent<Button>();
+        button.targetGraphic = image;
+        button.interactable = interactable;
+        if (action != null)
+            button.onClick.AddListener(() => action());
+
+        GameObject textObject = new(
+            "txtStartingItemReroll",
+            typeof(RectTransform),
+            typeof(TextMeshProUGUI));
+        RectTransform textRect = (RectTransform)textObject.transform;
+        textRect.SetParent(buttonRect, false);
+        textRect.anchorMin = Vector2.zero;
+        textRect.anchorMax = Vector2.one;
+        textRect.offsetMin = new Vector2(8f, 2f);
+        textRect.offsetMax = new Vector2(-8f, -2f);
+        TextMeshProUGUI text =
+            textObject.GetComponent<TextMeshProUGUI>();
+        LocalizationFontResolver.ApplyGameDefault(text);
+        text.text = label;
+        text.fontSize = 18f;
+        text.color = _textColor;
+        text.alignment = TextAlignmentOptions.Center;
+        text.raycastTarget = false;
     }
 
     private TextMeshProUGUI CreateText(

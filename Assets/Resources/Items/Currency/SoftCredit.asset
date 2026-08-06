@@ -1,0 +1,32 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 3f4da38ff05f41e39e0a5cd305678a8a, type: 3}
+  m_Name: SoftCredit
+  m_EditorClassIdentifier: Assembly-CSharp::CurrencyItemSO
+  itemId: currency.soft
+  category: 0
+  rarity: 0
+  sortOrder: 10
+  nameLocalizationKey: item.client.soft_credit.name
+  descriptionLocalizationKey: item.client.soft_credit.description
+  koreanName: "\uC778\uAC8C\uC784 \uD06C\uB808\uB527"
+  englishName: IN-GAME CREDIT
+  koreanDescription: "\uAC8C\uC784 \uD50C\uB808\uC774\uC5D0\uC11C \uD68D\uB4DD\uD558\uACE0
+    \uC0AC\uC6A9\uD558\uB294 \uAE30\uBCF8 \uC7AC\uD654\uC785\uB2C8\uB2E4."
+  englishDescription: Basic currency earned and spent through gameplay.
+  icon: {fileID: 21300000, guid: 41b57ed0f114f37469960c54d31ec362, type: 3}
+  illustration: {fileID: 0}
+  maximumStack: 0
+  initialAmount: 0
+  hiddenInStorage: 0
+  currencyKind: 0
+  purchasedWithRealMoney: 0

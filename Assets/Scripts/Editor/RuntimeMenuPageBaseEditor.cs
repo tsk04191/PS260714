@@ -255,6 +255,52 @@ public sealed class DungeonBgmProfileEditor : Editor
     public override void OnInspectorGUI()
     {
         serializedObject.Update();
+        EditorGUILayout.HelpBox(
+            "Ready is used for entry choices and post-battle rewards. " +
+            "BattleSO and DungeonEventSO can override the other defaults. " +
+            "Overrides inherit the volume of their Battle or Rest state. " +
+            "Different clips fade out completely before the next clip " +
+            "fades in.",
+            MessageType.Info);
+
+        EditorGUILayout.LabelField("Default Music", EditorStyles.boldLabel);
+        DrawTrack("Ready", "readyClip", "readyVolumePercent");
+        DrawTrack("Battle", "battleClip", "battleVolumePercent");
+        DrawTrack("Rest", "restClip", "restVolumePercent");
+
+        EditorGUILayout.Space(8f);
+        EditorGUILayout.LabelField("Sequential Fade", EditorStyles.boldLabel);
+        EditorGUILayout.PropertyField(
+            serializedObject.FindProperty("fadeOutDuration"));
+        EditorGUILayout.PropertyField(
+            serializedObject.FindProperty("fadeInDuration"));
+        serializedObject.ApplyModifiedProperties();
+
+        DungeonBgmProfile profile = target as DungeonBgmProfile;
+        if (profile != null && !profile.TryValidate(out string error))
+            EditorGUILayout.HelpBox(error, MessageType.Error);
+    }
+
+    private void DrawTrack(
+        string label,
+        string clipPropertyName,
+        string volumePropertyName)
+    {
+        EditorGUILayout.PropertyField(
+            serializedObject.FindProperty(clipPropertyName),
+            new GUIContent($"{label} Clip"));
+        EditorGUILayout.IntSlider(
+            serializedObject.FindProperty(volumePropertyName),
+            0,
+            100,
+            new GUIContent($"{label} Volume (%)"));
+        EditorGUILayout.Space(3f);
+    }
+
+#if false // Pre-state-based Dungeon BGM inspector retained only for asset migration history.
+    private void DrawLegacyInspector()
+    {
+        serializedObject.Update();
         DataManager dataManager = FindDataManager();
         AudioClipList musicList = dataManager != null
             ? dataManager.MusicList
@@ -443,4 +489,5 @@ public sealed class DungeonBgmProfileEditor : Editor
             ? string.Empty
             : value.Trim();
     }
+#endif
 }

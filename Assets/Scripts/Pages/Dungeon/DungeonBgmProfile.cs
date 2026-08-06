@@ -1,35 +1,10 @@
-using System;
-using System.Collections.Generic;
 using UnityEngine;
 
-public enum EDungeonBgmTransitionMode
+public enum EDungeonBgmState
 {
-    NextBar,
-    LoopBoundary,
-}
-
-public enum EDungeonBgmExitReason
-{
-    Clear,
-    Defeat,
-    Aborted,
-}
-
-[Serializable]
-public sealed class DungeonBgmPhaseLoop
-{
-    [SerializeField] private EDungeonPhase phase;
-    [SerializeField] private string clipName;
-
-    public EDungeonPhase Phase => phase;
-    public string ClipName => Normalize(clipName);
-
-    private static string Normalize(string value)
-    {
-        return string.IsNullOrWhiteSpace(value)
-            ? string.Empty
-            : value.Trim();
-    }
+    Ready,
+    Battle,
+    Rest,
 }
 
 [CreateAssetMenu(
@@ -37,73 +12,88 @@ public sealed class DungeonBgmPhaseLoop
     menuName = "Dungeon/BGM Profile")]
 public sealed class DungeonBgmProfile : ScriptableObject
 {
-    [Header("Intro / Loop")]
-    [SerializeField] private string introClipName;
-    [SerializeField] private string defaultLoopClipName;
-    [SerializeField] private List<DungeonBgmPhaseLoop> phaseLoops = new();
+    [Header("Default Music")]
+    [SerializeField] private AudioClip readyClip;
+    [SerializeField, Range(0, 100)] private int readyVolumePercent = 100;
+    [SerializeField] private AudioClip battleClip;
+    [SerializeField, Range(0, 100)] private int battleVolumePercent = 100;
+    [SerializeField] private AudioClip restClip;
+    [SerializeField, Range(0, 100)] private int restVolumePercent = 100;
 
-    [Header("Exit")]
-    [SerializeField] private string clearExitClipName;
-    [SerializeField] private string defeatExitClipName;
-    [SerializeField] private string abortedExitClipName;
+    [Header("Sequential Fade")]
+    [SerializeField, Min(0f)] private float fadeOutDuration = 0.5f;
+    [SerializeField, Min(0f)] private float fadeInDuration = 0.5f;
 
-    [Header("Musical Transition")]
-    [SerializeField, Min(1f)] private float bpm = 120f;
-    [SerializeField, Min(1)] private int beatsPerBar = 4;
-    [SerializeField] private EDungeonBgmTransitionMode transitionMode =
-        EDungeonBgmTransitionMode.NextBar;
-    [SerializeField, Min(0.05f)] private float scheduleLeadTime = 0.1f;
+    public AudioClip ReadyClip => readyClip;
+    public AudioClip BattleClip => battleClip;
+    public AudioClip RestClip => restClip;
+    public int ReadyVolumePercent =>
+        Mathf.Clamp(readyVolumePercent, 0, 100);
+    public int BattleVolumePercent =>
+        Mathf.Clamp(battleVolumePercent, 0, 100);
+    public int RestVolumePercent =>
+        Mathf.Clamp(restVolumePercent, 0, 100);
+    public float FadeOutDuration => Mathf.Max(0f, fadeOutDuration);
+    public float FadeInDuration => Mathf.Max(0f, fadeInDuration);
 
-    public string IntroClipName => Normalize(introClipName);
-    public float Bpm => Mathf.Max(1f, bpm);
-    public int BeatsPerBar => Mathf.Max(1, beatsPerBar);
-    public EDungeonBgmTransitionMode TransitionMode => transitionMode;
-    public float ScheduleLeadTime => Mathf.Max(0.05f, scheduleLeadTime);
-    public IReadOnlyList<DungeonBgmPhaseLoop> PhaseLoops => phaseLoops;
-
-    public string ResolveLoopClipName(EDungeonPhase phase)
+    public AudioClip ResolveClip(
+        EDungeonBgmState state,
+        AudioClip overrideClip = null)
     {
-        if (phaseLoops != null)
-        {
-            foreach (DungeonBgmPhaseLoop entry in phaseLoops)
-            {
-                if (entry != null && entry.Phase == phase &&
-                    !string.IsNullOrEmpty(entry.ClipName))
-                {
-                    return entry.ClipName;
-                }
-            }
-        }
+        if (overrideClip != null)
+            return overrideClip;
 
-        return Normalize(defaultLoopClipName);
+        return state switch
+        {
+            EDungeonBgmState.Battle => battleClip,
+            EDungeonBgmState.Rest => restClip,
+            _ => readyClip,
+        };
     }
 
-    public string ResolveExitClipName(EDungeonBgmExitReason reason)
+    public int ResolveVolumePercent(EDungeonBgmState state)
     {
-        return reason switch
+        return state switch
         {
-            EDungeonBgmExitReason.Clear => Normalize(clearExitClipName),
-            EDungeonBgmExitReason.Defeat => Normalize(defeatExitClipName),
-            _ => Normalize(abortedExitClipName),
+            EDungeonBgmState.Battle => BattleVolumePercent,
+            EDungeonBgmState.Rest => RestVolumePercent,
+            _ => ReadyVolumePercent,
         };
+    }
+
+    public float ResolveVolumeScale(EDungeonBgmState state)
+    {
+        return ResolveVolumePercent(state) / 100f;
+    }
+
+    public bool TryValidate(out string error)
+    {
+        if (readyClip == null)
+        {
+            error = "Ready Clip is required.";
+            return false;
+        }
+        if (battleClip == null)
+        {
+            error = "Battle Clip is required.";
+            return false;
+        }
+        if (restClip == null)
+        {
+            error = "Rest Clip is required.";
+            return false;
+        }
+
+        error = string.Empty;
+        return true;
     }
 
     private void OnValidate()
     {
-        introClipName = Normalize(introClipName);
-        defaultLoopClipName = Normalize(defaultLoopClipName);
-        clearExitClipName = Normalize(clearExitClipName);
-        defeatExitClipName = Normalize(defeatExitClipName);
-        abortedExitClipName = Normalize(abortedExitClipName);
-        bpm = Mathf.Max(1f, bpm);
-        beatsPerBar = Mathf.Max(1, beatsPerBar);
-        scheduleLeadTime = Mathf.Max(0.05f, scheduleLeadTime);
-    }
-
-    private static string Normalize(string value)
-    {
-        return string.IsNullOrWhiteSpace(value)
-            ? string.Empty
-            : value.Trim();
+        readyVolumePercent = Mathf.Clamp(readyVolumePercent, 0, 100);
+        battleVolumePercent = Mathf.Clamp(battleVolumePercent, 0, 100);
+        restVolumePercent = Mathf.Clamp(restVolumePercent, 0, 100);
+        fadeOutDuration = Mathf.Max(0f, fadeOutDuration);
+        fadeInDuration = Mathf.Max(0f, fadeInDuration);
     }
 }

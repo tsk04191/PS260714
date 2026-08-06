@@ -5,6 +5,7 @@ public enum EDungeonRunActivity
 {
     None,
     StartingSelection,
+    StartingItemSelection,
     TutorialGuide,
     Battle,
     Event,

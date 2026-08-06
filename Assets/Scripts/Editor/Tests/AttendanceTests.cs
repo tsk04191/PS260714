@@ -92,7 +92,7 @@ public sealed class AttendanceTests
     public void Claim_GrantsRewardAndBlocksSameDayDuplicate()
     {
         TestClock clock = new(new DateTimeOffset(
-            2026, 8, 3, 2, 0, 0, TimeSpan.Zero));
+            2026, 8, 1, 2, 0, 0, TimeSpan.Zero));
         AttendanceService service = CreateService(clock, out var attendance,
             out var inventory);
         long previous = inventory.GetAmount(CoreItemIds.SoftCredit);
@@ -112,7 +112,7 @@ public sealed class AttendanceTests
     }
 
     [Test]
-    public void MissedDays_DoNotSkipSequentialReward()
+    public void MissedDays_UseTheCurrentCalendarDayReward()
     {
         TestClock clock = new(new DateTimeOffset(
             2026, 8, 1, 2, 0, 0, TimeSpan.Zero));
@@ -124,7 +124,7 @@ public sealed class AttendanceTests
         AttendanceClaimResult next = service.TryClaimToday();
 
         Assert.That(next.Success, Is.True, next.Detail);
-        Assert.That(next.RewardIndex, Is.EqualTo(1));
+        Assert.That(next.RewardIndex, Is.EqualTo(10));
         Assert.That(attendance.ClaimedCount, Is.EqualTo(2));
         Assert.That(
             inventory.GetAmount(CoreItemIds.BasicUpgradeMaterial),
@@ -132,7 +132,7 @@ public sealed class AttendanceTests
     }
 
     [Test]
-    public void RepeatingSchedule_WrapsToFirstReward()
+    public void MonthChange_ResetsCalendarClaims()
     {
         TestClock clock = new(new DateTimeOffset(
             2026, 8, 1, 2, 0, 0, TimeSpan.Zero));
@@ -149,18 +149,17 @@ public sealed class AttendanceTests
             out _);
 
         Assert.That(service.TryClaimToday().RewardIndex, Is.EqualTo(0));
-        clock.UtcNow = clock.UtcNow.AddDays(1);
-        Assert.That(service.TryClaimToday().RewardIndex, Is.EqualTo(1));
-        clock.UtcNow = clock.UtcNow.AddDays(1);
+        clock.UtcNow = clock.UtcNow.AddMonths(1);
         Assert.That(service.TryClaimToday().RewardIndex, Is.EqualTo(0));
-        Assert.That(attendance.ClaimedCount, Is.EqualTo(3));
+        Assert.That(attendance.ClaimedCount, Is.EqualTo(1));
+        Assert.That(attendance.MonthKey, Is.EqualTo(202609));
     }
 
     [Test]
-    public void NonRepeatingSchedule_CompletesAfterFinalReward()
+    public void DaysAfterTwentyEight_UseFixedCurrencyReward()
     {
         TestClock clock = new(new DateTimeOffset(
-            2026, 8, 1, 2, 0, 0, TimeSpan.Zero));
+            2026, 8, 29, 2, 0, 0, TimeSpan.Zero));
         AttendanceRewardScheduleSO schedule = CreateSchedule(
             false,
             CoreItemIds.SoftCredit,
@@ -171,12 +170,13 @@ public sealed class AttendanceTests
             out _,
             out _);
 
-        Assert.That(service.TryClaimToday().Success, Is.True);
-        clock.UtcNow = clock.UtcNow.AddDays(1);
+        AttendanceClaimResult result = service.TryClaimToday();
 
+        Assert.That(result.Success, Is.True, result.Detail);
+        Assert.That(result.RewardIndex, Is.EqualTo(-1));
         Assert.That(
             service.RefreshStatus().Availability,
-            Is.EqualTo(AttendanceAvailability.ScheduleCompleted));
+            Is.EqualTo(AttendanceAvailability.ClaimedToday));
     }
 
     [Test]
@@ -249,7 +249,7 @@ public sealed class AttendanceTests
             maximum.longValue = 500L;
             serialized.ApplyModifiedPropertiesWithoutUndo();
             TestClock clock = new(new DateTimeOffset(
-                2026, 8, 3, 2, 0, 0, TimeSpan.Zero));
+                2026, 8, 1, 2, 0, 0, TimeSpan.Zero));
             AttendanceService service = CreateService(clock, out _, out var inventory);
 
             AttendanceStatus status = service.RefreshStatus();
@@ -343,6 +343,71 @@ public sealed class AttendanceTests
                 Is.True,
                 key);
         }
+    }
+
+    [Test]
+    public void RuntimeSchedule_ExpandsContentsToFourBySeven()
+    {
+        AttendanceRewardScheduleSO schedule = CreateSchedule(
+            true,
+            CoreItemIds.SoftCredit,
+            10L,
+            CoreItemIds.BasicUpgradeMaterial,
+            2L);
+
+        Assert.That(
+            schedule.DayCount,
+            Is.EqualTo(AttendanceRewardScheduleSO.MonthlyRewardCount));
+        Assert.That(schedule.ExtraDayReward, Is.Not.Null);
+        Assert.That(schedule.TryValidate(out string reason), Is.True, reason);
+    }
+
+    [Test]
+    public void NotificationDot_OverlapsTopRightByOneQuarter()
+    {
+        GameObject buttonObject = new("Button", typeof(RectTransform));
+        GameObject dotObject = new(
+            "Dot",
+            typeof(RectTransform),
+            typeof(CanvasRenderer),
+            typeof(NotificationDotView));
+        dotObject.transform.SetParent(buttonObject.transform, false);
+        try
+        {
+            NotificationDotView dot =
+                dotObject.GetComponent<NotificationDotView>();
+            dot.ApplyLayout((RectTransform)buttonObject.transform);
+
+            RectTransform rect = (RectTransform)dotObject.transform;
+            Assert.That(rect.sizeDelta.x, Is.EqualTo(18f));
+            Assert.That(rect.sizeDelta.y, Is.EqualTo(18f));
+            Assert.That(rect.anchoredPosition.x, Is.EqualTo(4.5f));
+            Assert.That(rect.anchoredPosition.y, Is.EqualTo(4.5f));
+            Assert.That(dot.raycastTarget, Is.False);
+        }
+        finally
+        {
+            UnityEngine.Object.DestroyImmediate(buttonObject);
+        }
+    }
+
+    [Test]
+    public void AttendancePresentationPrefabs_AreDesignerEditableAssets()
+    {
+        MonthlyAttendancePopupView popup =
+            Resources.Load<MonthlyAttendancePopupView>(
+                "Presentation/AttendancePopup");
+        AttendanceRewardCellView cell =
+            Resources.Load<AttendanceRewardCellView>(
+                "Presentation/AttendanceRewardCell");
+        NotificationDotView dot = Resources.Load<NotificationDotView>(
+            "Presentation/NotificationDot");
+
+        Assert.That(popup, Is.Not.Null);
+        Assert.That(popup.HasRequiredReferences, Is.True);
+        Assert.That(cell, Is.Not.Null);
+        Assert.That(cell.HasRequiredReferences, Is.True);
+        Assert.That(dot, Is.Not.Null);
     }
 
     private AttendanceService CreateService(

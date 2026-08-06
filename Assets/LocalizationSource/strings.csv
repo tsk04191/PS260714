@@ -66,7 +66,7 @@ ui.main.title,메인 페이지 제목,title,,메인,MAIN
 ui.main.description,메인 페이지 설명,body,,로비 메뉴를 선택하세요,SELECT A LOBBY MENU
 ui.main.attendance,메인 출석 버튼,body,,출석체크,ATTENDANCE
 ui.attendance.title,출석 팝업 제목,title,,출석 보상,ATTENDANCE REWARDS
-ui.attendance.description,출석 팝업 설명,body,,매일 접속하고 순서대로 보상을 받으세요,Log in each day and claim rewards in order.
+ui.attendance.description,출석 팝업 설명,body,,매일 접속하고 달력의 오늘 보상을 받으세요,Log in each day and claim today's calendar reward.
 ui.attendance.day,출석 일차,number,,{day}일차,DAY {day}
 ui.attendance.claim,출석 수령 버튼,body,,보상 받기,CLAIM REWARD
 ui.attendance.claimed,출석 수령 상태,body,,수령 완료,CLAIMED
@@ -245,6 +245,13 @@ ui.dungeon.start.description,시작 터렛 선택 설명,body,,3개 중 하나�
 ui.dungeon.start.error_title,시작 터렛 설정 오류 제목,title,,시작 터렛 설정 오류,STARTING TURRET SETUP ERROR
 ui.dungeon.start.error_description,시작 터렛 설정 오류 설명,body,,서로 다른 터렛 3개가 필요합니다.[br]사용 가능한 정의: {count},3 DIFFERENT TURRETS ARE REQUIRED[br]AVAILABLE DEFINITIONS: {count}
 ui.dungeon.start.retry,시작 터렛 다시 시도 버튼,body,,다시 시도,RETRY
+ui.dungeon.starting_items.title,스타팅 아이템 구성 제목,title,,스타팅 아이템 구성,STARTING ITEM LOADOUT
+ui.dungeon.starting_items.description,스타팅 아이템 구성 설명,body,,아이템별 리롤: {rerolls}회. 확정하면 {count}개를 모두 획득합니다.,REROLLS PER ITEM: {rerolls}. CONFIRM TO TAKE ALL {count} ITEMS.
+ui.dungeon.starting_items.reroll,스타팅 아이템 리롤 버튼,number,,리롤 ({count}),REROLL ({count})
+ui.dungeon.starting_items.reroll_used,스타팅 아이템 리롤 사용 완료,body,,리롤 사용 완료,REROLL USED
+ui.dungeon.starting_items.confirm,스타팅 아이템 확정 버튼,body,,아이템 확정,CONFIRM ITEMS
+ui.dungeon.starting_items.error_title,스타팅 아이템 설정 오류 제목,title,,스타팅 아이템 설정 오류,STARTING ITEM SETUP ERROR
+ui.dungeon.starting_items.error_description,스타팅 아이템 설정 오류 설명,body,,리롤 가능한 중복 없는 구성을 위해 {required}개의 스타팅 아이템이 필요합니다.[br]현재 사용 가능: {available},{required} UNIQUE STARTING ITEMS ARE REQUIRED FOR REROLLS.[br]CURRENTLY AVAILABLE: {available}
 ui.dungeon.result.clear_title,던전 클리어 제목,title,,던전 클리어,DUNGEON CLEAR
 ui.dungeon.result.clear_description,던전 클리어 설명,body,,모든 전투 {count}회를 클리어했습니다.,ALL {count} BATTLES CLEARED
 ui.dungeon.result.reset_description,던전 패배 설명,body,,이번 진행이 초기화되었습니다.[br]새 시작 터렛을 선택하세요.,THE RUN WAS RESET[br]CHOOSE A NEW STARTING TURRET
@@ -342,3 +349,5 @@ item.battle.speed_drink.name,아이템 이름,title,,스피드 음료,Speed Drin
 item.battle.speed_drink.description,아이템 설명,tooltip,,[icon=speed] 스피드 1 획득,Gain [icon=speed]  Speed 1 status
 item.battle.boom.name,아이템 이름,title,,폭탄,Boom
 item.battle.boom.description,아이템 설명,tooltip,,[icon=damage] 피해량을 3X3 범위로 부여,Give [icon=damage] damage to 3X3
+item.battle.blood_dagger.name,아이템 이름,title,,출혈 단검,Bloody dagger
+item.battle.blood_dagger.description,아이템 설명,tooltip,,[icon=damage] 피해량과 [icon=blood] 를 5초 부여,Give [icon=damage] damange and [icon=blood] 5 sec

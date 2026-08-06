@@ -27,8 +27,8 @@ public sealed class MainPage : RuntimeMenuPageBase
     private string _defaultLobbyCharacterCaption;
     private Button _noticeButton;
     private Button _attendanceButton;
-    private GameObject _attendanceBadge;
-    private AttendancePopupView _attendancePopup;
+    private NotificationDotView _attendanceBadge;
+    private MonthlyAttendancePopupView _attendancePopup;
     private LobbyNoticePopupView _noticePopup;
     private AttendanceData _boundAttendanceData;
     private GameEventManager _gameEvents;
@@ -83,9 +83,11 @@ public sealed class MainPage : RuntimeMenuPageBase
             HandleAttendanceClicked);
         ConfigureUtilityButton(_noticeButton, 48f, 160f);
         ConfigureUtilityButton(_attendanceButton, 220f, 184f);
-        BuildAttendanceBadge();
+        _attendanceBadge = NotificationDotView.BuildOrBind(
+            _attendanceButton.transform as RectTransform);
         _noticePopup = LobbyNoticePopupView.BuildOrBind(RuntimeRoot);
-        _attendancePopup = AttendancePopupView.BuildOrBind(RuntimeRoot);
+        _attendancePopup = MonthlyAttendancePopupView.BuildOrBind(
+            RuntimeRoot);
         BindLobbyCharacterView();
         RefreshLobbyCharacterView();
     }
@@ -232,39 +234,10 @@ public sealed class MainPage : RuntimeMenuPageBase
         AttendanceStatus status = service?.RefreshStatus();
         if (_attendanceBadge != null)
         {
-            _attendanceBadge.SetActive(
+            _attendanceBadge.SetVisible(
                 status?.Availability ==
                 AttendanceAvailability.Claimable);
         }
-    }
-
-    private void BuildAttendanceBadge()
-    {
-        if (_attendanceButton == null)
-            return;
-
-        Transform existing = _attendanceButton.transform.Find(
-            "imgAttendanceAvailable");
-        GameObject badge = existing != null
-            ? existing.gameObject
-            : new GameObject(
-                "imgAttendanceAvailable",
-                typeof(RectTransform),
-                typeof(CanvasRenderer),
-                typeof(Image));
-        if (existing == null)
-            badge.transform.SetParent(_attendanceButton.transform, false);
-
-        RectTransform rect = (RectTransform)badge.transform;
-        rect.anchorMin = Vector2.one;
-        rect.anchorMax = Vector2.one;
-        rect.pivot = new Vector2(0.5f, 0.5f);
-        rect.anchoredPosition = new Vector2(-4f, -4f);
-        rect.sizeDelta = new Vector2(18f, 18f);
-        Image image = badge.GetComponent<Image>();
-        image.color = new Color(0.95f, 0.3f, 0.2f, 1f);
-        image.raycastTarget = false;
-        _attendanceBadge = badge;
     }
 
     private static void ConfigureUtilityButton(

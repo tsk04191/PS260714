@@ -105,6 +105,16 @@ public sealed class DungeonTutorialController : MonoBehaviour
         RefreshLayout();
     }
 
+    public void PauseForStartingItemSelection()
+    {
+        if (!_initialized || !_running)
+            return;
+
+        _startingChoiceTarget = null;
+        if (_overlayRoot != null)
+            _overlayRoot.gameObject.SetActive(false);
+    }
+
     public void ShowCompletion()
     {
         if (!_initialized)

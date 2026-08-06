@@ -211,6 +211,58 @@ public sealed class ItemDefinitionTests
     }
 
     [Test]
+    public void BattleItemCardTooltip_MovesToLayPopupWhileHovered()
+    {
+        BattleItemSO item =
+            ScriptableObject.CreateInstance<BattleItemSO>();
+        GameObject canvasObject = new(
+            "Canvas",
+            typeof(RectTransform),
+            typeof(Canvas));
+        GameObject popupLayerObject = new(
+            PopupLayerUtility.PopupLayerName,
+            typeof(RectTransform));
+        popupLayerObject.transform.SetParent(canvasObject.transform, false);
+        RectTransform popupLayer =
+            (RectTransform)popupLayerObject.transform;
+        popupLayer.sizeDelta = new Vector2(1200f, 800f);
+        GameObject prefab = Resources.Load<GameObject>(
+            "Presentation/BattleItemCard");
+        GameObject cardObject = Object.Instantiate(
+            prefab,
+            canvasObject.transform,
+            false);
+        try
+        {
+            SerializedObject serialized = new(item);
+            serialized.FindProperty("itemId").stringValue =
+                "test.popup-layer-card";
+            serialized.ApplyModifiedPropertiesWithoutUndo();
+            DungeonItemCardView card =
+                cardObject.GetComponent<DungeonItemCardView>();
+            Assert.That(card.Initialize(item, _ => { }), Is.True);
+            Transform tooltip = cardObject.transform.Find("grpItemPopup");
+
+            card.OnPointerEnter(null);
+
+            Assert.That(tooltip.parent, Is.SameAs(popupLayer));
+            Assert.That(
+                tooltip.GetSiblingIndex(),
+                Is.EqualTo(popupLayer.childCount - 1));
+            Assert.That(tooltip.gameObject.activeSelf, Is.True);
+
+            card.OnPointerExit(null);
+            Assert.That(tooltip.parent, Is.SameAs(cardObject.transform));
+            Assert.That(tooltip.gameObject.activeSelf, Is.False);
+        }
+        finally
+        {
+            Object.DestroyImmediate(canvasObject);
+            Object.DestroyImmediate(item);
+        }
+    }
+
+    [Test]
     public void BattleItemHand_ShowsOneCardPerRemainingUseWithoutCountText()
     {
         BattleItemSO item =
@@ -1128,12 +1180,15 @@ public sealed class ItemDefinitionTests
         public TemporaryLocalizationFixture(string text)
         {
             Text = text ?? string.Empty;
+            HashSet<Dictionary<string, LocalizationEntry>> uniqueTables =
+                new();
             FieldInfo[] fields = typeof(GeneratedLocalizationTables)
                 .GetFields(BindingFlags.Static | BindingFlags.NonPublic);
             foreach (FieldInfo field in fields)
             {
                 if (field.GetValue(null) is not
-                    Dictionary<string, LocalizationEntry> table)
+                    Dictionary<string, LocalizationEntry> table ||
+                    !uniqueTables.Add(table))
                 {
                     continue;
                 }
@@ -1177,5 +1232,143 @@ public sealed class ItemDefinitionTests
             (int)chargeMode;
         serialized.FindProperty("limitedUses").intValue = usesPerBattle;
         serialized.ApplyModifiedPropertiesWithoutUndo();
+    }
+}
+
+public sealed class DungeonStartingItemSelectionTests
+{
+    private readonly List<Object> _createdObjects = new();
+
+    [TearDown]
+    public void TearDown()
+    {
+        for (int index = _createdObjects.Count - 1; index >= 0; index--)
+        {
+            if (_createdObjects[index] != null)
+                Object.DestroyImmediate(_createdObjects[index]);
+        }
+        _createdObjects.Clear();
+    }
+
+    [Test]
+    public void Prepare_WithOneItem_SelectsThreeDeterministicCopies()
+    {
+        List<BattleItemSO> pool = CreatePool(1);
+        DungeonStartingItemSelectionState first = new();
+        DungeonStartingItemSelectionState second = new();
+
+        Assert.That(
+            first.TryPrepare(pool, 3, 1, 7141, out string firstError),
+            Is.True,
+            firstError);
+        Assert.That(
+            second.TryPrepare(pool, 3, 1, 7141, out string secondError),
+            Is.True,
+            secondError);
+        Assert.That(first.Items.Count, Is.EqualTo(3));
+        for (int index = 0; index < first.Items.Count; index++)
+        {
+            Assert.That(first.Items[index], Is.SameAs(pool[0]));
+            Assert.That(
+                first.Items[index].ItemId,
+                Is.EqualTo(second.Items[index].ItemId));
+        }
+    }
+
+    [Test]
+    public void Reroll_WithOneItem_ConsumesUseAndMayReturnSameItem()
+    {
+        List<BattleItemSO> pool = CreatePool(1);
+        DungeonStartingItemSelectionState state = new();
+        Assert.That(
+            state.TryPrepare(pool, 3, 1, 260714, out string error),
+            Is.True,
+            error);
+        BattleItemSO originalItem = state.Items[0];
+
+        Assert.That(state.TryReroll(0), Is.True);
+        Assert.That(state.Items[0], Is.SameAs(originalItem));
+        Assert.That(state.GetRerollsRemaining(0), Is.Zero);
+        Assert.That(state.TryReroll(0), Is.False);
+    }
+
+    [Test]
+    public void Prepare_RequiresAtLeastOneEligibleItem()
+    {
+        DungeonStartingItemSelectionState state = new();
+
+        Assert.That(
+            state.TryPrepare(
+                CreatePool(0),
+                3,
+                1,
+                17,
+                out string error),
+            Is.False);
+        Assert.That(error, Does.Contain("at least 1"));
+        Assert.That(state.IsPrepared, Is.False);
+    }
+
+    [Test]
+    public void Confirm_CanOnlySucceedOnceAndLocksRerolls()
+    {
+        DungeonStartingItemSelectionState state = new();
+        Assert.That(
+            state.TryPrepare(
+                CreatePool(1),
+                3,
+                1,
+                21,
+                out string error),
+            Is.True,
+            error);
+
+        Assert.That(state.TryConfirm(), Is.True);
+        Assert.That(state.IsConfirmed, Is.True);
+        Assert.That(state.CanReroll(0), Is.False);
+        Assert.That(state.TryConfirm(), Is.False);
+    }
+
+    [Test]
+    public void AcquireCopies_GrantsAllThreeDisposableItems()
+    {
+        BattleItemSO item = CreatePool(1)[0];
+        SerializedObject serialized = new(item);
+        serialized.FindProperty("usageSchemaVersion").intValue = 1;
+        serialized.FindProperty("lifecycle").enumValueIndex =
+            (int)BattleItemLifecycle.Disposable;
+        serialized.FindProperty("chargeMode").enumValueIndex =
+            (int)BattleItemChargeMode.Limited;
+        serialized.FindProperty("limitedUses").intValue = 1;
+        serialized.FindProperty("maximumRunUses").intValue = 0;
+        serialized.ApplyModifiedPropertiesWithoutUndo();
+        BattleItemRunState state = new(item);
+
+        Assert.That(state.AcquireCopies(item, 3), Is.True);
+        Assert.That(state.OwnedCopies, Is.EqualTo(3));
+        Assert.That(state.RemainingUses, Is.EqualTo(3));
+        Assert.That(state.CompleteSuccessfulUse(item), Is.True);
+        Assert.That(state.IsOwned, Is.True);
+        Assert.That(state.RemainingUses, Is.EqualTo(2));
+    }
+
+    private List<BattleItemSO> CreatePool(int count)
+    {
+        List<BattleItemSO> result = new();
+        for (int index = 0; index < count; index++)
+        {
+            BattleItemSO item =
+                ScriptableObject.CreateInstance<BattleItemSO>();
+            item.name = $"StartingItem{index + 1}";
+            SerializedObject serialized = new(item);
+            serialized.FindProperty("itemId").stringValue =
+                $"test.starting_item.{index + 1}";
+            serialized.FindProperty("availableAsStartingItem").boolValue =
+                true;
+            serialized.ApplyModifiedPropertiesWithoutUndo();
+            _createdObjects.Add(item);
+            result.Add(item);
+        }
+        return result;
     }
 }

@@ -538,6 +538,7 @@ public sealed class BattleItemRunState
     public bool IsOwned { get; private set; }
     public bool IsInDeck => IsOwned;
     public bool IsRemoved { get; private set; }
+    public int OwnedCopies { get; private set; }
     public int RemainingUses { get; private set; }
     public float CooldownRemaining { get; private set; }
 
@@ -556,11 +557,7 @@ public sealed class BattleItemRunState
             if (IsOwned || IsRemoved)
                 return false;
 
-            IsOwned = true;
-            RemainingUses = item.HasUnlimitedUses
-                ? 0
-                : item.UsesPerBattle;
-            return true;
+            return AcquireCopies(item, 1);
         }
 
         if (item.HasUnlimitedUses)
@@ -569,6 +566,7 @@ public sealed class BattleItemRunState
                 return false;
 
             IsOwned = true;
+            OwnedCopies = 1;
             RemainingUses = 0;
             return true;
         }
@@ -580,6 +578,25 @@ public sealed class BattleItemRunState
 
         RemainingUses = nextUses;
         IsOwned = true;
+        OwnedCopies++;
+        return true;
+    }
+
+    public bool AcquireCopies(BattleItemSO item, int copyCount)
+    {
+        if (!Matches(item) || copyCount <= 0 || IsOwned || IsRemoved)
+            return false;
+
+        int uses = item.HasUnlimitedUses
+            ? 0
+            : item.ClampRunUses(
+                (long)item.UsesPerAcquisition * copyCount);
+        if (!item.HasUnlimitedUses && uses <= 0)
+            return false;
+
+        IsOwned = true;
+        OwnedCopies = copyCount;
+        RemainingUses = uses;
         return true;
     }
 
@@ -634,7 +651,8 @@ public sealed class BattleItemRunState
             return;
         }
 
-        RemainingUses = item.UsesPerBattle;
+        RemainingUses = item.ClampRunUses(
+            (long)item.UsesPerBattle * Math.Max(1, OwnedCopies));
     }
 
     private bool Matches(BattleItemSO item)

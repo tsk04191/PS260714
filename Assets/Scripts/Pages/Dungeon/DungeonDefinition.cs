@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using UnityEngine;
+using UnityEngine.Serialization;
 
 public enum EDungeonCompletionDestination
 {
@@ -39,7 +40,11 @@ public sealed class DungeonDefinition : ScriptableObject
 
     [Header("Run Rules")]
     [SerializeField] private bool selectStartingCharacter = true;
-    [SerializeField] private bool includeStartingConsumable = true;
+    [FormerlySerializedAs("includeStartingConsumable")]
+    [SerializeField, Tooltip(
+        "Shows the starting-item loadout step after character selection.")]
+    private bool selectStartingItems = true;
+    [SerializeField] private DungeonStartingItemRule startingItemRule = new();
     [SerializeField, Tooltip(
         "Uses the tutorial encounter setup for the first battle. " +
         "This requires a Tutorial definition.")]
@@ -50,12 +55,18 @@ public sealed class DungeonDefinition : ScriptableObject
     [Header("Encounters")]
     [SerializeField] private BattleSO[] fixedBattles =
         Array.Empty<BattleSO>();
+    [SerializeField, Tooltip(
+        "Optional authored events in event-occurrence order. Empty event " +
+        "slots use the built-in post-battle reward and Ready music.")]
+    private DungeonEventSO[] fixedEvents =
+        Array.Empty<DungeonEventSO>();
     [SerializeField] private EnemySO[] enemyPoolOverride =
         Array.Empty<EnemySO>();
 
     [Header("Presentation")]
     [SerializeField] private DungeonFieldView fieldViewPrefab;
     [SerializeField] private DungeonThemeDefinition theme;
+    [SerializeField] private DungeonBgmProfile bgmProfile;
     [SerializeField] private DungeonTutorialDefinition tutorial;
 
     [Header("Optional Rule Modules")]
@@ -123,7 +134,9 @@ public sealed class DungeonDefinition : ScriptableObject
             ? theme.BackgroundSprite
             : null;
     public bool SelectStartingCharacter => selectStartingCharacter;
-    public bool IncludeStartingConsumable => includeStartingConsumable;
+    public bool SelectStartingItems => selectStartingItems;
+    public DungeonStartingItemRule StartingItemRule =>
+        startingItemRule ??= new DungeonStartingItemRule();
     public bool UseIntroBattleBalance => useIntroBattleBalance;
     public bool UsesTutorialBattleSetup =>
         HasTutorial && useIntroBattleBalance;
@@ -131,6 +144,7 @@ public sealed class DungeonDefinition : ScriptableObject
         completionDestination;
     public DungeonFieldView FieldViewPrefab => fieldViewPrefab;
     public DungeonThemeDefinition Theme => theme;
+    public DungeonBgmProfile BgmProfile => bgmProfile;
     public DungeonTutorialDefinition Tutorial => tutorial;
     public bool HasTutorial => tutorial != null;
     public IReadOnlyList<DungeonModifier> Modifiers => modifiers;
@@ -147,6 +161,19 @@ public sealed class DungeonDefinition : ScriptableObject
 
         battle = fixedBattles[battleIndex];
         return battle != null;
+    }
+
+    public bool TryGetFixedEvent(int eventIndex, out DungeonEventSO dungeonEvent)
+    {
+        dungeonEvent = null;
+        if (fixedEvents == null || eventIndex < 0 ||
+            eventIndex >= fixedEvents.Length)
+        {
+            return false;
+        }
+
+        dungeonEvent = fixedEvents[eventIndex];
+        return dungeonEvent != null;
     }
 
     public int ResolveBattleCount(int runSeed)
@@ -221,6 +248,19 @@ public sealed class DungeonDefinition : ScriptableObject
         {
             error = $"Flow resolved {battleCount} battles but contains " +
                     $"{phaseBattleCount} battle phases.";
+            return false;
+        }
+
+        if (SelectStartingItems && phases[0] != EDungeonPhase.Battle)
+        {
+            error = "A dungeon with starting-item selection must begin " +
+                    "with a Battle phase.";
+            return false;
+        }
+
+        if (bgmProfile != null && !bgmProfile.TryValidate(out error))
+        {
+            error = $"Dungeon BGM profile is invalid: {error}";
             return false;
         }
 
@@ -309,7 +349,9 @@ public sealed class DungeonDefinition : ScriptableObject
         maximumBattleCount = Mathf.Max(
             minimumBattleCount,
             maximumBattleCount);
+        startingItemRule ??= new DungeonStartingItemRule();
         fixedBattles ??= Array.Empty<BattleSO>();
+        fixedEvents ??= Array.Empty<DungeonEventSO>();
         enemyPoolOverride ??= Array.Empty<EnemySO>();
         modifiers ??= Array.Empty<DungeonModifier>();
     }

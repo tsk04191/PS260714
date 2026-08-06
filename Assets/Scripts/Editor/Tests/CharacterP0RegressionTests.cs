@@ -392,10 +392,10 @@ public sealed class CharacterP0RegressionTests
             character.transform.Find("txtCooldown").gameObject;
 
         Assert.That(sdRect, Is.Not.Null);
-        Assert.That(sdRect.sizeDelta, Is.EqualTo(new Vector2(168f, 168f)));
+        Assert.That(sdRect.sizeDelta, Is.EqualTo(new Vector2(225f, 225f)));
         Assert.That(
             sdRect.anchoredPosition,
-            Is.EqualTo(new Vector2(-10f, 18f)));
+            Is.EqualTo(new Vector2(0f, 18f)));
         Assert.That(cooldownTrack, Is.Not.Null);
         Assert.That(cooldownTrack.anchorMin, Is.EqualTo(Vector2.zero));
         Assert.That(
@@ -414,10 +414,10 @@ public sealed class CharacterP0RegressionTests
             Is.True);
         Assert.That(
             passiveIcon.anchoredPosition,
-            Is.EqualTo(new Vector2(-62f, -6f)));
+            Is.EqualTo(new Vector2(-114f, 0f)));
         Assert.That(
             activeIcon.anchoredPosition,
-            Is.EqualTo(new Vector2(-8f, -6f)));
+            Is.EqualTo(new Vector2(-8f, 0f)));
         Assert.That(
             passiveIcon.anchoredPosition.y,
             Is.EqualTo(activeIcon.anchoredPosition.y));
@@ -1104,6 +1104,58 @@ public sealed class CharacterP0RegressionTests
         Assert.That(restored.IsCleared("test_field"), Is.True);
         Assert.That(restored.GetClearCount("test_field"), Is.EqualTo(2));
         Assert.That(restored.IsCleared("free_battle"), Is.False);
+    }
+
+    [Test]
+    public void TutorialBattle_TimeoutFinishesRunAsClear()
+    {
+        DungeonPage page = CreateTutorialDungeonPageForBattleResult();
+        EDungeonRunResult notifiedResult = EDungeonRunResult.None;
+        page.RunEnded += result => notifiedResult = result;
+        MethodInfo handleBattleEnded = typeof(DungeonPage).GetMethod(
+            "HandleBattleEnded",
+            BindingFlags.Instance | BindingFlags.NonPublic);
+        Assert.That(handleBattleEnded, Is.Not.Null);
+
+        handleBattleEnded.Invoke(
+            page,
+            new object[] { EBattleResult.Timeout });
+
+        Assert.That(page.RunResult, Is.EqualTo(EDungeonRunResult.Clear));
+        Assert.That(notifiedResult, Is.EqualTo(EDungeonRunResult.Clear));
+        Assert.That(
+            page.RunSession.Activity,
+            Is.EqualTo(EDungeonRunActivity.Result));
+        Assert.That(
+            page.RunSession.Pause.Reasons.HasFlag(
+                EDungeonPauseReason.Result),
+            Is.True);
+    }
+
+    [Test]
+    public void TutorialBattle_VictoryFinishesRunAsClear()
+    {
+        DungeonPage page = CreateTutorialDungeonPageForBattleResult();
+        MethodInfo handleBattleEnded = typeof(DungeonPage).GetMethod(
+            "HandleBattleEnded",
+            BindingFlags.Instance | BindingFlags.NonPublic);
+        MethodInfo handleBattleCompleted = typeof(DungeonPage).GetMethod(
+            "HandleBattleCompleted",
+            BindingFlags.Instance | BindingFlags.NonPublic);
+        Assert.That(handleBattleEnded, Is.Not.Null);
+        Assert.That(handleBattleCompleted, Is.Not.Null);
+
+        handleBattleEnded.Invoke(
+            page,
+            new object[] { EBattleResult.Victory });
+        Assert.That(page.RunResult, Is.EqualTo(EDungeonRunResult.None));
+
+        handleBattleCompleted.Invoke(page, null);
+
+        Assert.That(page.RunResult, Is.EqualTo(EDungeonRunResult.Clear));
+        Assert.That(
+            page.RunSession.Activity,
+            Is.EqualTo(EDungeonRunActivity.Result));
     }
 
     [Test]
@@ -7232,17 +7284,20 @@ public sealed class CharacterP0RegressionTests
             new IBattleEffectDefinition[] { effect });
 
         Assert.That(result.Succeeded, Is.True);
-        Assert.That(character.GetActiveStatusEffects(), Has.Count.EqualTo(1));
+        IReadOnlyList<BattleStatusSnapshot> activeStatusEffects =
+            character.GetActiveStatusEffects();
+        Assert.That(activeStatusEffects.Count, Is.EqualTo(1));
         Assert.That(
-            character.GetActiveStatusEffects()[0].IsPermanent,
+            activeStatusEffects[0].IsPermanent,
             Is.True);
 
         character.TickBattle(120f, board);
         Assert.That(character.HasStatusEffect(status), Is.True);
 
         Assert.That(character.ApplyStatusEffect(status, 1f, 1), Is.True);
+        activeStatusEffects = character.GetActiveStatusEffects();
         Assert.That(
-            character.GetActiveStatusEffects()[0].IsPermanent,
+            activeStatusEffects[0].IsPermanent,
             Is.True,
             "A timed reapplication must not shorten a battle-long item buff.");
 
@@ -7624,6 +7679,32 @@ public sealed class CharacterP0RegressionTests
             BindingFlags.Instance | BindingFlags.NonPublic);
         Assert.That(field, Is.Not.Null, $"Missing field '{fieldName}'.");
         field.SetValue(target, value);
+    }
+
+    private DungeonPage CreateTutorialDungeonPageForBattleResult()
+    {
+        DungeonTutorialDefinition tutorial =
+            ScriptableObject.CreateInstance<DungeonTutorialDefinition>();
+        DungeonDefinition definition =
+            ScriptableObject.CreateInstance<DungeonDefinition>();
+        definition.name = "TutorialBattleResultDefinition";
+        SetPrivateField(definition, "tutorial", tutorial);
+        _createdObjects.Add(tutorial);
+        _createdObjects.Add(definition);
+
+        GameObject pageObject = new(
+            "TutorialBattleResultPage",
+            typeof(RectTransform));
+        pageObject.SetActive(false);
+        _createdObjects.Add(pageObject);
+        DungeonPage page = pageObject.AddComponent<DungeonPage>();
+        page.RunSession.Begin(
+            definition,
+            260714,
+            1,
+            new[] { EDungeonPhase.Battle });
+        page.RunSession.SetActivity(EDungeonRunActivity.Battle);
+        return page;
     }
 
     private static void ConfigureStatusRemovalMetadata(

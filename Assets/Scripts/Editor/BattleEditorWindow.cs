@@ -199,6 +199,7 @@ public sealed class BattleEditorWindow : EditorWindow
         DrawGradeRule("Boss", "bossEnemies", usesFixedCounts);
 
         DrawSection("Time Limit", "timeLimit");
+        DrawSection("Presentation Override", "bgmOverride");
         bool changed = _serializedBattle.ApplyModifiedProperties();
         if (changed)
             EditorUtility.SetDirty(_battle);

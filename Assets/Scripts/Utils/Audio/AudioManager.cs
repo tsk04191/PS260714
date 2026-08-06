@@ -4,11 +4,22 @@ using UnityEngine.Audio;
 
 public class AudioManager : MonoBehaviour
 {
+    private enum EMusicFadeState
+    {
+        None,
+        FadingOut,
+        FadingIn,
+    }
+
     private const float MutedVolume = -80f;
     private const float UnmutedVolume = 0f;
 
     public AudioMixer mixer;
     [SerializeField] public Speakers main_speakers;
+
+    [Header("Page BGM Sequential Fade")]
+    [SerializeField, Min(0f)] private float pageBgmFadeOutDuration = 0.5f;
+    [SerializeField, Min(0f)] private float pageBgmFadeInDuration = 0.5f;
 
     public AudioMixerGroup SfxMixerGroup
     {
@@ -23,45 +34,52 @@ public class AudioManager : MonoBehaviour
         }
     }
 
+    public bool IsDungeonBgmActive => _activeDungeonBgmProfile != null;
+    public bool IsMusicTransitioning =>
+        _musicFadeState != EMusicFadeState.None;
+    public AudioClip CurrentMusicClip => _currentMusicClip;
+
     private GameManager _manager;
     private GameEventManager _events;
     private bool _hasFocus = true;
     private bool _isPaused;
     private string _pendingBgmClipName;
     private DungeonBgmProfile _pendingDungeonBgmProfile;
-    private EDungeonPhase _pendingDungeonBgmPhase;
-
-    private AudioSource _secondaryMusicSource;
+    private EDungeonBgmState _pendingDungeonBgmState;
+    private AudioClip _pendingDungeonBgmOverride;
     private DungeonBgmProfile _activeDungeonBgmProfile;
-    private bool _dungeonBgmActive;
-    private AudioSource _currentDungeonLoopSource;
-    private AudioClip _currentDungeonLoopClip;
-    private double _currentDungeonLoopStartDspTime;
-    private AudioSource _pendingDungeonLoopSource;
-    private AudioClip _pendingDungeonLoopClip;
-    private double _pendingDungeonLoopStartDspTime;
-    private bool _hasPendingDungeonLoop;
-    private bool _dungeonExitScheduled;
-    private double _dungeonExitEndDspTime;
-    private string _queuedBgmNameAfterExit;
-    private AudioClip _queuedBgmClipAfterExit;
 
-    public bool IsDungeonBgmActive => _dungeonBgmActive;
+    private AudioSource _musicSource;
+    private AudioClip _currentMusicClip;
+    private AudioClip _pendingMusicClip;
+    private EMusicFadeState _musicFadeState;
+    private float _musicBaseVolume = 1f;
+    private float _fadeStartVolume;
+    private float _fadeDuration;
+    private float _fadeElapsed;
+    private float _pendingFadeInDuration;
+    private float _musicTargetVolume = 1f;
+    private float _pendingMusicTargetVolume = 1f;
 
     public void Setup(GameManager manager)
     {
-        if (_manager == manager && _events == (manager != null ? manager.Events : null))
+        if (_manager == manager &&
+            _events == (manager != null ? manager.Events : null))
+        {
             return;
+        }
 
         Teardown();
-
         _manager = manager;
         SetEventManager(manager != null ? manager.Events : null);
+        ResolveMusicSource();
         ApplyMuteInBackground();
 
         if (_manager != null && _manager.Data != null &&
             _manager.Data.IsSetupDone)
+        {
             PlayPendingBgm();
+        }
     }
 
     public void Teardown()
@@ -77,8 +95,7 @@ public class AudioManager : MonoBehaviour
 
     private void Update()
     {
-        FinalizeScheduledDungeonLoop();
-        FinalizeDungeonExit();
+        TickMusicTransition(Time.unscaledDeltaTime);
     }
 
     private void OnApplicationFocus(bool focus)
@@ -100,9 +117,7 @@ public class AudioManager : MonoBehaviour
 
         if (_events != null)
             UnsubscribeEventManager(_events);
-
         _events = events;
-
         if (_events != null)
             SubscribeEventManager(_events);
     }
@@ -130,36 +145,22 @@ public class AudioManager : MonoBehaviour
     public AudioClip FindBgmClip(string clipName)
     {
         DataManager data = GetDataManager();
-
-        if (data == null || data.MusicList == null)
-            return null;
-
-        return data.MusicList.Find(clipName);
+        return data?.MusicList?.Find(clipName);
     }
 
     public AudioClip FindSfxClip(string clipName)
     {
         DataManager data = GetDataManager();
-
         if (data == null)
             return null;
 
-        AudioClip clip = data.SFXList != null ? data.SFXList.Find(clipName) : null;
-
-        if (clip != null)
-            return clip;
-
-        return data.UIList != null ? data.UIList.Find(clipName) : null;
+        AudioClip clip = data.SFXList?.Find(clipName);
+        return clip != null ? clip : data.UIList?.Find(clipName);
     }
 
     public AudioClip FindUiClip(string clipName)
     {
-        DataManager data = GetDataManager();
-
-        if (data == null || data.UIList == null)
-            return null;
-
-        return data.UIList.Find(clipName);
+        return GetDataManager()?.UIList?.Find(clipName);
     }
 
     public void PlayBgm(string clipName)
@@ -168,15 +169,9 @@ public class AudioManager : MonoBehaviour
         if (string.IsNullOrEmpty(normalizedName))
             return;
 
-        if (_dungeonExitScheduled)
-        {
-            _queuedBgmNameAfterExit = normalizedName;
-            _queuedBgmClipAfterExit = null;
-            return;
-        }
-
         _pendingDungeonBgmProfile = null;
-
+        _pendingDungeonBgmOverride = null;
+        _activeDungeonBgmProfile = null;
         DataManager data = GetDataManager();
         if (data == null || !data.IsSetupDone)
         {
@@ -199,34 +194,23 @@ public class AudioManager : MonoBehaviour
 
     public void PlayBgm(AudioClip clip)
     {
-        Speakers speakers = main_speakers;
-        
-        if (speakers == null || speakers.MainMusic == null || clip == null)
+        if (clip == null)
             return;
 
-        if (_dungeonExitScheduled)
-        {
-            _queuedBgmClipAfterExit = clip;
-            _queuedBgmNameAfterExit = null;
-            return;
-        }
-
-        AudioSource musicSpeaker = speakers.MainMusic;
-        if (!_dungeonBgmActive && ReferenceEquals(musicSpeaker.clip, clip) &&
-            musicSpeaker.isPlaying)
-        {
-            return;
-        }
-
-        StopDungeonBgmImmediately();
-        musicSpeaker.loop = true;
-        musicSpeaker.clip = clip;
-        musicSpeaker.Play();
+        _pendingDungeonBgmProfile = null;
+        _pendingDungeonBgmOverride = null;
+        _activeDungeonBgmProfile = null;
+        RequestMusicTransition(
+            clip,
+            pageBgmFadeOutDuration,
+            pageBgmFadeInDuration,
+            1f);
     }
 
     public bool PlayDungeonBgm(
         DungeonBgmProfile profile,
-        EDungeonPhase initialPhase)
+        EDungeonBgmState state,
+        AudioClip overrideClip = null)
     {
         if (profile == null)
             return false;
@@ -235,190 +219,191 @@ public class AudioManager : MonoBehaviour
         if (data == null || !data.IsSetupDone)
         {
             _pendingDungeonBgmProfile = profile;
-            _pendingDungeonBgmPhase = initialPhase;
+            _pendingDungeonBgmState = state;
+            _pendingDungeonBgmOverride = overrideClip;
             _pendingBgmClipName = null;
             return true;
         }
 
-        if (_dungeonBgmActive && !_dungeonExitScheduled &&
-            ReferenceEquals(_activeDungeonBgmProfile, profile))
-        {
-            SetDungeonBgmPhase(initialPhase);
-            return true;
-        }
-
-        string loopName = profile.ResolveLoopClipName(initialPhase);
-        AudioClip loopClip = FindRequiredDungeonClip(
-            loopName,
-            $"{initialPhase} loop",
-            profile);
-        if (loopClip == null)
-            return false;
-
-        AudioSource primary = GetPrimaryMusicSource();
-        AudioSource secondary = EnsureSecondaryMusicSource();
-        if (primary == null || secondary == null)
+        AudioClip clip = profile.ResolveClip(state, overrideClip);
+        if (clip == null)
         {
             Debug.LogWarning(
-                "Dungeon BGM requires a Main Music AudioSource.",
-                this);
-            return false;
-        }
-
-        AudioClip introClip = null;
-        if (!string.IsNullOrEmpty(profile.IntroClipName))
-        {
-            introClip = FindRequiredDungeonClip(
-                profile.IntroClipName,
-                "intro",
+                $"Dungeon BGM profile '{profile.name}' has no {state} clip.",
                 profile);
+            return false;
         }
 
-        StopDungeonBgmImmediately();
-        CopyMusicSourceSettings(primary, secondary);
-
-        double startDspTime = AudioSettings.dspTime +
-                              profile.ScheduleLeadTime;
-        if (introClip != null)
-        {
-            ConfigureScheduledMusic(primary, introClip, false);
-            primary.PlayScheduled(startDspTime);
-
-            double loopStart = startDspTime + GetClipDuration(introClip);
-            ConfigureScheduledMusic(secondary, loopClip, true);
-            secondary.PlayScheduled(loopStart);
-            _currentDungeonLoopSource = secondary;
-            _currentDungeonLoopStartDspTime = loopStart;
-        }
-        else
-        {
-            ConfigureScheduledMusic(primary, loopClip, true);
-            primary.PlayScheduled(startDspTime);
-            _currentDungeonLoopSource = primary;
-            _currentDungeonLoopStartDspTime = startDspTime;
-        }
-
-        _currentDungeonLoopClip = loopClip;
         _activeDungeonBgmProfile = profile;
-        _dungeonBgmActive = true;
         _pendingDungeonBgmProfile = null;
+        _pendingDungeonBgmOverride = null;
         _pendingBgmClipName = null;
+        return RequestMusicTransition(
+            clip,
+            profile.FadeOutDuration,
+            profile.FadeInDuration,
+            profile.ResolveVolumeScale(state));
+    }
+
+    private bool RequestMusicTransition(
+        AudioClip nextClip,
+        float fadeOutDuration,
+        float fadeInDuration,
+        float volumeScale)
+    {
+        AudioSource source = ResolveMusicSource();
+        if (source == null || nextClip == null)
+            return false;
+
+        fadeOutDuration = Mathf.Max(0f, fadeOutDuration);
+        fadeInDuration = Mathf.Max(0f, fadeInDuration);
+        float nextTargetVolume =
+            _musicBaseVolume * Mathf.Clamp01(volumeScale);
+        if (ReferenceEquals(_pendingMusicClip, nextClip) &&
+            _musicFadeState == EMusicFadeState.FadingOut)
+        {
+            _pendingMusicTargetVolume = nextTargetVolume;
+            _pendingFadeInDuration = fadeInDuration;
+            return true;
+        }
+
+        if (ReferenceEquals(_currentMusicClip, nextClip) &&
+            ReferenceEquals(source.clip, nextClip))
+        {
+            _pendingMusicClip = null;
+            _musicTargetVolume = nextTargetVolume;
+            if (_musicFadeState == EMusicFadeState.FadingOut)
+            {
+                BeginFadeIn(fadeInDuration);
+            }
+            else if (!Mathf.Approximately(
+                         source.volume,
+                         _musicTargetVolume))
+            {
+                BeginFadeIn(fadeInDuration);
+            }
+            return true;
+        }
+
+        _pendingMusicClip = nextClip;
+        _pendingMusicTargetVolume = nextTargetVolume;
+        _pendingFadeInDuration = fadeInDuration;
+        bool hasCurrentClip = _currentMusicClip != null ||
+                              source.clip != null;
+        if (!hasCurrentClip || fadeOutDuration <= 0f ||
+            source.volume <= 0.0001f)
+        {
+            SwitchToPendingMusic();
+            return true;
+        }
+
+        BeginFadeOut(fadeOutDuration);
         return true;
     }
 
-    public bool SetDungeonBgmPhase(EDungeonPhase phase)
+    private AudioSource ResolveMusicSource()
     {
-        FinalizeScheduledDungeonLoop();
-        if (!_dungeonBgmActive || _dungeonExitScheduled ||
-            _activeDungeonBgmProfile == null ||
-            _currentDungeonLoopSource == null)
+        AudioSource resolved = main_speakers != null
+            ? main_speakers.MainMusic
+            : null;
+        if (ReferenceEquals(resolved, _musicSource))
+            return _musicSource;
+
+        _musicSource = resolved;
+        _musicFadeState = EMusicFadeState.None;
+        _pendingMusicClip = null;
+        _fadeElapsed = 0f;
+        if (_musicSource == null)
         {
-            return false;
+            _currentMusicClip = null;
+            return null;
         }
 
-        string clipName = _activeDungeonBgmProfile.ResolveLoopClipName(phase);
-        AudioClip nextClip = FindRequiredDungeonClip(
-            clipName,
-            $"{phase} loop",
-            _activeDungeonBgmProfile);
+        _musicBaseVolume = Mathf.Clamp01(_musicSource.volume);
+        _musicTargetVolume = _musicBaseVolume;
+        _pendingMusicTargetVolume = _musicBaseVolume;
+        _currentMusicClip = _musicSource.clip;
+        return _musicSource;
+    }
+
+    private void BeginFadeOut(float duration)
+    {
+        _musicFadeState = EMusicFadeState.FadingOut;
+        _fadeStartVolume = _musicSource != null
+            ? _musicSource.volume
+            : 0f;
+        _fadeDuration = Mathf.Max(0f, duration);
+        _fadeElapsed = 0f;
+    }
+
+    private void BeginFadeIn(float duration)
+    {
+        _musicFadeState = EMusicFadeState.FadingIn;
+        _fadeStartVolume = _musicSource != null
+            ? _musicSource.volume
+            : 0f;
+        _fadeDuration = Mathf.Max(0f, duration);
+        _fadeElapsed = 0f;
+        if (_fadeDuration <= 0f)
+            CompleteFadeIn();
+    }
+
+    private void TickMusicTransition(float deltaTime)
+    {
+        AudioSource source = ResolveMusicSource();
+        if (source == null || _musicFadeState == EMusicFadeState.None)
+            return;
+
+        _fadeElapsed += Mathf.Max(0f, deltaTime);
+        float progress = _fadeDuration <= 0f
+            ? 1f
+            : Mathf.Clamp01(_fadeElapsed / _fadeDuration);
+        if (_musicFadeState == EMusicFadeState.FadingOut)
+        {
+            source.volume = Mathf.Lerp(_fadeStartVolume, 0f, progress);
+            if (progress >= 1f)
+                SwitchToPendingMusic();
+            return;
+        }
+
+        source.volume = Mathf.Lerp(
+            _fadeStartVolume,
+            _musicTargetVolume,
+            progress);
+        if (progress >= 1f)
+            CompleteFadeIn();
+    }
+
+    private void SwitchToPendingMusic()
+    {
+        if (_musicSource == null)
+            return;
+
+        AudioClip nextClip = _pendingMusicClip;
+        _pendingMusicClip = null;
+        _musicTargetVolume = _pendingMusicTargetVolume;
+        _musicSource.Stop();
+        _musicSource.clip = nextClip;
+        _musicSource.loop = true;
+        _currentMusicClip = nextClip;
         if (nextClip == null)
-            return false;
-
-        if (!_hasPendingDungeonLoop &&
-            ReferenceEquals(nextClip, _currentDungeonLoopClip))
         {
-            return true;
+            _musicSource.volume = _musicTargetVolume;
+            _musicFadeState = EMusicFadeState.None;
+            return;
         }
 
-        double now = AudioSettings.dspTime;
-        double earliestStart = now +
-                               _activeDungeonBgmProfile.ScheduleLeadTime;
-        if (_currentDungeonLoopStartDspTime >= earliestStart)
-        {
-            _currentDungeonLoopSource.Stop();
-            ConfigureScheduledMusic(
-                _currentDungeonLoopSource,
-                nextClip,
-                true);
-            _currentDungeonLoopSource.PlayScheduled(
-                _currentDungeonLoopStartDspTime);
-            _currentDungeonLoopClip = nextClip;
-            CancelPendingDungeonLoop();
-            return true;
-        }
-
-        double transitionDspTime = CalculateTransitionDspTime(
-            earliestStart);
-        AudioSource nextSource = GetOtherMusicSource(
-            _currentDungeonLoopSource);
-        if (nextSource == null)
-            return false;
-
-        CancelPendingDungeonLoop();
-        _currentDungeonLoopSource.SetScheduledEndTime(transitionDspTime);
-        ConfigureScheduledMusic(nextSource, nextClip, true);
-        nextSource.PlayScheduled(transitionDspTime);
-        _pendingDungeonLoopSource = nextSource;
-        _pendingDungeonLoopClip = nextClip;
-        _pendingDungeonLoopStartDspTime = transitionDspTime;
-        _hasPendingDungeonLoop = true;
-        return true;
+        _musicSource.volume = 0f;
+        _musicSource.Play();
+        BeginFadeIn(_pendingFadeInDuration);
     }
 
-    public bool RequestDungeonBgmExit(EDungeonBgmExitReason reason)
+    private void CompleteFadeIn()
     {
-        if (_pendingDungeonBgmProfile != null && !_dungeonBgmActive)
-        {
-            _pendingDungeonBgmProfile = null;
-            return true;
-        }
-
-        FinalizeScheduledDungeonLoop();
-        if (!_dungeonBgmActive || _activeDungeonBgmProfile == null ||
-            _currentDungeonLoopSource == null)
-            return false;
-        if (_dungeonExitScheduled)
-            return true;
-
-        string exitName = _activeDungeonBgmProfile.ResolveExitClipName(reason);
-        AudioClip exitClip = string.IsNullOrEmpty(exitName)
-            ? null
-            : FindRequiredDungeonClip(
-                exitName,
-                $"{reason} exit",
-                _activeDungeonBgmProfile);
-
-        double earliestStart = AudioSettings.dspTime +
-                               _activeDungeonBgmProfile.ScheduleLeadTime;
-        double transitionDspTime;
-        AudioSource exitSource;
-        if (_currentDungeonLoopStartDspTime >= earliestStart)
-        {
-            transitionDspTime = _currentDungeonLoopStartDspTime;
-            exitSource = _currentDungeonLoopSource;
-            CancelPendingDungeonLoop();
-            exitSource.Stop();
-        }
-        else
-        {
-            transitionDspTime = CalculateTransitionDspTime(earliestStart);
-            CancelPendingDungeonLoop();
-            _currentDungeonLoopSource.SetScheduledEndTime(transitionDspTime);
-            exitSource = GetOtherMusicSource(_currentDungeonLoopSource);
-        }
-
-        if (exitClip != null && exitSource == null)
-            return false;
-
-        if (exitClip != null)
-        {
-            ConfigureScheduledMusic(exitSource, exitClip, false);
-            exitSource.PlayScheduled(transitionDspTime);
-        }
-        _dungeonExitScheduled = true;
-        _dungeonExitEndDspTime = transitionDspTime +
-                                 GetClipDuration(exitClip);
-        return true;
+        if (_musicSource != null)
+            _musicSource.volume = _musicTargetVolume;
+        _musicFadeState = EMusicFadeState.None;
+        _fadeElapsed = 0f;
     }
 
     private void PlayPendingBgm()
@@ -426,17 +411,17 @@ public class AudioManager : MonoBehaviour
         DungeonBgmProfile pendingProfile = _pendingDungeonBgmProfile;
         if (pendingProfile != null)
         {
-            EDungeonPhase pendingPhase = _pendingDungeonBgmPhase;
+            EDungeonBgmState state = _pendingDungeonBgmState;
+            AudioClip overrideClip = _pendingDungeonBgmOverride;
             _pendingDungeonBgmProfile = null;
-            PlayDungeonBgm(pendingProfile, pendingPhase);
+            _pendingDungeonBgmOverride = null;
+            PlayDungeonBgm(pendingProfile, state, overrideClip);
             return;
         }
 
         string pendingName = _pendingBgmClipName;
-        if (string.IsNullOrEmpty(pendingName))
-            return;
-
-        PlayBgm(pendingName);
+        if (!string.IsNullOrEmpty(pendingName))
+            PlayBgm(pendingName);
     }
 
     private static string NormalizeClipName(string clipName)
@@ -444,199 +429,6 @@ public class AudioManager : MonoBehaviour
         return string.IsNullOrWhiteSpace(clipName)
             ? string.Empty
             : clipName.Trim();
-    }
-
-    private AudioClip FindRequiredDungeonClip(
-        string clipName,
-        string role,
-        DungeonBgmProfile profile)
-    {
-        string normalizedName = NormalizeClipName(clipName);
-        if (string.IsNullOrEmpty(normalizedName))
-        {
-            Debug.LogWarning(
-                $"Dungeon BGM profile '{profile.name}' has no {role} clip.",
-                profile);
-            return null;
-        }
-
-        AudioClip clip = FindBgmClip(normalizedName);
-        if (clip == null)
-        {
-            Debug.LogWarning(
-                $"Dungeon BGM {role} '{normalizedName}' from profile " +
-                $"'{profile.name}' was not found in Music List.",
-                profile);
-        }
-
-        return clip;
-    }
-
-    private AudioSource GetPrimaryMusicSource()
-    {
-        return main_speakers != null ? main_speakers.MainMusic : null;
-    }
-
-    private AudioSource EnsureSecondaryMusicSource()
-    {
-        AudioSource primary = GetPrimaryMusicSource();
-        if (primary == null)
-            return null;
-        if (_secondaryMusicSource == null)
-        {
-            GameObject speakerObject = new("Dungeon BGM Secondary");
-            speakerObject.transform.SetParent(transform, false);
-            _secondaryMusicSource = speakerObject.AddComponent<AudioSource>();
-        }
-
-        CopyMusicSourceSettings(primary, _secondaryMusicSource);
-        return _secondaryMusicSource;
-    }
-
-    private static void CopyMusicSourceSettings(
-        AudioSource source,
-        AudioSource destination)
-    {
-        if (source == null || destination == null)
-            return;
-
-        destination.outputAudioMixerGroup = source.outputAudioMixerGroup;
-        destination.mute = source.mute;
-        destination.bypassEffects = source.bypassEffects;
-        destination.bypassListenerEffects = source.bypassListenerEffects;
-        destination.bypassReverbZones = source.bypassReverbZones;
-        destination.priority = source.priority;
-        destination.volume = source.volume;
-        destination.pitch = source.pitch;
-        destination.panStereo = source.panStereo;
-        destination.spatialBlend = source.spatialBlend;
-        destination.reverbZoneMix = source.reverbZoneMix;
-        destination.dopplerLevel = source.dopplerLevel;
-        destination.playOnAwake = false;
-    }
-
-    private static void ConfigureScheduledMusic(
-        AudioSource source,
-        AudioClip clip,
-        bool loop)
-    {
-        source.Stop();
-        source.playOnAwake = false;
-        source.clip = clip;
-        source.loop = loop;
-    }
-
-    private AudioSource GetOtherMusicSource(AudioSource source)
-    {
-        AudioSource primary = GetPrimaryMusicSource();
-        AudioSource secondary = EnsureSecondaryMusicSource();
-        return ReferenceEquals(source, primary) ? secondary : primary;
-    }
-
-    private double CalculateTransitionDspTime(double earliestStart)
-    {
-        double unitDuration;
-        if (_activeDungeonBgmProfile.TransitionMode ==
-            EDungeonBgmTransitionMode.LoopBoundary)
-        {
-            unitDuration = GetClipDuration(_currentDungeonLoopClip);
-        }
-        else
-        {
-            unitDuration = 60d / _activeDungeonBgmProfile.Bpm *
-                           _activeDungeonBgmProfile.BeatsPerBar;
-        }
-
-        unitDuration = Math.Max(0.001d, unitDuration);
-        double elapsed = Math.Max(
-            0d,
-            earliestStart - _currentDungeonLoopStartDspTime);
-        double unitCount = Math.Ceiling(elapsed / unitDuration);
-        return _currentDungeonLoopStartDspTime +
-               Math.Max(1d, unitCount) * unitDuration;
-    }
-
-    private void FinalizeScheduledDungeonLoop()
-    {
-        if (!_hasPendingDungeonLoop ||
-            AudioSettings.dspTime < _pendingDungeonLoopStartDspTime)
-        {
-            return;
-        }
-
-        AudioSource previousSource = _currentDungeonLoopSource;
-        _currentDungeonLoopSource = _pendingDungeonLoopSource;
-        _currentDungeonLoopClip = _pendingDungeonLoopClip;
-        _currentDungeonLoopStartDspTime =
-            _pendingDungeonLoopStartDspTime;
-        _pendingDungeonLoopSource = null;
-        _pendingDungeonLoopClip = null;
-        _pendingDungeonLoopStartDspTime = 0d;
-        _hasPendingDungeonLoop = false;
-        if (previousSource != null &&
-            !ReferenceEquals(previousSource, _currentDungeonLoopSource))
-        {
-            previousSource.Stop();
-        }
-    }
-
-    private void FinalizeDungeonExit()
-    {
-        if (!_dungeonExitScheduled ||
-            AudioSettings.dspTime < _dungeonExitEndDspTime)
-        {
-            return;
-        }
-
-        string queuedName = _queuedBgmNameAfterExit;
-        AudioClip queuedClip = _queuedBgmClipAfterExit;
-        StopDungeonBgmImmediately();
-        if (queuedClip != null)
-            PlayBgm(queuedClip);
-        else if (!string.IsNullOrEmpty(queuedName))
-            PlayBgm(queuedName);
-    }
-
-    private void CancelPendingDungeonLoop()
-    {
-        if (_pendingDungeonLoopSource != null)
-            _pendingDungeonLoopSource.Stop();
-        _pendingDungeonLoopSource = null;
-        _pendingDungeonLoopClip = null;
-        _pendingDungeonLoopStartDspTime = 0d;
-        _hasPendingDungeonLoop = false;
-    }
-
-    private void StopDungeonBgmImmediately()
-    {
-        AudioSource primary = GetPrimaryMusicSource();
-        if (primary != null)
-            primary.Stop();
-        if (_secondaryMusicSource != null)
-            _secondaryMusicSource.Stop();
-
-        _activeDungeonBgmProfile = null;
-        _dungeonBgmActive = false;
-        _currentDungeonLoopSource = null;
-        _currentDungeonLoopClip = null;
-        _currentDungeonLoopStartDspTime = 0d;
-        _pendingDungeonLoopSource = null;
-        _pendingDungeonLoopClip = null;
-        _pendingDungeonLoopStartDspTime = 0d;
-        _hasPendingDungeonLoop = false;
-        _dungeonExitScheduled = false;
-        _dungeonExitEndDspTime = 0d;
-        _queuedBgmNameAfterExit = null;
-        _queuedBgmClipAfterExit = null;
-    }
-
-    private static double GetClipDuration(AudioClip clip)
-    {
-        if (clip == null)
-            return 0d;
-        return clip.frequency > 0
-            ? (double)clip.samples / clip.frequency
-            : clip.length;
     }
 
     public void PlaySfx(string clipName)
@@ -647,7 +439,6 @@ public class AudioManager : MonoBehaviour
     public void PlaySfx(AudioClip clip)
     {
         Speakers speakers = main_speakers;
-
         PlayOneShot(speakers != null ? speakers.MainSFX : null, clip);
     }
 
@@ -660,7 +451,6 @@ public class AudioManager : MonoBehaviour
         AudioSource targetSpeaker = speaker != null
             ? speaker
             : fallbackSpeaker;
-
         ConfigureSfxSpeaker(targetSpeaker, fallbackSpeaker);
         PlayOneShot(targetSpeaker, clip);
     }
@@ -669,11 +459,9 @@ public class AudioManager : MonoBehaviour
     {
         if (speaker == null)
             return false;
-
         AudioMixerGroup group = SfxMixerGroup;
         if (group == null)
             return false;
-
         speaker.outputAudioMixerGroup = group;
         return true;
     }
@@ -686,16 +474,13 @@ public class AudioManager : MonoBehaviour
     public void PlayUiSound(AudioClip clip)
     {
         Speakers speakers = main_speakers;
-
         PlayOneShot(speakers != null ? speakers.MainUI : null, clip);
     }
 
-    private void PlayOneShot(AudioSource speaker, AudioClip clip)
+    private static void PlayOneShot(AudioSource speaker, AudioClip clip)
     {
-        if (speaker == null || clip == null)
-            return;
-
-        speaker.PlayOneShot(clip);
+        if (speaker != null && clip != null)
+            speaker.PlayOneShot(clip);
     }
 
     private void ConfigureSfxSpeaker(
@@ -709,7 +494,6 @@ public class AudioManager : MonoBehaviour
         speaker.loop = false;
         speaker.spatialBlend = 0f;
         speaker.dopplerLevel = 0f;
-
         if (template == null || ReferenceEquals(speaker, template))
             return;
 
@@ -725,20 +509,22 @@ public class AudioManager : MonoBehaviour
     private void ApplyMuteInBackground()
     {
         DataManager data = GetDataManager();
-        AudioMixer audioMixer = mixer;
-
-        if (data == null || data.AudioDatas == null || audioMixer == null)
+        if (data?.AudioDatas == null || mixer == null)
             return;
 
-        bool shouldMute = data.AudioDatas.mute_in_bg && (!_hasFocus || _isPaused);
-        audioMixer.SetFloat("MiB", shouldMute ? MutedVolume : UnmutedVolume);
+        bool shouldMute = data.AudioDatas.mute_in_bg &&
+                          (!_hasFocus || _isPaused);
+        mixer.SetFloat(
+            "MiB",
+            shouldMute ? MutedVolume : UnmutedVolume);
     }
 
     private DataManager GetDataManager()
     {
-        if (_manager != null && _manager.Data != null)
+        if (_manager?.Data != null)
             return _manager.Data;
-
-        return GameManager.Instance != null ? GameManager.Instance.Data : null;
+        return GameManager.Instance != null
+            ? GameManager.Instance.Data
+            : null;
     }
 }
