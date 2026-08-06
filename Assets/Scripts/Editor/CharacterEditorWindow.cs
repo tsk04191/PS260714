@@ -11,6 +11,7 @@ public sealed class CharacterEditorWindow : EditorWindow
     private const string CharacterFolder = "Assets/Resources/Characters";
     private const string PassiveDefinitionsPropertyName = "passiveDefinitions";
     private const string PassiveSectionsPropertyName = "sections";
+    private const string PassiveMotionModePropertyName = "motionMode";
     private const string PassiveTriggerPropertyName = "trigger";
     private const string PassiveKillSourcePropertyName = "killSource";
     private const string PassiveSpecifiedKillerPropertyName =
@@ -172,6 +173,12 @@ public sealed class CharacterEditorWindow : EditorWindow
         "쿨다운마다",
         "킬 마다",
         "공격 대상 선택 시"
+    };
+
+    private static readonly string[] PassiveMotionModeOptions =
+    {
+        "패시브 모션 재생",
+        "모션 없음"
     };
 
     private static readonly string[] PassiveKillSourceOptions =
@@ -1579,6 +1586,11 @@ public sealed class CharacterEditorWindow : EditorWindow
                 new GUIContent("Action ID"));
             DrawActionIconSprite(definition);
             DrawActionAudioClip(definition);
+            DrawAttackEnumPopup(
+                definition.FindPropertyRelative(
+                    PassiveMotionModePropertyName),
+                "패시브 모션",
+                PassiveMotionModeOptions);
             EditorGUILayout.Space(4f);
             SerializedProperty sections = definition.FindPropertyRelative(
                 PassiveSectionsPropertyName);
@@ -1638,6 +1650,11 @@ public sealed class CharacterEditorWindow : EditorWindow
                 new GUIContent("Action ID"));
             DrawActionIconSprite(definition);
             DrawActionAudioClip(definition);
+            DrawAttackEnumPopup(
+                definition.FindPropertyRelative(
+                    PassiveMotionModePropertyName),
+                "패시브 모션",
+                PassiveMotionModeOptions);
             EditorGUILayout.Space(4f);
             DrawPassiveSectionBlocks(
                 definition,
@@ -1959,6 +1976,10 @@ public sealed class CharacterEditorWindow : EditorWindow
     {
         ResetActionIconSprite(definition);
         ResetActionAudioClip(definition);
+        SetEnumValue(
+            definition,
+            PassiveMotionModePropertyName,
+            (int)CharacterPassiveMotionMode.PlayPassiveMotion);
         ResetPassiveSectionValue(
             definition,
             CharacterPassiveSectionType.Linkage);

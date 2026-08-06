@@ -1164,7 +1164,6 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
         else if (subject == CharacterAttackSubject.AllExceptSelf)
             subject = CharacterAttackSubject.All;
 
-        targetCount = Mathf.Max(1, targetCount);
         List<DungeonTileView> candidates = CollectPriorityTargetTiles(
             out bool hasAlternateTarget);
         candidates.RemoveAll(tile => !MatchesCharacterConditions(
@@ -1175,7 +1174,8 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
         if (candidates.Count == 0)
             return Array.Empty<EnemyRuntime>();
 
-        List<DungeonTileView> selected = new(targetCount);
+        targetCount = Mathf.Clamp(targetCount, 1, candidates.Count);
+        List<DungeonTileView> selected = new(candidates.Count);
         if (TryGetForcedPriorityTile(out DungeonTileView forcedTarget) &&
             candidates.Remove(forcedTarget))
         {

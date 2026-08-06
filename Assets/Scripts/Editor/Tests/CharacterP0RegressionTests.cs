@@ -17,6 +17,8 @@ public sealed class CharacterP0RegressionTests
         "fixture:previous-target-status";
     private const string IsoldeAssetPath =
         "Assets/Resources/Characters/2_Isolde.asset";
+    private const string CalistaAssetPath =
+        "Assets/Resources/Characters/2_Calista.asset";
     private const string EmergencyKitAssetPath =
         "Assets/Resources/StatusEffects/EmergencyKit.asset";
     private const string FireAssetPath =
@@ -1553,6 +1555,52 @@ public sealed class CharacterP0RegressionTests
         Assert.That(
             new CharacterSkillDefinition().Linkage,
             Is.EqualTo(CharacterActionLinkage.None));
+        Assert.That(
+            new CharacterPassiveDefinition().MotionMode,
+            Is.EqualTo(CharacterPassiveMotionMode.PlayPassiveMotion));
+    }
+
+    [Test]
+    public void Calista_PassiveMotionPlaysOnlyOnFourStackRelease()
+    {
+        CharacterSO definition = LoadAsset<CharacterSO>(CalistaAssetPath);
+        Assert.That(definition.PassiveDefinitions, Has.Count.EqualTo(2));
+        Assert.That(
+            definition.PassiveDefinitions[0].MotionMode,
+            Is.EqualTo(CharacterPassiveMotionMode.None));
+        Assert.That(
+            definition.PassiveDefinitions[1].MotionMode,
+            Is.EqualTo(CharacterPassiveMotionMode.PlayPassiveMotion));
+
+        StatusEffectSO ready = LoadAsset<StatusEffectSO>(
+            "Assets/Resources/StatusEffects/Ready_4.asset");
+        CharacterRuntime calista = CreateCharacter(definition);
+        FakeBattleBoard board = new()
+        {
+            LivingEnemyCountValue = 1,
+            SelectedEnemyTargets = new[] { CreateEnemyRuntime() },
+        };
+        calista.BindBattle(null, board);
+
+        for (int attackIndex = 1; attackIndex <= 3; attackIndex++)
+        {
+            calista.TickBattle(calista.Data.AttackCooldown, board);
+            Assert.That(
+                calista.GetStatusStackCount(ready),
+                Is.EqualTo(attackIndex));
+            Assert.That(
+                GetPrivateField<float>(
+                    calista,
+                    "_passiveSdTimeRemaining"),
+                Is.Zero);
+        }
+
+        calista.TickBattle(calista.Data.AttackCooldown, board);
+
+        Assert.That(calista.GetStatusStackCount(ready), Is.Zero);
+        Assert.That(
+            GetPrivateField<float>(calista, "_passiveSdTimeRemaining"),
+            Is.GreaterThan(0f));
     }
 
     [Test]
@@ -2613,6 +2661,11 @@ public sealed class CharacterP0RegressionTests
 
         Assert.That(character.TryActivateActiveSkill(), Is.True);
         Assert.That(board.IsManualTargetSelectionPending, Is.True);
+        Assert.That(
+            board.CharacterTargetSelectionCounts,
+            Is.EqualTo(new[] { 1 }),
+            "Collecting all manual candidates must not request an " +
+            "unbounded target-list capacity.");
         Assert.That(
             board.CurrentManualTargetRequest.RequiredCount,
             Is.EqualTo(1));
@@ -7679,6 +7732,17 @@ public sealed class CharacterP0RegressionTests
             BindingFlags.Instance | BindingFlags.NonPublic);
         Assert.That(field, Is.Not.Null, $"Missing field '{fieldName}'.");
         field.SetValue(target, value);
+    }
+
+    private static T GetPrivateField<T>(
+        object target,
+        string fieldName)
+    {
+        FieldInfo field = target.GetType().GetField(
+            fieldName,
+            BindingFlags.Instance | BindingFlags.NonPublic);
+        Assert.That(field, Is.Not.Null, $"Missing field '{fieldName}'.");
+        return (T)field.GetValue(target);
     }
 
     private DungeonPage CreateTutorialDungeonPageForBattleResult()

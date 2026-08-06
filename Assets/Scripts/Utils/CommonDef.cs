@@ -6,7 +6,7 @@ public static class CommonDef
     /// Test-build switch. Keep enabled while save compatibility is not
     /// guaranteed, and set to false before creating a release build.
     /// </summary>
-    public const bool ResetLocalDataOnNewBuild = true;
+    public static readonly bool ResetLocalDataOnNewBuild = true;
 
     public const string CharacterGradePaletteResourcePath =
         "Presentation/CharacterGradePalette";

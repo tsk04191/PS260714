@@ -177,7 +177,13 @@ public static class PageControl
             target.TryGetComponent(out PageBgmSelection selection))
         {
             selection.RequestSelectedBgm();
+            return;
         }
+
+        // Stage Select intentionally shares the configurable Main page track.
+        // This also replaces a dungeon theme after returning from a run.
+        if (page is StageSelectPage stageSelectPage)
+            stageSelectPage.RequestMainMenuBgm();
     }
 
     private static bool TryResolvePages(GameObject[] targets, out IPage[] pages)

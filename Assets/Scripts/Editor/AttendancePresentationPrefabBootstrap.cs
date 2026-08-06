@@ -106,7 +106,12 @@ public static class AttendancePresentationPrefabBootstrap
             root.transform,
             "imgRewardIcon",
             Color.white).GetComponent<Image>();
-        Stretch(icon.rectTransform, 10f);
+        RectTransform iconRect = icon.rectTransform;
+        iconRect.anchorMin = new Vector2(0.5f, 0.5f);
+        iconRect.anchorMax = new Vector2(0.5f, 0.5f);
+        iconRect.pivot = new Vector2(0.5f, 0.5f);
+        iconRect.anchoredPosition = Vector2.zero;
+        iconRect.sizeDelta = new Vector2(56f, 56f);
         icon.preserveAspect = true;
 
         TextMeshProUGUI amount = CreateText(
@@ -135,32 +140,12 @@ public static class AttendancePresentationPrefabBootstrap
         GameObject border = CreateBorder(root.transform);
         border.SetActive(false);
 
-        GameObject tooltip = CreateImage(
-            root.transform,
-            "grpRewardTooltip",
-            new Color(0.035f, 0.055f, 0.045f, 0.99f));
-        RectTransform tooltipRect = (RectTransform)tooltip.transform;
-        tooltipRect.anchorMin = new Vector2(1f, 0.5f);
-        tooltipRect.anchorMax = new Vector2(1f, 0.5f);
-        tooltipRect.pivot = new Vector2(0f, 0.5f);
-        tooltipRect.anchoredPosition = new Vector2(12f, 0f);
-        tooltipRect.sizeDelta = new Vector2(310f, 120f);
-        TextMeshProUGUI tooltipText = CreateText(
-            tooltip.transform,
-            "txtRewardTooltip",
-            17f,
-            TextAlignmentOptions.MidlineLeft);
-        Stretch(tooltipText.rectTransform, 12f);
-        tooltip.SetActive(false);
-
         SerializedObject serialized = new(view);
         SetObject(serialized, "rewardIcon", icon);
         SetObject(serialized, "amountText", amount);
         SetObject(serialized, "additionalCountText", additional);
         SetObject(serialized, "claimedOverlay", overlay);
         SetObject(serialized, "todayBorder", border);
-        SetObject(serialized, "tooltip", tooltip);
-        SetObject(serialized, "tooltipText", tooltipText);
         serialized.ApplyModifiedPropertiesWithoutUndo();
 
         GameObject prefab = PrefabUtility.SaveAsPrefabAsset(root, CellPath);

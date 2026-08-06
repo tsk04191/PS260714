@@ -407,6 +407,13 @@ public sealed class AttendanceTests
         Assert.That(popup.HasRequiredReferences, Is.True);
         Assert.That(cell, Is.Not.Null);
         Assert.That(cell.HasRequiredReferences, Is.True);
+        RectTransform rewardIcon = cell.transform
+            .Find("imgRewardIcon") as RectTransform;
+        Assert.That(rewardIcon, Is.Not.Null);
+        Assert.That(rewardIcon.anchorMin, Is.EqualTo(new Vector2(0.5f, 0.5f)));
+        Assert.That(rewardIcon.anchorMax, Is.EqualTo(new Vector2(0.5f, 0.5f)));
+        Assert.That(rewardIcon.sizeDelta, Is.EqualTo(new Vector2(56f, 56f)));
+        Assert.That(cell.transform.Find("grpRewardTooltip"), Is.Null);
         Assert.That(dot, Is.Not.Null);
     }
 

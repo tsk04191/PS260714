@@ -92,11 +92,19 @@ public static class PopupLayerUtility
         return placement;
     }
 
-    public static void Restore(PopupLayerPlacement placement)
+    public static bool Restore(PopupLayerPlacement placement)
     {
         RectTransform popup = placement.Popup;
         if (popup == null || placement.Parent == null)
-            return;
+            return false;
+
+        Transform currentParent = popup.parent;
+        if (currentParent == null ||
+            !currentParent.gameObject.activeInHierarchy ||
+            !placement.Parent.gameObject.activeInHierarchy)
+        {
+            return false;
+        }
 
         popup.SetParent(placement.Parent, false);
         popup.anchorMin = placement.AnchorMin;
@@ -109,6 +117,7 @@ public static class PopupLayerUtility
             placement.SiblingIndex,
             0,
             placement.Parent.childCount - 1));
+        return true;
     }
 
     private static PopupLayerPlacement Capture(RectTransform popup)

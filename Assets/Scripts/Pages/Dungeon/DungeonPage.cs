@@ -219,6 +219,8 @@ public class DungeonPage : MonoBehaviour, IPage
         _startingCharacterChoices;
     public IReadOnlyList<BattleItemSO> StartingItemChoices =>
         _startingItemSelection.Items;
+    internal Button PreparationNavigationButtonTemplate =>
+        battleTab != null ? battleTab.PauseButtonTemplate : null;
     public IReadOnlyList<DungeonBattlePlan> BattlePlans => _battlePlans;
     public DungeonBoardView Board => board;
     public int MaximumEnergy => _maximumEnergy;
@@ -2922,6 +2924,8 @@ public sealed class DungeonEventTab
     private RectTransform _rewardCardRoot;
     private GridLayoutGroup _rewardCardLayout;
     private RectTransform _buttonRoot;
+    private Button _preparationNavigationButton;
+    private TextMeshProUGUI _preparationNavigationText;
     private RectTransform _firstStartingChoiceRect;
     private readonly List<RewardOption> _currentRewardOptions = new();
     private readonly List<CharacterSO> _startingChoices = new();
@@ -2977,6 +2981,8 @@ public sealed class DungeonEventTab
         _rewardCardRoot = null;
         _rewardCardLayout = null;
         _buttonRoot = null;
+        _preparationNavigationButton = null;
+        _preparationNavigationText = null;
         _firstStartingChoiceRect = null;
         _panel = null;
         _root = null;
@@ -3696,7 +3702,100 @@ public sealed class DungeonEventTab
 
         _rewardCardRoot.gameObject.SetActive(false);
         _buttonRoot.gameObject.SetActive(false);
+        BuildPreparationNavigationButton();
         RefreshRuntimeLayout();
+    }
+
+    private void BuildPreparationNavigationButton()
+    {
+        Button template = _page?.PreparationNavigationButtonTemplate;
+        if (template != null)
+        {
+            _preparationNavigationButton = UnityEngine.Object.Instantiate(
+                template,
+                _root.transform,
+                false);
+        }
+        else
+        {
+            GameObject buttonObject = new(
+                "btnPreparationReturnToStage",
+                typeof(RectTransform),
+                typeof(CanvasRenderer),
+                typeof(Image),
+                typeof(Outline),
+                typeof(Button));
+            buttonObject.transform.SetParent(_root.transform, false);
+            Image image = buttonObject.GetComponent<Image>();
+            image.color = new Color(0.105f, 0.22f, 0.2f, 1f);
+            _preparationNavigationButton =
+                buttonObject.GetComponent<Button>();
+            _preparationNavigationButton.targetGraphic = image;
+        }
+
+        _preparationNavigationButton.name =
+            "btnPreparationReturnToStage";
+        _preparationNavigationButton.onClick =
+            new Button.ButtonClickedEvent();
+        _preparationNavigationButton.onClick.AddListener(
+            () => _page?.ReturnToStageSelect());
+
+        RectTransform buttonRect =
+            _preparationNavigationButton.transform as RectTransform;
+        buttonRect.anchorMin = new Vector2(1f, 1f);
+        buttonRect.anchorMax = new Vector2(1f, 1f);
+        buttonRect.pivot = new Vector2(1f, 1f);
+        buttonRect.anchoredPosition = new Vector2(-32f, -28f);
+        buttonRect.sizeDelta = new Vector2(112f, 56f);
+        buttonRect.localScale = Vector3.one;
+
+        _preparationNavigationText = _preparationNavigationButton
+            .GetComponentInChildren<TextMeshProUGUI>(true);
+        if (_preparationNavigationText == null)
+        {
+            GameObject textObject = new(
+                "txtPreparationReturnToStage",
+                typeof(RectTransform),
+                typeof(TextMeshProUGUI));
+            textObject.transform.SetParent(buttonRect, false);
+            _preparationNavigationText =
+                textObject.GetComponent<TextMeshProUGUI>();
+            RectTransform textRect =
+                _preparationNavigationText.rectTransform;
+            textRect.anchorMin = Vector2.zero;
+            textRect.anchorMax = Vector2.one;
+            textRect.offsetMin = new Vector2(6f, 4f);
+            textRect.offsetMax = new Vector2(-6f, -4f);
+        }
+
+        _preparationNavigationText.name =
+            "txtPreparationReturnToStage";
+        LocalizationFontResolver.ApplyGameDefault(
+            _preparationNavigationText);
+        _preparationNavigationText.enableAutoSizing = true;
+        _preparationNavigationText.fontSizeMax = 22f;
+        _preparationNavigationText.fontSizeMin = 10f;
+        _preparationNavigationText.alignment =
+            TextAlignmentOptions.Center;
+        _preparationNavigationText.raycastTarget = false;
+        _preparationNavigationButton.gameObject.SetActive(false);
+    }
+
+    private void RefreshPreparationNavigationButton()
+    {
+        if (_preparationNavigationButton == null)
+            return;
+
+        bool visible = _viewMode == EViewMode.StartingSelection ||
+                       _viewMode == EViewMode.StartingItemSelection;
+        if (_preparationNavigationText != null)
+        {
+            _preparationNavigationText.text = LocalizationService.Get(
+                LocalizationKeys.UiDungeonReturnToStage);
+        }
+        _preparationNavigationButton.gameObject.SetActive(visible);
+        if (visible)
+            _preparationNavigationButton.transform.SetAsLastSibling();
     }
 
     private void SetRewardCardMode(bool showRewardCards)
@@ -4084,6 +4183,7 @@ public sealed class DungeonEventTab
         _firstStartingChoiceRect = null;
         ClearChildren(_rewardCardRoot);
         ClearChildren(_buttonRoot);
+        RefreshPreparationNavigationButton();
     }
 
     private static void ClearChildren(RectTransform root)

@@ -50,6 +50,17 @@ public sealed class StageSelectPage : RuntimeMenuPageBase
     [SerializeField] private GameObject mainPage;
     [SerializeField] private GameObject dungeonPage;
 
+    public bool RequestMainMenuBgm()
+    {
+        if (mainPage == null ||
+            !mainPage.TryGetComponent(out PageBgmSelection selection))
+        {
+            return false;
+        }
+
+        return selection.RequestSelectedBgm();
+    }
+
     [Header("Stage Progress Presentation")]
     [SerializeField] private Sprite clearedMarkerSprite;
     [SerializeField] private Sprite unclearedMarkerSprite;

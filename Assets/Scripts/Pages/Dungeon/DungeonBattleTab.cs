@@ -15,6 +15,7 @@ public sealed class DungeonBattleTab : MonoBehaviour
     [SerializeField] private Button pauseButton;
     [SerializeField] private TextMeshProUGUI pauseText;
     [SerializeField] private GameObject pauseOverlay;
+    internal Button PauseButtonTemplate => pauseButton;
     private RectTransform _pauseMenuPanel;
     private Button _continueButton;
     private TextMeshProUGUI _continueText;
@@ -1718,6 +1719,12 @@ public class DungeonItemCardView : MonoBehaviour,
         transform.SetAsLastSibling();
         if (popup != null)
         {
+            if (_popupLayerPlacement.IsActive &&
+                !PopupLayerUtility.Restore(_popupLayerPlacement))
+            {
+                return;
+            }
+            _popupLayerPlacement = default;
             popup.SetActive(true);
             _popupLayerPlacement = PopupLayerUtility.MoveToPopupLayer(
                 popup.transform as RectTransform,
@@ -1751,9 +1758,11 @@ public class DungeonItemCardView : MonoBehaviour,
     {
         if (popup != null)
             popup.SetActive(false);
-        if (_popupLayerPlacement.IsActive)
-            PopupLayerUtility.Restore(_popupLayerPlacement);
-        _popupLayerPlacement = default;
+        if (_popupLayerPlacement.IsActive &&
+            PopupLayerUtility.Restore(_popupLayerPlacement))
+        {
+            _popupLayerPlacement = default;
+        }
     }
 
 }

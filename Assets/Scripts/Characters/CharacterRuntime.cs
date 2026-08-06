@@ -2552,7 +2552,7 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
             return;
         }
 
-        bool anyPassiveSucceeded = false;
+        bool shouldPlayPassiveMotion = false;
         int totalDamage = 0;
         foreach (CharacterPassiveDefinition definition in
                  Data.PassiveDefinitions)
@@ -2579,11 +2579,12 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
                 selectedTargets,
                 out int damageDealt);
             totalDamage += damageDealt;
-            anyPassiveSucceeded |= succeeded;
+            shouldPlayPassiveMotion |=
+                succeeded && definition.ShouldPlayPassiveMotion;
         }
 
         RecordDamageDealt(totalDamage);
-        if (anyPassiveSucceeded)
+        if (shouldPlayPassiveMotion)
             NotifyPassiveActivated();
     }
 
@@ -2596,7 +2597,7 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
         if (!Data.HasCustomPassiveDefinitions)
             return;
 
-        bool anyPassiveSucceeded = false;
+        bool shouldPlayPassiveMotion = false;
         int totalDamage = 0;
         foreach (CharacterPassiveDefinition definition in
                  Data.PassiveDefinitions)
@@ -2633,11 +2634,12 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
                 _lastAttackTargets,
                 out int damageDealt);
             totalDamage += damageDealt;
-            anyPassiveSucceeded |= succeeded;
+            shouldPlayPassiveMotion |=
+                succeeded && definition.ShouldPlayPassiveMotion;
         }
 
         RecordDamageDealt(totalDamage);
-        if (anyPassiveSucceeded)
+        if (shouldPlayPassiveMotion)
             NotifyPassiveActivated();
     }
 
@@ -2689,7 +2691,7 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
             return;
         }
 
-        bool anyPassiveSucceeded = false;
+        bool shouldPlayPassiveMotion = false;
         int totalDamage = 0;
         foreach (CharacterPassiveDefinition definition in
                  Data.PassiveDefinitions)
@@ -2728,11 +2730,12 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
                 default,
                 out int damageDealt);
             totalDamage += damageDealt;
-            anyPassiveSucceeded |= succeeded;
+            shouldPlayPassiveMotion |=
+                succeeded && definition.ShouldPlayPassiveMotion;
         }
 
         RecordDamageDealt(totalDamage);
-        if (anyPassiveSucceeded)
+        if (shouldPlayPassiveMotion)
             NotifyPassiveActivated();
     }
 
@@ -2765,7 +2768,7 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
             return;
         }
 
-        bool anyPassiveSucceeded = false;
+        bool shouldPlayPassiveMotion = false;
         int totalDamage = 0;
         foreach (CharacterPassiveDefinition definition in
                  Data.PassiveDefinitions)
@@ -2795,11 +2798,12 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
                 CreateStatusEventTargets(eventData.Target),
                 out int damageDealt);
             totalDamage += damageDealt;
-            anyPassiveSucceeded |= succeeded;
+            shouldPlayPassiveMotion |=
+                succeeded && definition.ShouldPlayPassiveMotion;
         }
 
         RecordDamageDealt(totalDamage);
-        if (anyPassiveSucceeded)
+        if (shouldPlayPassiveMotion)
             NotifyPassiveActivated();
     }
 
@@ -2812,7 +2816,7 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
             return;
         }
 
-        bool anyPassiveSucceeded = false;
+        bool shouldPlayPassiveMotion = false;
         int totalDamage = 0;
         foreach (CharacterPassiveDefinition definition in
                  Data.PassiveDefinitions)
@@ -2835,11 +2839,12 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
                 default,
                 out int damageDealt);
             totalDamage += damageDealt;
-            anyPassiveSucceeded |= succeeded;
+            shouldPlayPassiveMotion |=
+                succeeded && definition.ShouldPlayPassiveMotion;
         }
 
         RecordDamageDealt(totalDamage);
-        if (anyPassiveSucceeded)
+        if (shouldPlayPassiveMotion)
             NotifyPassiveActivated();
     }
 
@@ -3027,7 +3032,7 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
 
         _pendingManualPassiveActions.RemoveAt(0);
         RecordDamageDealt(damageDealt);
-        if (succeeded)
+        if (succeeded && pending.Definition.ShouldPlayPassiveMotion)
             NotifyPassiveActivated();
         return true;
     }
@@ -3331,13 +3336,17 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
             System.Array.Empty<IBattleCharacter>();
         IReadOnlyList<EnemyRuntime> enemyCandidates =
             System.Array.Empty<EnemyRuntime>();
+        // The All selector ignores its count. Use the smallest valid value
+        // so board implementations never interpret an unbounded sentinel as
+        // collection capacity while gathering manual-selection candidates.
+        const int allCandidateTargetCount = 1;
         if (targetFaction == CharacterTargetFaction.Ally)
         {
             allyCandidates = board.SelectAlliedCharacters(
                 this,
                 CharacterAttackSubject.All,
                 CharacterAttackSubjectMetric.Health,
-                int.MaxValue,
+                allCandidateTargetCount,
                 conditionMatchMode,
                 conditions);
         }
@@ -3347,7 +3356,7 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
                 this,
                 CharacterAttackSubject.All,
                 CharacterAttackSubjectMetric.Health,
-                int.MaxValue,
+                allCandidateTargetCount,
                 conditionMatchMode,
                 conditions);
         }

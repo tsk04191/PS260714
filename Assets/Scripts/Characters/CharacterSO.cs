@@ -636,6 +636,12 @@ public enum CharacterPassiveTrigger
     OnAttackTargetSelected = 4
 }
 
+public enum CharacterPassiveMotionMode
+{
+    PlayPassiveMotion = 0,
+    None = 1
+}
+
 public enum CharacterPassiveKillSource
 {
     Self,
@@ -2169,6 +2175,8 @@ public sealed class CharacterPassiveDefinition :
     [SerializeField]
     private AudioClip audioClip;
     [SerializeField]
+    private CharacterPassiveMotionMode motionMode;
+    [SerializeField]
     private CharacterPassiveTrigger trigger;
     [SerializeField]
     private CharacterPassiveKillSource killSource;
@@ -2245,6 +2253,9 @@ public sealed class CharacterPassiveDefinition :
     public IReadOnlyList<CharacterPassiveSectionType> Sections => sections;
     public Sprite IconSprite => iconSprite;
     public AudioClip AudioClip => audioClip;
+    public CharacterPassiveMotionMode MotionMode => motionMode;
+    public bool ShouldPlayPassiveMotion =>
+        motionMode == CharacterPassiveMotionMode.PlayPassiveMotion;
     public CharacterPassiveTrigger Trigger => trigger;
     public CharacterPassiveKillSource KillSource => killSource;
     public CharacterSO SpecifiedKillerCharacter => specifiedKillerCharacter;
@@ -2351,6 +2362,10 @@ public sealed class CharacterPassiveDefinition :
     {
         actionId = (actionId ?? string.Empty).Trim();
         sections ??= new List<CharacterPassiveSectionType>();
+        if (!Enum.IsDefined(typeof(CharacterPassiveMotionMode), motionMode))
+        {
+            motionMode = CharacterPassiveMotionMode.PlayPassiveMotion;
+        }
         if (trigger != CharacterPassiveTrigger.OnAttack)
             linkage = CharacterActionLinkage.None;
         triggerStatusEffects ??= new List<StatusEffectSO>();

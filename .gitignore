@@ -519,6 +519,11 @@ $RECYCLE.BIN/
 !/Assets/Resources/Attendance/DefaultAttendanceSchedule.asset
 !/Assets/Resources/Attendance/DefaultAttendanceSchedule.asset.meta
 !/Assets/Resources/Attendance.meta
+!/Assets/Resources/Characters/
+/Assets/Resources/Characters/*
+!/Assets/Resources/Characters/2_Calista.asset
+!/Assets/Resources/Characters/2_Calista.asset.meta
+!/Assets/Resources/Characters.meta
 !/Assets/Resources/Items/
 /Assets/Resources/Items/*
 !/Assets/Resources/Items/Currency/
