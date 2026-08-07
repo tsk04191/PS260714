@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.IO;
 using UnityEditor;
 using UnityEditor.SceneManagement;
 using UnityEngine;
@@ -41,7 +40,7 @@ public sealed class StageSelectEditorWindow : EditorWindow
     {
         StageSelectEditorWindow window =
             GetWindow<StageSelectEditorWindow>();
-        window.titleContent = new GUIContent("Stage Select Editor");
+        window.titleContent = new GUIContent("Dungeon Editor");
         window.minSize = new Vector2(920f, 620f);
         window.Show();
         window.Focus();
@@ -69,7 +68,7 @@ public sealed class StageSelectEditorWindow : EditorWindow
 
     private void OnEnable()
     {
-        titleContent = new GUIContent("Stage Select Editor");
+        titleContent = new GUIContent("Dungeon Editor");
         minSize = new Vector2(920f, 620f);
         EditorApplication.projectChanged += HandleProjectChanged;
         EditorApplication.hierarchyChanged += HandleHierarchyChanged;
@@ -150,50 +149,19 @@ public sealed class StageSelectEditorWindow : EditorWindow
 
     private void DrawRenameRow()
     {
-        using (new EditorGUILayout.HorizontalScope(EditorStyles.helpBox))
-        {
-            EditorGUILayout.LabelField(
+        PS260714AssetRenameCommand command =
+            PS260714EditorAssetUtility.DrawRenameRow(
                 "SO File Name",
-                GUILayout.Width(88f));
-            GUI.SetNextControlName(RenameControlName);
-            _renameAssetName = EditorGUILayout.TextField(_renameAssetName);
-            bool apply = GUILayout.Button("Apply", GUILayout.Width(56f));
-            bool cancel = GUILayout.Button("Cancel", GUILayout.Width(56f));
-
-            if (_focusRenameField)
-            {
-                EditorGUI.FocusTextInControl(RenameControlName);
-                _focusRenameField = false;
-            }
-
-            Event current = Event.current;
-            if (current.type == EventType.KeyDown &&
-                GUI.GetNameOfFocusedControl() == RenameControlName)
-            {
-                if (current.keyCode == KeyCode.Return ||
-                    current.keyCode == KeyCode.KeypadEnter)
-                {
-                    apply = true;
-                    current.Use();
-                }
-                else if (current.keyCode == KeyCode.Escape)
-                {
-                    cancel = true;
-                    current.Use();
-                }
-            }
-
-            if (cancel)
-            {
-                CancelRename();
-                GUIUtility.ExitGUI();
-            }
-            if (apply)
-            {
-                RenameSelected();
-                GUIUtility.ExitGUI();
-            }
-        }
+                RenameControlName,
+                ref _renameAssetName,
+                ref _focusRenameField);
+        if (command == PS260714AssetRenameCommand.None)
+            return;
+        if (command == PS260714AssetRenameCommand.Apply)
+            RenameSelected();
+        else
+            CancelRename();
+        GUIUtility.ExitGUI();
     }
 
     private void DrawScenePreviewToolbar()
@@ -405,7 +373,8 @@ public sealed class StageSelectEditorWindow : EditorWindow
             DrawProperty("maximumBattleCount", "Maximum Battles");
             DrawProperty(
                 "insertEventBetweenBattles",
-                "Events Between Battles");
+                "Rooms Between Battles");
+            DrawProperty("roomPattern", "Room Pattern");
             PS260714AssetReferenceField.Draw(
                 _serialized.FindProperty("flowPolicy"),
                 new GUIContent("Flow Policy"));
@@ -435,6 +404,7 @@ public sealed class StageSelectEditorWindow : EditorWindow
             DrawProperty(
                 "completionDestination",
                 "Completion Destination");
+            DrawProperty("initialRunCurrency", "Initial Run Currency");
         }
         EditorGUILayout.EndFoldoutHeaderGroup();
     }
@@ -448,6 +418,11 @@ public sealed class StageSelectEditorWindow : EditorWindow
         {
             DrawAssetReferenceArray("fixedBattles", "Fixed Battles");
             DrawAssetReferenceArray("fixedEvents", "Fixed Events");
+            DrawProperty("defaultEvent", "Default Event");
+            DrawAssetReferenceArray("fixedRests", "Fixed Rest Rooms");
+            DrawProperty("defaultRest", "Default Rest Room");
+            DrawAssetReferenceArray("fixedShops", "Fixed Shops");
+            DrawProperty("defaultShop", "Default Shop");
             DrawAssetReferenceArray(
                 "enemyPoolOverride",
                 "Enemy Pool Override");
@@ -654,35 +629,17 @@ public sealed class StageSelectEditorWindow : EditorWindow
 
     private void RefreshDefinitions()
     {
-        string selectedPath = _selected != null
-            ? AssetDatabase.GetAssetPath(_selected)
-            : string.Empty;
-        _definitions.Clear();
-        foreach (string guid in AssetDatabase.FindAssets(
-                     "t:DungeonDefinition",
-                     new[] { AssetFolder }))
-        {
-            string path = AssetDatabase.GUIDToAssetPath(guid);
-            DungeonDefinition definition =
-                AssetDatabase.LoadAssetAtPath<DungeonDefinition>(path);
-            if (definition != null)
-                _definitions.Add(definition);
-        }
-
-        _definitions.Sort(CompareDefinitions);
+        string selectedPath =
+            PS260714EditorAssetUtility.CapturePath(_selected);
+        PS260714EditorAssetUtility.LoadAssets(
+            _definitions,
+            "t:DungeonDefinition",
+            new[] { AssetFolder },
+            CompareDefinitions);
         DungeonDefinitionCatalog.Invalidate();
-
-        if (!string.IsNullOrEmpty(selectedPath))
-        {
-            DungeonDefinition restored =
-                AssetDatabase.LoadAssetAtPath<DungeonDefinition>(
-                    selectedPath);
-            SelectDefinition(restored);
-        }
-        else if (_selected == null && _definitions.Count > 0)
-        {
-            SelectDefinition(_definitions[0]);
-        }
+        SelectDefinition(PS260714EditorAssetUtility.RestoreSelection(
+            selectedPath,
+            _definitions));
     }
 
     private static int CompareDefinitions(
@@ -737,22 +694,19 @@ public sealed class StageSelectEditorWindow : EditorWindow
             return;
 
         EnsureAssetFolder();
-        string sourcePath = AssetDatabase.GetAssetPath(_selected);
-        string destinationPath = AssetDatabase.GenerateUniqueAssetPath(
-            AssetFolder + "/" + _selected.name + "_Copy.asset");
-        if (!AssetDatabase.CopyAsset(sourcePath, destinationPath))
+        if (!PS260714EditorAssetUtility.TryDuplicate(
+                _selected,
+                AssetFolder,
+                "_Copy",
+                out DungeonDefinition duplicate,
+                out string duplicateError))
         {
             EditorUtility.DisplayDialog(
                 "Duplicate Stage",
-                "Failed to duplicate the selected DungeonDefinition.",
+                duplicateError,
                 "OK");
             return;
         }
-
-        AssetDatabase.ImportAsset(destinationPath);
-        DungeonDefinition duplicate =
-            AssetDatabase.LoadAssetAtPath<DungeonDefinition>(
-                destinationPath);
         if (duplicate != null)
         {
             SerializedObject serialized = new(duplicate);
@@ -802,27 +756,16 @@ public sealed class StageSelectEditorWindow : EditorWindow
         if (_selected == null)
             return;
 
-        string requested = (_renameAssetName ?? string.Empty).Trim();
-        if (string.IsNullOrEmpty(requested) ||
-            requested.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0)
-        {
-            EditorUtility.DisplayDialog(
-                "Rename Stage",
-                "Enter a valid file name.",
-                "OK");
-            return;
-        }
-
-        string path = AssetDatabase.GetAssetPath(_selected);
-        string error = AssetDatabase.RenameAsset(path, requested);
-        if (!string.IsNullOrEmpty(error))
+        if (!PS260714EditorAssetUtility.TryRename(
+                _selected,
+                _renameAssetName,
+                out string error))
         {
             EditorUtility.DisplayDialog("Rename Stage", error, "OK");
             return;
         }
 
         CancelRename();
-        AssetDatabase.SaveAssets();
         RefreshDefinitions();
     }
 

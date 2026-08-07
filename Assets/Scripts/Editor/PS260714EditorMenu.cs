@@ -1,12 +1,12 @@
 using System;
 using System.Collections.Generic;
-using System.IO;
 using UnityEditor;
 using UnityEngine;
 
 internal static class PS260714EditorMenu
 {
     public const string Root = "PS260714/";
+    public const string DungeonRoot = Root + "Dungeon/";
     private const string EffectsRoot = Root + "Effects/";
     private const string LocalizationRoot = Root + "Localization/";
     private const string UiRoot = Root + "UI/";
@@ -17,13 +17,17 @@ internal static class PS260714EditorMenu
     public const int ItemEditorPriority = 102;
     public const int EnemyEditorPriority = 103;
     public const int StatusEffectEditorPriority = 104;
-    public const int BattleEditorPriority = 105;
+    public const int DungeonEditorPriority = 0;
+    public const int BattleEditorPriority = 1;
+    public const int EventEditorPriority = 2;
+    public const int RestEditorPriority = 3;
+    public const int ShopEditorPriority = 4;
     public const int BattleVfxEditorPriority = 106;
     public const int ValidateBattleVfxPriority = 107;
     public const int LocalizationEditorPriority = 108;
     public const int ValidateLocalizationPriority = 109;
     public const int GenerateLocalizationPriority = 110;
-    public const int StageSelectEditorPriority = 111;
+    public const int StageSelectEditorPriority = DungeonEditorPriority;
     public const int RecruitEditorPriority = 112;
     public const int ValidateDesignerUiPriority = 113;
     public const int MigrateRuntimeUiPriority = 114;
@@ -36,8 +40,9 @@ internal static class PS260714EditorMenu
         Root + "Common Settings";
     public const string RecruitEditor =
         UiRoot + "Recruit Editor";
-    public const string StageSelectEditor =
-        UiRoot + "Stage Select Editor";
+    public const string DungeonEditor =
+        DungeonRoot + "Dungeon Editor";
+    public const string StageSelectEditor = DungeonEditor;
     public const string ItemEditor =
         Root + "Item Editor";
     public const string EnemyEditor =
@@ -45,7 +50,13 @@ internal static class PS260714EditorMenu
     public const string StatusEffectEditor =
         Root + "Status Effect Editor";
     public const string BattleEditor =
-        Root + "Battle Editor";
+        DungeonRoot + "Battle Editor";
+    public const string EventEditor =
+        DungeonRoot + "Event Editor";
+    public const string RestEditor =
+        DungeonRoot + "Rest Editor";
+    public const string ShopEditor =
+        DungeonRoot + "Shop Editor";
     public const string BattleVfxEditor =
         EffectsRoot + "Battle VFX Editor";
     public const string ValidateBattleVfx =
@@ -66,243 +77,6 @@ internal static class PS260714EditorMenu
         DataRoot + "Migrate Character Modifier IDs";
 }
 
-internal static class PS260714AssetEditorToolbar
-{
-    internal static readonly string[] ButtonOrder =
-    {
-        "New",
-        "Save",
-        "Duplicate",
-        "Rename",
-        "Delete",
-        "Ping",
-        "Refresh"
-    };
-
-    public static void Draw(
-        string summary,
-        bool hasSelection,
-        Action create,
-        Action save,
-        Action duplicate,
-        Action rename,
-        Action delete,
-        Action ping,
-        Action refresh)
-    {
-        using (new EditorGUILayout.HorizontalScope(EditorStyles.toolbar))
-        {
-            GUILayout.Label(
-                summary,
-                EditorStyles.miniLabel,
-                GUILayout.Width(136f));
-            GUILayout.FlexibleSpace();
-
-            using (new EditorGUI.DisabledScope(
-                       EditorApplication.isPlayingOrWillChangePlaymode))
-            {
-                if (GUILayout.Button(
-                        ButtonOrder[0],
-                        EditorStyles.toolbarButton,
-                        GUILayout.Width(56f)))
-                {
-                    create?.Invoke();
-                }
-
-                using (new EditorGUI.DisabledScope(!hasSelection))
-                {
-                    if (GUILayout.Button(
-                            ButtonOrder[1],
-                            EditorStyles.toolbarButton,
-                            GUILayout.Width(56f)))
-                    {
-                        save?.Invoke();
-                    }
-
-                    if (GUILayout.Button(
-                            ButtonOrder[2],
-                            EditorStyles.toolbarButton,
-                            GUILayout.Width(76f)))
-                    {
-                        duplicate?.Invoke();
-                    }
-
-                    if (GUILayout.Button(
-                            ButtonOrder[3],
-                            EditorStyles.toolbarButton,
-                            GUILayout.Width(64f)))
-                    {
-                        rename?.Invoke();
-                    }
-
-                    if (GUILayout.Button(
-                            ButtonOrder[4],
-                            EditorStyles.toolbarButton,
-                            GUILayout.Width(60f)))
-                    {
-                        delete?.Invoke();
-                    }
-                }
-            }
-
-            using (new EditorGUI.DisabledScope(!hasSelection))
-            {
-                if (GUILayout.Button(
-                        ButtonOrder[5],
-                        EditorStyles.toolbarButton,
-                        GUILayout.Width(52f)))
-                {
-                    ping?.Invoke();
-                }
-            }
-
-            if (GUILayout.Button(
-                    ButtonOrder[6],
-                    EditorStyles.toolbarButton,
-                    GUILayout.Width(64f)))
-            {
-                refresh?.Invoke();
-            }
-        }
-    }
-}
-
-internal static class PS260714AssetEditorList
-{
-    internal const float Width = 230f;
-    internal const float RowHeight = 42f;
-    private const float IconSize = 34f;
-    private const float ContentPadding = 5f;
-
-    private static GUIStyle _leftLabelStyle;
-    private static GUIStyle _centeredLabelStyle;
-
-    internal static string DrawSearchField(string searchText)
-    {
-        EditorGUILayout.Space(4f);
-        string result = EditorGUILayout.TextField(
-            searchText,
-            EditorStyles.toolbarSearchField);
-        EditorGUILayout.Space(4f);
-        return result;
-    }
-
-    internal static bool DrawRow(
-        bool selected,
-        GUIContent content,
-        TextAnchor alignment = TextAnchor.MiddleLeft)
-    {
-        Rect rowRect = GUILayoutUtility.GetRect(
-            1f,
-            RowHeight,
-            GUILayout.ExpandWidth(true));
-        bool toggled = GUI.Toggle(
-            rowRect,
-            selected,
-            GUIContent.none,
-            GUI.skin.button);
-
-        Rect labelRect = new(
-            rowRect.x + ContentPadding,
-            rowRect.y,
-            rowRect.width - ContentPadding * 2f,
-            rowRect.height);
-        if (content.image != null)
-        {
-            Rect iconRect = new(
-                labelRect.x,
-                rowRect.y + (rowRect.height - IconSize) * 0.5f,
-                IconSize,
-                IconSize);
-            GUI.DrawTexture(
-                iconRect,
-                content.image,
-                ScaleMode.ScaleToFit,
-                true);
-            labelRect.xMin = iconRect.xMax + ContentPadding;
-        }
-
-        GUIStyle labelStyle = alignment == TextAnchor.MiddleCenter
-            ? CenteredLabelStyle
-            : LeftLabelStyle;
-        GUI.Label(
-            labelRect,
-            new GUIContent(content.text, content.tooltip),
-            labelStyle);
-        EditorGUIUtility.AddCursorRect(rowRect, MouseCursor.Link);
-        return toggled && !selected;
-    }
-
-    internal static Texture GetAssetPreview(UnityEngine.Object asset)
-    {
-        if (asset == null)
-            return null;
-
-        return AssetPreview.GetAssetPreview(asset) ??
-               AssetPreview.GetMiniThumbnail(asset);
-    }
-
-    internal static Texture GetAssetPreview(
-        UnityEngine.Object preferredPreview,
-        UnityEngine.Object fallbackAsset)
-    {
-        Texture preview = GetAssetPreview(preferredPreview);
-        if (preview != null)
-            return preview;
-        if (fallbackAsset == null)
-            return null;
-        return AssetPreview.GetMiniTypeThumbnail(fallbackAsset.GetType());
-    }
-
-    internal static bool DrawAssetRow(
-        bool selected,
-        UnityEngine.Object asset,
-        UnityEngine.Object preferredPreview,
-        string title,
-        string detail,
-        string tooltip = null)
-    {
-        string text = string.IsNullOrWhiteSpace(detail)
-            ? title ?? string.Empty
-            : $"{title}\n{detail}";
-        return DrawRow(
-            selected,
-            new GUIContent(
-                text,
-                GetAssetPreview(preferredPreview, asset),
-                tooltip ?? AssetDatabase.GetAssetPath(asset)));
-    }
-
-    internal static void DrawCountFooter(int visibleCount, int totalCount)
-    {
-        EditorGUILayout.LabelField(
-            $"{visibleCount} / {totalCount}",
-            EditorStyles.centeredGreyMiniLabel);
-    }
-
-    internal static void Ping(UnityEngine.Object asset)
-    {
-        if (asset != null)
-            EditorGUIUtility.PingObject(asset);
-    }
-
-    private static GUIStyle LeftLabelStyle =>
-        _leftLabelStyle ??= CreateLabelStyle(TextAnchor.MiddleLeft);
-
-    private static GUIStyle CenteredLabelStyle =>
-        _centeredLabelStyle ??= CreateLabelStyle(TextAnchor.MiddleCenter);
-
-    private static GUIStyle CreateLabelStyle(TextAnchor alignment)
-    {
-        return new GUIStyle(EditorStyles.label)
-        {
-            alignment = alignment,
-            clipping = TextClipping.Clip,
-            wordWrap = false
-        };
-    }
-}
-
 internal static class PS260714AssetEditorRegistry
 {
     internal static bool CanOpen(UnityEngine.Object asset)
@@ -313,6 +87,7 @@ internal static class PS260714AssetEditorRegistry
             StatusEffectSO or
             BattleVfxCueSO or
             DungeonDefinition or
+            DungeonRoomSO or
             BattleSO or
             CharacterRoleSO or
             CharacterArchetypeSO;
@@ -339,6 +114,9 @@ internal static class PS260714AssetEditorRegistry
                 return true;
             case DungeonDefinition dungeon:
                 StageSelectEditorWindow.Open(dungeon);
+                return true;
+            case DungeonRoomSO room:
+                DungeonRoomEditorMenu.Open(room);
                 return true;
             case BattleSO battle:
                 BattleEditorWindow.Open(battle);
@@ -394,163 +172,111 @@ internal static class PS260714AssetReferenceField
     }
 }
 
-internal static class PS260714SafeAssetDelete
+internal static class DungeonRoomEditorMenu
 {
-    private const int VisibleReferenceLimit = 10;
-
-    internal static bool TryMoveToTrash(
-        UnityEngine.Object asset,
-        string assetLabel,
-        bool checkReferences = true)
+    [MenuItem(
+        PS260714EditorMenu.EventEditor,
+        false,
+        PS260714EditorMenu.EventEditorPriority)]
+    public static void OpenEventEditor()
     {
-        if (!TryGetDeletablePath(asset, out string path))
-        {
-            EditorUtility.DisplayDialog(
-                $"Delete {assetLabel}",
-                "The selected object is not a deletable project asset.",
-                "OK");
-            return false;
-        }
-
-        if (checkReferences)
-        {
-            IReadOnlyList<string> references = FindReferences(asset);
-            if (references.Count > 0)
-            {
-                EditorUtility.DisplayDialog(
-                    $"Delete {assetLabel} Blocked",
-                    BuildReferenceMessage(references),
-                    "OK");
-                return false;
-            }
-        }
-
-        if (!EditorUtility.DisplayDialog(
-                $"Delete {assetLabel}",
-                $"Move '{asset.name}' to the system trash?\n\n{path}\n\n" +
-                "The asset can be restored from the system trash.",
-                "Move to Trash",
-                "Cancel"))
-        {
-            return false;
-        }
-
-        if (!AssetDatabase.MoveAssetToTrash(path))
-        {
-            EditorUtility.DisplayDialog(
-                $"Delete {assetLabel}",
-                "Failed to move the asset to the system trash.",
-                "OK");
-            return false;
-        }
-
-        AssetDatabase.SaveAssets();
-        return true;
+        DungeonEventEditorWindow.Open(
+            Selection.activeObject as DungeonEventSO);
     }
 
-    internal static IReadOnlyList<string> FindReferences(
-        UnityEngine.Object asset)
+    [MenuItem(
+        PS260714EditorMenu.EventEditor,
+        true,
+        PS260714EditorMenu.EventEditorPriority)]
+    private static bool ValidateOpenEventEditor()
     {
-        if (!TryGetDeletablePath(asset, out string targetPath))
-            return Array.Empty<string>();
+        return CanOpen();
+    }
 
-        List<string> references = new();
-        string[] allPaths = AssetDatabase.GetAllAssetPaths();
-        foreach (string candidatePath in allPaths)
+    [MenuItem(
+        PS260714EditorMenu.RestEditor,
+        false,
+        PS260714EditorMenu.RestEditorPriority)]
+    public static void OpenRestEditor()
+    {
+        OpenFirst<DungeonRestSO>("Rest");
+    }
+
+    [MenuItem(
+        PS260714EditorMenu.RestEditor,
+        true,
+        PS260714EditorMenu.RestEditorPriority)]
+    private static bool ValidateOpenRestEditor()
+    {
+        return CanOpen();
+    }
+
+    [MenuItem(
+        PS260714EditorMenu.ShopEditor,
+        false,
+        PS260714EditorMenu.ShopEditorPriority)]
+    public static void OpenShopEditor()
+    {
+        OpenFirst<DungeonShopSO>("Shop");
+    }
+
+    [MenuItem(
+        PS260714EditorMenu.ShopEditor,
+        true,
+        PS260714EditorMenu.ShopEditorPriority)]
+    private static bool ValidateOpenShopEditor()
+    {
+        return CanOpen();
+    }
+
+    internal static void Open(DungeonRoomSO room)
+    {
+        if (room == null)
+            return;
+
+        if (room is DungeonEventSO dungeonEvent)
         {
-            if (!IsReferenceCandidate(candidatePath, targetPath))
+            DungeonEventEditorWindow.Open(dungeonEvent);
+            return;
+        }
+
+        Selection.activeObject = room;
+        EditorUtility.FocusProjectWindow();
+        EditorGUIUtility.PingObject(room);
+        EditorApplication.delayCall += () =>
+            EditorApplication.ExecuteMenuItem("Window/General/Inspector");
+    }
+
+    private static void OpenFirst<T>(string roomLabel)
+        where T : DungeonRoomSO
+    {
+        if (Selection.activeObject is T selected)
+        {
+            Open(selected);
+            return;
+        }
+
+        string[] guids = AssetDatabase.FindAssets($"t:{typeof(T).Name}");
+        Array.Sort(guids, StringComparer.Ordinal);
+        for (int index = 0; index < guids.Length; index++)
+        {
+            string path = AssetDatabase.GUIDToAssetPath(guids[index]);
+            T room = AssetDatabase.LoadAssetAtPath<T>(path);
+            if (room == null)
                 continue;
-            if (asset is ItemDefinitionSO &&
-                string.Equals(
-                    candidatePath,
-                    "Assets/Resources/ItemCatalog.asset",
-                    StringComparison.OrdinalIgnoreCase))
-            {
-                continue;
-            }
 
-            string[] dependencies;
-            try
-            {
-                dependencies = AssetDatabase.GetDependencies(
-                    candidatePath,
-                    false);
-            }
-            catch (Exception)
-            {
-                continue;
-            }
-
-            foreach (string dependency in dependencies)
-            {
-                if (!string.Equals(
-                        dependency,
-                        targetPath,
-                        StringComparison.OrdinalIgnoreCase))
-                {
-                    continue;
-                }
-
-                references.Add(candidatePath);
-                break;
-            }
+            Open(room);
+            return;
         }
 
-        references.Sort(StringComparer.OrdinalIgnoreCase);
-        return references;
+        Debug.LogWarning(
+            $"No Dungeon {roomLabel} asset was found. Create one from " +
+            $"Assets/Create/Dungeon/Room/{roomLabel}.");
     }
 
-    private static bool TryGetDeletablePath(
-        UnityEngine.Object asset,
-        out string path)
+    private static bool CanOpen()
     {
-        path = asset != null
-            ? AssetDatabase.GetAssetPath(asset)
-            : string.Empty;
-        return !string.IsNullOrWhiteSpace(path) &&
-               path.StartsWith("Assets/", StringComparison.Ordinal) &&
-               AssetDatabase.LoadMainAssetAtPath(path) == asset;
-    }
-
-    private static bool IsReferenceCandidate(
-        string candidatePath,
-        string targetPath)
-    {
-        if (string.IsNullOrWhiteSpace(candidatePath) ||
-            string.Equals(
-                candidatePath,
-                targetPath,
-                StringComparison.OrdinalIgnoreCase) ||
-            !candidatePath.StartsWith("Assets/", StringComparison.Ordinal))
-        {
-            return false;
-        }
-
-        string extension = Path.GetExtension(candidatePath);
-        return string.Equals(extension, ".asset", StringComparison.OrdinalIgnoreCase) ||
-               string.Equals(extension, ".prefab", StringComparison.OrdinalIgnoreCase) ||
-               string.Equals(extension, ".unity", StringComparison.OrdinalIgnoreCase) ||
-               string.Equals(extension, ".controller", StringComparison.OrdinalIgnoreCase) ||
-               string.Equals(extension, ".overrideController", StringComparison.OrdinalIgnoreCase) ||
-               string.Equals(extension, ".playable", StringComparison.OrdinalIgnoreCase);
-    }
-
-    private static string BuildReferenceMessage(
-        IReadOnlyList<string> references)
-    {
-        int visibleCount = Math.Min(
-            references.Count,
-            VisibleReferenceLimit);
-        string message =
-            "The asset is still referenced and cannot be deleted.\n\n";
-        for (int index = 0; index < visibleCount; index++)
-            message += $"• {references[index]}\n";
-        if (references.Count > visibleCount)
-        {
-            message +=
-                $"• {references.Count - visibleCount} more reference(s)";
-        }
-        return message;
+        return !EditorApplication.isPlayingOrWillChangePlaymode;
     }
 }
 

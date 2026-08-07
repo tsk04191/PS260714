@@ -23,6 +23,7 @@ public enum EDungeonPauseReason
     UserPause = 1 << 2,
     Result = 1 << 3,
     NonBattlePhase = 1 << 4,
+    BattleReward = 1 << 5,
 }
 
 public sealed class DungeonPauseCoordinator
@@ -145,6 +146,7 @@ public sealed class DungeonRunSession
     public float PreferredGameSpeed { get; private set; } = 1f;
     public EDungeonRunActivity Activity { get; private set; }
     public EDungeonRunResult Result { get; private set; }
+    public int RunCurrency { get; private set; }
     public IReadOnlyList<EDungeonPhase> PhaseSequence => _phaseSequence;
     public DungeonPauseCoordinator Pause { get; } = new();
     public DungeonStateBag State { get; } = new();
@@ -155,7 +157,8 @@ public sealed class DungeonRunSession
         DungeonDefinition definition,
         int runSeed,
         int battleCount,
-        IReadOnlyList<EDungeonPhase> phases)
+        IReadOnlyList<EDungeonPhase> phases,
+        int initialRunCurrency = 0)
     {
         Definition = definition ?? throw new ArgumentNullException(
             nameof(definition));
@@ -166,6 +169,7 @@ public sealed class DungeonRunSession
         PreferredGameSpeed = 1f;
         Activity = EDungeonRunActivity.StartingSelection;
         Result = EDungeonRunResult.None;
+        RunCurrency = Math.Max(0, initialRunCurrency);
         _phaseSequence = phases ?? Array.Empty<EDungeonPhase>();
         Pause.Clear();
         State.Clear();
@@ -174,6 +178,22 @@ public sealed class DungeonRunSession
     public void SetActivity(EDungeonRunActivity activity)
     {
         Activity = activity;
+    }
+
+    public void AddRunCurrency(int amount)
+    {
+        long next = (long)RunCurrency + amount;
+        RunCurrency = (int)Math.Max(0L, Math.Min(int.MaxValue, next));
+    }
+
+    public bool TrySpendRunCurrency(int amount)
+    {
+        amount = Math.Max(0, amount);
+        if (RunCurrency < amount)
+            return false;
+
+        RunCurrency -= amount;
+        return true;
     }
 
     public void SetBattleNumber(int battleNumber)
@@ -208,6 +228,7 @@ public sealed class DungeonRunSession
         PreferredGameSpeed = 1f;
         Activity = EDungeonRunActivity.None;
         Result = EDungeonRunResult.None;
+        RunCurrency = 0;
         _phaseSequence = Array.Empty<EDungeonPhase>();
         Pause.Clear();
         State.Clear();

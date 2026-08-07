@@ -52,7 +52,12 @@ public sealed class DungeonFlowController : MonoBehaviour
     }
     public bool IsCompleted { get; private set; }
     public IReadOnlyList<EDungeonPhase> PhaseSequence => phaseSequence;
+    public GameObject BattleTab => battleTab;
     public GameObject EventTab => eventTab;
+    public GameObject RestTab => restTab;
+    public GameObject ShopTab => shopTab;
+    public bool HasNextStep => !IsCompleted &&
+                               CurrentStepIndex + 1 < StepCount;
 
     public event Action<EDungeonPhase, int> PhaseChanged;
     public event Action FlowCompleted;

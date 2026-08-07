@@ -4,13 +4,22 @@ using UnityEngine;
 
 [CreateAssetMenu(
     fileName = "AlternatingDungeonFlow",
-    menuName = "Dungeon/Flow/Alternating Battle And Event")]
+    menuName = "Dungeon/Flow/Alternating Battle And Rooms")]
 public sealed class AlternatingDungeonFlowPolicy : DungeonFlowPolicy
 {
     [SerializeField, Min(1)] private int minimumBattleCount = 5;
     [SerializeField, Min(1)] private int maximumBattleCount = 8;
     [SerializeField] private EDungeonPhase phaseBetweenBattles =
         EDungeonPhase.Event;
+    [SerializeField, Tooltip(
+        "Optional round-robin room pattern between battles. Empty uses " +
+        "the legacy Phase Between Battles value.")]
+    private EDungeonPhase[] roomPattern =
+    {
+        EDungeonPhase.Event,
+        EDungeonPhase.Rest,
+        EDungeonPhase.Shop,
+    };
 
     public override int ResolveBattleCount(int runSeed)
     {
@@ -31,10 +40,26 @@ public sealed class AlternatingDungeonFlowPolicy : DungeonFlowPolicy
         {
             phases[index] = index % 2 == 0
                 ? EDungeonPhase.Battle
-                : phaseBetweenBattles;
+                : ResolveRoomPhase(index / 2);
         }
 
         return Array.AsReadOnly(phases);
+    }
+
+    private EDungeonPhase ResolveRoomPhase(int roomIndex)
+    {
+        if (roomPattern == null || roomPattern.Length == 0)
+            return NormalizeRoomPhase(phaseBetweenBattles);
+
+        return NormalizeRoomPhase(
+            roomPattern[Math.Abs(roomIndex) % roomPattern.Length]);
+    }
+
+    private static EDungeonPhase NormalizeRoomPhase(EDungeonPhase phase)
+    {
+        return phase == EDungeonPhase.Battle
+            ? EDungeonPhase.Event
+            : phase;
     }
 
     private void OnValidate()
@@ -43,5 +68,6 @@ public sealed class AlternatingDungeonFlowPolicy : DungeonFlowPolicy
         maximumBattleCount = Mathf.Max(
             minimumBattleCount,
             maximumBattleCount);
+        roomPattern ??= Array.Empty<EDungeonPhase>();
     }
 }

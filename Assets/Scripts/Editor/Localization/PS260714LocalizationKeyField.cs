@@ -67,12 +67,28 @@ internal static class PS260714LocalizationKeyField
         SerializedProperty property,
         string label)
     {
-        Draw(property, new GUIContent(label));
+        Draw(property, new GUIContent(label), null);
+    }
+
+    public static void Draw(
+        SerializedProperty property,
+        string label,
+        Action changed)
+    {
+        Draw(property, new GUIContent(label), changed);
     }
 
     public static void Draw(
         SerializedProperty property,
         GUIContent label)
+    {
+        Draw(property, label, null);
+    }
+
+    public static void Draw(
+        SerializedProperty property,
+        GUIContent label,
+        Action changed)
     {
         EnsureLoaded();
         if (property == null)
@@ -84,7 +100,7 @@ internal static class PS260714LocalizationKeyField
         }
 
         Rect position = EditorGUILayout.GetControlRect();
-        Draw(position, property, label);
+        Draw(position, property, label, changed);
 
         string currentKey = (property.stringValue ?? string.Empty).Trim();
         if (!string.IsNullOrEmpty(currentKey) && !Keys.Contains(currentKey))
@@ -100,6 +116,15 @@ internal static class PS260714LocalizationKeyField
         Rect position,
         SerializedProperty property,
         GUIContent label)
+    {
+        Draw(position, property, label, null);
+    }
+
+    public static void Draw(
+        Rect position,
+        SerializedProperty property,
+        GUIContent label,
+        Action changed)
     {
         EnsureLoaded();
         if (property == null)
@@ -145,7 +170,7 @@ internal static class PS260714LocalizationKeyField
                 new GUIContent(displayText, tooltip),
                 EditorStyles.popup))
         {
-            ShowMenu(dropdownRect, property, currentKey);
+            ShowMenu(dropdownRect, property, currentKey, changed);
         }
 
         GUI.color = previousColor;
@@ -195,7 +220,8 @@ internal static class PS260714LocalizationKeyField
     private static void ShowMenu(
         Rect dropdownRect,
         SerializedProperty property,
-        string currentKey)
+        string currentKey,
+        Action changed)
     {
         GenericMenu menu = new();
         AddAssignmentItem(
@@ -203,7 +229,8 @@ internal static class PS260714LocalizationKeyField
             EmptyLabel,
             string.IsNullOrEmpty(currentKey),
             property,
-            string.Empty);
+            string.Empty,
+            changed);
         menu.AddSeparator(string.Empty);
 
         if (!string.IsNullOrWhiteSpace(_loadError))
@@ -225,9 +252,10 @@ internal static class PS260714LocalizationKeyField
                     string.Equals(
                         entry.Key,
                         currentKey,
-                        StringComparison.Ordinal),
+                    StringComparison.Ordinal),
                     property,
-                    entry.Key);
+                    entry.Key,
+                    changed);
             }
         }
 
@@ -239,7 +267,8 @@ internal static class PS260714LocalizationKeyField
         string menuPath,
         bool selected,
         SerializedProperty property,
-        string value)
+        string value,
+        Action changed)
     {
         UnityEngine.Object[] targets =
             property.serializedObject.targetObjects;
@@ -247,13 +276,14 @@ internal static class PS260714LocalizationKeyField
         menu.AddItem(
             new GUIContent(menuPath),
             selected,
-            () => Assign(targets, propertyPath, value));
+            () => Assign(targets, propertyPath, value, changed));
     }
 
     private static void Assign(
         UnityEngine.Object[] targets,
         string propertyPath,
-        string value)
+        string value,
+        Action changed)
     {
         if (targets == null || targets.Length == 0)
             return;
@@ -275,6 +305,7 @@ internal static class PS260714LocalizationKeyField
             if (target != null)
                 EditorUtility.SetDirty(target);
         }
+        changed?.Invoke();
     }
 
     private static bool HasChildKey(string key)

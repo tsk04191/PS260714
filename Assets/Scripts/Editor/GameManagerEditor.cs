@@ -957,33 +957,42 @@ public sealed class CommonSettingsProjectProvider : SettingsProvider
         if (source == null)
             return;
 
-        string sourcePath = AssetDatabase.GetAssetPath(source);
-        if (string.IsNullOrWhiteSpace(sourcePath))
-            return;
-
-        string directory = Path.GetDirectoryName(sourcePath)
-            ?.Replace('\\', '/');
-        string fileName = Path.GetFileNameWithoutExtension(sourcePath);
-        string destinationPath = AssetDatabase.GenerateUniqueAssetPath(
-            $"{directory}/{fileName} Copy.asset");
-        if (!AssetDatabase.CopyAsset(sourcePath, destinationPath))
+        UnityEngine.Object duplicate = null;
+        string duplicateError;
+        bool duplicated = source switch
+        {
+            CharacterRoleSO roleSource =>
+                PS260714EditorAssetUtility.TryDuplicate(
+                    roleSource,
+                    null,
+                    " Copy",
+                    out CharacterRoleSO roleDuplicate,
+                    out duplicateError) &&
+                AssignDuplicate(roleDuplicate, out duplicate),
+            CharacterArchetypeSO archetypeSource =>
+                PS260714EditorAssetUtility.TryDuplicate(
+                    archetypeSource,
+                    null,
+                    " Copy",
+                    out CharacterArchetypeSO archetypeDuplicate,
+                    out duplicateError) &&
+                AssignDuplicate(archetypeDuplicate, out duplicate),
+            _ => SetUnsupportedDuplicate(
+                out duplicate,
+                out duplicateError)
+        };
+        if (!duplicated)
         {
             EditorUtility.DisplayDialog(
                 "직군 에셋 복제",
-                "에셋을 복제하지 못했습니다.",
+                duplicateError,
                 "확인");
             return;
         }
 
-        AssetDatabase.ImportAsset(destinationPath);
-        UnityEngine.Object duplicate = null;
-        if (source is CharacterRoleSO)
+        if (duplicate is CharacterRoleSO role)
         {
-            CharacterRoleSO role =
-                AssetDatabase.LoadAssetAtPath<CharacterRoleSO>(
-                    destinationPath);
             role?.RegenerateRoleId();
-            duplicate = role;
             if (role != null)
             {
                 CommonSettingsEditorUtility.AppendAssetReference(
@@ -992,13 +1001,9 @@ public sealed class CommonSettingsProjectProvider : SettingsProvider
                     role);
             }
         }
-        else if (source is CharacterArchetypeSO)
+        else if (duplicate is CharacterArchetypeSO archetype)
         {
-            CharacterArchetypeSO archetype =
-                AssetDatabase.LoadAssetAtPath<CharacterArchetypeSO>(
-                    destinationPath);
             archetype?.RegenerateArchetypeId();
-            duplicate = archetype;
             if (archetype != null)
             {
                 CommonSettingsEditorUtility.AppendAssetReference(
@@ -1026,6 +1031,24 @@ public sealed class CommonSettingsProjectProvider : SettingsProvider
         EditorGUIUtility.PingObject(duplicate);
     }
 
+    private static bool AssignDuplicate<T>(
+        T value,
+        out UnityEngine.Object duplicate)
+        where T : UnityEngine.Object
+    {
+        duplicate = value;
+        return value != null;
+    }
+
+    private static bool SetUnsupportedDuplicate(
+        out UnityEngine.Object duplicate,
+        out string error)
+    {
+        duplicate = null;
+        error = "The selected role asset type is not supported.";
+        return false;
+    }
+
     private void BeginRenameSelectedRoleDefinition()
     {
         if (_selectedRoleDefinition == null)
@@ -1042,45 +1065,16 @@ public sealed class CommonSettingsProjectProvider : SettingsProvider
 
     private void DrawRoleRenameField()
     {
-        using (new EditorGUILayout.HorizontalScope(
-                   EditorStyles.helpBox))
-        {
-            EditorGUILayout.LabelField(
-                "SO 파일명",
-                GUILayout.Width(70f));
-            GUI.SetNextControlName(RoleRenameControlName);
-            _renameAssetName =
-                EditorGUILayout.TextField(_renameAssetName);
-            if (_focusRenameField)
-            {
-                EditorGUI.FocusTextInControl(RoleRenameControlName);
-                _focusRenameField = false;
-            }
-
-            bool apply = GUILayout.Button("적용", GUILayout.Width(52f));
-            bool cancel = GUILayout.Button("취소", GUILayout.Width(52f));
-            Event current = Event.current;
-            if (current.type == EventType.KeyDown &&
-                GUI.GetNameOfFocusedControl() == RoleRenameControlName)
-            {
-                if (current.keyCode == KeyCode.Return ||
-                    current.keyCode == KeyCode.KeypadEnter)
-                {
-                    apply = true;
-                    current.Use();
-                }
-                else if (current.keyCode == KeyCode.Escape)
-                {
-                    cancel = true;
-                    current.Use();
-                }
-            }
-
-            if (cancel)
-                CancelRenameSelectedRoleDefinition();
-            else if (apply)
-                RenameSelectedRoleDefinition();
-        }
+        PS260714AssetRenameCommand command =
+            PS260714EditorAssetUtility.DrawRenameRow(
+                "SO File Name",
+                RoleRenameControlName,
+                ref _renameAssetName,
+                ref _focusRenameField);
+        if (command == PS260714AssetRenameCommand.Apply)
+            RenameSelectedRoleDefinition();
+        else if (command == PS260714AssetRenameCommand.Cancel)
+            CancelRenameSelectedRoleDefinition();
     }
 
     private void RenameSelectedRoleDefinition()
@@ -1092,43 +1086,10 @@ public sealed class CommonSettingsProjectProvider : SettingsProvider
             return;
         }
 
-        string sourcePath = AssetDatabase.GetAssetPath(selected);
-        string requestedName = (_renameAssetName ?? string.Empty).Trim();
-        if (requestedName.EndsWith(
-                ".asset",
-                StringComparison.OrdinalIgnoreCase))
-        {
-            requestedName = requestedName.Substring(
-                0,
-                requestedName.Length - ".asset".Length).Trim();
-        }
-
-        if (!IsValidAssetFileName(
-                requestedName,
-                out string validationError))
-        {
-            EditorUtility.DisplayDialog(
-                "직군 에셋 이름 변경",
-                validationError,
-                "확인");
-            _focusRenameField = true;
-            return;
-        }
-
-        string currentName = Path.GetFileNameWithoutExtension(sourcePath);
-        if (string.Equals(
-                currentName,
-                requestedName,
-                StringComparison.Ordinal))
-        {
-            CancelRenameSelectedRoleDefinition();
-            return;
-        }
-
-        string error = AssetDatabase.RenameAsset(
-            sourcePath,
-            requestedName);
-        if (!string.IsNullOrWhiteSpace(error))
+        if (!PS260714EditorAssetUtility.TryRename(
+                selected,
+                _renameAssetName,
+                out string error))
         {
             EditorUtility.DisplayDialog(
                 "직군 에셋 이름 변경",
@@ -1138,7 +1099,6 @@ public sealed class CommonSettingsProjectProvider : SettingsProvider
             return;
         }
 
-        AssetDatabase.SaveAssets();
         CancelRenameSelectedRoleDefinition();
         EditorGUIUtility.PingObject(selected);
     }
@@ -1148,30 +1108,6 @@ public sealed class CommonSettingsProjectProvider : SettingsProvider
         _isRenamingRoleDefinition = false;
         _focusRenameField = false;
         _renameAssetName = string.Empty;
-    }
-
-    private static bool IsValidAssetFileName(
-        string fileName,
-        out string validationError)
-    {
-        if (string.IsNullOrWhiteSpace(fileName))
-        {
-            validationError = "파일명을 입력하세요.";
-            return false;
-        }
-        if (fileName == "." || fileName == ".." ||
-            fileName.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0 ||
-            fileName.IndexOf('/') >= 0 ||
-            fileName.IndexOf('\\') >= 0 ||
-            fileName.EndsWith(".", StringComparison.Ordinal) ||
-            fileName.EndsWith(" ", StringComparison.Ordinal))
-        {
-            validationError = "파일명에 사용할 수 없는 문자가 있습니다.";
-            return false;
-        }
-
-        validationError = string.Empty;
-        return true;
     }
 
     private void DeleteSelectedRoleDefinition()

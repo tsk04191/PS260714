@@ -217,7 +217,7 @@ public sealed class StatusEffectEditorTests
     }
 
     [Test]
-    public void EditorMenus_UseSingleProjectRoot()
+    public void EditorMenus_GroupDungeonToolsUnderDungeonRoot()
     {
         Assert.That(
             CharacterEditorWindow.MenuPath,
@@ -227,7 +227,7 @@ public sealed class StatusEffectEditorTests
             Is.EqualTo("PS260714/Enemy Editor"));
         Assert.That(
             StageSelectEditorWindow.MenuPath,
-            Is.EqualTo("PS260714/UI/Stage Select Editor"));
+            Is.EqualTo("PS260714/Dungeon/Dungeon Editor"));
         Assert.That(
             PS260714EditorMenu.RecruitEditor,
             Is.EqualTo("PS260714/UI/Recruit Editor"));
@@ -236,7 +236,16 @@ public sealed class StatusEffectEditorTests
             Is.EqualTo("PS260714/Status Effect Editor"));
         Assert.That(
             BattleEditorWindow.MenuPath,
-            Is.EqualTo("PS260714/Battle Editor"));
+            Is.EqualTo("PS260714/Dungeon/Battle Editor"));
+        Assert.That(
+            PS260714EditorMenu.EventEditor,
+            Is.EqualTo("PS260714/Dungeon/Event Editor"));
+        Assert.That(
+            PS260714EditorMenu.RestEditor,
+            Is.EqualTo("PS260714/Dungeon/Rest Editor"));
+        Assert.That(
+            PS260714EditorMenu.ShopEditor,
+            Is.EqualTo("PS260714/Dungeon/Shop Editor"));
         Assert.That(
             PS260714EditorMenu.LocalizationEditor,
             Is.EqualTo(
@@ -333,9 +342,13 @@ public sealed class StatusEffectEditorTests
 
                     string path = attribute.ConstructorArguments[0].Value
                         as string;
-                    if (path == null || !path.StartsWith(
-                            PS260714EditorMenu.Root,
-                            StringComparison.Ordinal))
+                    if (path == null ||
+                        (!path.StartsWith(
+                             PS260714EditorMenu.Root,
+                             StringComparison.Ordinal) &&
+                         !path.StartsWith(
+                             PS260714EditorMenu.DungeonRoot,
+                             StringComparison.Ordinal)))
                     {
                         continue;
                     }
@@ -367,7 +380,7 @@ public sealed class StatusEffectEditorTests
         Assert.That(
             prioritiesByPath,
             Does.Not.ContainKey("PS260714/UI/Apply Main Lobby Layout"));
-        Assert.That(prioritiesByPath.Count, Is.EqualTo(17));
+        Assert.That(prioritiesByPath.Count, Is.EqualTo(20));
 
         HashSet<int> uniquePriorities = new();
         foreach (KeyValuePair<string, int> menu in prioritiesByPath)
@@ -381,18 +394,21 @@ public sealed class StatusEffectEditorTests
         Assert.That(
             new[]
             {
+                PS260714EditorMenu.DungeonEditorPriority,
+                PS260714EditorMenu.BattleEditorPriority,
+                PS260714EditorMenu.EventEditorPriority,
+                PS260714EditorMenu.RestEditorPriority,
+                PS260714EditorMenu.ShopEditorPriority,
                 PS260714EditorMenu.CommonSettingsPriority,
                 PS260714EditorMenu.CharacterEditorPriority,
                 PS260714EditorMenu.ItemEditorPriority,
                 PS260714EditorMenu.EnemyEditorPriority,
                 PS260714EditorMenu.StatusEffectEditorPriority,
-                PS260714EditorMenu.BattleEditorPriority,
                 PS260714EditorMenu.BattleVfxEditorPriority,
                 PS260714EditorMenu.ValidateBattleVfxPriority,
                 PS260714EditorMenu.LocalizationEditorPriority,
                 PS260714EditorMenu.ValidateLocalizationPriority,
                 PS260714EditorMenu.GenerateLocalizationPriority,
-                PS260714EditorMenu.StageSelectEditorPriority,
                 PS260714EditorMenu.RecruitEditorPriority,
                 PS260714EditorMenu.ValidateDesignerUiPriority,
                 PS260714EditorMenu.MigrateRuntimeUiPriority,
@@ -401,8 +417,9 @@ public sealed class StatusEffectEditorTests
             },
             Is.EqualTo(new[]
             {
-                100, 101, 102, 103, 104, 105, 106, 107, 108,
-                109, 110, 111, 112, 113, 114, 115, 116,
+                0, 1, 2, 3, 4,
+                100, 101, 102, 103, 104, 106, 107, 108,
+                109, 110, 112, 113, 114, 115, 116,
             }));
     }
 

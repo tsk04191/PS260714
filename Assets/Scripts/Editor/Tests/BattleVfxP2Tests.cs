@@ -149,6 +149,36 @@ public sealed class BattleVfxP2Tests
             }));
         Assert.That(PS260714AssetEditorList.Width, Is.EqualTo(230f));
         Assert.That(PS260714AssetEditorList.RowHeight, Is.EqualTo(42f));
+
+        PS260714UIToolkitAssetToolbar uiToolkitToolbar = new(
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null);
+        for (int index = 0;
+             index < PS260714AssetEditorToolbar.ButtonOrder.Length;
+             index++)
+        {
+            Assert.That(
+                uiToolkitToolbar[index],
+                Is.TypeOf<UnityEditor.UIElements.ToolbarButton>());
+            Assert.That(
+                ((UnityEditor.UIElements.ToolbarButton)
+                    uiToolkitToolbar[index]).text,
+                Is.EqualTo(
+                    PS260714AssetEditorToolbar.ButtonOrder[index]));
+        }
+
+        uiToolkitToolbar.SetHasSelection(false);
+        Assert.That(uiToolkitToolbar[1].enabledSelf, Is.False);
+        Assert.That(uiToolkitToolbar[5].enabledSelf, Is.False);
+        Assert.That(uiToolkitToolbar[6].enabledSelf, Is.True);
+        uiToolkitToolbar.SetHasSelection(true);
+        Assert.That(uiToolkitToolbar[1].enabledSelf, Is.True);
+        Assert.That(uiToolkitToolbar[5].enabledSelf, Is.True);
     }
 
     [Test]

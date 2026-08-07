@@ -2514,4 +2514,430 @@ public sealed class DungeonDefinitionRegressionTests
         Assert.That(definition.UsesTutorialBattleSetup, Is.True);
         Assert.That(definition.TryValidate(out string error), Is.True, error);
     }
+
+    [Test]
+    public void FreeBattle_RotatesEventRestAndShopBetweenBattles()
+    {
+        DungeonDefinition definition =
+            AssetDatabase.LoadAssetAtPath<DungeonDefinition>(
+                FreeBattlePath);
+
+        Assert.That(definition, Is.Not.Null);
+        IReadOnlyList<EDungeonPhase> phases =
+            definition.BuildPhaseSequence(5, 260714);
+
+        Assert.That(phases.Count, Is.EqualTo(9));
+        Assert.That(phases[0], Is.EqualTo(EDungeonPhase.Battle));
+        Assert.That(phases[1], Is.EqualTo(EDungeonPhase.Event));
+        Assert.That(phases[3], Is.EqualTo(EDungeonPhase.Rest));
+        Assert.That(phases[5], Is.EqualTo(EDungeonPhase.Shop));
+        Assert.That(phases[8], Is.EqualTo(EDungeonPhase.Battle));
+    }
+
+    [Test]
+    public void DungeonRunSession_TracksRunCurrencyWithoutGoingNegative()
+    {
+        DungeonDefinition definition =
+            ScriptableObject.CreateInstance<DungeonDefinition>();
+        DungeonRunSession session = new();
+        try
+        {
+            session.Begin(
+                definition,
+                260714,
+                1,
+                new[] { EDungeonPhase.Battle },
+                100);
+
+            Assert.That(session.RunCurrency, Is.EqualTo(100));
+            Assert.That(session.TrySpendRunCurrency(40), Is.True);
+            Assert.That(session.RunCurrency, Is.EqualTo(60));
+            Assert.That(session.TrySpendRunCurrency(61), Is.False);
+            session.AddRunCurrency(-1000);
+            Assert.That(session.RunCurrency, Is.Zero);
+        }
+        finally
+        {
+            UnityEngine.Object.DestroyImmediate(definition);
+        }
+    }
+
+    [Test]
+    public void DungeonEvent_ValidatesAuthoredChoiceAndEffect()
+    {
+        DungeonEventSO dungeonEvent =
+            ScriptableObject.CreateInstance<DungeonEventSO>();
+        try
+        {
+            SerializedObject serialized = new(dungeonEvent);
+            SerializedProperty choices = serialized.FindProperty("choices");
+            choices.arraySize = 1;
+            SerializedProperty choice = choices.GetArrayElementAtIndex(0);
+            choice.FindPropertyRelative("choiceId").stringValue = "search";
+            choice.FindPropertyRelative("fallbackTitle").stringValue =
+                "Search the room";
+            SerializedProperty effects =
+                choice.FindPropertyRelative("effects");
+            effects.arraySize = 1;
+            SerializedProperty effect = effects.GetArrayElementAtIndex(0);
+            effect.FindPropertyRelative("effectType").enumValueIndex =
+                (int)EDungeonRoomEffectType.RunCurrency;
+            effect.FindPropertyRelative("amount").intValue = 25;
+            serialized.ApplyModifiedPropertiesWithoutUndo();
+
+            Assert.That(
+                dungeonEvent.TryValidate(out string error),
+                Is.True,
+                error);
+            Assert.That(dungeonEvent.Choices.Count, Is.EqualTo(1));
+        }
+        finally
+        {
+            UnityEngine.Object.DestroyImmediate(dungeonEvent);
+        }
+    }
+
+    [Test]
+    public void DungeonEventGraph_ValidatesLinkedChoiceNodes()
+    {
+        DungeonEventSO dungeonEvent =
+            ScriptableObject.CreateInstance<DungeonEventSO>();
+        try
+        {
+            SerializedObject serialized = new(dungeonEvent);
+            serialized.FindProperty("choiceGraphVersion").intValue = 1;
+            SerializedProperty choices = serialized.FindProperty("choices");
+            choices.arraySize = 3;
+            ConfigureEventNode(
+                choices.GetArrayElementAtIndex(0),
+                "node_search",
+                "search",
+                false,
+                "node_open");
+            ConfigureEventNode(
+                choices.GetArrayElementAtIndex(1),
+                "node_leave",
+                "leave",
+                true);
+            ConfigureEventNode(
+                choices.GetArrayElementAtIndex(2),
+                "node_open",
+                "open",
+                true);
+
+            SerializedProperty entries =
+                serialized.FindProperty("entryChoiceNodeIds");
+            entries.arraySize = 2;
+            entries.GetArrayElementAtIndex(0).stringValue = "node_search";
+            entries.GetArrayElementAtIndex(1).stringValue = "node_leave";
+            serialized.ApplyModifiedPropertiesWithoutUndo();
+
+            Assert.That(
+                dungeonEvent.TryValidate(out string error),
+                Is.True,
+                error);
+            List<DungeonEventChoiceNodeDefinition> entryNodes = new();
+            dungeonEvent.GetEntryChoices(entryNodes);
+            Assert.That(entryNodes.Count, Is.EqualTo(2));
+            Assert.That(entryNodes[0].NextChoiceNodeIds,
+                Is.EqualTo(new[] { "node_open" }));
+        }
+        finally
+        {
+            UnityEngine.Object.DestroyImmediate(dungeonEvent);
+        }
+    }
+
+    [Test]
+    public void DungeonEventGraph_RejectsChoiceCycles()
+    {
+        DungeonEventSO dungeonEvent =
+            ScriptableObject.CreateInstance<DungeonEventSO>();
+        try
+        {
+            SerializedObject serialized = new(dungeonEvent);
+            serialized.FindProperty("choiceGraphVersion").intValue = 1;
+            SerializedProperty choices = serialized.FindProperty("choices");
+            choices.arraySize = 2;
+            ConfigureEventNode(
+                choices.GetArrayElementAtIndex(0),
+                "node_a",
+                "a",
+                false,
+                "node_b");
+            ConfigureEventNode(
+                choices.GetArrayElementAtIndex(1),
+                "node_b",
+                "b",
+                false,
+                "node_a");
+
+            SerializedProperty entries =
+                serialized.FindProperty("entryChoiceNodeIds");
+            entries.arraySize = 1;
+            entries.GetArrayElementAtIndex(0).stringValue = "node_a";
+            serialized.ApplyModifiedPropertiesWithoutUndo();
+
+            Assert.That(dungeonEvent.TryValidate(out string error), Is.False);
+            StringAssert.Contains("cycle", error);
+        }
+        finally
+        {
+            UnityEngine.Object.DestroyImmediate(dungeonEvent);
+        }
+    }
+
+    [Test]
+    public void DungeonEventGraph_RepairsNonFiniteEditorPosition()
+    {
+        DungeonEventSO dungeonEvent =
+            ScriptableObject.CreateInstance<DungeonEventSO>();
+        try
+        {
+            SerializedObject serialized = new(dungeonEvent);
+            SerializedProperty choices = serialized.FindProperty("choices");
+            choices.arraySize = 1;
+            SerializedProperty node = choices.GetArrayElementAtIndex(0);
+            ConfigureEventNode(
+                node,
+                "node_invalid_position",
+                "invalid_position",
+                true);
+            node.FindPropertyRelative("editorPosition").vector2Value =
+                new Vector2(float.NaN, float.PositiveInfinity);
+            serialized.ApplyModifiedPropertiesWithoutUndo();
+
+            DungeonEventEditorWindow.EnsureGraphData(dungeonEvent);
+
+            Vector2 repaired = dungeonEvent.Choices[0].EditorPosition;
+            Assert.That(float.IsNaN(repaired.x), Is.False);
+            Assert.That(float.IsInfinity(repaired.x), Is.False);
+            Assert.That(float.IsNaN(repaired.y), Is.False);
+            Assert.That(float.IsInfinity(repaired.y), Is.False);
+            Assert.That(repaired, Is.EqualTo(new Vector2(90f, 90f)));
+        }
+        finally
+        {
+            UnityEngine.Object.DestroyImmediate(dungeonEvent);
+        }
+    }
+
+    [Test]
+    public void EditorAssetUtility_RenamesDuplicatesLoadsAndRestoresSelection()
+    {
+        string folder = $"Assets/TempEditorUtil_{Guid.NewGuid():N}";
+        AssetDatabase.CreateFolder("Assets", folder.Substring(7));
+        try
+        {
+            DungeonEventSO source =
+                ScriptableObject.CreateInstance<DungeonEventSO>();
+            AssetDatabase.CreateAsset(source, $"{folder}/Original.asset");
+            AssetDatabase.SaveAssets();
+
+            Assert.That(
+                PS260714EditorAssetUtility.TryRename(
+                    source,
+                    "Renamed.asset",
+                    out string renameError),
+                Is.True,
+                renameError);
+            Assert.That(
+                AssetDatabase.GetAssetPath(source),
+                Is.EqualTo($"{folder}/Renamed.asset"));
+
+            Assert.That(
+                PS260714EditorAssetUtility.TryDuplicate(
+                    source,
+                    null,
+                    " Copy",
+                    out DungeonEventSO duplicate,
+                    out string duplicateError),
+                Is.True,
+                duplicateError);
+            Assert.That(duplicate, Is.Not.Null);
+
+            List<DungeonEventSO> loaded = new();
+            PS260714EditorAssetUtility.LoadAssets(
+                loaded,
+                "t:DungeonEventSO",
+                new[] { folder });
+            Assert.That(loaded.Count, Is.EqualTo(2));
+            Assert.That(loaded[0], Is.SameAs(source));
+            Assert.That(loaded[1], Is.SameAs(duplicate));
+
+            string duplicatePath =
+                PS260714EditorAssetUtility.CapturePath(duplicate);
+            Assert.That(
+                PS260714EditorAssetUtility.RestoreSelection(
+                    duplicatePath,
+                    loaded),
+                Is.SameAs(duplicate));
+        }
+        finally
+        {
+            AssetDatabase.DeleteAsset(folder);
+            AssetDatabase.Refresh();
+        }
+    }
+
+    [TestCase("")]
+    [TestCase(".")]
+    [TestCase("../invalid")]
+    public void EditorAssetUtility_RejectsInvalidRename(string requested)
+    {
+        Assert.That(
+            PS260714EditorAssetUtility.TryRename(
+                null,
+                requested,
+                out string error),
+            Is.False);
+        Assert.That(error, Is.Not.Empty);
+    }
+
+    [Test]
+    public void DungeonEventDelete_ClearsDungeonReferencesBeforeDeleting()
+    {
+        string folder =
+            $"Assets/TempDungeonEventDelete_{Guid.NewGuid():N}";
+        AssetDatabase.CreateFolder("Assets", folder.Substring(7));
+        string eventPath = $"{folder}/DeleteTarget.asset";
+        try
+        {
+            DungeonEventSO target =
+                ScriptableObject.CreateInstance<DungeonEventSO>();
+            DungeonEventSO survivor =
+                ScriptableObject.CreateInstance<DungeonEventSO>();
+            DungeonDefinition definition =
+                ScriptableObject.CreateInstance<DungeonDefinition>();
+            AssetDatabase.CreateAsset(target, eventPath);
+            AssetDatabase.CreateAsset(
+                survivor,
+                $"{folder}/Survivor.asset");
+
+            SerializedObject serialized = new(definition);
+            serialized.FindProperty("defaultEvent").objectReferenceValue =
+                target;
+            SerializedProperty fixedEvents =
+                serialized.FindProperty("fixedEvents");
+            fixedEvents.arraySize = 2;
+            fixedEvents.GetArrayElementAtIndex(0).objectReferenceValue =
+                target;
+            fixedEvents.GetArrayElementAtIndex(1).objectReferenceValue =
+                survivor;
+            serialized.ApplyModifiedPropertiesWithoutUndo();
+            AssetDatabase.CreateAsset(
+                definition,
+                $"{folder}/Dungeon.asset");
+            AssetDatabase.SaveAssets();
+
+            string movedPath = null;
+            bool deleted = DungeonEventAssetDelete.TryMoveToTrash(
+                target,
+                false,
+                out string error,
+                path =>
+                {
+                    movedPath = path;
+                    return true;
+                });
+
+            Assert.That(deleted, Is.True, error);
+            Assert.That(movedPath, Is.EqualTo(eventPath));
+            serialized = new SerializedObject(definition);
+            Assert.That(
+                serialized.FindProperty("defaultEvent")
+                    .objectReferenceValue,
+                Is.Null);
+            fixedEvents = serialized.FindProperty("fixedEvents");
+            Assert.That(
+                fixedEvents.GetArrayElementAtIndex(0)
+                    .objectReferenceValue,
+                Is.Null);
+            Assert.That(
+                fixedEvents.GetArrayElementAtIndex(1)
+                    .objectReferenceValue,
+                Is.SameAs(survivor));
+        }
+        finally
+        {
+            AssetDatabase.DeleteAsset(folder);
+            AssetDatabase.Refresh();
+        }
+    }
+
+    [Test]
+    public void DungeonEventDelete_RestoresReferencesWhenTrashMoveFails()
+    {
+        string folder =
+            $"Assets/TempDungeonEventRestore_{Guid.NewGuid():N}";
+        AssetDatabase.CreateFolder("Assets", folder.Substring(7));
+        try
+        {
+            DungeonEventSO target =
+                ScriptableObject.CreateInstance<DungeonEventSO>();
+            DungeonDefinition definition =
+                ScriptableObject.CreateInstance<DungeonDefinition>();
+            AssetDatabase.CreateAsset(
+                target,
+                $"{folder}/DeleteTarget.asset");
+
+            SerializedObject serialized = new(definition);
+            serialized.FindProperty("defaultEvent").objectReferenceValue =
+                target;
+            SerializedProperty fixedEvents =
+                serialized.FindProperty("fixedEvents");
+            fixedEvents.arraySize = 1;
+            fixedEvents.GetArrayElementAtIndex(0).objectReferenceValue =
+                target;
+            serialized.ApplyModifiedPropertiesWithoutUndo();
+            AssetDatabase.CreateAsset(
+                definition,
+                $"{folder}/Dungeon.asset");
+            AssetDatabase.SaveAssets();
+
+            bool deleted = DungeonEventAssetDelete.TryMoveToTrash(
+                target,
+                false,
+                out string error,
+                _ => false);
+
+            Assert.That(deleted, Is.False);
+            StringAssert.Contains("Failed to move", error);
+            serialized = new SerializedObject(definition);
+            Assert.That(
+                serialized.FindProperty("defaultEvent")
+                    .objectReferenceValue,
+                Is.SameAs(target));
+            Assert.That(
+                serialized.FindProperty("fixedEvents")
+                    .GetArrayElementAtIndex(0)
+                    .objectReferenceValue,
+                Is.SameAs(target));
+        }
+        finally
+        {
+            AssetDatabase.DeleteAsset(folder);
+            AssetDatabase.Refresh();
+        }
+    }
+
+    private static void ConfigureEventNode(
+        SerializedProperty node,
+        string nodeId,
+        string choiceId,
+        bool endsEvent,
+        params string[] nextNodeIds)
+    {
+        node.FindPropertyRelative("nodeId").stringValue = nodeId;
+        node.FindPropertyRelative("choiceId").stringValue = choiceId;
+        node.FindPropertyRelative("fallbackTitle").stringValue = choiceId;
+        node.FindPropertyRelative("conditions").arraySize = 0;
+        node.FindPropertyRelative("effects").arraySize = 0;
+        node.FindPropertyRelative("endsEvent").boolValue = endsEvent;
+        SerializedProperty next =
+            node.FindPropertyRelative("nextChoiceNodeIds");
+        next.arraySize = nextNodeIds.Length;
+        for (int index = 0; index < nextNodeIds.Length; index++)
+            next.GetArrayElementAtIndex(index).stringValue = nextNodeIds[index];
+    }
 }

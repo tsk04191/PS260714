@@ -37,6 +37,14 @@ public sealed class DungeonDefinition : ScriptableObject
     [SerializeField, Min(1)] private int maximumBattleCount = 8;
     [SerializeField] private bool insertEventBetweenBattles = true;
     [SerializeField] private DungeonFlowPolicy flowPolicy;
+    [SerializeField, Tooltip(
+        "Round-robin room pattern used when no Flow Policy is assigned.")]
+    private EDungeonPhase[] roomPattern =
+    {
+        EDungeonPhase.Event,
+        EDungeonPhase.Rest,
+        EDungeonPhase.Shop,
+    };
 
     [Header("Run Rules")]
     [SerializeField] private bool selectStartingCharacter = true;
@@ -51,15 +59,33 @@ public sealed class DungeonDefinition : ScriptableObject
     private bool useIntroBattleBalance;
     [SerializeField] private EDungeonCompletionDestination completionDestination =
         EDungeonCompletionDestination.Main;
+    [SerializeField, Min(0)] private int initialRunCurrency = 100;
 
     [Header("Encounters")]
     [SerializeField] private BattleSO[] fixedBattles =
         Array.Empty<BattleSO>();
     [SerializeField, Tooltip(
-        "Optional authored events in event-occurrence order. Empty event " +
-        "slots use the built-in post-battle reward and Ready music.")]
+        "Optional authored events in event-occurrence order. Empty slots " +
+        "use the built-in fallback event.")]
     private DungeonEventSO[] fixedEvents =
         Array.Empty<DungeonEventSO>();
+    [SerializeField, Tooltip(
+        "Event used when the occurrence-specific slot is empty.")]
+    private DungeonEventSO defaultEvent;
+    [SerializeField, Tooltip(
+        "Optional authored rest rooms in rest-occurrence order.")]
+    private DungeonRestSO[] fixedRests =
+        Array.Empty<DungeonRestSO>();
+    [SerializeField, Tooltip(
+        "Rest room used when the occurrence-specific slot is empty.")]
+    private DungeonRestSO defaultRest;
+    [SerializeField, Tooltip(
+        "Optional authored shops in shop-occurrence order.")]
+    private DungeonShopSO[] fixedShops =
+        Array.Empty<DungeonShopSO>();
+    [SerializeField, Tooltip(
+        "Shop used when the occurrence-specific slot is empty.")]
+    private DungeonShopSO defaultShop;
     [SerializeField] private EnemySO[] enemyPoolOverride =
         Array.Empty<EnemySO>();
 
@@ -142,6 +168,7 @@ public sealed class DungeonDefinition : ScriptableObject
         HasTutorial && useIntroBattleBalance;
     public EDungeonCompletionDestination CompletionDestination =>
         completionDestination;
+    public int InitialRunCurrency => Mathf.Max(0, initialRunCurrency);
     public DungeonFieldView FieldViewPrefab => fieldViewPrefab;
     public DungeonThemeDefinition Theme => theme;
     public DungeonBgmProfile BgmProfile => bgmProfile;
@@ -165,15 +192,47 @@ public sealed class DungeonDefinition : ScriptableObject
 
     public bool TryGetFixedEvent(int eventIndex, out DungeonEventSO dungeonEvent)
     {
-        dungeonEvent = null;
+        dungeonEvent = defaultEvent;
         if (fixedEvents == null || eventIndex < 0 ||
             eventIndex >= fixedEvents.Length)
         {
-            return false;
+            return dungeonEvent != null;
         }
 
-        dungeonEvent = fixedEvents[eventIndex];
+        dungeonEvent = fixedEvents[eventIndex] != null
+            ? fixedEvents[eventIndex]
+            : defaultEvent;
         return dungeonEvent != null;
+    }
+
+    public bool TryGetFixedRest(int restIndex, out DungeonRestSO rest)
+    {
+        rest = defaultRest;
+        if (fixedRests == null || restIndex < 0 ||
+            restIndex >= fixedRests.Length)
+        {
+            return rest != null;
+        }
+
+        rest = fixedRests[restIndex] != null
+            ? fixedRests[restIndex]
+            : defaultRest;
+        return rest != null;
+    }
+
+    public bool TryGetFixedShop(int shopIndex, out DungeonShopSO shop)
+    {
+        shop = defaultShop;
+        if (fixedShops == null || shopIndex < 0 ||
+            shopIndex >= fixedShops.Length)
+        {
+            return shop != null;
+        }
+
+        shop = fixedShops[shopIndex] != null
+            ? fixedShops[shopIndex]
+            : defaultShop;
+        return shop != null;
     }
 
     public int ResolveBattleCount(int runSeed)
@@ -205,11 +264,23 @@ public sealed class DungeonDefinition : ScriptableObject
         for (int index = 0; index < phases.Length; index++)
         {
             phases[index] = insertEventBetweenBattles && index % 2 == 1
-                ? EDungeonPhase.Event
+                ? ResolveRoomPhase(index / 2)
                 : EDungeonPhase.Battle;
         }
 
         return Array.AsReadOnly(phases);
+    }
+
+    private EDungeonPhase ResolveRoomPhase(int roomIndex)
+    {
+        if (roomPattern == null || roomPattern.Length == 0)
+            return EDungeonPhase.Event;
+
+        EDungeonPhase phase = roomPattern[
+            Math.Abs(roomIndex) % roomPattern.Length];
+        return phase == EDungeonPhase.Battle
+            ? EDungeonPhase.Event
+            : phase;
     }
 
     public bool TryValidate(out string error)
@@ -264,6 +335,29 @@ public sealed class DungeonDefinition : ScriptableObject
             return false;
         }
 
+        if (!TryValidateRooms(fixedEvents, "Event", out error) ||
+            !TryValidateRooms(fixedRests, "Rest", out error) ||
+            !TryValidateRooms(fixedShops, "Shop", out error))
+        {
+            return false;
+        }
+
+        if (defaultEvent != null && !defaultEvent.TryValidate(out error))
+        {
+            error = $"Default event: {error}";
+            return false;
+        }
+        if (defaultRest != null && !defaultRest.TryValidate(out error))
+        {
+            error = $"Default rest room: {error}";
+            return false;
+        }
+        if (defaultShop != null && !defaultShop.TryValidate(out error))
+        {
+            error = $"Default shop: {error}";
+            return false;
+        }
+
         if (tutorial != null)
         {
             if (tutorial.Steps.Count == 0)
@@ -298,6 +392,29 @@ public sealed class DungeonDefinition : ScriptableObject
             error =
                 "Intro battle balance requires a Tutorial definition.";
             return false;
+        }
+
+        error = string.Empty;
+        return true;
+    }
+
+    private static bool TryValidateRooms<T>(
+        T[] rooms,
+        string roomType,
+        out string error)
+        where T : DungeonRoomSO
+    {
+        if (rooms != null)
+        {
+            for (int index = 0; index < rooms.Length; index++)
+            {
+                if (rooms[index] != null &&
+                    !rooms[index].TryValidate(out error))
+                {
+                    error = $"{roomType} room {index + 1}: {error}";
+                    return false;
+                }
+            }
         }
 
         error = string.Empty;
@@ -352,6 +469,10 @@ public sealed class DungeonDefinition : ScriptableObject
         startingItemRule ??= new DungeonStartingItemRule();
         fixedBattles ??= Array.Empty<BattleSO>();
         fixedEvents ??= Array.Empty<DungeonEventSO>();
+        fixedRests ??= Array.Empty<DungeonRestSO>();
+        fixedShops ??= Array.Empty<DungeonShopSO>();
+        roomPattern ??= Array.Empty<EDungeonPhase>();
+        initialRunCurrency = Mathf.Max(0, initialRunCurrency);
         enemyPoolOverride ??= Array.Empty<EnemySO>();
         modifiers ??= Array.Empty<DungeonModifier>();
     }

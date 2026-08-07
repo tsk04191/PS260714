@@ -138,51 +138,19 @@ public sealed class EnemyEditorWindow : EditorWindow
 
     private void DrawRenameRow()
     {
-        using (new EditorGUILayout.HorizontalScope(EditorStyles.helpBox))
-        {
-            EditorGUILayout.LabelField(
+        PS260714AssetRenameCommand command =
+            PS260714EditorAssetUtility.DrawRenameRow(
                 "SO File Name",
-                GUILayout.Width(88f));
-            GUI.SetNextControlName(RenameControlName);
-            _renameAssetName =
-                EditorGUILayout.TextField(_renameAssetName);
-            bool apply = GUILayout.Button("Apply", GUILayout.Width(56f));
-            bool cancel = GUILayout.Button("Cancel", GUILayout.Width(56f));
-
-            if (_focusRenameField)
-            {
-                EditorGUI.FocusTextInControl(RenameControlName);
-                _focusRenameField = false;
-            }
-
-            Event current = Event.current;
-            if (current.type == EventType.KeyDown &&
-                GUI.GetNameOfFocusedControl() == RenameControlName)
-            {
-                if (current.keyCode == KeyCode.Return ||
-                    current.keyCode == KeyCode.KeypadEnter)
-                {
-                    apply = true;
-                    current.Use();
-                }
-                else if (current.keyCode == KeyCode.Escape)
-                {
-                    cancel = true;
-                    current.Use();
-                }
-            }
-
-            if (cancel)
-            {
-                CancelRename();
-                GUIUtility.ExitGUI();
-            }
-            if (apply)
-            {
-                RenameSelected();
-                GUIUtility.ExitGUI();
-            }
-        }
+                RenameControlName,
+                ref _renameAssetName,
+                ref _focusRenameField);
+        if (command == PS260714AssetRenameCommand.None)
+            return;
+        if (command == PS260714AssetRenameCommand.Apply)
+            RenameSelected();
+        else
+            CancelRename();
+        GUIUtility.ExitGUI();
     }
 
     private void DrawAssetList()
@@ -1421,38 +1389,16 @@ public sealed class EnemyEditorWindow : EditorWindow
 
     private void RefreshList()
     {
-        string selectedPath = _selected != null
-            ? AssetDatabase.GetAssetPath(_selected)
-            : string.Empty;
-        _definitions.Clear();
-        foreach (string guid in AssetDatabase.FindAssets(
-                     "t:EnemySO",
-                     new[] { AssetFolder }))
-        {
-            string path = AssetDatabase.GUIDToAssetPath(guid);
-            EnemySO definition =
-                AssetDatabase.LoadAssetAtPath<EnemySO>(path);
-            if (definition != null)
-                _definitions.Add(definition);
-        }
-
-        _definitions.Sort((left, right) => string.Compare(
-            left.name,
-            right.name,
-            StringComparison.OrdinalIgnoreCase));
+        string selectedPath =
+            PS260714EditorAssetUtility.CapturePath(_selected);
+        PS260714EditorAssetUtility.LoadAssets(
+            _definitions,
+            "t:EnemySO",
+            new[] { AssetFolder });
         EnemyDefinitionCatalog.Invalidate();
-
-        if (!string.IsNullOrEmpty(selectedPath))
-        {
-            EnemySO restored =
-                AssetDatabase.LoadAssetAtPath<EnemySO>(selectedPath);
-            if (restored != null)
-                SelectDefinition(restored);
-        }
-        else if (_selected == null && _definitions.Count > 0)
-        {
-            SelectDefinition(_definitions[0]);
-        }
+        SelectDefinition(PS260714EditorAssetUtility.RestoreSelection(
+            selectedPath,
+            _definitions));
     }
 
     private void CreateDefinition()
@@ -1476,21 +1422,19 @@ public sealed class EnemyEditorWindow : EditorWindow
             return;
 
         EnsureAssetFolder();
-        string sourcePath = AssetDatabase.GetAssetPath(_selected);
-        string destination = AssetDatabase.GenerateUniqueAssetPath(
-            AssetFolder + "/" + _selected.name + "_Copy.asset");
-        if (!AssetDatabase.CopyAsset(sourcePath, destination))
+        if (!PS260714EditorAssetUtility.TryDuplicate(
+                _selected,
+                AssetFolder,
+                "_Copy",
+                out EnemySO duplicate,
+                out string duplicateError))
         {
             EditorUtility.DisplayDialog(
                 "Duplicate Enemy",
-                "Failed to duplicate the selected EnemySO.",
+                duplicateError,
                 "OK");
             return;
         }
-
-        AssetDatabase.ImportAsset(destination);
-        EnemySO duplicate =
-            AssetDatabase.LoadAssetAtPath<EnemySO>(destination);
         if (duplicate != null)
         {
             duplicate.RegenerateEnemyId();
@@ -1534,21 +1478,10 @@ public sealed class EnemyEditorWindow : EditorWindow
         if (_selected == null)
             return;
 
-        string requested = (_renameAssetName ?? string.Empty).Trim();
-        if (string.IsNullOrEmpty(requested) ||
-            requested.IndexOfAny(
-                System.IO.Path.GetInvalidFileNameChars()) >= 0)
-        {
-            EditorUtility.DisplayDialog(
-                "Rename Enemy",
-                "Enter a valid file name.",
-                "OK");
-            return;
-        }
-
-        string path = AssetDatabase.GetAssetPath(_selected);
-        string error = AssetDatabase.RenameAsset(path, requested);
-        if (!string.IsNullOrEmpty(error))
+        if (!PS260714EditorAssetUtility.TryRename(
+                _selected,
+                _renameAssetName,
+                out string error))
         {
             EditorUtility.DisplayDialog(
                 "Rename Enemy",
@@ -1558,7 +1491,6 @@ public sealed class EnemyEditorWindow : EditorWindow
         }
 
         CancelRename();
-        AssetDatabase.SaveAssets();
         RefreshList();
     }
 

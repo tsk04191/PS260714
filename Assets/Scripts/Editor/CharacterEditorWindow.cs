@@ -726,49 +726,19 @@ public sealed class CharacterEditorWindow : EditorWindow
 
     private void DrawRenameSelectedCharacter()
     {
-        EditorGUILayout.BeginHorizontal(EditorStyles.helpBox);
-        EditorGUILayout.LabelField("SO File Name", GUILayout.Width(88f));
-
-        GUI.SetNextControlName(RenameControlName);
-        _renameAssetName = EditorGUILayout.TextField(_renameAssetName);
-        if (_focusRenameField)
-        {
-            EditorGUI.FocusTextInControl(RenameControlName);
-            _focusRenameField = false;
-        }
-
-        bool apply = GUILayout.Button("Apply", GUILayout.Width(56f));
-        bool cancel = GUILayout.Button("Cancel", GUILayout.Width(56f));
-
-        Event currentEvent = Event.current;
-        if (currentEvent.type == EventType.KeyDown &&
-            GUI.GetNameOfFocusedControl() == RenameControlName)
-        {
-            if (currentEvent.keyCode == KeyCode.Return ||
-                currentEvent.keyCode == KeyCode.KeypadEnter)
-            {
-                apply = true;
-                currentEvent.Use();
-            }
-            else if (currentEvent.keyCode == KeyCode.Escape)
-            {
-                cancel = true;
-                currentEvent.Use();
-            }
-        }
-        EditorGUILayout.EndHorizontal();
-
-        if (cancel)
-        {
-            CancelRenameSelectedCharacter();
-            GUIUtility.ExitGUI();
-        }
-
-        if (apply)
-        {
+        PS260714AssetRenameCommand command =
+            PS260714EditorAssetUtility.DrawRenameRow(
+                "SO File Name",
+                RenameControlName,
+                ref _renameAssetName,
+                ref _focusRenameField);
+        if (command == PS260714AssetRenameCommand.None)
+            return;
+        if (command == PS260714AssetRenameCommand.Apply)
             RenameSelectedCharacter();
-            GUIUtility.ExitGUI();
-        }
+        else
+            CancelRenameSelectedCharacter();
+        GUIUtility.ExitGUI();
     }
 
     private void DrawCharacterList()
@@ -6339,37 +6309,14 @@ public sealed class CharacterEditorWindow : EditorWindow
 
     private void RefreshCharacterList()
     {
-        string selectedPath = _selectedCharacter != null
-            ? AssetDatabase.GetAssetPath(_selectedCharacter)
-            : string.Empty;
-        _characters.Clear();
-
-        string[] guids = AssetDatabase.FindAssets("t:CharacterSO");
-        foreach (string guid in guids)
-        {
-            string path = AssetDatabase.GUIDToAssetPath(guid);
-            CharacterSO character =
-                AssetDatabase.LoadAssetAtPath<CharacterSO>(path);
-            if (character != null)
-                _characters.Add(character);
-        }
-
-        _characters.Sort((left, right) => string.Compare(
-            left != null ? left.name : string.Empty,
-            right != null ? right.name : string.Empty,
-            StringComparison.OrdinalIgnoreCase));
-
-        if (!string.IsNullOrEmpty(selectedPath))
-        {
-            CharacterSO restored = AssetDatabase.LoadAssetAtPath<CharacterSO>(
-                selectedPath);
-            if (restored != null)
-                SelectCharacter(restored);
-        }
-        else if (_selectedCharacter == null && _characters.Count > 0)
-        {
-            SelectCharacter(_characters[0]);
-        }
+        string selectedPath =
+            PS260714EditorAssetUtility.CapturePath(_selectedCharacter);
+        PS260714EditorAssetUtility.LoadAssets(
+            _characters,
+            "t:CharacterSO");
+        SelectCharacter(PS260714EditorAssetUtility.RestoreSelection(
+            selectedPath,
+            _characters));
     }
 
     private void CreateCharacter()
@@ -6481,63 +6428,10 @@ public sealed class CharacterEditorWindow : EditorWindow
             return;
         }
 
-        string sourcePath = AssetDatabase.GetAssetPath(character);
-        if (string.IsNullOrEmpty(sourcePath))
-        {
-            EditorUtility.DisplayDialog(
-                "Rename CharacterSO",
-                "The selected CharacterSO is not a saved asset.",
-                "OK");
-            return;
-        }
-
-        string newName = (_renameAssetName ?? string.Empty).Trim();
-        if (newName.EndsWith(".asset", StringComparison.OrdinalIgnoreCase))
-        {
-            newName = newName.Substring(
-                0,
-                newName.Length - ".asset".Length).Trim();
-        }
-
-        if (!IsValidAssetFileName(newName, out string validationError))
-        {
-            EditorUtility.DisplayDialog(
-                "Rename CharacterSO",
-                validationError,
-                "OK");
-            _focusRenameField = true;
-            return;
-        }
-
-        string currentName = System.IO.Path.GetFileNameWithoutExtension(
-            sourcePath);
-        if (string.Equals(currentName, newName, StringComparison.Ordinal))
-        {
-            CancelRenameSelectedCharacter();
-            return;
-        }
-
-        string directory = System.IO.Path.GetDirectoryName(sourcePath)
-            ?.Replace('\\', '/');
-        string extension = System.IO.Path.GetExtension(sourcePath);
-        string destinationPath = string.IsNullOrEmpty(directory)
-            ? $"{newName}{extension}"
-            : $"{directory}/{newName}{extension}";
-        UnityEngine.Object existingAsset =
-            AssetDatabase.LoadMainAssetAtPath(destinationPath);
-        if (existingAsset != null && existingAsset != character)
-        {
-            EditorUtility.DisplayDialog(
-                "Rename CharacterSO",
-                $"An asset named '{newName}{extension}' already exists in " +
-                "this folder.",
-                "OK");
-            _focusRenameField = true;
-            return;
-        }
-
-        string renameError = AssetDatabase.RenameAsset(sourcePath, newName);
-        if (!string.IsNullOrEmpty(renameError))
+        if (!PS260714EditorAssetUtility.TryRename(
+                character,
+                _renameAssetName,
+                out string renameError))
         {
             EditorUtility.DisplayDialog(
                 "Rename CharacterSO",
@@ -6549,48 +6443,10 @@ public sealed class CharacterEditorWindow : EditorWindow
 
         CancelRenameSelectedCharacter();
         CharacterDefinitionCatalog.Invalidate();
-        AssetDatabase.SaveAssets();
         RefreshCharacterList();
         SelectCharacter(character);
         EditorGUIUtility.PingObject(character);
         Repaint();
-    }
-
-    private static bool IsValidAssetFileName(
-        string fileName,
-        out string validationError)
-    {
-        if (string.IsNullOrWhiteSpace(fileName))
-        {
-            validationError = "Enter a file name.";
-            return false;
-        }
-
-        if (fileName == "." || fileName == "..")
-        {
-            validationError = "The file name cannot be '.' or '..'.";
-            return false;
-        }
-
-        if (fileName.IndexOfAny(
-                System.IO.Path.GetInvalidFileNameChars()) >= 0 ||
-            fileName.IndexOf('/') >= 0 ||
-            fileName.IndexOf('\\') >= 0)
-        {
-            validationError = "The file name contains an invalid character.";
-            return false;
-        }
-
-        if (fileName.EndsWith(".", StringComparison.Ordinal) ||
-            fileName.EndsWith(" ", StringComparison.Ordinal))
-        {
-            validationError =
-                "The file name cannot end with a period or a space.";
-            return false;
-        }
-
-        validationError = string.Empty;
-        return true;
     }
 
     private void DuplicateSelectedCharacter()
@@ -6598,29 +6454,22 @@ public sealed class CharacterEditorWindow : EditorWindow
         if (_selectedCharacter == null)
             return;
 
-        string sourcePath = AssetDatabase.GetAssetPath(_selectedCharacter);
-        if (string.IsNullOrEmpty(sourcePath))
-            return;
-
-        string directory = System.IO.Path.GetDirectoryName(sourcePath)
-            ?.Replace('\\', '/');
-        string fileName = System.IO.Path.GetFileNameWithoutExtension(
-            sourcePath);
-        string destinationPath = AssetDatabase.GenerateUniqueAssetPath(
-            $"{directory}/{fileName} Copy.asset");
-        if (!AssetDatabase.CopyAsset(sourcePath, destinationPath))
+        if (!PS260714EditorAssetUtility.TryDuplicate(
+                _selectedCharacter,
+                null,
+                " Copy",
+                out CharacterSO duplicate,
+                out string duplicateError))
         {
             EditorUtility.DisplayDialog(
                 "Character Editor",
-                "The character asset could not be duplicated.",
+                duplicateError,
                 "OK");
             return;
         }
 
         AssetDatabase.SaveAssets();
         CharacterDefinitionCatalog.Invalidate();
-        CharacterSO duplicate = AssetDatabase.LoadAssetAtPath<CharacterSO>(
-            destinationPath);
         if (duplicate != null)
         {
             duplicate.RegenerateCharacterId();

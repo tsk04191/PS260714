@@ -111,43 +111,16 @@ public sealed class ItemEditorWindow : EditorWindow
 
     private void DrawRenameRow()
     {
-        using (new EditorGUILayout.HorizontalScope(
-                   EditorStyles.helpBox))
-        {
-            GUILayout.Label("에셋 이름", GUILayout.Width(64f));
-            GUI.SetNextControlName(RenameControlName);
-            _renameText = EditorGUILayout.TextField(_renameText);
-
-            if (_focusRenameField)
-            {
-                EditorGUI.FocusTextInControl(RenameControlName);
-                _focusRenameField = false;
-            }
-
-            if (GUILayout.Button("변경", GUILayout.Width(56f)))
-                RenameSelected();
-            if (GUILayout.Button("취소", GUILayout.Width(56f)))
-                CancelRename();
-        }
-
-        Event current = Event.current;
-        if (current.type != EventType.KeyDown ||
-            GUI.GetNameOfFocusedControl() != RenameControlName)
-        {
-            return;
-        }
-
-        if (current.keyCode == KeyCode.Return ||
-            current.keyCode == KeyCode.KeypadEnter)
-        {
+        PS260714AssetRenameCommand command =
+            PS260714EditorAssetUtility.DrawRenameRow(
+                "SO File Name",
+                RenameControlName,
+                ref _renameText,
+                ref _focusRenameField);
+        if (command == PS260714AssetRenameCommand.Apply)
             RenameSelected();
-            current.Use();
-        }
-        else if (current.keyCode == KeyCode.Escape)
-        {
+        else if (command == PS260714AssetRenameCommand.Cancel)
             CancelRename();
-            current.Use();
-        }
     }
 
     private void DrawItemList()
@@ -809,23 +782,20 @@ public sealed class ItemEditorWindow : EditorWindow
             return;
 
         SaveSelected();
-        string sourcePath = AssetDatabase.GetAssetPath(_selected);
-        string directory = Path.GetDirectoryName(sourcePath)
-            ?.Replace('\\', '/') ?? AssetRoot;
-        string destination = AssetDatabase.GenerateUniqueAssetPath(
-            $"{directory}/{_selected.name} Copy.asset");
-        if (!AssetDatabase.CopyAsset(sourcePath, destination))
+        if (!PS260714EditorAssetUtility.TryDuplicate(
+                _selected,
+                null,
+                " Copy",
+                out ItemDefinitionSO duplicate,
+                out string duplicateError))
         {
             EditorUtility.DisplayDialog(
                 "Item Editor",
-                "아이템 복제에 실패했습니다.",
+                duplicateError,
                 "확인");
             return;
         }
 
-        ItemDefinitionSO duplicate =
-            AssetDatabase.LoadAssetAtPath<ItemDefinitionSO>(
-                destination);
         if (duplicate != null)
         {
             SerializedObject serialized = new(duplicate);
@@ -870,20 +840,10 @@ public sealed class ItemEditorWindow : EditorWindow
             return;
         }
 
-        string requested = _renameText?.Trim() ?? string.Empty;
-        if (string.IsNullOrWhiteSpace(requested))
-        {
-            EditorUtility.DisplayDialog(
-                "Item Editor",
-                "에셋 이름을 입력하세요.",
-                "확인");
-            _focusRenameField = true;
-            return;
-        }
-
-        string path = AssetDatabase.GetAssetPath(_selected);
-        string error = AssetDatabase.RenameAsset(path, requested);
-        if (!string.IsNullOrWhiteSpace(error))
+        if (!PS260714EditorAssetUtility.TryRename(
+                _selected,
+                _renameText,
+                out string error))
         {
             EditorUtility.DisplayDialog(
                 "Item Editor",
@@ -893,7 +853,6 @@ public sealed class ItemEditorWindow : EditorWindow
             return;
         }
 
-        AssetDatabase.SaveAssets();
         CancelRename();
         RefreshAssets(true);
     }
@@ -934,32 +893,18 @@ public sealed class ItemEditorWindow : EditorWindow
 
     private void RefreshAssets(bool preserveSelection)
     {
-        string selectedPath = preserveSelection && _selected != null
-            ? AssetDatabase.GetAssetPath(_selected)
+        string selectedPath = preserveSelection
+            ? PS260714EditorAssetUtility.CapturePath(_selected)
             : string.Empty;
-
-        _items.Clear();
-        string[] guids = AssetDatabase.FindAssets(
+        PS260714EditorAssetUtility.LoadAssets(
+            _items,
             string.Empty,
-            new[] { AssetRoot });
-        for (int index = 0; index < guids.Length; index++)
-        {
-            string path = AssetDatabase.GUIDToAssetPath(guids[index]);
-            ItemDefinitionSO item =
-                AssetDatabase.LoadAssetAtPath<ItemDefinitionSO>(path);
-            if (item != null)
-                _items.Add(item);
-        }
-
-        _items.Sort(CompareItems);
-
-        ItemDefinitionSO next = null;
-        if (!string.IsNullOrWhiteSpace(selectedPath))
-        {
-            next = AssetDatabase.LoadAssetAtPath<ItemDefinitionSO>(
-                selectedPath);
-        }
-        next ??= _items.Count > 0 ? _items[0] : null;
+            new[] { AssetRoot },
+            CompareItems);
+        ItemDefinitionSO next =
+            PS260714EditorAssetUtility.RestoreSelection(
+                selectedPath,
+                _items);
         SelectItem(next);
         Repaint();
     }

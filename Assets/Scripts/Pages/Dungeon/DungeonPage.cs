@@ -162,11 +162,16 @@ public class DungeonPage : MonoBehaviour, IPage
     private bool _characterInfoInstancesPrepared;
     private bool _flowEventsBound;
     private bool _battleEventsBound;
-    private bool _eventRewardPending;
+    private bool _battleRewardPending;
     private bool _startingCharacterSelectionPending;
     private bool _startingItemSelectionPending;
     private BattleManager _battleManager;
     private DungeonEventTab _eventTab;
+    private DungeonEventTab _battleRewardOverlay;
+    private GameObject _battleRewardOverlayRoot;
+    private DungeonRoomView _eventRoomView;
+    private DungeonRoomView _restRoomView;
+    private DungeonRoomView _shopRoomView;
     private DungeonTutorialController _tutorialController;
     [SerializeField] private DungeonFieldView fieldView;
     private DungeonDefinition _pendingDefinition;
@@ -329,6 +334,10 @@ public class DungeonPage : MonoBehaviour, IPage
         UnbindFlowEvents();
         battleTab?.Teardown();
         _eventTab?.Teardown();
+        _battleRewardOverlay?.Teardown();
+        _eventRoomView?.Teardown();
+        _restRoomView?.Teardown();
+        _shopRoomView?.Teardown();
 
         if (_battleManager != null)
         {
@@ -498,6 +507,8 @@ public class DungeonPage : MonoBehaviour, IPage
         }
 
         InitializeEventTab();
+        InitializeBattleRewardOverlay();
+        InitializeRoomViews();
         EnsureFieldView();
         EnsureTutorialController();
 
@@ -510,7 +521,7 @@ public class DungeonPage : MonoBehaviour, IPage
     {
         if (_startingCharacterSelectionPending ||
             _startingItemSelectionPending ||
-            CurrentPhase == EDungeonPhase.Event && _eventRewardPending)
+            _battleRewardPending)
         {
             return false;
         }
@@ -582,7 +593,9 @@ public class DungeonPage : MonoBehaviour, IPage
         }
 
         _tutorialController?.StopTutorial();
-        _eventRewardPending = false;
+        _battleRewardPending = false;
+        HideBattleRewardOverlay();
+        HideRoomViews();
         _startingCharacterSelectionPending = false;
         EDungeonCompletionDestination destination =
             _session.Definition.CompletionDestination;
@@ -619,13 +632,20 @@ public class DungeonPage : MonoBehaviour, IPage
         int battleCount = definition.ResolveBattleCount(runSeed);
         IReadOnlyList<EDungeonPhase> phases =
             definition.BuildPhaseSequence(battleCount, runSeed);
-        _session.Begin(definition, runSeed, battleCount, phases);
+        _session.Begin(
+            definition,
+            runSeed,
+            battleCount,
+            phases,
+            definition.InitialRunCurrency);
         RequestDungeonBgm(
             definition,
             EDungeonBgmState.Ready);
         fieldView?.ApplyTheme(definition.Theme);
         GenerateBattlePlans(battleCount, runSeed);
-        _eventRewardPending = false;
+        _battleRewardPending = false;
+        HideBattleRewardOverlay();
+        HideRoomViews();
         _startingCharacterSelectionPending = false;
         NotifyRunStarted();
 
@@ -893,7 +913,7 @@ public class DungeonPage : MonoBehaviour, IPage
         int definitionIndex,
         CharacterDungeonUpgradeType upgradeType)
     {
-        if (!_eventRewardPending || slotIndex < 0 ||
+        if (!_battleRewardPending || slotIndex < 0 ||
             slotIndex >= _ownedTurrets.Count)
         {
             return false;
@@ -907,7 +927,7 @@ public class DungeonPage : MonoBehaviour, IPage
             return false;
         }
 
-        CompleteEventReward();
+        CompleteBattleReward();
         return true;
     }
 
@@ -916,7 +936,7 @@ public class DungeonPage : MonoBehaviour, IPage
         int definitionIndex,
         string upgradeId)
     {
-        if (!_eventRewardPending || slotIndex < 0 ||
+        if (!_battleRewardPending || slotIndex < 0 ||
             slotIndex >= _ownedTurrets.Count)
         {
             return false;
@@ -930,7 +950,7 @@ public class DungeonPage : MonoBehaviour, IPage
             return false;
         }
 
-        CompleteEventReward();
+        CompleteBattleReward();
         return true;
     }
 
@@ -942,7 +962,7 @@ public class DungeonPage : MonoBehaviour, IPage
 
     public bool TryApplyEnergyUpgrade(EDungeonEnergyUpgradeType upgradeType)
     {
-        if (!_eventRewardPending || !CanApplyEnergyUpgrade(upgradeType))
+        if (!_battleRewardPending || !CanApplyEnergyUpgrade(upgradeType))
             return false;
 
         switch (upgradeType)
@@ -962,7 +982,7 @@ public class DungeonPage : MonoBehaviour, IPage
         _battleManager?.ConfigureActiveSkillResource(
             _maximumEnergy,
             _energyRechargeDuration);
-        CompleteEventReward();
+        CompleteBattleReward();
         return true;
     }
 
@@ -1009,7 +1029,15 @@ public class DungeonPage : MonoBehaviour, IPage
 
     public bool TryAcquireBattleItem(BattleItemSO item)
     {
-        if (!_eventRewardPending || !CanAcquireBattleItem(item))
+        if (!_battleRewardPending || !AcquireBattleItemInternal(item))
+            return false;
+        CompleteBattleReward();
+        return true;
+    }
+
+    private bool AcquireBattleItemInternal(BattleItemSO item)
+    {
+        if (!CanAcquireBattleItem(item))
             return false;
 
         BattleItemRunState state = GetOrCreateBattleItemState(item);
@@ -1017,7 +1045,6 @@ public class DungeonPage : MonoBehaviour, IPage
             return false;
 
         BattleItemsChanged?.Invoke();
-        CompleteEventReward();
         return true;
     }
 
@@ -1088,7 +1115,7 @@ public class DungeonPage : MonoBehaviour, IPage
         CharacterSO definition,
         int replacementSlotIndex = -1)
     {
-        if (!_eventRewardPending || definition == null ||
+        if (!_battleRewardPending || definition == null ||
             !CanAcquireCharacterReward(definition))
         {
             return false;
@@ -1118,7 +1145,7 @@ public class DungeonPage : MonoBehaviour, IPage
         }
 
         RecordAcquiredCharacter(definition);
-        CompleteEventReward();
+        CompleteBattleReward();
         return true;
     }
 
@@ -1906,7 +1933,10 @@ public class DungeonPage : MonoBehaviour, IPage
             _session.SetBattleNumber(flowController.CurrentBattleNumber);
             _session.SetActivity(EDungeonRunActivity.Battle);
             _session.Pause.Remove(EDungeonPauseReason.NonBattlePhase);
-            _eventRewardPending = false;
+            _session.Pause.Remove(EDungeonPauseReason.BattleReward);
+            _battleRewardPending = false;
+            HideBattleRewardOverlay();
+            HideRoomViews();
             if (_battleManager.State == EBattleState.Completed)
                 StartNewBattle();
             else if (!_battleManager.HasSession)
@@ -1921,34 +1951,9 @@ public class DungeonPage : MonoBehaviour, IPage
                 _ => EDungeonRunActivity.Event,
             });
             _session.Pause.Add(EDungeonPauseReason.NonBattlePhase);
-            if (phase == EDungeonPhase.Event)
-            {
-                _eventRewardPending = true;
-                int eventIndex = GetCurrentEventIndex();
-                if (_session.Definition != null &&
-                    _session.Definition.TryGetFixedEvent(
-                        eventIndex,
-                        out DungeonEventSO dungeonEvent))
-                {
-                    RequestDungeonBgm(
-                        _session.Definition,
-                        EDungeonBgmState.Rest,
-                        dungeonEvent.BgmOverride);
-                }
-                else
-                {
-                    RequestDungeonBgm(
-                        _session.Definition,
-                        EDungeonBgmState.Ready);
-                }
-                _eventTab?.ShowUpgradeEvent();
-            }
-            else
-            {
-                RequestDungeonBgm(
-                    _session.Definition,
-                    EDungeonBgmState.Rest);
-            }
+            _battleRewardPending = false;
+            HideBattleRewardOverlay();
+            ShowDungeonRoom(phase);
         }
 
         NotifyPhaseEntered(phase);
@@ -1989,7 +1994,19 @@ public class DungeonPage : MonoBehaviour, IPage
         if (CurrentPhase == EDungeonPhase.Battle && flowController != null &&
             !flowController.IsCompleted)
         {
-            flowController.TryAdvance();
+            if (flowController.HasNextStep)
+            {
+                _battleRewardPending = true;
+                _session.Pause.Add(EDungeonPauseReason.BattleReward);
+                RequestDungeonBgm(
+                    _session.Definition,
+                    EDungeonBgmState.Ready);
+                ShowBattleRewardOverlay();
+            }
+            else
+            {
+                flowController.TryAdvance();
+            }
         }
     }
 
@@ -2010,7 +2027,9 @@ public class DungeonPage : MonoBehaviour, IPage
         if (result == EBattleResult.Victory)
             return;
 
-        _eventRewardPending = false;
+        _battleRewardPending = false;
+        HideBattleRewardOverlay();
+        HideRoomViews();
         _startingCharacterSelectionPending = false;
         _session.Finish(EDungeonRunResult.Defeat);
         _battleManager?.EndBattle(board);
@@ -2031,7 +2050,9 @@ public class DungeonPage : MonoBehaviour, IPage
             return;
         }
 
-        _eventRewardPending = false;
+        _battleRewardPending = false;
+        HideBattleRewardOverlay();
+        HideRoomViews();
         _startingCharacterSelectionPending = false;
         _startingItemSelectionPending = false;
         _session.Finish(EDungeonRunResult.Clear);
@@ -2046,7 +2067,9 @@ public class DungeonPage : MonoBehaviour, IPage
         if (!_session.IsActive)
             return;
 
-        _eventRewardPending = false;
+        _battleRewardPending = false;
+        HideBattleRewardOverlay();
+        HideRoomViews();
         _startingCharacterSelectionPending = false;
         _session.Finish(EDungeonRunResult.Clear);
         flowController?.ShowEventTab();
@@ -2055,12 +2078,14 @@ public class DungeonPage : MonoBehaviour, IPage
         RunEnded?.Invoke(_session.Result);
     }
 
-    private void CompleteEventReward()
+    private void CompleteBattleReward()
     {
-        if (!_eventRewardPending)
+        if (!_battleRewardPending)
             return;
 
-        _eventRewardPending = false;
+        _battleRewardPending = false;
+        _session.Pause.Remove(EDungeonPauseReason.BattleReward);
+        HideBattleRewardOverlay();
         flowController?.TryAdvance();
     }
 
@@ -2372,6 +2397,92 @@ public class DungeonPage : MonoBehaviour, IPage
         _eventTab.Initialize(eventTabObject, this);
     }
 
+    private void InitializeBattleRewardOverlay()
+    {
+        GameObject battleRoot = flowController != null
+            ? flowController.BattleTab
+            : null;
+        if (battleRoot == null || _battleRewardOverlayRoot != null)
+            return;
+
+        _battleRewardOverlayRoot = new GameObject(
+            "grpBattleRewardOverlay",
+            typeof(RectTransform),
+            typeof(CanvasRenderer),
+            typeof(Image),
+            typeof(CanvasGroup));
+        RectTransform overlayRect =
+            (RectTransform)_battleRewardOverlayRoot.transform;
+        overlayRect.SetParent(battleRoot.transform, false);
+        overlayRect.anchorMin = Vector2.zero;
+        overlayRect.anchorMax = Vector2.one;
+        overlayRect.offsetMin = Vector2.zero;
+        overlayRect.offsetMax = Vector2.zero;
+        overlayRect.SetAsLastSibling();
+
+        Image backdrop = _battleRewardOverlayRoot.GetComponent<Image>();
+        backdrop.color = new Color(0.015f, 0.025f, 0.02f, 0.72f);
+        backdrop.raycastTarget = true;
+        CanvasGroup canvasGroup =
+            _battleRewardOverlayRoot.GetComponent<CanvasGroup>();
+        canvasGroup.interactable = true;
+        canvasGroup.blocksRaycasts = true;
+
+        _battleRewardOverlay = new DungeonEventTab();
+        _battleRewardOverlay.Initialize(
+            _battleRewardOverlayRoot,
+            this,
+            true);
+        _battleRewardOverlayRoot.SetActive(false);
+    }
+
+    private void InitializeRoomViews()
+    {
+        if (flowController == null)
+            return;
+
+        _eventRoomView ??= new DungeonRoomView();
+        _eventRoomView.Initialize(
+            flowController.EventTab,
+            this,
+            EDungeonPhase.Event);
+        _restRoomView ??= new DungeonRoomView();
+        _restRoomView.Initialize(
+            flowController.RestTab,
+            this,
+            EDungeonPhase.Rest);
+        _shopRoomView ??= new DungeonRoomView();
+        _shopRoomView.Initialize(
+            flowController.ShopTab,
+            this,
+            EDungeonPhase.Shop);
+        HideRoomViews();
+    }
+
+    private void ShowBattleRewardOverlay()
+    {
+        InitializeBattleRewardOverlay();
+        if (_battleRewardOverlayRoot == null)
+            return;
+
+        _battleRewardOverlayRoot.SetActive(true);
+        _battleRewardOverlayRoot.transform.SetAsLastSibling();
+        _battleRewardOverlay?.ShowUpgradeEvent();
+    }
+
+    private void HideBattleRewardOverlay()
+    {
+        if (_battleRewardOverlayRoot != null)
+            _battleRewardOverlayRoot.SetActive(false);
+    }
+
+    private void HideRoomViews()
+    {
+        _eventRoomView?.Hide();
+        _restRoomView?.Hide();
+        _shopRoomView?.Hide();
+    }
+
     private void EnsureTutorialController()
     {
         if (_tutorialController == null)
@@ -2484,7 +2595,9 @@ public class DungeonPage : MonoBehaviour, IPage
     private void ResetCurrentRunForNavigation()
     {
         _tutorialController?.StopTutorial();
-        _eventRewardPending = false;
+        _battleRewardPending = false;
+        HideBattleRewardOverlay();
+        HideRoomViews();
         _startingCharacterSelectionPending = false;
         if (_battleManager != null && _battleManager.HasSession)
             _battleManager.EndBattle(board);
@@ -2537,23 +2650,406 @@ public class DungeonPage : MonoBehaviour, IPage
             modifier.OnRunEnded(GetRuntimeContext(), result));
     }
 
-    private int GetCurrentEventIndex()
+    private int GetCurrentRoomIndex(EDungeonPhase phase)
     {
         IReadOnlyList<EDungeonPhase> phases = _session.PhaseSequence;
         if (phases == null || flowController == null)
             return 0;
 
-        int eventCount = 0;
+        int roomCount = 0;
         int end = Mathf.Min(
             flowController.CurrentStepIndex,
             phases.Count - 1);
         for (int index = 0; index <= end; index++)
         {
-            if (phases[index] == EDungeonPhase.Event)
-                eventCount++;
+            if (phases[index] == phase)
+                roomCount++;
         }
 
-        return Mathf.Max(0, eventCount - 1);
+        return Mathf.Max(0, roomCount - 1);
+    }
+
+    private void ShowDungeonRoom(EDungeonPhase phase)
+    {
+        HideRoomViews();
+        _eventTab?.SetPanelVisible(false);
+        int roomIndex = GetCurrentRoomIndex(phase);
+        DungeonRoomSO room = null;
+        DungeonRoomView view = null;
+        DungeonDefinition definition = _session.Definition;
+
+        switch (phase)
+        {
+            case EDungeonPhase.Event:
+                view = _eventRoomView;
+                if (definition != null &&
+                    definition.TryGetFixedEvent(
+                        roomIndex,
+                        out DungeonEventSO dungeonEvent))
+                {
+                    room = dungeonEvent;
+                }
+                break;
+            case EDungeonPhase.Rest:
+                view = _restRoomView;
+                if (definition != null &&
+                    definition.TryGetFixedRest(
+                        roomIndex,
+                        out DungeonRestSO dungeonRest))
+                {
+                    room = dungeonRest;
+                }
+                break;
+            case EDungeonPhase.Shop:
+                view = _shopRoomView;
+                if (definition != null &&
+                    definition.TryGetFixedShop(
+                        roomIndex,
+                        out DungeonShopSO dungeonShop))
+                {
+                    room = dungeonShop;
+                }
+                break;
+        }
+
+        RequestDungeonBgm(
+            definition,
+            EDungeonBgmState.Rest,
+            room != null ? room.BgmOverride : null);
+        view?.Show(room, roomIndex);
+    }
+
+    internal bool CanUseDungeonRoomChoice(
+        EDungeonPhase phase,
+        int roomIndex,
+        int choiceIndex,
+        DungeonRoomChoiceDefinition choice)
+    {
+        if (!_session.IsActive || CurrentPhase != phase || choice == null ||
+            _session.RunCurrency < choice.RunCurrencyCost)
+        {
+            return false;
+        }
+
+        if (phase == EDungeonPhase.Shop && choice.SinglePurchase &&
+            IsShopProductSold(roomIndex, choiceIndex))
+        {
+            return false;
+        }
+
+        IReadOnlyList<DungeonRoomConditionDefinition> conditions =
+            choice.Conditions;
+        for (int index = 0; index < conditions.Count; index++)
+        {
+            if (!EvaluateDungeonRoomCondition(conditions[index]))
+                return false;
+        }
+
+        long currency = _session.RunCurrency - choice.RunCurrencyCost;
+        IReadOnlyList<DungeonRoomEffectDefinition> effects = choice.Effects;
+        HashSet<BattleItemSO> grantedItems = new();
+        for (int index = 0; index < effects.Count; index++)
+        {
+            DungeonRoomEffectDefinition effect = effects[index];
+            if (effect == null)
+                return false;
+            if (effect.EffectType == EDungeonRoomEffectType.RunCurrency)
+            {
+                currency += effect.Amount;
+                if (currency < 0)
+                    return false;
+            }
+            else if (effect.EffectType == EDungeonRoomEffectType.BattleItem &&
+                     (!grantedItems.Add(effect.BattleItem) ||
+                      !CanAcquireBattleItem(effect.BattleItem)))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private bool EvaluateDungeonRoomCondition(
+        DungeonRoomConditionDefinition condition)
+    {
+        if (condition == null)
+            return false;
+
+        switch (condition.ConditionType)
+        {
+            case EDungeonRoomConditionType.MinimumRunCurrency:
+                return _session.RunCurrency >= condition.Amount;
+            case EDungeonRoomConditionType.PartyHasInjuredMember:
+                foreach (CharacterRuntime character in _ownedTurrets)
+                {
+                    if (character != null && character.CurrentHealth > 0 &&
+                        character.CurrentHealth < character.MaximumHealth)
+                    {
+                        return true;
+                    }
+                }
+                return false;
+            case EDungeonRoomConditionType.OwnsBattleItem:
+                return IsBattleItemOwned(condition.BattleItem);
+            case EDungeonRoomConditionType.DoesNotOwnBattleItem:
+                return !IsBattleItemOwned(condition.BattleItem);
+            default:
+                return false;
+        }
+    }
+
+    internal bool TryUseDungeonRoomChoice(
+        EDungeonPhase phase,
+        int roomIndex,
+        int choiceIndex,
+        DungeonRoomChoiceDefinition choice)
+    {
+        if (!CanUseDungeonRoomChoice(
+                phase,
+                roomIndex,
+                choiceIndex,
+                choice) ||
+            !_session.TrySpendRunCurrency(choice.RunCurrencyCost))
+        {
+            return false;
+        }
+
+        IReadOnlyList<DungeonRoomEffectDefinition> effects = choice.Effects;
+        for (int index = 0; index < effects.Count; index++)
+            ApplyDungeonRoomEffect(effects[index]);
+
+        if (phase == EDungeonPhase.Shop)
+        {
+            if (choice.SinglePurchase)
+            {
+                _session.State.SetInt(
+                    GetShopProductStateKey(roomIndex, choiceIndex),
+                    1);
+            }
+            return true;
+        }
+
+        _session.State.SetString(
+            $"room:{phase}:{roomIndex}:choice",
+            choice.ChoiceId);
+        CompleteDungeonRoom();
+        return true;
+    }
+
+    internal void GetActiveDungeonEventChoices(
+        DungeonEventSO dungeonEvent,
+        int roomIndex,
+        List<DungeonEventChoiceNodeDefinition> results)
+    {
+        if (results == null)
+            throw new ArgumentNullException(nameof(results));
+
+        results.Clear();
+        if (dungeonEvent == null)
+            return;
+
+        string activeIds = _session.State.GetString(
+            GetEventActiveChoicesStateKey(roomIndex));
+        if (string.IsNullOrWhiteSpace(activeIds))
+        {
+            dungeonEvent.GetEntryChoices(results);
+            return;
+        }
+
+        string[] ids = activeIds.Split(
+            new[] { '|' },
+            StringSplitOptions.RemoveEmptyEntries);
+        for (int index = 0; index < ids.Length; index++)
+        {
+            if (dungeonEvent.TryGetChoiceNode(ids[index], out var node))
+                results.Add(node);
+        }
+    }
+
+    internal bool TryUseDungeonEventChoice(
+        DungeonEventSO dungeonEvent,
+        int roomIndex,
+        DungeonEventChoiceNodeDefinition node)
+    {
+        if (dungeonEvent == null || node == null ||
+            CurrentPhase != EDungeonPhase.Event ||
+            !dungeonEvent.UsesChoiceGraph ||
+            !IsDungeonEventChoiceActive(
+                dungeonEvent,
+                roomIndex,
+                node.NodeId))
+        {
+            return false;
+        }
+
+        string visitKey = GetEventNodeVisitStateKey(
+            roomIndex,
+            node.NodeId);
+        if (_session.State.GetInt(visitKey) > 0)
+        {
+            Debug.LogError(
+                $"Dungeon event '{dungeonEvent.EventId}' attempted to " +
+                $"visit choice node '{node.NodeId}' more than once.",
+                this);
+            return false;
+        }
+
+        int choiceIndex = dungeonEvent.FindChoiceIndex(node.NodeId);
+        if (choiceIndex < 0 || !CanUseDungeonRoomChoice(
+                EDungeonPhase.Event,
+                roomIndex,
+                choiceIndex,
+                node) ||
+            !_session.TrySpendRunCurrency(node.RunCurrencyCost))
+        {
+            return false;
+        }
+
+        IReadOnlyList<DungeonRoomEffectDefinition> effects = node.Effects;
+        for (int index = 0; index < effects.Count; index++)
+            ApplyDungeonRoomEffect(effects[index]);
+
+        _session.State.SetInt(visitKey, 1);
+        _session.State.SetString(
+            GetEventLastChoiceStateKey(roomIndex),
+            node.NodeId);
+        if (node.EndsEvent)
+        {
+            _session.State.SetString(
+                GetEventActiveChoicesStateKey(roomIndex),
+                string.Empty);
+            CompleteDungeonRoom();
+            return true;
+        }
+
+        _session.State.SetString(
+            GetEventActiveChoicesStateKey(roomIndex),
+            string.Join("|", node.NextChoiceNodeIds));
+        return true;
+    }
+
+    internal string GetDungeonEventResultDescription(
+        DungeonEventSO dungeonEvent,
+        int roomIndex)
+    {
+        if (dungeonEvent == null)
+            return string.Empty;
+
+        string nodeId = _session.State.GetString(
+            GetEventLastChoiceStateKey(roomIndex));
+        return dungeonEvent.TryGetChoiceNode(nodeId, out var node)
+            ? node.ResultDescription
+            : string.Empty;
+    }
+
+    private bool IsDungeonEventChoiceActive(
+        DungeonEventSO dungeonEvent,
+        int roomIndex,
+        string nodeId)
+    {
+        string activeIds = _session.State.GetString(
+            GetEventActiveChoicesStateKey(roomIndex));
+        if (string.IsNullOrWhiteSpace(activeIds))
+            return dungeonEvent.IsEntryChoice(nodeId);
+
+        string[] ids = activeIds.Split(
+            new[] { '|' },
+            StringSplitOptions.RemoveEmptyEntries);
+        for (int index = 0; index < ids.Length; index++)
+        {
+            if (string.Equals(ids[index], nodeId, StringComparison.Ordinal))
+                return true;
+        }
+
+        return false;
+    }
+
+    private void ApplyDungeonRoomEffect(DungeonRoomEffectDefinition effect)
+    {
+        switch (effect.EffectType)
+        {
+            case EDungeonRoomEffectType.RunCurrency:
+                _session.AddRunCurrency(effect.Amount);
+                break;
+            case EDungeonRoomEffectType.HealPartyFlat:
+                HealParty(effect.Amount, false);
+                break;
+            case EDungeonRoomEffectType.HealPartyPercent:
+                HealParty(effect.Amount, true);
+                break;
+            case EDungeonRoomEffectType.MaximumEnergy:
+                _maximumEnergy = Mathf.Max(
+                    1,
+                    _maximumEnergy + effect.Amount);
+                _battleManager?.ConfigureActiveSkillResource(
+                    _maximumEnergy,
+                    _energyRechargeDuration);
+                break;
+            case EDungeonRoomEffectType.RechargeSpeed:
+                _energyRechargeDuration = TimePrecision.Normalize(
+                    _energyRechargeDuration -
+                    EnergyRechargeUpgradeAmount * effect.Amount,
+                    MinimumEnergyRechargeDuration);
+                _battleManager?.ConfigureActiveSkillResource(
+                    _maximumEnergy,
+                    _energyRechargeDuration);
+                break;
+            case EDungeonRoomEffectType.BattleItem:
+                AcquireBattleItemInternal(effect.BattleItem);
+                break;
+        }
+    }
+
+    private void HealParty(int amount, bool percentage)
+    {
+        foreach (CharacterRuntime character in _ownedTurrets)
+        {
+            if (character == null)
+                continue;
+            int healAmount = percentage
+                ? Mathf.CeilToInt(character.MaximumHealth * amount / 100f)
+                : amount;
+            character.Heal(healAmount);
+        }
+    }
+
+    internal bool IsShopProductSold(int roomIndex, int productIndex)
+    {
+        return _session.State.GetInt(
+                   GetShopProductStateKey(roomIndex, productIndex)) != 0;
+    }
+
+    internal void CompleteDungeonRoom()
+    {
+        if (CurrentPhase == EDungeonPhase.Battle)
+            return;
+
+        flowController?.TryAdvance();
+    }
+
+    private static string GetShopProductStateKey(
+        int roomIndex,
+        int productIndex)
+    {
+        return $"shop:{roomIndex}:product:{productIndex}:sold";
+    }
+
+    private static string GetEventActiveChoicesStateKey(int roomIndex)
+    {
+        return $"event:{roomIndex}:active";
+    }
+
+    private static string GetEventLastChoiceStateKey(int roomIndex)
+    {
+        return $"event:{roomIndex}:last-choice";
+    }
+
+    private static string GetEventNodeVisitStateKey(
+        int roomIndex,
+        string nodeId)
+    {
+        return $"event:{roomIndex}:visited:{nodeId}";
     }
 
     private static void RequestDungeonBgm(
@@ -2957,17 +3453,22 @@ public sealed class DungeonEventTab
     private CharacterSO _replacementDefinition;
     private bool _initialized;
     private bool _localizationEventsBound;
+    private bool _isBattleRewardOverlay;
 
     public RectTransform FirstStartingChoiceRect =>
         _firstStartingChoiceRect;
 
-    public void Initialize(GameObject root, DungeonPage page)
+    public void Initialize(
+        GameObject root,
+        DungeonPage page,
+        bool isBattleRewardOverlay = false)
     {
         if (root == null || page == null)
             return;
 
         _root = root;
         _page = page;
+        _isBattleRewardOverlay = isBattleRewardOverlay;
         if (_initialized)
         {
             BindLocalizationEvents();
@@ -3009,11 +3510,20 @@ public sealed class DungeonEventTab
         _page = null;
     }
 
+    public void SetPanelVisible(bool visible)
+    {
+        if (_panel != null)
+            _panel.gameObject.SetActive(visible);
+        if (!visible && _preparationNavigationButton != null)
+            _preparationNavigationButton.gameObject.SetActive(false);
+    }
+
     public void ShowUpgradeEvent()
     {
         if (!EnsureInitialized())
             return;
 
+        SetPanelVisible(true);
         GenerateRewardOptions();
         _viewMode = EViewMode.RewardSelection;
         RenderRewardSelection();
@@ -3025,6 +3535,7 @@ public sealed class DungeonEventTab
         if (!EnsureInitialized())
             return;
 
+        SetPanelVisible(true);
         _startingChoices.Clear();
         if (choices != null)
         {
@@ -3040,6 +3551,7 @@ public sealed class DungeonEventTab
         if (!EnsureInitialized())
             return;
 
+        SetPanelVisible(true);
         _viewMode = EViewMode.StartingItemSelection;
         RenderStartingItemSelection();
     }
@@ -3051,6 +3563,7 @@ public sealed class DungeonEventTab
         if (!EnsureInitialized())
             return;
 
+        SetPanelVisible(true);
         _startingItemAvailableCount = Mathf.Max(0, availableCount);
         _startingItemRequiredCount = Mathf.Max(0, requiredCount);
         _viewMode = EViewMode.StartingItemConfigurationError;
@@ -3147,6 +3660,7 @@ public sealed class DungeonEventTab
         if (!EnsureInitialized())
             return;
 
+        SetPanelVisible(true);
         _startingAvailableCount = Mathf.Max(0, availableCount);
         _viewMode = EViewMode.StartingConfigurationError;
         RenderStartingCharacterConfigurationError();
@@ -3175,6 +3689,7 @@ public sealed class DungeonEventTab
         if (!EnsureInitialized())
             return;
 
+        SetPanelVisible(true);
         _currentRunResult = result;
         _viewMode = EViewMode.RunResult;
         RenderRunResult();
@@ -3661,7 +4176,10 @@ public sealed class DungeonEventTab
         _panel.pivot = new Vector2(0.5f, 0.5f);
         _panel.sizeDelta = new Vector2(900f, 650f);
 
-        panelObject.GetComponent<Image>().color = _panelColor;
+        Color panelColor = _panelColor;
+        if (_isBattleRewardOverlay)
+            panelColor.a = 0.92f;
+        panelObject.GetComponent<Image>().color = panelColor;
         VerticalLayoutGroup layout = panelObject.GetComponent<VerticalLayoutGroup>();
         layout.padding = new RectOffset(32, 32, 32, 32);
         layout.spacing = 16f;
@@ -3724,6 +4242,9 @@ public sealed class DungeonEventTab
         _buttonRoot.gameObject.SetActive(false);
         BuildPreparationNavigationButton();
         RefreshRuntimeLayout();
+        ResponsivePanelFitter.Bind(
+            _panel,
+            _root.transform as RectTransform);
     }
 
     private void BuildPreparationNavigationButton()
@@ -4217,5 +4738,518 @@ public sealed class DungeonEventTab
             child.SetActive(false);
             UnityEngine.Object.Destroy(child);
         }
+    }
+}
+
+public sealed class DungeonRoomView
+{
+    private readonly Color _panelColor =
+        new(0.055f, 0.085f, 0.075f, 0.98f);
+    private readonly Color _buttonColor =
+        new(0.14f, 0.25f, 0.2f, 1f);
+    private readonly Color _textColor =
+        new(0.94f, 0.91f, 0.8f, 1f);
+
+    private GameObject _root;
+    private DungeonPage _page;
+    private EDungeonPhase _phase;
+    private RectTransform _panel;
+    private Image _banner;
+    private AspectRatioFitter _bannerAspect;
+    private TextMeshProUGUI _title;
+    private TextMeshProUGUI _description;
+    private TextMeshProUGUI _currency;
+    private RectTransform _buttonRoot;
+    private DungeonRoomSO _room;
+    private int _roomIndex;
+    private bool _localizationEventsBound;
+    private readonly List<DungeonEventChoiceNodeDefinition>
+        _activeEventChoices = new();
+
+    public void Initialize(
+        GameObject root,
+        DungeonPage page,
+        EDungeonPhase phase)
+    {
+        if (root == null || page == null)
+            return;
+        if (_panel != null)
+            return;
+
+        _root = root;
+        _page = page;
+        _phase = phase;
+        HidePlaceholderText();
+        BuildRuntimeUi();
+        BindLocalizationEvents();
+        Hide();
+    }
+
+    public void Show(DungeonRoomSO room, int roomIndex)
+    {
+        if (_panel == null)
+            return;
+
+        _room = room;
+        _roomIndex = Mathf.Max(0, roomIndex);
+        _panel.gameObject.SetActive(true);
+        Render();
+    }
+
+    public void Hide()
+    {
+        if (_panel != null)
+            _panel.gameObject.SetActive(false);
+    }
+
+    public void Teardown()
+    {
+        UnbindLocalizationEvents();
+        _root = null;
+        _page = null;
+        _panel = null;
+        _banner = null;
+        _bannerAspect = null;
+        _title = null;
+        _description = null;
+        _currency = null;
+        _buttonRoot = null;
+        _room = null;
+        _activeEventChoices.Clear();
+    }
+
+    private void Render()
+    {
+        if (_panel == null || _page == null)
+            return;
+
+        ClearButtons();
+        _banner.sprite = _room != null ? _room.Banner : null;
+        if (_bannerAspect != null)
+        {
+            _bannerAspect.aspectRatio = _banner.sprite != null &&
+                                        _banner.sprite.rect.height > 0f
+                ? _banner.sprite.rect.width / _banner.sprite.rect.height
+                : 16f / 9f;
+        }
+        _banner.color = _banner.sprite != null
+            ? Color.white
+            : GetFallbackBannerColor();
+        _title.text = _room != null
+            ? _room.DisplayName
+            : GetFallbackTitle();
+        _description.text = _room != null &&
+                            !string.IsNullOrWhiteSpace(_room.Description)
+            ? _room.Description
+            : GetFallbackDescription();
+        _currency.gameObject.SetActive(_phase == EDungeonPhase.Shop);
+        _currency.text = $"런 재화  {_page.RunSession.RunCurrency}";
+
+        if (_phase == EDungeonPhase.Event &&
+            _room is DungeonEventSO dungeonEvent &&
+            dungeonEvent.Choices.Count > 0 &&
+            dungeonEvent.UsesChoiceGraph)
+        {
+            string resultDescription =
+                _page.GetDungeonEventResultDescription(
+                    dungeonEvent,
+                    _roomIndex);
+            if (!string.IsNullOrWhiteSpace(resultDescription))
+                _description.text = resultDescription;
+            RenderEventChoices(dungeonEvent);
+        }
+        else if (_phase == EDungeonPhase.Event &&
+                 _room is DungeonEventSO legacyEvent &&
+                 legacyEvent.Choices.Count > 0)
+        {
+            RenderChoices(legacyEvent.Choices, false);
+        }
+        else if (_phase == EDungeonPhase.Rest && _room is DungeonRestSO dungeonRest &&
+                 dungeonRest.Choices.Count > 0)
+        {
+            RenderChoices(dungeonRest.Choices, false);
+        }
+        else if (_phase == EDungeonPhase.Shop && _room is DungeonShopSO dungeonShop &&
+                 dungeonShop.Products.Count > 0)
+        {
+            RenderChoices(dungeonShop.Products, true);
+        }
+        else
+        {
+            RenderFallbackChoices();
+        }
+    }
+
+    private void RenderEventChoices(DungeonEventSO dungeonEvent)
+    {
+        _page.GetActiveDungeonEventChoices(
+            dungeonEvent,
+            _roomIndex,
+            _activeEventChoices);
+        if (_activeEventChoices.Count == 0)
+        {
+            Debug.LogError(
+                $"Dungeon event '{dungeonEvent.EventId}' has no active " +
+                "choice nodes.");
+            RenderFallbackChoices();
+            return;
+        }
+
+        for (int index = 0; index < _activeEventChoices.Count; index++)
+        {
+            DungeonEventChoiceNodeDefinition node =
+                _activeEventChoices[index];
+            int choiceIndex = dungeonEvent.FindChoiceIndex(node.NodeId);
+            bool interactable = choiceIndex >= 0 &&
+                                _page.CanUseDungeonRoomChoice(
+                                    EDungeonPhase.Event,
+                                    _roomIndex,
+                                    choiceIndex,
+                                    node);
+            CreateButton(GetChoiceLabel(node, false), interactable, () =>
+            {
+                if (!_page.TryUseDungeonEventChoice(
+                        dungeonEvent,
+                        _roomIndex,
+                        node))
+                {
+                    return;
+                }
+
+                if (_page.CurrentPhase == EDungeonPhase.Event)
+                    Render();
+            });
+        }
+    }
+
+    private void RenderChoices(
+        IReadOnlyList<DungeonRoomChoiceDefinition> choices,
+        bool shop)
+    {
+        for (int index = 0; index < choices.Count; index++)
+        {
+            int choiceIndex = index;
+            DungeonRoomChoiceDefinition choice = choices[index];
+            bool sold = shop && choice != null && choice.SinglePurchase &&
+                        _page.IsShopProductSold(_roomIndex, choiceIndex);
+            bool interactable = !sold && _page.CanUseDungeonRoomChoice(
+                _phase,
+                _roomIndex,
+                choiceIndex,
+                choice);
+            string label = GetChoiceLabel(choice, sold);
+            CreateButton(label, interactable, () =>
+            {
+                if (!_page.TryUseDungeonRoomChoice(
+                        _phase,
+                        _roomIndex,
+                        choiceIndex,
+                        choice))
+                {
+                    return;
+                }
+
+                if (shop)
+                    Render();
+            });
+        }
+
+        if (shop)
+            CreateLeaveShopButton();
+    }
+
+    private void RenderFallbackChoices()
+    {
+        Debug.LogError(
+            $"Dungeon {_phase} room {_roomIndex} has no configured " +
+            "DungeonRoomSO.");
+        CreateButton(
+            "ROOM DATA NOT CONFIGURED\nCONTINUE",
+            true,
+            () => _page.CompleteDungeonRoom());
+    }
+
+    private void CreateLeaveShopButton()
+    {
+        CreateButton(
+            "상점을 나간다",
+            true,
+            () => _page.CompleteDungeonRoom());
+    }
+
+    private static string GetChoiceLabel(
+        DungeonRoomChoiceDefinition choice,
+        bool sold)
+    {
+        if (choice == null)
+            return "INVALID CHOICE";
+
+        string label = choice.Title;
+        if (!string.IsNullOrWhiteSpace(choice.Description))
+            label += "\n" + choice.Description;
+        if (sold)
+            return label + "\n판매 완료";
+        if (choice.RunCurrencyCost > 0)
+            label += $"\n가격 {choice.RunCurrencyCost}";
+        return label;
+    }
+
+    private string GetFallbackTitle()
+    {
+        return _phase switch
+        {
+            EDungeonPhase.Rest => LocalizationService.Get(
+                LocalizationKeys.UiDungeonRest),
+            EDungeonPhase.Shop => LocalizationService.Get(
+                LocalizationKeys.UiCommonShop),
+            _ => LocalizationService.Get(LocalizationKeys.UiDungeonEvent),
+        };
+    }
+
+    private string GetFallbackDescription()
+    {
+        return "Dungeon room data is not configured.";
+    }
+
+    private Color GetFallbackBannerColor()
+    {
+        return _phase switch
+        {
+            EDungeonPhase.Rest => new Color(0.16f, 0.3f, 0.24f, 1f),
+            EDungeonPhase.Shop => new Color(0.31f, 0.23f, 0.12f, 1f),
+            _ => new Color(0.16f, 0.2f, 0.29f, 1f),
+        };
+    }
+
+    private void BuildRuntimeUi()
+    {
+        GameObject panelObject = new(
+            $"grp{_phase}RoomPanel",
+            typeof(RectTransform),
+            typeof(CanvasRenderer),
+            typeof(Image),
+            typeof(RectMask2D));
+        _panel = (RectTransform)panelObject.transform;
+        _panel.SetParent(_root.transform, false);
+        _panel.anchorMin = new Vector2(0.5f, 0.5f);
+        _panel.anchorMax = new Vector2(0.5f, 0.5f);
+        _panel.pivot = new Vector2(0.5f, 0.5f);
+        _panel.sizeDelta = new Vector2(1920f, 1080f);
+        panelObject.GetComponent<Image>().color = Color.black;
+
+        GameObject bannerObject = new(
+            "imgRoomBanner",
+            typeof(RectTransform),
+            typeof(CanvasRenderer),
+            typeof(Image),
+            typeof(AspectRatioFitter));
+        bannerObject.transform.SetParent(_panel, false);
+        RectTransform bannerRect =
+            (RectTransform)bannerObject.transform;
+        bannerRect.anchorMin = Vector2.zero;
+        bannerRect.anchorMax = Vector2.one;
+        bannerRect.offsetMin = Vector2.zero;
+        bannerRect.offsetMax = Vector2.zero;
+        _banner = bannerObject.GetComponent<Image>();
+        _banner.preserveAspect = false;
+        _banner.raycastTarget = false;
+        _bannerAspect = bannerObject.GetComponent<AspectRatioFitter>();
+        _bannerAspect.aspectMode = AspectRatioFitter.AspectMode.EnvelopeParent;
+        _bannerAspect.aspectRatio = 16f / 9f;
+
+        GameObject shadeObject = new(
+            "imgRoomBannerShade",
+            typeof(RectTransform),
+            typeof(CanvasRenderer),
+            typeof(Image));
+        shadeObject.transform.SetParent(_panel, false);
+        RectTransform shadeRect = (RectTransform)shadeObject.transform;
+        shadeRect.anchorMin = _phase == EDungeonPhase.Event
+            ? new Vector2(0.62f, 0f)
+            : Vector2.zero;
+        shadeRect.anchorMax = Vector2.one;
+        shadeRect.offsetMin = Vector2.zero;
+        shadeRect.offsetMax = Vector2.zero;
+        Image shade = shadeObject.GetComponent<Image>();
+        Color shadeColor = _panelColor;
+        shadeColor.a = 0.72f;
+        shade.color = shadeColor;
+        shade.raycastTarget = false;
+
+        GameObject contentObject = new(
+            "grpRoomContent",
+            typeof(RectTransform),
+            typeof(VerticalLayoutGroup));
+        RectTransform content = (RectTransform)contentObject.transform;
+        content.SetParent(_panel, false);
+        content.anchorMin = _phase == EDungeonPhase.Event
+            ? new Vector2(0.62f, 0f)
+            : new Vector2(0.22f, 0f);
+        content.anchorMax = _phase == EDungeonPhase.Event
+            ? Vector2.one
+            : new Vector2(0.78f, 1f);
+        content.offsetMin = Vector2.zero;
+        content.offsetMax = Vector2.zero;
+        VerticalLayoutGroup layout =
+            contentObject.GetComponent<VerticalLayoutGroup>();
+        layout.padding = new RectOffset(40, 40, 40, 40);
+        layout.spacing = 14f;
+        layout.childAlignment = TextAnchor.UpperCenter;
+        layout.childControlWidth = true;
+        layout.childForceExpandWidth = true;
+        layout.childControlHeight = true;
+        layout.childForceExpandHeight = false;
+
+        _title = CreateText(content, "txtRoomTitle", 36f, 66f);
+        _title.fontStyle = FontStyles.Bold;
+        _description = CreateText(
+            content,
+            "txtRoomDescription",
+            21f,
+            128f);
+        _currency = CreateText(content, "txtRunCurrency", 22f, 42f);
+        _currency.alignment = TextAlignmentOptions.Right;
+
+        GameObject buttonRootObject = new(
+            "grpRoomChoices",
+            typeof(RectTransform),
+            typeof(VerticalLayoutGroup),
+            typeof(LayoutElement));
+        _buttonRoot = (RectTransform)buttonRootObject.transform;
+        _buttonRoot.SetParent(content, false);
+        VerticalLayoutGroup buttonLayout =
+            buttonRootObject.GetComponent<VerticalLayoutGroup>();
+        buttonLayout.spacing = 10f;
+        buttonLayout.childAlignment = TextAnchor.UpperCenter;
+        buttonLayout.childControlWidth = true;
+        buttonLayout.childForceExpandWidth = true;
+        buttonLayout.childControlHeight = false;
+        buttonLayout.childForceExpandHeight = false;
+        LayoutElement buttonRootLayout =
+            buttonRootObject.GetComponent<LayoutElement>();
+        buttonRootLayout.flexibleHeight = 1f;
+
+        ResponsivePanelFitter.Bind(
+            _panel,
+            _root.transform as RectTransform);
+    }
+
+    private TextMeshProUGUI CreateText(
+        Transform parent,
+        string objectName,
+        float fontSize,
+        float preferredHeight)
+    {
+        GameObject textObject = new(
+            objectName,
+            typeof(RectTransform),
+            typeof(TextMeshProUGUI),
+            typeof(LayoutElement));
+        textObject.transform.SetParent(parent, false);
+        TextMeshProUGUI text = textObject.GetComponent<TextMeshProUGUI>();
+        LocalizationFontResolver.ApplyGameDefault(text);
+        text.fontSize = fontSize;
+        text.enableAutoSizing = true;
+        text.fontSizeMax = fontSize;
+        text.fontSizeMin = Mathf.Max(12f, fontSize - 9f);
+        text.color = _textColor;
+        text.alignment = TextAlignmentOptions.Center;
+        text.textWrappingMode = TextWrappingModes.Normal;
+        text.raycastTarget = false;
+        textObject.GetComponent<LayoutElement>().preferredHeight =
+            preferredHeight;
+        return text;
+    }
+
+    private void CreateButton(
+        string label,
+        bool interactable,
+        Action action)
+    {
+        GameObject buttonObject = new(
+            "btnRoomChoice",
+            typeof(RectTransform),
+            typeof(CanvasRenderer),
+            typeof(Image),
+            typeof(Button),
+            typeof(LayoutElement));
+        buttonObject.transform.SetParent(_buttonRoot, false);
+        Color normalColor = interactable
+            ? _buttonColor
+            : Color.Lerp(_buttonColor, Color.black, 0.55f);
+        Image image = buttonObject.GetComponent<Image>();
+        image.color = normalColor;
+        Button button = buttonObject.GetComponent<Button>();
+        button.targetGraphic = image;
+        button.interactable = interactable;
+        if (action != null)
+            button.onClick.AddListener(() => action());
+
+        int lineCount = string.IsNullOrEmpty(label)
+            ? 1
+            : label.Split('\n').Length;
+        float height = Mathf.Clamp(54f + (lineCount - 1) * 23f, 54f, 112f);
+        buttonObject.GetComponent<LayoutElement>().preferredHeight = height;
+        TextMeshProUGUI text = CreateText(
+            buttonObject.transform,
+            "txtRoomChoice",
+            lineCount > 1 ? 19f : 22f,
+            height);
+        RectTransform textRect = text.rectTransform;
+        textRect.anchorMin = Vector2.zero;
+        textRect.anchorMax = Vector2.one;
+        textRect.offsetMin = new Vector2(16f, 5f);
+        textRect.offsetMax = new Vector2(-16f, -5f);
+        text.text = label;
+    }
+
+    private void ClearButtons()
+    {
+        if (_buttonRoot == null)
+            return;
+        for (int index = _buttonRoot.childCount - 1; index >= 0; index--)
+        {
+            GameObject child = _buttonRoot.GetChild(index).gameObject;
+            child.SetActive(false);
+            UnityEngine.Object.Destroy(child);
+        }
+    }
+
+    private void HidePlaceholderText()
+    {
+        foreach (TextMeshProUGUI text in
+                 _root.GetComponentsInChildren<TextMeshProUGUI>(true))
+        {
+            if (text.name == "txtEventPlaceholder" ||
+                text.name == "txtRestPlaceholder" ||
+                text.name == "txtShopPlaceholder")
+            {
+                text.gameObject.SetActive(false);
+            }
+        }
+    }
+
+    private void BindLocalizationEvents()
+    {
+        if (_localizationEventsBound)
+            return;
+        LocalizationService.LocaleChanged += HandleLocalizationChanged;
+        LocalizationService.FontChanged += HandleLocalizationChanged;
+        _localizationEventsBound = true;
+    }
+
+    private void UnbindLocalizationEvents()
+    {
+        if (!_localizationEventsBound)
+            return;
+        LocalizationService.LocaleChanged -= HandleLocalizationChanged;
+        LocalizationService.FontChanged -= HandleLocalizationChanged;
+        _localizationEventsBound = false;
+    }
+
+    private void HandleLocalizationChanged(string unusedValue)
+    {
+        if (_panel != null && _panel.gameObject.activeSelf)
+            Render();
     }
 }

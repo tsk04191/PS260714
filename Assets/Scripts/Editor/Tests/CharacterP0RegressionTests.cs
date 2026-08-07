@@ -5216,12 +5216,12 @@ public sealed class CharacterP0RegressionTests
         FieldInfo availableTurretsField = typeof(DungeonPage).GetField(
             "_availableTurrets",
             BindingFlags.Instance | BindingFlags.NonPublic);
-        FieldInfo eventRewardPendingField = typeof(DungeonPage).GetField(
-            "_eventRewardPending",
+        FieldInfo battleRewardPendingField = typeof(DungeonPage).GetField(
+            "_battleRewardPending",
             BindingFlags.Instance | BindingFlags.NonPublic);
         Assert.That(playerCharactersField, Is.Not.Null);
         Assert.That(availableTurretsField, Is.Not.Null);
-        Assert.That(eventRewardPendingField, Is.Not.Null);
+        Assert.That(battleRewardPendingField, Is.Not.Null);
         playerCharactersField.SetValue(page, slots);
         List<CharacterSO> available =
             (List<CharacterSO>)availableTurretsField.GetValue(page);
@@ -5229,7 +5229,7 @@ public sealed class CharacterP0RegressionTests
 
         for (int index = 0; index < DungeonPage.MaximumPartySize; index++)
         {
-            eventRewardPendingField.SetValue(page, true);
+            battleRewardPendingField.SetValue(page, true);
             Assert.That(
                 page.TryAcquireTurret(definitions[index]),
                 Is.True);
@@ -5240,7 +5240,7 @@ public sealed class CharacterP0RegressionTests
         Assert.That(beforeReplacement.Count, Is.EqualTo(1));
         Assert.That(beforeReplacement[0], Is.SameAs(definitions[4]));
 
-        eventRewardPendingField.SetValue(page, true);
+        battleRewardPendingField.SetValue(page, true);
         Assert.That(
             page.TryAcquireTurret(definitions[4], 0),
             Is.True);
@@ -5248,7 +5248,7 @@ public sealed class CharacterP0RegressionTests
             page.GetAvailableCharacterRewardDefinitions(),
             Is.Empty);
 
-        eventRewardPendingField.SetValue(page, true);
+        battleRewardPendingField.SetValue(page, true);
         Assert.That(
             page.TryAcquireTurret(definitions[0], 0),
             Is.False);

@@ -108,21 +108,16 @@ public sealed class BattleEditorWindow : EditorWindow
 
     private void DrawRenameRow()
     {
-        using (new EditorGUILayout.HorizontalScope(EditorStyles.helpBox))
-        {
-            EditorGUILayout.LabelField("SO File Name", GUILayout.Width(88f));
-            GUI.SetNextControlName(RenameControlName);
-            _renameAssetName = EditorGUILayout.TextField(_renameAssetName);
-            if (_focusRenameField)
-            {
-                EditorGUI.FocusTextInControl(RenameControlName);
-                _focusRenameField = false;
-            }
-            if (GUILayout.Button("Apply", GUILayout.Width(56f)))
-                RenameSelected();
-            if (GUILayout.Button("Cancel", GUILayout.Width(56f)))
-                CancelRename();
-        }
+        PS260714AssetRenameCommand command =
+            PS260714EditorAssetUtility.DrawRenameRow(
+                "SO File Name",
+                RenameControlName,
+                ref _renameAssetName,
+                ref _focusRenameField);
+        if (command == PS260714AssetRenameCommand.Apply)
+            RenameSelected();
+        else if (command == PS260714AssetRenameCommand.Cancel)
+            CancelRename();
     }
 
     private void DrawBattleList()
@@ -231,34 +226,14 @@ public sealed class BattleEditorWindow : EditorWindow
 
     private void RefreshList()
     {
-        string selectedPath = _battle != null
-            ? AssetDatabase.GetAssetPath(_battle)
-            : string.Empty;
-        _battles.Clear();
-        foreach (string guid in AssetDatabase.FindAssets("t:BattleSO"))
-        {
-            string path = AssetDatabase.GUIDToAssetPath(guid);
-            BattleSO battle = AssetDatabase.LoadAssetAtPath<BattleSO>(path);
-            if (battle != null)
-                _battles.Add(battle);
-        }
-
-        _battles.Sort((left, right) => string.Compare(
-            left != null ? left.name : string.Empty,
-            right != null ? right.name : string.Empty,
-            StringComparison.OrdinalIgnoreCase));
-
-        if (!string.IsNullOrEmpty(selectedPath))
-        {
-            BattleSO restored =
-                AssetDatabase.LoadAssetAtPath<BattleSO>(selectedPath);
-            if (restored != null)
-                SetBattle(restored);
-        }
-        else if (_battle == null && _battles.Count > 0)
-        {
-            SetBattle(_battles[0]);
-        }
+        string selectedPath =
+            PS260714EditorAssetUtility.CapturePath(_battle);
+        PS260714EditorAssetUtility.LoadAssets(
+            _battles,
+            "t:BattleSO");
+        SetBattle(PS260714EditorAssetUtility.RestoreSelection(
+            selectedPath,
+            _battles));
     }
 
     private bool MatchesSearch(BattleSO battle)
@@ -317,17 +292,19 @@ public sealed class BattleEditorWindow : EditorWindow
             return;
 
         SaveSelected();
-        string sourcePath = AssetDatabase.GetAssetPath(_battle);
-        string directory = Path.GetDirectoryName(sourcePath)
-            ?.Replace('\\', '/');
-        string fileName = Path.GetFileNameWithoutExtension(sourcePath);
-        string destinationPath = AssetDatabase.GenerateUniqueAssetPath(
-            $"{directory}/{fileName} Copy.asset");
-        if (!AssetDatabase.CopyAsset(sourcePath, destinationPath))
+        if (!PS260714EditorAssetUtility.TryDuplicate(
+                _battle,
+                null,
+                " Copy",
+                out BattleSO duplicate,
+                out string duplicateError))
+        {
+            EditorUtility.DisplayDialog(
+                "Duplicate Battle",
+                duplicateError,
+                "OK");
             return;
-
-        BattleSO duplicate =
-            AssetDatabase.LoadAssetAtPath<BattleSO>(destinationPath);
+        }
         if (duplicate != null)
         {
             SetIdentity(
@@ -367,29 +344,17 @@ public sealed class BattleEditorWindow : EditorWindow
             return;
         }
 
-        string requested = (_renameAssetName ?? string.Empty).Trim();
-        if (string.IsNullOrEmpty(requested) ||
-            requested.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0)
+        if (!PS260714EditorAssetUtility.TryRename(
+                _battle,
+                _renameAssetName,
+                out string error))
         {
-            EditorUtility.DisplayDialog(
-                "Rename Battle",
-                "Enter a valid file name.",
-                "OK");
+            EditorUtility.DisplayDialog("Rename Battle", error, "OK");
             _focusRenameField = true;
             return;
         }
 
-        string error = AssetDatabase.RenameAsset(
-            AssetDatabase.GetAssetPath(_battle),
-            requested);
-        if (!string.IsNullOrEmpty(error))
-        {
-            EditorUtility.DisplayDialog("Rename Battle", error, "OK");
-            return;
-        }
-
         CancelRename();
-        AssetDatabase.SaveAssets();
         RefreshList();
     }
 

@@ -281,46 +281,19 @@ public sealed class StatusEffectEditorWindow : EditorWindow
 
     private void DrawRenameRow()
     {
-        EditorGUILayout.BeginHorizontal(EditorStyles.helpBox);
-        EditorGUILayout.LabelField("SO File Name", GUILayout.Width(90f));
-        GUI.SetNextControlName(RenameControlName);
-        _renameAssetName = EditorGUILayout.TextField(_renameAssetName);
-        bool apply = GUILayout.Button("OK", GUILayout.Width(44f));
-        bool cancel = GUILayout.Button("Cancel", GUILayout.Width(58f));
-        EditorGUILayout.EndHorizontal();
-
-        if (_focusRenameField)
-        {
-            EditorGUI.FocusTextInControl(RenameControlName);
-            _focusRenameField = false;
-        }
-
-        Event current = Event.current;
-        if (current.type == EventType.KeyDown)
-        {
-            if (current.keyCode == KeyCode.Return ||
-                current.keyCode == KeyCode.KeypadEnter)
-            {
-                apply = true;
-                current.Use();
-            }
-            else if (current.keyCode == KeyCode.Escape)
-            {
-                cancel = true;
-                current.Use();
-            }
-        }
-
-        if (cancel)
-        {
-            CancelRename();
-            GUIUtility.ExitGUI();
-        }
-        if (apply)
-        {
+        PS260714AssetRenameCommand command =
+            PS260714EditorAssetUtility.DrawRenameRow(
+                "SO File Name",
+                RenameControlName,
+                ref _renameAssetName,
+                ref _focusRenameField);
+        if (command == PS260714AssetRenameCommand.None)
+            return;
+        if (command == PS260714AssetRenameCommand.Apply)
             RenameSelected();
-            GUIUtility.ExitGUI();
-        }
+        else
+            CancelRename();
+        GUIUtility.ExitGUI();
     }
 
     private void DrawAssetList()
@@ -1835,36 +1808,15 @@ public sealed class StatusEffectEditorWindow : EditorWindow
 
     private void RefreshList()
     {
-        string selectedPath = _selected != null
-            ? AssetDatabase.GetAssetPath(_selected)
-            : string.Empty;
-        _definitions.Clear();
-        foreach (string guid in AssetDatabase.FindAssets("t:StatusEffectSO"))
-        {
-            string path = AssetDatabase.GUIDToAssetPath(guid);
-            StatusEffectSO definition =
-                AssetDatabase.LoadAssetAtPath<StatusEffectSO>(path);
-            if (definition != null)
-                _definitions.Add(definition);
-        }
-
-        _definitions.Sort((left, right) => string.Compare(
-            left.name,
-            right.name,
-            StringComparison.OrdinalIgnoreCase));
+        string selectedPath =
+            PS260714EditorAssetUtility.CapturePath(_selected);
+        PS260714EditorAssetUtility.LoadAssets(
+            _definitions,
+            "t:StatusEffectSO");
         StatusEffectDefinitionCatalog.Invalidate();
-
-        if (!string.IsNullOrEmpty(selectedPath))
-        {
-            StatusEffectSO restored =
-                AssetDatabase.LoadAssetAtPath<StatusEffectSO>(selectedPath);
-            if (restored != null)
-                SelectDefinition(restored);
-        }
-        else if (_selected == null && _definitions.Count > 0)
-        {
-            SelectDefinition(_definitions[0]);
-        }
+        SelectDefinition(PS260714EditorAssetUtility.RestoreSelection(
+            selectedPath,
+            _definitions));
     }
 
     private void RefreshLocalizationKeys()
@@ -1913,17 +1865,21 @@ public sealed class StatusEffectEditorWindow : EditorWindow
         if (_selected == null)
             return;
 
-        string sourcePath = AssetDatabase.GetAssetPath(_selected);
-        string directory = Path.GetDirectoryName(sourcePath)?.Replace('\\', '/');
-        string fileName = Path.GetFileNameWithoutExtension(sourcePath);
-        string destinationPath = AssetDatabase.GenerateUniqueAssetPath(
-            $"{directory}/{fileName} Copy.asset");
-        if (!AssetDatabase.CopyAsset(sourcePath, destinationPath))
+        if (!PS260714EditorAssetUtility.TryDuplicate(
+                _selected,
+                null,
+                " Copy",
+                out StatusEffectSO duplicate,
+                out string duplicateError))
+        {
+            EditorUtility.DisplayDialog(
+                "Duplicate StatusEffectSO",
+                duplicateError,
+                "OK");
             return;
+        }
 
         AssetDatabase.SaveAssets();
-        StatusEffectSO duplicate =
-            AssetDatabase.LoadAssetAtPath<StatusEffectSO>(destinationPath);
         if (duplicate != null)
         {
             duplicate.RegenerateStatusId();
@@ -1981,19 +1937,10 @@ public sealed class StatusEffectEditorWindow : EditorWindow
             return;
         }
 
-        string name = (_renameAssetName ?? string.Empty).Trim();
-        if (name.EndsWith(".asset", StringComparison.OrdinalIgnoreCase))
-            name = name.Substring(0, name.Length - 6).Trim();
-        if (!IsValidFileName(name, out string error))
-        {
-            EditorUtility.DisplayDialog("Rename StatusEffectSO", error, "OK");
-            _focusRenameField = true;
-            return;
-        }
-
-        string path = AssetDatabase.GetAssetPath(_selected);
-        string renameError = AssetDatabase.RenameAsset(path, name);
-        if (!string.IsNullOrEmpty(renameError))
+        if (!PS260714EditorAssetUtility.TryRename(
+                _selected,
+                _renameAssetName,
+                out string renameError))
         {
             EditorUtility.DisplayDialog(
                 "Rename StatusEffectSO",
@@ -2004,30 +1951,8 @@ public sealed class StatusEffectEditorWindow : EditorWindow
         }
 
         CancelRename();
-        AssetDatabase.SaveAssets();
         RefreshList();
         EditorGUIUtility.PingObject(_selected);
-    }
-
-    private static bool IsValidFileName(string fileName, out string error)
-    {
-        if (string.IsNullOrWhiteSpace(fileName))
-        {
-            error = "파일 이름을 입력하세요.";
-            return false;
-        }
-        if (fileName == "." || fileName == ".." ||
-            fileName.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0 ||
-            fileName.IndexOf('/') >= 0 || fileName.IndexOf('\\') >= 0 ||
-            fileName.EndsWith(".", StringComparison.Ordinal) ||
-            fileName.EndsWith(" ", StringComparison.Ordinal))
-        {
-            error = "사용할 수 없는 파일 이름입니다.";
-            return false;
-        }
-
-        error = string.Empty;
-        return true;
     }
 
     private static void EnsureFolder(string path)
