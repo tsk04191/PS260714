@@ -23,6 +23,7 @@ public sealed class DungeonBattleTab : MonoBehaviour
     private TextMeshProUGUI _returnToStageText;
     private Button _quitGameButton;
     private TextMeshProUGUI _quitGameText;
+    private ResponsivePanelFitter _pausePanelFitter;
 
     [Header("Battle Time")]
     [SerializeField] private TextMeshProUGUI battleTimeText;
@@ -48,6 +49,23 @@ public sealed class DungeonBattleTab : MonoBehaviour
     private bool _controlEventsBound;
     private bool _battleEventsBound;
     private bool _localizationEventsBound;
+    private RectTransform _partyInfoRect;
+
+    public float BottomReservedHeight
+    {
+        get
+        {
+            RectTransform parent = transform as RectTransform;
+            if (parent == null || _partyInfoRect == null)
+                return 0f;
+
+            Bounds bounds = RectTransformUtility
+                .CalculateRelativeRectTransformBounds(
+                    parent,
+                    _partyInfoRect);
+            return Mathf.Max(0f, bounds.max.y - parent.rect.yMin);
+        }
+    }
 
     public RectTransform TimerHighlightRect => battleTimeText != null
         ? battleTimeText.rectTransform
@@ -83,6 +101,11 @@ public sealed class DungeonBattleTab : MonoBehaviour
         UnbindControlEvents();
         UnbindBattleEvents();
         UnbindLocalizationEvents();
+    }
+
+    private void OnRectTransformDimensionsChange()
+    {
+        RefreshResponsiveLayout();
     }
 
     private void OnDestroy()
@@ -202,7 +225,9 @@ public sealed class DungeonBattleTab : MonoBehaviour
             return false;
         }
 
-        return spawnQueueView.Initialize();
+        bool initialized = spawnQueueView.Initialize();
+        RefreshResponsiveLayout();
+        return initialized;
     }
 
     private void BindControlEvents()
@@ -551,6 +576,9 @@ public sealed class DungeonBattleTab : MonoBehaviour
         _pauseMenuPanel.anchoredPosition = Vector2.zero;
         _pauseMenuPanel.sizeDelta = new Vector2(440f, 430f);
         _pauseMenuPanel.localScale = Vector3.one;
+        _pausePanelFitter = ResponsivePanelFitter.Bind(
+            _pauseMenuPanel,
+            pauseOverlay.transform as RectTransform);
         _pauseMenuPanel.SetAsFirstSibling();
 
         Image background =
@@ -740,9 +768,7 @@ public sealed class DungeonBattleTab : MonoBehaviour
         if (partyInfo == null)
             return;
 
-        RectTransform partyRect = partyInfo as RectTransform;
-        if (partyRect != null)
-            partyRect.sizeDelta = new Vector2(partyRect.sizeDelta.x, 152f);
+        _partyInfoRect = partyInfo as RectTransform;
 
         HorizontalLayoutGroup layout =
             partyInfo.GetComponentInChildren<HorizontalLayoutGroup>(true);
@@ -759,6 +785,17 @@ public sealed class DungeonBattleTab : MonoBehaviour
 
         LayoutRebuilder.MarkLayoutForRebuild(
             layout.transform as RectTransform);
+    }
+
+    private void RefreshResponsiveLayout()
+    {
+        _pausePanelFitter?.RefreshLayout();
+        spawnQueueView?.ConfigureResponsiveBounds(_partyInfoRect);
+        _itemHandView?.ConfigureResponsiveBounds(
+            _partyInfoRect,
+            spawnQueueView != null
+                ? spawnQueueView.transform as RectTransform
+                : null);
     }
 
     private void EnsureActiveSkillResourceView()
@@ -822,6 +859,11 @@ public sealed class DungeonBattleTab : MonoBehaviour
             _itemHandView = handObject.GetComponent<DungeonItemHandView>();
         }
 
+        _itemHandView.ConfigureResponsiveBounds(
+            _partyInfoRect,
+            spawnQueueView != null
+                ? spawnQueueView.transform as RectTransform
+                : null);
         _itemHandView.Initialize(_page, _battleManager);
     }
 }
@@ -1069,8 +1111,6 @@ public sealed class DungeonItemHandView : MonoBehaviour
 {
     private const string DefaultCardPrefabResourcePath =
         "Presentation/BattleItemCard";
-    private const float HandHeight = 620f;
-    private const float MaximumCardStep = 132f;
 
     [SerializeField] private DungeonItemCardView cardPrefab;
 
@@ -1081,6 +1121,9 @@ public sealed class DungeonItemHandView : MonoBehaviour
     private TextMeshProUGUI _instructionText;
     private BattleItemSO _selectedItem;
     private bool _initialized;
+    private bool _refreshingLayout;
+    private RectTransform _bottomReservedArea;
+    private RectTransform _topAlignedArea;
 
     public RectTransform HighlightRect
     {
@@ -1130,6 +1173,16 @@ public sealed class DungeonItemHandView : MonoBehaviour
         RebuildCards();
     }
 
+    public void ConfigureResponsiveBounds(
+        RectTransform bottomReservedArea,
+        RectTransform topAlignedArea)
+    {
+        _bottomReservedArea = bottomReservedArea;
+        _topAlignedArea = topAlignedArea;
+        ConfigureRoot();
+        RefreshCardLayout();
+    }
+
     public void Teardown()
     {
         if (_page != null)
@@ -1163,6 +1216,15 @@ public sealed class DungeonItemHandView : MonoBehaviour
         Teardown();
     }
 
+    private void OnRectTransformDimensionsChange()
+    {
+        if (_refreshingLayout)
+            return;
+
+        ConfigureRoot();
+        RefreshCardLayout();
+    }
+
     private void Update()
     {
         if (!_initialized || _battleManager == null)
@@ -1174,12 +1236,58 @@ public sealed class DungeonItemHandView : MonoBehaviour
     private void ConfigureRoot()
     {
         RectTransform root = (RectTransform)transform;
-        root.anchorMin = new Vector2(0f, 0.5f);
-        root.anchorMax = new Vector2(0f, 0.5f);
+        RectTransform parent = root.parent as RectTransform;
+        DungeonItemCardView resolvedCardPrefab = ResolveCardPrefab();
+        RectTransform prefabRect = resolvedCardPrefab != null
+            ? resolvedCardPrefab.transform as RectTransform
+            : null;
+        if (parent == null || prefabRect == null || parent.rect.height <= 0f)
+            return;
+
+        float leftInset = 0f;
+        HorizontalLayoutGroup partyLayout = _bottomReservedArea != null
+            ? _bottomReservedArea.GetComponentInChildren<
+                HorizontalLayoutGroup>(true)
+            : null;
+        if (partyLayout != null)
+            leftInset = partyLayout.padding.left;
+
+        Vector3[] corners = new Vector3[4];
+        float bottomInset = 0f;
+        if (_bottomReservedArea != null)
+        {
+            _bottomReservedArea.GetWorldCorners(corners);
+            bottomInset = Mathf.Max(
+                0f,
+                parent.InverseTransformPoint(corners[1]).y -
+                parent.rect.yMin);
+        }
+
+        float topInset = 0f;
+        if (_topAlignedArea != null)
+        {
+            _topAlignedArea.GetWorldCorners(corners);
+            topInset = Mathf.Max(
+                0f,
+                parent.rect.yMax -
+                parent.InverseTransformPoint(corners[1]).y);
+        }
+
+        _refreshingLayout = true;
+        root.anchorMin = Vector2.zero;
+        root.anchorMax = new Vector2(0f, 1f);
         root.pivot = new Vector2(0f, 0.5f);
-        root.anchoredPosition = new Vector2(18f, 56f);
-        root.sizeDelta = new Vector2(176f, HandHeight);
+        root.anchoredPosition = new Vector2(
+            leftInset,
+            (bottomInset - topInset) * 0.5f);
+        float availableHeight = Mathf.Max(
+            1f,
+            parent.rect.height - bottomInset - topInset);
+        root.sizeDelta = new Vector2(
+            prefabRect.rect.width,
+            availableHeight - parent.rect.height);
         root.SetAsLastSibling();
+        _refreshingLayout = false;
 
         if (_instructionText != null)
             return;
@@ -1192,10 +1300,12 @@ public sealed class DungeonItemHandView : MonoBehaviour
         RectTransform instructionRect =
             (RectTransform)instructionObject.transform;
         instructionRect.anchorMin = new Vector2(0f, 1f);
-        instructionRect.anchorMax = new Vector2(0f, 1f);
-        instructionRect.pivot = new Vector2(0f, 1f);
+        instructionRect.anchorMax = Vector2.one;
+        instructionRect.pivot = new Vector2(0.5f, 1f);
         instructionRect.anchoredPosition = new Vector2(0f, 0f);
-        instructionRect.sizeDelta = new Vector2(310f, 46f);
+        instructionRect.sizeDelta = new Vector2(
+            0f,
+            prefabRect.rect.height - prefabRect.rect.width);
         _instructionText = instructionObject.GetComponent<TextMeshProUGUI>();
         LocalizationFontResolver.ApplyGameDefault(_instructionText);
         _instructionText.fontSize = 18f;
@@ -1243,10 +1353,13 @@ public sealed class DungeonItemHandView : MonoBehaviour
         }
 
         int visibleIndex = 0;
+        float handHeight = ((RectTransform)transform).rect.height;
+        float maximumCardStep = cardHeight * 0.6f;
         float cardStep = visibleCount > 1
             ? Mathf.Min(
-                MaximumCardStep,
-                (HandHeight - cardHeight) / (visibleCount - 1))
+                maximumCardStep,
+                Mathf.Max(0f, handHeight - cardHeight) /
+                (visibleCount - 1))
             : 0f;
         foreach (BattleItemSO item in BattleItemCatalog.GetAll())
         {
@@ -1285,7 +1398,57 @@ public sealed class DungeonItemHandView : MonoBehaviour
         }
 
         RefreshTurretBindings();
+        RefreshCardLayout();
         RefreshCards();
+    }
+
+    private void RefreshCardLayout()
+    {
+        int visibleCount = 0;
+        float cardHeight = 0f;
+        for (int index = 0; index < _cards.Count; index++)
+        {
+            DungeonItemCardView card = _cards[index];
+            if (card == null || !card.gameObject.activeSelf)
+                continue;
+
+            visibleCount++;
+            if (cardHeight <= 0f &&
+                card.transform is RectTransform cardRect)
+            {
+                cardHeight = cardRect.rect.height;
+            }
+        }
+
+        if (visibleCount == 0 || cardHeight <= 0f)
+            return;
+
+        float handHeight = ((RectTransform)transform).rect.height;
+        float cardStep = visibleCount > 1
+            ? Mathf.Min(
+                cardHeight * 0.6f,
+                Mathf.Max(0f, handHeight - cardHeight) /
+                (visibleCount - 1))
+            : 0f;
+        float top = (visibleCount - 1) * cardStep * 0.5f;
+        int visibleIndex = 0;
+        for (int index = 0; index < _cards.Count; index++)
+        {
+            DungeonItemCardView card = _cards[index];
+            if (card == null || !card.gameObject.activeSelf ||
+                card.transform is not RectTransform cardRect)
+            {
+                continue;
+            }
+
+            cardRect.anchorMin = new Vector2(0f, 0.5f);
+            cardRect.anchorMax = new Vector2(0f, 0.5f);
+            cardRect.pivot = new Vector2(0f, 0.5f);
+            cardRect.anchoredPosition = new Vector2(
+                0f,
+                top - visibleIndex * cardStep);
+            visibleIndex++;
+        }
     }
 
     private DungeonItemCardView ResolveCardPrefab()

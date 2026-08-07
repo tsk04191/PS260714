@@ -1378,6 +1378,7 @@ public sealed class OperatorDetailView
     private Action _previousRequested;
     private Action _nextRequested;
     private Action<bool> _lobbyRepresentativeRequested;
+    private bool _usesAuthoredHeaderLayout;
 
     private OperatorDetailView(Transform host)
     {
@@ -1387,7 +1388,8 @@ public sealed class OperatorDetailView
     public static OperatorDetailView Build(Transform host)
     {
         OperatorDetailView view = new(host);
-        if (!view.TryBindLayout())
+        view._usesAuthoredHeaderLayout = view.TryBindLayout();
+        if (!view._usesAuthoredHeaderLayout)
         {
             view.BuildLayout();
             if (!view.TryBindLayout())
@@ -1401,7 +1403,8 @@ public sealed class OperatorDetailView
         SetNavigationLabel(view._previousButton, "<");
         SetNavigationLabel(view._nextButton, ">");
         view.EnsureGradeIconStrip();
-        view.ApplyHeaderLayout();
+        if (!view._usesAuthoredHeaderLayout)
+            view.ApplyHeaderLayout();
         view._root.SetAsLastSibling();
         view.SetVisible(false);
         return view;
@@ -1478,7 +1481,8 @@ public sealed class OperatorDetailView
 
         _nameText.text = model.Name;
         _gradeIcons.SetGrade(model.Grade);
-        ApplyNameGradeLayout();
+        if (!_usesAuthoredHeaderLayout)
+            ApplyNameGradeLayout();
         _idText.text = string.IsNullOrWhiteSpace(model.CharacterId)
             ? string.Empty
             : $"ID  {model.CharacterId}";
@@ -1549,7 +1553,8 @@ public sealed class OperatorDetailView
     {
         _nameText.text = message ?? string.Empty;
         _gradeIcons.SetGrade(CharacterGrade.Grade0);
-        ApplyNameGradeLayout();
+        if (!_usesAuthoredHeaderLayout)
+            ApplyNameGradeLayout();
         _idText.text = string.Empty;
         _positionText.text = string.Empty;
         _standingImage.sprite = null;

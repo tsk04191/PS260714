@@ -31,6 +31,7 @@ public sealed class MonthlyAttendancePopupView : MonoBehaviour
 
     private readonly List<AttendanceRewardCellView> _cells = new();
     private AttendanceService _service;
+    private ResponsivePanelFitter _panelFitter;
 
     public static MonthlyAttendancePopupView BuildOrBind(
         RectTransform parent)
@@ -65,7 +66,6 @@ public sealed class MonthlyAttendancePopupView : MonoBehaviour
         backdropButton != null && closeButton != null &&
         titleText != null && descriptionText != null && monthText != null &&
         calendarRoot != null && rewardCellPrefab != null &&
-        extraRewardRoot != null && extraRewardCell != null &&
         statusText != null && resetText != null && claimButton != null &&
         claimLabel != null;
 
@@ -102,13 +102,14 @@ public sealed class MonthlyAttendancePopupView : MonoBehaviour
 
         AttendanceStatus status = _service?.RefreshStatus();
         AttendanceRewardScheduleSO schedule = _service?.Schedule;
-        RefreshMonth(status);
-        RefreshCalendar(schedule, status);
+        RefreshProgress(status, schedule);
+        RefreshRewards(schedule, status);
         RefreshStatus(status, schedule);
     }
 
     private void Awake()
     {
+        EnsureResponsiveLayout();
         if (!HasRequiredReferences)
         {
             Debug.LogError(
@@ -124,13 +125,22 @@ public sealed class MonthlyAttendancePopupView : MonoBehaviour
         closeButton.onClick.AddListener(Hide);
         claimButton.onClick.RemoveAllListeners();
         claimButton.onClick.AddListener(HandleClaimClicked);
+        if (extraRewardRoot != null)
+            extraRewardRoot.SetActive(false);
         EnsureCells();
     }
 
     private void OnEnable()
     {
+        EnsureResponsiveLayout();
+        _panelFitter?.RefreshLayout();
         LocalizationService.LocaleChanged += HandleLocaleChanged;
         Refresh();
+    }
+
+    private void OnRectTransformDimensionsChange()
+    {
+        _panelFitter?.RefreshLayout();
     }
 
     private void OnDisable()
@@ -155,7 +165,7 @@ public sealed class MonthlyAttendancePopupView : MonoBehaviour
                 _cells.Add(existing);
         }
 
-        while (_cells.Count < AttendanceRewardScheduleSO.MonthlyRewardCount)
+        while (_cells.Count < AttendanceRewardScheduleSO.CycleRewardCount)
         {
             AttendanceRewardCellView cell = Instantiate(
                 rewardCellPrefab,
@@ -168,55 +178,60 @@ public sealed class MonthlyAttendancePopupView : MonoBehaviour
         for (int index = 0; index < _cells.Count; index++)
         {
             _cells[index].gameObject.SetActive(
-                index < AttendanceRewardScheduleSO.MonthlyRewardCount);
+                index < AttendanceRewardScheduleSO.CycleRewardCount);
         }
     }
 
-    private void RefreshMonth(AttendanceStatus status)
+    private void EnsureResponsiveLayout()
     {
-        int monthKey = status?.MonthKey ?? 0;
-        monthText.text = monthKey > 0
-            ? $"{monthKey / 100:0000}.{monthKey % 100:00}"
+        if (_panelFitter != null)
+            return;
+
+        RectTransform panel = transform.Find("grpAttendancePanel")
+            as RectTransform;
+        _panelFitter = ResponsivePanelFitter.Bind(
+            panel,
+            transform as RectTransform);
+    }
+
+    private void RefreshProgress(
+        AttendanceStatus status,
+        AttendanceRewardScheduleSO schedule)
+    {
+        int total = schedule?.DayCount ?? 0;
+        int claimed = Mathf.Clamp(
+            status?.ClaimedInDisplayedCycle ?? 0,
+            0,
+            total);
+        monthText.text = total > 0
+            ? $"{claimed:N0} / {total:N0}"
             : string.Empty;
     }
 
-    private void RefreshCalendar(
+    private void RefreshRewards(
         AttendanceRewardScheduleSO schedule,
         AttendanceStatus status)
     {
         EnsureCells();
-        int claimedMask = status?.ClaimedDayMask ?? 0;
-        int todayIndex = status != null && status.DayOfMonth <= 28
-            ? status.DayOfMonth - 1
+        int claimedCount = status?.ClaimedInDisplayedCycle ?? 0;
+        AttendanceAvailability availability =
+            status?.Availability ?? AttendanceAvailability.NotReady;
+        int currentIndex = availability == AttendanceAvailability.Claimable ||
+                           availability == AttendanceAvailability.ClaimedToday
+            ? status?.RewardIndex ?? -1
             : -1;
         for (int index = 0;
-             index < AttendanceRewardScheduleSO.MonthlyRewardCount;
+             index < AttendanceRewardScheduleSO.CycleRewardCount;
              index++)
         {
-            bool claimed = (claimedMask & (1 << index)) != 0;
             _cells[index].Bind(
                 schedule?.GetDay(index),
-                claimed,
-                index == todayIndex);
+                index < claimedCount,
+                index == currentIndex);
         }
 
-        int year = (status?.MonthKey ?? 0) / 100;
-        int month = (status?.MonthKey ?? 0) % 100;
-        bool hasExtraDays = year > 0 && month >= 1 && month <= 12 &&
-                            DateTime.DaysInMonth(year, month) > 28;
-        extraRewardRoot.SetActive(hasExtraDays);
-        if (!hasExtraDays)
-            return;
-
-        int dayOfMonth = status?.DayOfMonth ?? 0;
-        bool extraToday = dayOfMonth >= 29;
-        bool extraClaimed = extraToday &&
-                            ((status.ExtraDayClaimedMask &
-                              (1 << (dayOfMonth - 29))) != 0);
-        extraRewardCell.Bind(
-            schedule?.ExtraDayReward,
-            extraClaimed,
-            extraToday);
+        if (extraRewardRoot != null)
+            extraRewardRoot.SetActive(false);
     }
 
     private void RefreshStatus(
@@ -239,6 +254,8 @@ public sealed class MonthlyAttendancePopupView : MonoBehaviour
                 LocalizationKeys.UiAttendanceClockRollback,
             AttendanceAvailability.InventoryFull =>
                 LocalizationKeys.UiAttendanceInventoryFull,
+            AttendanceAvailability.ScheduleCompleted =>
+                LocalizationKeys.UiAttendanceScheduleComplete,
             _ => LocalizationKeys.UiAttendanceNotReady,
         };
         statusText.text = LocalizationService.Get(key);
@@ -246,6 +263,7 @@ public sealed class MonthlyAttendancePopupView : MonoBehaviour
             availability == AttendanceAvailability.Claimable;
 
         if (status == null || schedule == null ||
+            availability == AttendanceAvailability.ScheduleCompleted ||
             status.NextResetUtc == default)
         {
             resetText.text = string.Empty;

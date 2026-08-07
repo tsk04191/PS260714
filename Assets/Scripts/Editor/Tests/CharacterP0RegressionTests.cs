@@ -81,6 +81,67 @@ public sealed class CharacterP0RegressionTests
     }
 
     [Test]
+    public void ResponsivePanelFitter_ShrinksOversizedContentOnly()
+    {
+        float reduced = ResponsivePanelFitter.CalculateFitScale(
+            new Vector2(1280f, 591f),
+            new Vector2(980f, 900f),
+            false);
+        float unchanged = ResponsivePanelFitter.CalculateFitScale(
+            new Vector2(1920f, 1080f),
+            new Vector2(980f, 900f),
+            false);
+
+        Assert.That(reduced, Is.EqualTo(591f / 900f).Within(0.001f));
+        Assert.That(unchanged, Is.EqualTo(1f).Within(0.001f));
+    }
+
+    [Test]
+    public void ResponsiveGridConstraint_DerivesColumnsFromViewportWidth()
+    {
+        int wide = ResponsiveGridConstraint.CalculateColumnCount(
+            1180f,
+            160f,
+            8f,
+            4,
+            4);
+        int narrow = ResponsiveGridConstraint.CalculateColumnCount(
+            500f,
+            160f,
+            8f,
+            4,
+            4);
+
+        Assert.That(wide, Is.EqualTo(7));
+        Assert.That(narrow, Is.EqualTo(2));
+    }
+
+    [Test]
+    public void ResponsiveCanvasUtility_UsesExpandForPcAspectChanges()
+    {
+        GameObject canvasObject = new(
+            "ResponsiveCanvas",
+            typeof(RectTransform),
+            typeof(Canvas),
+            typeof(CanvasScaler));
+        _createdObjects.Add(canvasObject);
+        CanvasScaler scaler = canvasObject.GetComponent<CanvasScaler>();
+        scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
+        scaler.referenceResolution = new Vector2(1920f, 1080f);
+        scaler.screenMatchMode =
+            CanvasScaler.ScreenMatchMode.MatchWidthOrHeight;
+
+        ResponsiveCanvasUtility.Configure(scaler);
+
+        Assert.That(
+            scaler.screenMatchMode,
+            Is.EqualTo(CanvasScaler.ScreenMatchMode.Expand));
+        Assert.That(
+            scaler.referenceResolution,
+            Is.EqualTo(new Vector2(1920f, 1080f)));
+    }
+
+    [Test]
     public void CharacterEditorPreview_TightSpriteUsesFullSourceCanvas()
     {
         Texture2D texture = new(8, 16, TextureFormat.RGBA32, false);
@@ -1581,10 +1642,12 @@ public sealed class CharacterP0RegressionTests
             SelectedEnemyTargets = new[] { CreateEnemyRuntime() },
         };
         calista.BindBattle(null, board);
+        float attackCycle = calista.Data.AttackCooldown +
+                            calista.Data.AttackRecoveryDuration;
 
         for (int attackIndex = 1; attackIndex <= 3; attackIndex++)
         {
-            calista.TickBattle(calista.Data.AttackCooldown, board);
+            calista.TickBattle(attackCycle, board);
             Assert.That(
                 calista.GetStatusStackCount(ready),
                 Is.EqualTo(attackIndex));
@@ -1595,7 +1658,7 @@ public sealed class CharacterP0RegressionTests
                 Is.Zero);
         }
 
-        calista.TickBattle(calista.Data.AttackCooldown, board);
+        calista.TickBattle(attackCycle, board);
 
         Assert.That(calista.GetStatusStackCount(ready), Is.Zero);
         Assert.That(

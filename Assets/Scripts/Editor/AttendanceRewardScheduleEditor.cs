@@ -11,8 +11,8 @@ public sealed class AttendanceRewardScheduleEditor : Editor
         serializedObject.Update();
 
         EditorGUILayout.HelpBox(
-            "The monthly calendar always contains 28 reward cells. " +
-            "Days 29-31 use the fixed currency reward below.",
+            "The attendance cycle contains 28 sequential rewards. " +
+            "Calendar dates do not change the reward order.",
             MessageType.Info);
 
         EditorGUILayout.LabelField("Identity", EditorStyles.boldLabel);
@@ -22,19 +22,21 @@ public sealed class AttendanceRewardScheduleEditor : Editor
             serializedObject.FindProperty("contentVersion"));
 
         EditorGUILayout.Space(6f);
-        EditorGUILayout.LabelField("Monthly Reset", EditorStyles.boldLabel);
+        EditorGUILayout.LabelField("Cycle", EditorStyles.boldLabel);
+        EditorGUILayout.PropertyField(
+            serializedObject.FindProperty("repeat"));
         EditorGUILayout.PropertyField(
             serializedObject.FindProperty("resetUtcOffsetMinutes"));
         EditorGUILayout.PropertyField(
             serializedObject.FindProperty("resetHour"));
 
         SerializedProperty days = serializedObject.FindProperty("days");
-        if (days.arraySize != AttendanceRewardScheduleSO.MonthlyRewardCount)
-            days.arraySize = AttendanceRewardScheduleSO.MonthlyRewardCount;
+        if (days.arraySize != AttendanceRewardScheduleSO.CycleRewardCount)
+            days.arraySize = AttendanceRewardScheduleSO.CycleRewardCount;
 
         EditorGUILayout.Space(8f);
         EditorGUILayout.LabelField(
-            "Monthly Rewards (4 x 7)",
+            "Sequential Rewards (4 x 7)",
             EditorStyles.boldLabel);
         for (int row = 0; row < 4; row++)
         {
@@ -56,20 +58,11 @@ public sealed class AttendanceRewardScheduleEditor : Editor
         _selectedDay = Mathf.Clamp(
             _selectedDay,
             0,
-            AttendanceRewardScheduleSO.MonthlyRewardCount - 1);
+            AttendanceRewardScheduleSO.CycleRewardCount - 1);
         EditorGUILayout.Space(4f);
         EditorGUILayout.PropertyField(
             days.GetArrayElementAtIndex(_selectedDay),
             new GUIContent($"Day {_selectedDay + 1} Contents"),
-            includeChildren: true);
-
-        EditorGUILayout.Space(8f);
-        EditorGUILayout.LabelField(
-            "Days 29-31 Fixed Currency",
-            EditorStyles.boldLabel);
-        EditorGUILayout.PropertyField(
-            serializedObject.FindProperty("extraDayReward"),
-            new GUIContent("Fixed Currency Contents"),
             includeChildren: true);
 
         serializedObject.ApplyModifiedProperties();

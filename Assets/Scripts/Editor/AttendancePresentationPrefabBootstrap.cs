@@ -346,8 +346,7 @@ public static class AttendancePresentationPrefabBootstrap
                 true,
                 540,
                 0,
-                pattern,
-                Day(soft, 1000L));
+                pattern);
         schedule.hideFlags = HideFlags.None;
         AssetDatabase.CreateAsset(schedule, SchedulePath);
         return schedule;

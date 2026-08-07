@@ -66,14 +66,14 @@ ui.main.title,메인 페이지 제목,title,,메인,MAIN
 ui.main.description,메인 페이지 설명,body,,로비 메뉴를 선택하세요,SELECT A LOBBY MENU
 ui.main.attendance,메인 출석 버튼,body,,출석체크,ATTENDANCE
 ui.attendance.title,출석 팝업 제목,title,,출석 보상,ATTENDANCE REWARDS
-ui.attendance.description,출석 팝업 설명,body,,매일 접속하고 달력의 오늘 보상을 받으세요,Log in each day and claim today's calendar reward.
+ui.attendance.description,출석 팝업 설명,body,,매일 접속하고 순서대로 다음 출석 보상을 받으세요,Log in each day and claim the next attendance reward.
 ui.attendance.day,출석 일차,number,,{day}일차,DAY {day}
 ui.attendance.claim,출석 수령 버튼,body,,보상 받기,CLAIM REWARD
 ui.attendance.claimed,출석 수령 상태,body,,수령 완료,CLAIMED
-ui.attendance.today,출석 오늘 상태,body,,오늘,TODAY
+ui.attendance.today,출석 현재 상태,body,,현재,CURRENT
 ui.attendance.upcoming,출석 예정 상태,body,,예정,UPCOMING
-ui.attendance.available,출석 수령 가능 안내,body,,오늘 보상을 받을 수 있습니다,Today's reward is ready to claim.
-ui.attendance.completed_today,출석 당일 수령 완료 안내,body,,오늘 보상을 이미 받았습니다,Today's reward has already been claimed.
+ui.attendance.available,출석 수령 가능 안내,body,,다음 출석 보상을 받을 수 있습니다,The next attendance reward is ready to claim.
+ui.attendance.completed_today,출석 당일 수령 완료 안내,body,,오늘의 출석 보상을 이미 받았습니다,Today's attendance reward has already been claimed.
 ui.attendance.schedule_complete,출석 일정 완료 안내,body,,모든 출석 보상을 받았습니다,All attendance rewards have been claimed.
 ui.attendance.next_reset,출석 다음 갱신 시간,number,,다음 갱신: {time},NEXT RESET: {time}
 ui.attendance.not_ready,출석 데이터 준비 안내,body,,데이터 준비 중입니다,Attendance data is loading.

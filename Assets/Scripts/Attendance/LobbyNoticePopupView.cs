@@ -10,6 +10,7 @@ public sealed class LobbyNoticePopupView : MonoBehaviour
     private TextMeshProUGUI _title;
     private TextMeshProUGUI _message;
     private Button _close;
+    private ResponsivePanelFitter _panelFitter;
     private bool _built;
 
     public static LobbyNoticePopupView BuildOrBind(RectTransform parent)
@@ -63,8 +64,14 @@ public sealed class LobbyNoticePopupView : MonoBehaviour
 
     private void OnEnable()
     {
+        _panelFitter?.RefreshLayout();
         LocalizationService.LocaleChanged += HandleLocaleChanged;
         Refresh();
+    }
+
+    private void OnRectTransformDimensionsChange()
+    {
+        _panelFitter?.RefreshLayout();
     }
 
     private void OnDisable()
@@ -98,6 +105,9 @@ public sealed class LobbyNoticePopupView : MonoBehaviour
         panelRect.pivot = new Vector2(0.5f, 0.5f);
         panelRect.anchoredPosition = Vector2.zero;
         panelRect.sizeDelta = new Vector2(700f, 400f);
+        _panelFitter = ResponsivePanelFitter.Bind(
+            panelRect,
+            transform as RectTransform);
         Image panelImage = panel.GetComponent<Image>();
         panelImage.color = new Color(0.065f, 0.085f, 0.072f, 0.99f);
         panelImage.raycastTarget = true;

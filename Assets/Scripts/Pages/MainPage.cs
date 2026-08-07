@@ -81,8 +81,7 @@ public sealed class MainPage : RuntimeMenuPageBase
             "btnATTENDANCEOverlay",
             LocalizationKeys.UiMainAttendance,
             HandleAttendanceClicked);
-        ConfigureUtilityButton(_noticeButton, 48f, 160f);
-        ConfigureUtilityButton(_attendanceButton, 220f, 184f);
+        AlignUtilityButtonAfter(_noticeButton, _attendanceButton);
         _attendanceBadge = NotificationDotView.BuildOrBind(
             _attendanceButton.transform as RectTransform);
         _noticePopup = LobbyNoticePopupView.BuildOrBind(RuntimeRoot);
@@ -240,20 +239,32 @@ public sealed class MainPage : RuntimeMenuPageBase
         }
     }
 
-    private static void ConfigureUtilityButton(
-        Button button,
-        float left,
-        float width)
+    private static void AlignUtilityButtonAfter(
+        Button leadingButton,
+        Button trailingButton)
     {
-        if (button == null)
+        if (leadingButton == null || trailingButton == null)
             return;
 
-        RectTransform rect = (RectTransform)button.transform;
-        rect.anchorMin = new Vector2(0f, 1f);
-        rect.anchorMax = new Vector2(0f, 1f);
-        rect.pivot = new Vector2(0f, 1f);
-        rect.anchoredPosition = new Vector2(left, -104f);
-        rect.sizeDelta = new Vector2(width, 52f);
+        RectTransform leading =
+            leadingButton.transform as RectTransform;
+        RectTransform trailing =
+            trailingButton.transform as RectTransform;
+        if (leading == null || trailing == null)
+            return;
+
+        trailing.anchorMin = leading.anchorMin;
+        trailing.anchorMax = leading.anchorMax;
+        trailing.pivot = leading.pivot;
+        trailing.anchoredPosition = new Vector2(
+            leading.anchoredPosition.x + leading.rect.width,
+            leading.anchoredPosition.y);
+        if (trailing.rect.height <= 0f)
+        {
+            trailing.SetSizeWithCurrentAnchors(
+                RectTransform.Axis.Vertical,
+                leading.rect.height);
+        }
     }
 
     private void BindLobbyCharacterView()

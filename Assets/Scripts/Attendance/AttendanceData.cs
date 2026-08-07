@@ -4,43 +4,48 @@ using UnityEngine;
 [Serializable]
 internal sealed class AttendanceSaveData
 {
-    public const int CurrentVersion = 2;
+    public const int CurrentVersion = 3;
 
     [SerializeField] private int version = CurrentVersion;
     [SerializeField] private string scheduleId = string.Empty;
     [SerializeField] private int claimedCount;
-    [SerializeField] private int monthKey;
-    [SerializeField] private int claimedDayMask;
-    [SerializeField] private int extraDayClaimedMask;
     [SerializeField] private int lastClaimedDayKey;
     [SerializeField] private int lastObservedDayKey;
 
     public int Version => version;
     public string ScheduleId => scheduleId?.Trim() ?? string.Empty;
     public int ClaimedCount => Math.Max(0, claimedCount);
-    public int MonthKey => Math.Max(0, monthKey);
-    public int ClaimedDayMask => claimedDayMask & 0x0FFFFFFF;
-    public int ExtraDayClaimedMask => extraDayClaimedMask & 0x7;
     public int LastClaimedDayKey => Math.Max(0, lastClaimedDayKey);
     public int LastObservedDayKey => Math.Max(0, lastObservedDayKey);
 
     public AttendanceSaveData(
         string scheduleId,
-        int monthKey,
-        int claimedDayMask,
-        int extraDayClaimedMask,
+        int claimedCount,
         int lastClaimedDayKey,
         int lastObservedDayKey)
     {
         this.scheduleId = scheduleId?.Trim() ?? string.Empty;
-        this.monthKey = Math.Max(0, monthKey);
-        this.claimedDayMask = claimedDayMask & 0x0FFFFFFF;
-        this.extraDayClaimedMask = extraDayClaimedMask & 0x7;
-        claimedCount = CountBits(this.claimedDayMask) +
-                       CountBits(this.extraDayClaimedMask);
+        this.claimedCount = Math.Max(0, claimedCount);
         this.lastClaimedDayKey = Math.Max(0, lastClaimedDayKey);
         this.lastObservedDayKey = Math.Max(0, lastObservedDayKey);
     }
+}
+
+[Serializable]
+internal sealed class AttendanceSaveDataV2
+{
+    [SerializeField] private string scheduleId = string.Empty;
+    [SerializeField] private int claimedDayMask;
+    [SerializeField] private int extraDayClaimedMask;
+    [SerializeField] private int lastClaimedDayKey;
+    [SerializeField] private int lastObservedDayKey;
+
+    public string ScheduleId => scheduleId?.Trim() ?? string.Empty;
+    public int ClaimedCount =>
+        CountBits(claimedDayMask & 0x0FFFFFFF) +
+        CountBits(extraDayClaimedMask & 0x7);
+    public int LastClaimedDayKey => Math.Max(0, lastClaimedDayKey);
+    public int LastObservedDayKey => Math.Max(0, lastObservedDayKey);
 
     private static int CountBits(int value)
     {
@@ -64,9 +69,7 @@ public sealed class AttendanceData
         PlayerPrefsKey + ".corrupt";
 
     [NonSerialized] private string _scheduleId = string.Empty;
-    [NonSerialized] private int _monthKey;
-    [NonSerialized] private int _claimedDayMask;
-    [NonSerialized] private int _extraDayClaimedMask;
+    [NonSerialized] private int _claimedCount;
     [NonSerialized] private int _lastClaimedDayKey;
     [NonSerialized] private int _lastObservedDayKey;
     [NonSerialized] private LocalDataLoadStatus _lastLoadStatus =
@@ -76,11 +79,7 @@ public sealed class AttendanceData
     public event Action Changed;
 
     public string ScheduleId => _scheduleId ?? string.Empty;
-    public int MonthKey => Math.Max(0, _monthKey);
-    public int ClaimedDayMask => _claimedDayMask & 0x0FFFFFFF;
-    public int ExtraDayClaimedMask => _extraDayClaimedMask & 0x7;
-    public int ClaimedCount =>
-        CountBits(ClaimedDayMask) + CountBits(ExtraDayClaimedMask);
+    public int ClaimedCount => Math.Max(0, _claimedCount);
     public int LastClaimedDayKey => Math.Max(0, _lastClaimedDayKey);
     public int LastObservedDayKey => Math.Max(0, _lastObservedDayKey);
     public LocalDataLoadStatus LastLoadStatus => _lastLoadStatus;
@@ -142,9 +141,7 @@ public sealed class AttendanceData
     {
         return JsonUtility.ToJson(new AttendanceSaveData(
             ScheduleId,
-            MonthKey,
-            ClaimedDayMask,
-            ExtraDayClaimedMask,
+            ClaimedCount,
             LastClaimedDayKey,
             LastObservedDayKey));
     }
@@ -159,33 +156,20 @@ public sealed class AttendanceData
         return true;
     }
 
-    internal bool ApplySchedule(string progressId, int monthKey)
+    internal bool ApplySchedule(string progressId)
     {
         string normalized = progressId?.Trim() ?? string.Empty;
-        monthKey = Math.Max(0, monthKey);
-        if (string.Equals(ScheduleId, normalized, StringComparison.Ordinal) &&
-            MonthKey == monthKey)
+        if (string.Equals(
+                ScheduleId,
+                normalized,
+                StringComparison.Ordinal))
         {
             return false;
         }
 
         _scheduleId = normalized;
-        _monthKey = monthKey;
-        _claimedDayMask = 0;
-        _extraDayClaimedMask = 0;
+        _claimedCount = 0;
         return true;
-    }
-
-    internal bool IsDayClaimed(int dayOfMonth)
-    {
-        if (dayOfMonth >= 1 && dayOfMonth <= 28)
-            return (ClaimedDayMask & (1 << (dayOfMonth - 1))) != 0;
-        if (dayOfMonth >= 29 && dayOfMonth <= 31)
-        {
-            return (ExtraDayClaimedMask &
-                    (1 << (dayOfMonth - 29))) != 0;
-        }
-        return false;
     }
 
     internal bool ObserveDay(int dayKey)
@@ -198,17 +182,11 @@ public sealed class AttendanceData
         return true;
     }
 
-    internal void CommitClaim(
-        string progressId,
-        int monthKey,
-        int dayKey)
+    internal void CommitClaim(string progressId, int dayKey)
     {
-        ApplySchedule(progressId, monthKey);
-        int dayOfMonth = Math.Max(0, dayKey) % 100;
-        if (dayOfMonth >= 1 && dayOfMonth <= 28)
-            _claimedDayMask |= 1 << (dayOfMonth - 1);
-        else if (dayOfMonth >= 29 && dayOfMonth <= 31)
-            _extraDayClaimedMask |= 1 << (dayOfMonth - 29);
+        ApplySchedule(progressId);
+        if (_claimedCount < int.MaxValue)
+            _claimedCount++;
         _lastClaimedDayKey = Math.Max(0, dayKey);
         _lastObservedDayKey = Math.Max(_lastObservedDayKey, dayKey);
     }
@@ -221,9 +199,7 @@ public sealed class AttendanceData
     private void InitializeNewAccount()
     {
         _scheduleId = string.Empty;
-        _monthKey = 0;
-        _claimedDayMask = 0;
-        _extraDayClaimedMask = 0;
+        _claimedCount = 0;
         _lastClaimedDayKey = 0;
         _lastObservedDayKey = 0;
     }
@@ -231,30 +207,7 @@ public sealed class AttendanceData
     private void ApplySaveData(AttendanceSaveData saveData)
     {
         _scheduleId = saveData.ScheduleId;
-        if (saveData.Version >= 2)
-        {
-            _monthKey = saveData.MonthKey;
-            _claimedDayMask = saveData.ClaimedDayMask;
-            _extraDayClaimedMask = saveData.ExtraDayClaimedMask;
-        }
-        else
-        {
-            int legacyMonthSource = Math.Max(
-                saveData.LastObservedDayKey,
-                saveData.LastClaimedDayKey);
-            _monthKey = legacyMonthSource / 100;
-            int migratedCount = Math.Min(28, saveData.ClaimedCount);
-            _claimedDayMask = migratedCount <= 0
-                ? 0
-                : (1 << migratedCount) - 1;
-            _extraDayClaimedMask = 0;
-            int legacyClaimedDay = saveData.LastClaimedDayKey % 100;
-            if (legacyClaimedDay >= 29 && legacyClaimedDay <= 31)
-            {
-                _extraDayClaimedMask |=
-                    1 << (legacyClaimedDay - 29);
-            }
-        }
+        _claimedCount = saveData.ClaimedCount;
         _lastClaimedDayKey = saveData.LastClaimedDayKey;
         _lastObservedDayKey = Math.Max(
             saveData.LastObservedDayKey,
@@ -347,7 +300,7 @@ public sealed class AttendanceData
             return false;
         }
 
-        if (saveData.Version >= 2 &&
+        if (saveData.Version == 2 &&
             (!LocalSaveJson.HasTopLevelProperty(json, "monthKey") ||
              !LocalSaveJson.HasTopLevelProperty(json, "claimedDayMask") ||
              !LocalSaveJson.HasTopLevelProperty(
@@ -358,18 +311,36 @@ public sealed class AttendanceData
             return false;
         }
 
-        return true;
-    }
-
-    private static int CountBits(int value)
-    {
-        int count = 0;
-        while (value != 0)
+        if (saveData.Version == 2)
         {
-            value &= value - 1;
-            count++;
+            AttendanceSaveDataV2 legacy;
+            try
+            {
+                legacy = JsonUtility.FromJson<AttendanceSaveDataV2>(json);
+            }
+            catch (ArgumentException exception)
+            {
+                Debug.LogWarning(
+                    $"Failed to migrate attendance data: " +
+                    exception.Message);
+                saveData = null;
+                return false;
+            }
+
+            if (legacy == null)
+            {
+                saveData = null;
+                return false;
+            }
+
+            saveData = new AttendanceSaveData(
+                legacy.ScheduleId,
+                legacy.ClaimedCount,
+                legacy.LastClaimedDayKey,
+                legacy.LastObservedDayKey);
         }
-        return count;
+
+        return true;
     }
 
     private void SetLoadState(

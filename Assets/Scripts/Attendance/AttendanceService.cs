@@ -37,11 +37,6 @@ public sealed class AttendanceStatus
     public int ClaimedCount { get; }
     public int RewardIndex { get; }
     public int ClaimedInDisplayedCycle { get; }
-    public int MonthKey { get; }
-    public int DayOfMonth { get; }
-    public int ClaimedDayMask { get; }
-    public int ExtraDayClaimedMask { get; }
-    public bool IsExtraDayReward => DayOfMonth > 28;
     public DateTimeOffset NextResetUtc { get; }
     public AttendanceDayReward Reward { get; }
     public string Detail { get; }
@@ -55,10 +50,6 @@ public sealed class AttendanceStatus
         int claimedCount,
         int rewardIndex,
         int claimedInDisplayedCycle,
-        int monthKey,
-        int dayOfMonth,
-        int claimedDayMask,
-        int extraDayClaimedMask,
         DateTimeOffset nextResetUtc,
         AttendanceDayReward reward,
         string detail = "")
@@ -68,10 +59,6 @@ public sealed class AttendanceStatus
         ClaimedCount = Math.Max(0, claimedCount);
         RewardIndex = rewardIndex;
         ClaimedInDisplayedCycle = Math.Max(0, claimedInDisplayedCycle);
-        MonthKey = Math.Max(0, monthKey);
-        DayOfMonth = Mathf.Clamp(dayOfMonth, 0, 31);
-        ClaimedDayMask = claimedDayMask & 0x0FFFFFFF;
-        ExtraDayClaimedMask = extraDayClaimedMask & 0x7;
         NextResetUtc = nextResetUtc;
         Reward = reward;
         Detail = detail ?? string.Empty;
@@ -148,8 +135,6 @@ public sealed class AttendanceService
             nowUtc,
             _schedule.ResetUtcOffsetMinutes,
             _schedule.ResetHour);
-        int monthKey = serviceDayKey / 100;
-        int dayOfMonth = serviceDayKey % 100;
 
         if (_attendance.IsSaveBlocked || _inventory.IsSaveBlocked)
         {
@@ -168,9 +153,7 @@ public sealed class AttendanceService
                 serviceDayKey);
         }
 
-        bool changed = _attendance.ApplySchedule(
-            _schedule.ProgressId,
-            monthKey);
+        bool changed = _attendance.ApplySchedule(_schedule.ProgressId);
         changed |= _attendance.ObserveDay(serviceDayKey);
         if (changed)
         {
@@ -181,11 +164,18 @@ public sealed class AttendanceService
             }
         }
 
-        if (_attendance.LastClaimedDayKey == serviceDayKey ||
-            _attendance.IsDayClaimed(dayOfMonth))
+        if (_attendance.LastClaimedDayKey == serviceDayKey)
         {
             return BuildStatus(
                 AttendanceAvailability.ClaimedToday,
+                serviceDayKey);
+        }
+
+        if (!_schedule.Repeat &&
+            _attendance.ClaimedCount >= _schedule.DayCount)
+        {
+            return BuildStatus(
+                AttendanceAvailability.ScheduleCompleted,
                 serviceDayKey);
         }
 
@@ -255,7 +245,6 @@ public sealed class AttendanceService
 
             _attendance.CommitClaim(
                 _schedule.ProgressId,
-                status.MonthKey,
                 status.ServiceDayKey);
             _inventory.Save(flush: false);
             _attendance.Save(flush: false);
@@ -328,18 +317,20 @@ public sealed class AttendanceService
         string detail = "")
     {
         int claimedCount = _attendance?.ClaimedCount ?? 0;
-        int monthKey = Math.Max(0, serviceDayKey / 100);
-        int dayOfMonth = Math.Max(0, serviceDayKey % 100);
-        int rewardIndex = dayOfMonth >= 1 && dayOfMonth <= 28
-            ? dayOfMonth - 1
-            : -1;
-        int claimedInCycle = CountBits(
-            _attendance?.ClaimedDayMask ?? 0);
-        AttendanceDayReward reward = rewardIndex >= 0
-            ? _schedule?.GetDay(rewardIndex)
-            : dayOfMonth >= 29 && dayOfMonth <= 31
-                ? _schedule?.ExtraDayReward
-                : null;
+        int dayCount = _schedule != null
+            ? _schedule.DayCount
+            : 0;
+        int rewardIndex = ResolveRewardIndex(
+            availability,
+            claimedCount,
+            dayCount,
+            _schedule != null && _schedule.Repeat);
+        int claimedInCycle = ResolveClaimedInDisplayedCycle(
+            availability,
+            claimedCount,
+            dayCount,
+            _schedule != null && _schedule.Repeat);
+        AttendanceDayReward reward = _schedule?.GetDay(rewardIndex);
         DateTimeOffset nextReset = _schedule != null
             ? GetNextResetUtc(
                 _clock.UtcNow,
@@ -352,13 +343,56 @@ public sealed class AttendanceService
             claimedCount,
             rewardIndex,
             claimedInCycle,
-            monthKey,
-            dayOfMonth,
-            _attendance?.ClaimedDayMask ?? 0,
-            _attendance?.ExtraDayClaimedMask ?? 0,
             nextReset,
             reward,
             detail);
+    }
+
+    private static int ResolveRewardIndex(
+        AttendanceAvailability availability,
+        int claimedCount,
+        int dayCount,
+        bool repeat)
+    {
+        if (dayCount <= 0)
+            return -1;
+
+        if (availability == AttendanceAvailability.ClaimedToday)
+        {
+            if (claimedCount <= 0)
+                return -1;
+            return repeat
+                ? PositiveModulo(claimedCount - 1, dayCount)
+                : Mathf.Clamp(claimedCount - 1, 0, dayCount - 1);
+        }
+
+        if (availability == AttendanceAvailability.ScheduleCompleted)
+            return dayCount - 1;
+
+        return repeat
+            ? claimedCount % dayCount
+            : Mathf.Clamp(claimedCount, 0, dayCount - 1);
+    }
+
+    private static int ResolveClaimedInDisplayedCycle(
+        AttendanceAvailability availability,
+        int claimedCount,
+        int dayCount,
+        bool repeat)
+    {
+        if (dayCount <= 0)
+            return 0;
+        if (!repeat)
+            return Mathf.Clamp(claimedCount, 0, dayCount);
+
+        int inCycle = claimedCount % dayCount;
+        if (availability == AttendanceAvailability.ClaimedToday &&
+            claimedCount > 0 && inCycle == 0)
+        {
+            return dayCount;
+        }
+
+        return inCycle;
     }
 
     private bool CanReceiveExactly(
@@ -450,14 +484,9 @@ public sealed class AttendanceService
         return true;
     }
 
-    private static int CountBits(int value)
+    private static int PositiveModulo(int value, int divisor)
     {
-        int count = 0;
-        while (value != 0)
-        {
-            value &= value - 1;
-            count++;
-        }
-        return count;
+        int result = value % divisor;
+        return result < 0 ? result + divisor : result;
     }
 }

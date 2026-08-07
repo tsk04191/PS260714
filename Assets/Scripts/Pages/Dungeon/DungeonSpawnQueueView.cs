@@ -16,6 +16,19 @@ public sealed class DungeonSpawnQueueView : MonoBehaviour
     private readonly List<DungeonSpawnQueueItemView> _items = new();
     private bool _initialized;
     private int _visibleItemCount;
+    private RectTransform _bottomReservedArea;
+    private float _authoredHeight;
+    private bool _refreshingLayout;
+
+    public void ConfigureResponsiveBounds(
+        RectTransform bottomReservedArea)
+    {
+        _bottomReservedArea = bottomReservedArea;
+        RectTransform rect = transform as RectTransform;
+        if (_authoredHeight <= 0f && rect != null && rect.rect.height > 0f)
+            _authoredHeight = rect.rect.height;
+        RefreshResponsiveLayout();
+    }
 
     public bool Initialize()
     {
@@ -31,6 +44,48 @@ public sealed class DungeonSpawnQueueView : MonoBehaviour
         LocalizationFontResolver.ApplyGameDefault(timerText);
         _initialized = true;
         return true;
+    }
+
+    private void OnRectTransformDimensionsChange()
+    {
+        RefreshResponsiveLayout();
+    }
+
+    private void RefreshResponsiveLayout()
+    {
+        if (_refreshingLayout)
+            return;
+
+        RectTransform rect = transform as RectTransform;
+        RectTransform parent = rect != null
+            ? rect.parent as RectTransform
+            : null;
+        if (rect == null || parent == null || parent.rect.height <= 0f)
+            return;
+
+        if (_authoredHeight <= 0f)
+            _authoredHeight = rect.rect.height;
+        if (_authoredHeight <= 0f)
+            return;
+
+        Vector3[] corners = new Vector3[4];
+        rect.GetWorldCorners(corners);
+        float availableTop = parent.InverseTransformPoint(corners[1]).y;
+        float availableBottom = parent.rect.yMin;
+        if (_bottomReservedArea != null)
+        {
+            _bottomReservedArea.GetWorldCorners(corners);
+            availableBottom = parent.InverseTransformPoint(corners[1]).y;
+        }
+
+        float height = Mathf.Min(
+            _authoredHeight,
+            Mathf.Max(0f, availableTop - availableBottom));
+        _refreshingLayout = true;
+        rect.SetSizeWithCurrentAnchors(
+            RectTransform.Axis.Vertical,
+            height);
+        _refreshingLayout = false;
     }
 
     public void RefreshQueue(IReadOnlyList<EnemyRuntime> enemies)

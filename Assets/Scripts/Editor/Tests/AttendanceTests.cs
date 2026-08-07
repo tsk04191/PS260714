@@ -112,7 +112,7 @@ public sealed class AttendanceTests
     }
 
     [Test]
-    public void MissedDays_UseTheCurrentCalendarDayReward()
+    public void MissedDays_DoNotSkipSequentialReward()
     {
         TestClock clock = new(new DateTimeOffset(
             2026, 8, 1, 2, 0, 0, TimeSpan.Zero));
@@ -124,7 +124,7 @@ public sealed class AttendanceTests
         AttendanceClaimResult next = service.TryClaimToday();
 
         Assert.That(next.Success, Is.True, next.Detail);
-        Assert.That(next.RewardIndex, Is.EqualTo(10));
+        Assert.That(next.RewardIndex, Is.EqualTo(1));
         Assert.That(attendance.ClaimedCount, Is.EqualTo(2));
         Assert.That(
             inventory.GetAmount(CoreItemIds.BasicUpgradeMaterial),
@@ -132,7 +132,7 @@ public sealed class AttendanceTests
     }
 
     [Test]
-    public void MonthChange_ResetsCalendarClaims()
+    public void MonthChange_PreservesSequentialProgress()
     {
         TestClock clock = new(new DateTimeOffset(
             2026, 8, 1, 2, 0, 0, TimeSpan.Zero));
@@ -150,13 +150,12 @@ public sealed class AttendanceTests
 
         Assert.That(service.TryClaimToday().RewardIndex, Is.EqualTo(0));
         clock.UtcNow = clock.UtcNow.AddMonths(1);
-        Assert.That(service.TryClaimToday().RewardIndex, Is.EqualTo(0));
-        Assert.That(attendance.ClaimedCount, Is.EqualTo(1));
-        Assert.That(attendance.MonthKey, Is.EqualTo(202609));
+        Assert.That(service.TryClaimToday().RewardIndex, Is.EqualTo(1));
+        Assert.That(attendance.ClaimedCount, Is.EqualTo(2));
     }
 
     [Test]
-    public void DaysAfterTwentyEight_UseFixedCurrencyReward()
+    public void CalendarDate_DoesNotChooseTheRewardIndex()
     {
         TestClock clock = new(new DateTimeOffset(
             2026, 8, 29, 2, 0, 0, TimeSpan.Zero));
@@ -173,10 +172,73 @@ public sealed class AttendanceTests
         AttendanceClaimResult result = service.TryClaimToday();
 
         Assert.That(result.Success, Is.True, result.Detail);
-        Assert.That(result.RewardIndex, Is.EqualTo(-1));
+        Assert.That(result.RewardIndex, Is.EqualTo(0));
         Assert.That(
             service.RefreshStatus().Availability,
             Is.EqualTo(AttendanceAvailability.ClaimedToday));
+    }
+
+    [Test]
+    public void RepeatingSchedule_WrapsAfterTheFinalReward()
+    {
+        TestClock clock = new(new DateTimeOffset(
+            2026, 8, 1, 2, 0, 0, TimeSpan.Zero));
+        AttendanceRewardScheduleSO schedule = CreateSchedule(
+            true,
+            CoreItemIds.SoftCredit,
+            10L);
+        AttendanceService service = CreateService(
+            clock,
+            schedule,
+            out AttendanceData attendance,
+            out _);
+
+        for (int index = 0;
+             index < AttendanceRewardScheduleSO.CycleRewardCount;
+             index++)
+        {
+            AttendanceClaimResult claim = service.TryClaimToday();
+            Assert.That(claim.Success, Is.True, claim.Detail);
+            Assert.That(claim.RewardIndex, Is.EqualTo(index));
+            clock.UtcNow = clock.UtcNow.AddDays(1);
+        }
+
+        AttendanceClaimResult wrapped = service.TryClaimToday();
+        Assert.That(wrapped.Success, Is.True, wrapped.Detail);
+        Assert.That(wrapped.RewardIndex, Is.Zero);
+        Assert.That(
+            attendance.ClaimedCount,
+            Is.EqualTo(AttendanceRewardScheduleSO.CycleRewardCount + 1));
+    }
+
+    [Test]
+    public void NonRepeatingSchedule_CompletesAfterTheFinalReward()
+    {
+        TestClock clock = new(new DateTimeOffset(
+            2026, 8, 1, 2, 0, 0, TimeSpan.Zero));
+        AttendanceRewardScheduleSO schedule = CreateSchedule(
+            false,
+            CoreItemIds.SoftCredit,
+            10L);
+        AttendanceService service = CreateService(
+            clock,
+            schedule,
+            out _,
+            out _);
+
+        for (int index = 0;
+             index < AttendanceRewardScheduleSO.CycleRewardCount;
+             index++)
+        {
+            Assert.That(service.TryClaimToday().Success, Is.True);
+            clock.UtcNow = clock.UtcNow.AddDays(1);
+        }
+
+        AttendanceStatus completed = service.RefreshStatus();
+        Assert.That(
+            completed.Availability,
+            Is.EqualTo(AttendanceAvailability.ScheduleCompleted));
+        Assert.That(completed.CanClaim, Is.False);
     }
 
     [Test]
@@ -325,6 +387,31 @@ public sealed class AttendanceTests
     }
 
     [Test]
+    public void VersionTwoCalendarSave_MigratesClaimMasksToCount()
+    {
+        const string versionTwoJson =
+            "{\"version\":2,\"scheduleId\":\"test.v1\"," +
+            "\"claimedCount\":99,\"monthKey\":202608," +
+            "\"claimedDayMask\":17,\"extraDayClaimedMask\":5," +
+            "\"lastClaimedDayKey\":20260831," +
+            "\"lastObservedDayKey\":20260831}";
+        PlayerPrefs.SetString(AttendanceKey, versionTwoJson);
+        PlayerPrefs.Save();
+
+        AttendanceData attendance = new();
+        LocalDataLoadStatus status = attendance.Load();
+
+        Assert.That(status, Is.EqualTo(LocalDataLoadStatus.Success));
+        Assert.That(attendance.ClaimedCount, Is.EqualTo(4));
+        Assert.That(attendance.LastClaimedDayKey, Is.EqualTo(20260831));
+        string migratedJson = attendance.ExportJson();
+        StringAssert.Contains("\"version\":3", migratedJson);
+        StringAssert.Contains("\"claimedCount\":4", migratedJson);
+        StringAssert.DoesNotContain("monthKey", migratedJson);
+        StringAssert.DoesNotContain("claimedDayMask", migratedJson);
+    }
+
+    [Test]
     public void AttendanceLocalizationKeys_AreGenerated()
     {
         string[] keys =
@@ -357,8 +444,7 @@ public sealed class AttendanceTests
 
         Assert.That(
             schedule.DayCount,
-            Is.EqualTo(AttendanceRewardScheduleSO.MonthlyRewardCount));
-        Assert.That(schedule.ExtraDayReward, Is.Not.Null);
+            Is.EqualTo(AttendanceRewardScheduleSO.CycleRewardCount));
         Assert.That(schedule.TryValidate(out string reason), Is.True, reason);
     }
 

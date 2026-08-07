@@ -102,7 +102,3 @@ MonoBehaviour:
   - rewards:
     - item: {fileID: 11400000, guid: d4d7fb081ac64e6ed74b257cd64bd804, type: 2}
       amount: 2
-  extraDayReward:
-    rewards:
-    - item: {fileID: 11400000, guid: a1a4c8e5d7f34b3ba418924fa318a501, type: 2}
-      amount: 1000

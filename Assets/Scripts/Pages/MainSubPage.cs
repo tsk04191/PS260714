@@ -1221,9 +1221,11 @@ public sealed class OperatorRosterView
     {
         OperatorRosterView view = new(host);
         view.HideLegacyBrowser();
+        bool createdLayout = false;
         if (!view.TryBindLayout())
         {
             view.BuildLayout();
+            createdLayout = true;
             if (!view.TryBindLayout())
             {
                 throw new InvalidOperationException(
@@ -1232,7 +1234,9 @@ public sealed class OperatorRosterView
         }
 
         view.ApplyRosterGridFlow();
-        view.ApplyHeaderLayout();
+        view.BindResponsiveGrid();
+        if (createdLayout)
+            view.ApplyHeaderLayout();
         view._root.gameObject.SetActive(true);
         view._root.SetAsLastSibling();
         return view;
@@ -2164,6 +2168,19 @@ public sealed class OperatorRosterView
         grid.startCorner = GridLayoutGroup.Corner.UpperLeft;
         grid.startAxis = GridLayoutGroup.Axis.Horizontal;
         grid.childAlignment = TextAnchor.UpperLeft;
+    }
+
+    private void BindResponsiveGrid()
+    {
+        GridLayoutGroup grid = _cardContent != null
+            ? _cardContent.GetComponent<GridLayoutGroup>()
+            : null;
+        if (grid == null)
+            return;
+
+        ResponsiveGridConstraint.Bind(
+            grid,
+            grid.transform.parent as RectTransform);
     }
 
     private static GameObject CreateUiObject(

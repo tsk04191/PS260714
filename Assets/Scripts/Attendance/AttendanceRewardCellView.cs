@@ -20,7 +20,7 @@ public sealed class AttendanceRewardCellView : MonoBehaviour
     public void Bind(
         AttendanceDayReward reward,
         bool claimed,
-        bool today)
+        bool highlighted)
     {
         IReadOnlyList<AttendanceItemReward> rewards = reward?.Rewards;
         AttendanceItemReward primary = rewards != null && rewards.Count > 0
@@ -36,6 +36,6 @@ public sealed class AttendanceRewardCellView : MonoBehaviour
             ? $"+{additionalCount}"
             : string.Empty;
         claimedOverlay.gameObject.SetActive(claimed);
-        todayBorder.SetActive(today);
+        todayBorder.SetActive(highlighted);
     }
 }

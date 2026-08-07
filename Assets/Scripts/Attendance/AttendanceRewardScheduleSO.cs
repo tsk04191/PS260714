@@ -45,7 +45,7 @@ public sealed class AttendanceDayReward
     menuName = "PS260714/Attendance/Reward Schedule")]
 public sealed class AttendanceRewardScheduleSO : ScriptableObject
 {
-    public const int MonthlyRewardCount = 28;
+    public const int CycleRewardCount = 28;
 
     [Header("Identity")]
     [SerializeField] private string scheduleId = "default_attendance";
@@ -59,7 +59,6 @@ public sealed class AttendanceRewardScheduleSO : ScriptableObject
 
     [Header("Rewards")]
     [SerializeField] private List<AttendanceDayReward> days = new();
-    [SerializeField] private AttendanceDayReward extraDayReward;
 
     public string ScheduleId => scheduleId?.Trim() ?? string.Empty;
     public int ContentVersion => Math.Max(1, contentVersion);
@@ -72,7 +71,6 @@ public sealed class AttendanceRewardScheduleSO : ScriptableObject
     public IReadOnlyList<AttendanceDayReward> Days =>
         days ??= new List<AttendanceDayReward>();
     public int DayCount => Days.Count;
-    public AttendanceDayReward ExtraDayReward => extraDayReward;
 
     public AttendanceDayReward GetDay(int index)
     {
@@ -89,10 +87,10 @@ public sealed class AttendanceRewardScheduleSO : ScriptableObject
             return false;
         }
 
-        if (DayCount != MonthlyRewardCount)
+        if (DayCount != CycleRewardCount)
         {
             reason = $"The attendance schedule must contain exactly " +
-                     $"{MonthlyRewardCount} monthly reward days.";
+                     $"{CycleRewardCount} sequential rewards.";
             return false;
         }
 
@@ -130,15 +128,6 @@ public sealed class AttendanceRewardScheduleSO : ScriptableObject
             }
         }
 
-        if (!TryValidateDay(
-                extraDayReward,
-                "Extra day reward",
-                requireCurrency: true,
-                out reason))
-        {
-            return false;
-        }
-
         reason = string.Empty;
         return true;
     }
@@ -149,8 +138,7 @@ public sealed class AttendanceRewardScheduleSO : ScriptableObject
         bool repeat,
         int resetUtcOffsetMinutes,
         int resetHour,
-        IEnumerable<AttendanceDayReward> days,
-        AttendanceDayReward extraDayReward = null)
+        IEnumerable<AttendanceDayReward> days)
     {
         AttendanceRewardScheduleSO schedule =
             CreateInstance<AttendanceRewardScheduleSO>();
@@ -164,11 +152,7 @@ public sealed class AttendanceRewardScheduleSO : ScriptableObject
         List<AttendanceDayReward> authoredDays = days != null
             ? new List<AttendanceDayReward>(days)
             : new List<AttendanceDayReward>();
-        schedule.days = ExpandMonthlyDays(authoredDays);
-        schedule.extraDayReward = extraDayReward ??
-                                  (authoredDays.Count > 0
-                                      ? authoredDays[0]
-                                      : null);
+        schedule.days = ExpandCycleRewards(authoredDays);
         return schedule;
     }
 
@@ -180,63 +164,21 @@ public sealed class AttendanceRewardScheduleSO : ScriptableObject
             Mathf.Clamp(resetUtcOffsetMinutes, -720, 840);
         resetHour = Mathf.Clamp(resetHour, 0, 23);
         days ??= new List<AttendanceDayReward>();
-        days = ExpandMonthlyDays(days);
+        days = ExpandCycleRewards(days);
     }
 
-    private static List<AttendanceDayReward> ExpandMonthlyDays(
+    private static List<AttendanceDayReward> ExpandCycleRewards(
         IReadOnlyList<AttendanceDayReward> source)
     {
-        List<AttendanceDayReward> result = new(MonthlyRewardCount);
+        List<AttendanceDayReward> result = new(CycleRewardCount);
         int sourceCount = source?.Count ?? 0;
-        for (int index = 0; index < MonthlyRewardCount; index++)
+        for (int index = 0; index < CycleRewardCount; index++)
         {
             result.Add(sourceCount > 0
                 ? source[index % sourceCount]
                 : new AttendanceDayReward(null));
         }
         return result;
-    }
-
-    private static bool TryValidateDay(
-        AttendanceDayReward day,
-        string label,
-        bool requireCurrency,
-        out string reason)
-    {
-        if (day == null || day.Rewards.Count == 0)
-        {
-            reason = $"{label} has no rewards.";
-            return false;
-        }
-
-        for (int rewardIndex = 0;
-             rewardIndex < day.Rewards.Count;
-             rewardIndex++)
-        {
-            AttendanceItemReward reward = day.Rewards[rewardIndex];
-            if (reward == null || reward.Item == null ||
-                string.IsNullOrWhiteSpace(reward.ItemId) ||
-                reward.Amount <= 0L)
-            {
-                reason = $"{label} reward {rewardIndex + 1} is invalid.";
-                return false;
-            }
-            if (requireCurrency && reward.Item is not CurrencyItemSO)
-            {
-                reason = $"{label} reward {rewardIndex + 1} must use a " +
-                         "currency item.";
-                return false;
-            }
-            if (ItemDefinitionCatalog.Get(reward.ItemId) == null)
-            {
-                reason = $"Item '{reward.ItemId}' is not registered in " +
-                         "the item catalog.";
-                return false;
-            }
-        }
-
-        reason = string.Empty;
-        return true;
     }
 }
 
@@ -298,7 +240,6 @@ public static class AttendanceRewardScheduleCatalog
                 Day(CoreItemIds.BasicUpgradeMaterial, 10L),
                 Day(CoreItemIds.FreeCredit, 50L),
                 Day(CoreItemIds.StandardRecruitTicket, 2L),
-            },
-            Day(CoreItemIds.SoftCredit, 1000L));
+            });
     }
 }

@@ -1,5 +1,6 @@
 using UnityEngine;
 using UnityEngine.SceneManagement;
+using UnityEngine.UI;
 
 public struct PopupLayerPlacement
 {
@@ -14,6 +15,45 @@ public struct PopupLayerPlacement
     internal Vector3 LocalScale;
 
     public bool IsActive => Popup != null && Parent != null;
+}
+
+public static class ResponsiveCanvasUtility
+{
+    [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.BeforeSceneLoad)]
+    private static void RegisterSceneCallback()
+    {
+        SceneManager.sceneLoaded -= HandleSceneLoaded;
+        SceneManager.sceneLoaded += HandleSceneLoaded;
+    }
+
+    public static void Configure(CanvasScaler scaler)
+    {
+        if (scaler == null ||
+            scaler.uiScaleMode != CanvasScaler.ScaleMode.ScaleWithScreenSize)
+        {
+            return;
+        }
+
+        scaler.screenMatchMode =
+            CanvasScaler.ScreenMatchMode.Expand;
+    }
+
+    private static void HandleSceneLoaded(
+        Scene scene,
+        LoadSceneMode mode)
+    {
+        if (!scene.IsValid() || !scene.isLoaded)
+            return;
+
+        GameObject[] roots = scene.GetRootGameObjects();
+        for (int rootIndex = 0; rootIndex < roots.Length; rootIndex++)
+        {
+            CanvasScaler[] scalers = roots[rootIndex]
+                .GetComponentsInChildren<CanvasScaler>(true);
+            for (int index = 0; index < scalers.Length; index++)
+                Configure(scalers[index]);
+        }
+    }
 }
 
 public static class PopupLayerUtility
@@ -68,7 +108,8 @@ public static class PopupLayerUtility
         popup.SetParent(layer, false);
         popup.anchorMin = new Vector2(0.5f, 0.5f);
         popup.anchorMax = new Vector2(0.5f, 0.5f);
-        popup.localScale = Vector3.one;
+        Vector3 authoredScale = placement.LocalScale;
+        popup.localScale = authoredScale;
 
         float width = popup.rect.width > 0f
             ? popup.rect.width
@@ -77,6 +118,21 @@ public static class PopupLayerUtility
             ? popup.rect.height
             : popup.sizeDelta.y;
         Rect layerRect = layer.rect;
+        Vector2 availableSize = new(
+            Mathf.Max(0f, layerRect.width - edgePadding * 2f),
+            Mathf.Max(0f, layerRect.height - edgePadding * 2f));
+        float fitScale = ResponsivePanelFitter.CalculateFitScale(
+            availableSize,
+            new Vector2(
+                width * Mathf.Abs(authoredScale.x),
+                height * Mathf.Abs(authoredScale.y)),
+            false);
+        popup.localScale = new Vector3(
+            authoredScale.x * fitScale,
+            authoredScale.y * fitScale,
+            authoredScale.z);
+        width *= Mathf.Abs(popup.localScale.x);
+        height *= Mathf.Abs(popup.localScale.y);
         bool openLeft = rightLocal.x + gap + width >
                         layerRect.xMax - edgePadding;
         popup.pivot = new Vector2(openLeft ? 1f : 0f, 0.5f);
@@ -136,5 +192,217 @@ public static class PopupLayerUtility
                 SizeDelta = popup.sizeDelta,
                 LocalScale = popup.localScale,
             };
+    }
+}
+
+[DisallowMultipleComponent]
+[RequireComponent(typeof(RectTransform))]
+public sealed class ResponsivePanelFitter : MonoBehaviour
+{
+    [SerializeField] private RectTransform viewport;
+    [SerializeField] private bool allowUpscale;
+
+    private RectTransform _panel;
+    private Vector2 _authoredSize;
+    private Vector3 _authoredScale;
+    private bool _captured;
+
+    public static ResponsivePanelFitter Bind(
+        RectTransform panel,
+        RectTransform viewport = null,
+        bool allowUpscale = false)
+    {
+        if (panel == null)
+            return null;
+
+        ResponsivePanelFitter fitter =
+            panel.GetComponent<ResponsivePanelFitter>() ??
+            panel.gameObject.AddComponent<ResponsivePanelFitter>();
+        fitter.viewport = viewport != null
+            ? viewport
+            : panel.parent as RectTransform;
+        fitter.allowUpscale = allowUpscale;
+        fitter.CaptureAuthoredLayout();
+        fitter.RefreshLayout();
+        return fitter;
+    }
+
+    public static float CalculateFitScale(
+        Vector2 viewportSize,
+        Vector2 contentSize,
+        bool allowUpscale)
+    {
+        if (viewportSize.x <= 0f || viewportSize.y <= 0f ||
+            contentSize.x <= 0f || contentSize.y <= 0f)
+        {
+            return 1f;
+        }
+
+        float scale = Mathf.Min(
+            viewportSize.x / contentSize.x,
+            viewportSize.y / contentSize.y);
+        return allowUpscale
+            ? Mathf.Max(0f, scale)
+            : Mathf.Clamp01(scale);
+    }
+
+    public void RefreshLayout()
+    {
+        EnsureReferences();
+        if (!_captured || _panel == null || viewport == null)
+            return;
+
+        float fitScale = CalculateFitScale(
+            viewport.rect.size,
+            _authoredSize,
+            allowUpscale);
+        _panel.localScale = new Vector3(
+            _authoredScale.x * fitScale,
+            _authoredScale.y * fitScale,
+            _authoredScale.z);
+    }
+
+    private void Awake()
+    {
+        EnsureReferences();
+        CaptureAuthoredLayout();
+    }
+
+    private void OnEnable()
+    {
+        RefreshLayout();
+    }
+
+    private void OnRectTransformDimensionsChange()
+    {
+        RefreshLayout();
+    }
+
+    private void EnsureReferences()
+    {
+        _panel ??= transform as RectTransform;
+        viewport ??= _panel != null
+            ? _panel.parent as RectTransform
+            : null;
+    }
+
+    private void CaptureAuthoredLayout()
+    {
+        EnsureReferences();
+        if (_captured || _panel == null)
+            return;
+
+        _authoredSize = _panel.rect.size;
+        if (_authoredSize.x <= 0f || _authoredSize.y <= 0f)
+            _authoredSize = _panel.sizeDelta;
+        _authoredScale = _panel.localScale;
+        _captured = _authoredSize.x > 0f && _authoredSize.y > 0f;
+    }
+}
+
+[DisallowMultipleComponent]
+[RequireComponent(typeof(GridLayoutGroup))]
+public sealed class ResponsiveGridConstraint : MonoBehaviour
+{
+    [SerializeField] private RectTransform viewport;
+    [SerializeField, Min(1)] private int maximumColumns = int.MaxValue;
+
+    private GridLayoutGroup _grid;
+    private bool _bound;
+    private bool _refreshing;
+
+    public static ResponsiveGridConstraint Bind(
+        GridLayoutGroup grid,
+        RectTransform viewport = null,
+        int maximumColumns = int.MaxValue)
+    {
+        if (grid == null)
+            return null;
+
+        ResponsiveGridConstraint constraint =
+            grid.GetComponent<ResponsiveGridConstraint>() ??
+            grid.gameObject.AddComponent<ResponsiveGridConstraint>();
+        constraint.viewport = viewport != null
+            ? viewport
+            : grid.transform.parent as RectTransform;
+        constraint.maximumColumns = Mathf.Max(1, maximumColumns);
+        constraint._bound = true;
+        if (constraint.viewport != null &&
+            constraint.viewport.GetComponentInParent<Canvas>() != null)
+        {
+            constraint.RefreshLayout();
+        }
+        return constraint;
+    }
+
+    public static int CalculateColumnCount(
+        float viewportWidth,
+        float cellWidth,
+        float spacing,
+        int leftPadding,
+        int rightPadding)
+    {
+        float usableWidth = Mathf.Max(
+            0f,
+            viewportWidth - leftPadding - rightPadding);
+        if (cellWidth <= 0f)
+            return 1;
+
+        float occupiedWidth = cellWidth + Mathf.Max(0f, spacing);
+        if (occupiedWidth <= 0f)
+            return 1;
+
+        return Mathf.Max(
+            1,
+            Mathf.FloorToInt(
+                (usableWidth + Mathf.Max(0f, spacing)) /
+                occupiedWidth));
+    }
+
+    public void RefreshLayout()
+    {
+        if (!_bound || _refreshing)
+            return;
+
+        _grid ??= GetComponent<GridLayoutGroup>();
+        viewport ??= transform.parent as RectTransform;
+        if (_grid == null || viewport == null ||
+            viewport.rect.width <= 0f)
+        {
+            return;
+        }
+
+        _refreshing = true;
+        int columnCount = Mathf.Min(
+            maximumColumns,
+            CalculateColumnCount(
+                viewport.rect.width,
+                _grid.cellSize.x,
+                _grid.spacing.x,
+                _grid.padding.left,
+                _grid.padding.right));
+        _grid.constraint = GridLayoutGroup.Constraint.FixedColumnCount;
+        _grid.constraintCount = columnCount;
+        _refreshing = false;
+    }
+
+    private void Awake()
+    {
+        _grid = GetComponent<GridLayoutGroup>();
+    }
+
+    private void OnEnable()
+    {
+        RefreshLayout();
+    }
+
+    private void Start()
+    {
+        RefreshLayout();
+    }
+
+    private void OnRectTransformDimensionsChange()
+    {
+        RefreshLayout();
     }
 }

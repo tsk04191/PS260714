@@ -29,6 +29,7 @@ public abstract class RuntimeMenuPageBase : MonoBehaviour, IPage
     private bool _initialized;
     private bool _localeEventBound;
     private bool _usesDesignerLayout;
+    private ResponsivePanelFitter _designerPanelFitter;
 
     protected abstract string PageTitle { get; }
     protected virtual string PageDescription => string.Empty;
@@ -553,6 +554,13 @@ public abstract class RuntimeMenuPageBase : MonoBehaviour, IPage
         _descriptionText ??= existingPanel.Find("txtPageDescription")
             ?.GetComponent<TextMeshProUGUI>();
         _usesDesignerLayout = true;
+        if (panelRect.anchorMin == panelRect.anchorMax &&
+            panelRect.rect.width > 0f && panelRect.rect.height > 0f)
+        {
+            _designerPanelFitter = ResponsivePanelFitter.Bind(
+                panelRect,
+                rootRect);
+        }
         return true;
     }
 
@@ -586,6 +594,7 @@ public abstract class RuntimeMenuPageBase : MonoBehaviour, IPage
         _buttonRoot = null;
         _titleText = null;
         _descriptionText = null;
+        _designerPanelFitter = null;
         _initialized = false;
         if (!BuildRuntimeUi())
             return;
@@ -603,13 +612,16 @@ public abstract class RuntimeMenuPageBase : MonoBehaviour, IPage
         if (_runtimeRoot == null || _panel == null)
             return;
 
-        if (_usesDesignerLayout)
-            return;
-
         _runtimeRoot.anchorMin = Vector2.zero;
         _runtimeRoot.anchorMax = Vector2.one;
         _runtimeRoot.offsetMin = Vector2.zero;
         _runtimeRoot.offsetMax = Vector2.zero;
+
+        if (_usesDesignerLayout)
+        {
+            _designerPanelFitter?.RefreshLayout();
+            return;
+        }
 
         RectTransform pageRect = transform as RectTransform;
         float pageWidth = pageRect != null && pageRect.rect.width > 0f
@@ -859,6 +871,7 @@ public sealed class CodexBrowserView
         CodexBrowserView view = new(host);
         if (!view.TryBindLayout())
             view.BuildLayout();
+        view.BindResponsiveGrid();
         return view;
     }
 
@@ -1020,7 +1033,24 @@ public sealed class CodexBrowserView
             grid.constraint =
                 GridLayoutGroup.Constraint.FixedColumnCount;
             grid.constraintCount = Mathf.Max(1, columnCount);
+            ResponsiveGridConstraint.Bind(
+                grid,
+                grid.transform.parent as RectTransform,
+                Mathf.Max(1, columnCount));
         }
+    }
+
+    private void BindResponsiveGrid()
+    {
+        GridLayoutGroup grid = _cardContent != null
+            ? _cardContent.GetComponent<GridLayoutGroup>()
+            : null;
+        if (grid == null)
+            return;
+
+        ResponsiveGridConstraint.Bind(
+            grid,
+            grid.transform.parent as RectTransform);
     }
 
     private void BuildLayout()

@@ -112,8 +112,6 @@ public class DungeonPage : MonoBehaviour, IPage
     private int initialGridSize = DungeonBoardView.MinimumGridSize;
 
     [SerializeField, Range(1, 20)] private int maximumStackSize = 8;
-    [SerializeField, Range(0.4f, 0.95f)] private float boardWidthRatio = 0.72f;
-    [SerializeField, Range(0.4f, 0.95f)] private float boardHeightRatio = 0.78f;
     [SerializeField, Min(100f)] private float maximumBoardSize = 760f;
     [SerializeField] private DungeonBoardView board;
 
@@ -2766,12 +2764,34 @@ public class DungeonPage : MonoBehaviour, IPage
         if (board == null || transform is not RectTransform pageRect)
             return;
 
-        float availableWidth = pageRect.rect.width * boardWidthRatio;
-        float availableHeight = pageRect.rect.height * boardHeightRatio;
+        RectTransform boardRect = board.transform as RectTransform;
+        Bounds boardBounds = RectTransformUtility
+            .CalculateRelativeRectTransformBounds(pageRect, boardRect);
+        float topInset = Mathf.Max(
+            0f,
+            pageRect.rect.yMax - boardBounds.max.y);
+        float bottomInset = battleTab != null
+            ? battleTab.BottomReservedHeight
+            : 0f;
+        float availableWidth = pageRect.rect.width;
+        float availableHeight = Mathf.Max(
+            1f,
+            pageRect.rect.height - topInset - bottomInset);
         float boardSize = Mathf.Min(maximumBoardSize, availableWidth, availableHeight);
 
         if (boardSize > 0f)
+        {
+            boardRect.anchorMin = new Vector2(
+                0.5f,
+                boardRect.anchorMin.y);
+            boardRect.anchorMax = new Vector2(
+                0.5f,
+                boardRect.anchorMax.y);
+            boardRect.anchoredPosition = new Vector2(
+                0f,
+                boardRect.anchoredPosition.y);
             board.SetPixelSize(boardSize);
+        }
     }
 }
 

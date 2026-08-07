@@ -9,7 +9,7 @@ namespace PS260714.Localization
 {
     public static class GeneratedLocalizationTables
     {
-        public const string SourceHash = "1a842a3d6e9f3a2d7094cecb5cde94b7b7b596564f9ce52d1bbfd07737dc2d8b";
+        public const string SourceHash = "9b744c915e7b07bd36977589b4301dfcd97eea2ccc4973010ead217afa1b355b";
         public const string ReferenceLocale = "en-US";
 
         private static readonly LocalizationLocaleInfo[] LocaleData =
@@ -92,14 +92,14 @@ namespace PS260714.Localization
                 { "ui.main.description", new LocalizationEntry("\uB85C\uBE44 \uBA54\uB274\uB97C \uC120\uD0DD\uD558\uC138\uC694", "body") },
                 { "ui.main.attendance", new LocalizationEntry("\uCD9C\uC11D\uCCB4\uD06C", "body") },
                 { "ui.attendance.title", new LocalizationEntry("\uCD9C\uC11D \uBCF4\uC0C1", "title") },
-                { "ui.attendance.description", new LocalizationEntry("\uB9E4\uC77C \uC811\uC18D\uD558\uACE0 \uB2EC\uB825\uC758 \uC624\uB298 \uBCF4\uC0C1\uC744 \uBC1B\uC73C\uC138\uC694", "body") },
+                { "ui.attendance.description", new LocalizationEntry("\uB9E4\uC77C \uC811\uC18D\uD558\uACE0 \uC21C\uC11C\uB300\uB85C \uB2E4\uC74C \uCD9C\uC11D \uBCF4\uC0C1\uC744 \uBC1B\uC73C\uC138\uC694", "body") },
                 { "ui.attendance.day", new LocalizationEntry("{day}\uC77C\uCC28", "number") },
                 { "ui.attendance.claim", new LocalizationEntry("\uBCF4\uC0C1 \uBC1B\uAE30", "body") },
                 { "ui.attendance.claimed", new LocalizationEntry("\uC218\uB839 \uC644\uB8CC", "body") },
-                { "ui.attendance.today", new LocalizationEntry("\uC624\uB298", "body") },
+                { "ui.attendance.today", new LocalizationEntry("\uD604\uC7AC", "body") },
                 { "ui.attendance.upcoming", new LocalizationEntry("\uC608\uC815", "body") },
-                { "ui.attendance.available", new LocalizationEntry("\uC624\uB298 \uBCF4\uC0C1\uC744 \uBC1B\uC744 \uC218 \uC788\uC2B5\uB2C8\uB2E4", "body") },
-                { "ui.attendance.completed_today", new LocalizationEntry("\uC624\uB298 \uBCF4\uC0C1\uC744 \uC774\uBBF8 \uBC1B\uC558\uC2B5\uB2C8\uB2E4", "body") },
+                { "ui.attendance.available", new LocalizationEntry("\uB2E4\uC74C \uCD9C\uC11D \uBCF4\uC0C1\uC744 \uBC1B\uC744 \uC218 \uC788\uC2B5\uB2C8\uB2E4", "body") },
+                { "ui.attendance.completed_today", new LocalizationEntry("\uC624\uB298\uC758 \uCD9C\uC11D \uBCF4\uC0C1\uC744 \uC774\uBBF8 \uBC1B\uC558\uC2B5\uB2C8\uB2E4", "body") },
                 { "ui.attendance.schedule_complete", new LocalizationEntry("\uBAA8\uB4E0 \uCD9C\uC11D \uBCF4\uC0C1\uC744 \uBC1B\uC558\uC2B5\uB2C8\uB2E4", "body") },
                 { "ui.attendance.next_reset", new LocalizationEntry("\uB2E4\uC74C \uAC31\uC2E0: {time}", "number") },
                 { "ui.attendance.not_ready", new LocalizationEntry("\uB370\uC774\uD130 \uC900\uBE44 \uC911\uC785\uB2C8\uB2E4", "body") },
@@ -450,14 +450,14 @@ namespace PS260714.Localization
                 { "ui.main.description", new LocalizationEntry("SELECT A LOBBY MENU", "body") },
                 { "ui.main.attendance", new LocalizationEntry("ATTENDANCE", "body") },
                 { "ui.attendance.title", new LocalizationEntry("ATTENDANCE REWARDS", "title") },
-                { "ui.attendance.description", new LocalizationEntry("Log in each day and claim today's calendar reward.", "body") },
+                { "ui.attendance.description", new LocalizationEntry("Log in each day and claim the next attendance reward.", "body") },
                 { "ui.attendance.day", new LocalizationEntry("DAY {day}", "number") },
                 { "ui.attendance.claim", new LocalizationEntry("CLAIM REWARD", "body") },
                 { "ui.attendance.claimed", new LocalizationEntry("CLAIMED", "body") },
-                { "ui.attendance.today", new LocalizationEntry("TODAY", "body") },
+                { "ui.attendance.today", new LocalizationEntry("CURRENT", "body") },
                 { "ui.attendance.upcoming", new LocalizationEntry("UPCOMING", "body") },
-                { "ui.attendance.available", new LocalizationEntry("Today's reward is ready to claim.", "body") },
-                { "ui.attendance.completed_today", new LocalizationEntry("Today's reward has already been claimed.", "body") },
+                { "ui.attendance.available", new LocalizationEntry("The next attendance reward is ready to claim.", "body") },
+                { "ui.attendance.completed_today", new LocalizationEntry("Today's attendance reward has already been claimed.", "body") },
                 { "ui.attendance.schedule_complete", new LocalizationEntry("All attendance rewards have been claimed.", "body") },
                 { "ui.attendance.next_reset", new LocalizationEntry("NEXT RESET: {time}", "number") },
                 { "ui.attendance.not_ready", new LocalizationEntry("Attendance data is loading.", "body") },
