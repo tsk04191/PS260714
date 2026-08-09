@@ -8,21 +8,21 @@ using UnityEngine.UI;
 [RequireComponent(typeof(RectTransform), typeof(Image))]
 public sealed class DungeonTileView : MonoBehaviour, IPointerClickHandler
 {
-    private const float AttackRangeDisplayDuration = 0.5f;
-    private const byte AttackRangeMinimumAlpha = 100;
-    private const byte AttackRangeAlphaStep = 50;
-    private const byte AttackRangeMaximumAlpha = 250;
-
     [SerializeField] private Image slotSurface;
     [SerializeField] private RectTransform stackRoot;
     [SerializeField] private EnemyCard enemyCardPrefab;
+    [Header("Target Area Feedback")]
     [SerializeField] private Image attackRangeOverlay;
+    [SerializeField, Min(0.01f)]
+    private float targetAreaDisplayDuration = 0.5f;
+    [SerializeField]
+    private Color targetAreaColor = new(1f, 0.58f, 0.18f, 0.22f);
     [SerializeField] private Image manualSelectionOverlay;
 
     private readonly List<EnemyRuntime> _enemies = new();
     private readonly List<EnemyCard> _cards = new();
     private readonly List<EnemyCard> _cardPool = new();
-    private readonly List<float> _attackRangeHitDurations = new();
+    private float _targetAreaDisplayRemaining;
     private int _maximumStackSize;
     private float _currentCellSize;
     private Color _baseSlotColor;
@@ -64,8 +64,8 @@ public sealed class DungeonTileView : MonoBehaviour, IPointerClickHandler
         }
 
         PrepareEnemyCardPool();
-        EnsureAttackRangeOverlay();
-        ClearAttackRangeIndicator();
+        EnsureTargetAreaOverlay();
+        ClearTargetAreaIndicator();
         SetManualSelectionState(false, false);
     }
 
@@ -89,25 +89,17 @@ public sealed class DungeonTileView : MonoBehaviour, IPointerClickHandler
 
     private void Update()
     {
-        if (_attackRangeHitDurations.Count == 0)
+        if (_targetAreaDisplayRemaining <= 0f)
             return;
 
-        float deltaTime = Time.deltaTime;
+        float deltaTime = Time.unscaledDeltaTime;
         if (deltaTime <= 0f)
             return;
 
-        for (int index = _attackRangeHitDurations.Count - 1;
-             index >= 0;
-             index--)
-        {
-            float remaining = _attackRangeHitDurations[index] - deltaTime;
-            if (remaining <= 0f)
-                _attackRangeHitDurations.RemoveAt(index);
-            else
-                _attackRangeHitDurations[index] = remaining;
-        }
-
-        RefreshAttackRangeIndicator();
+        _targetAreaDisplayRemaining = Mathf.Max(
+            0f,
+            _targetAreaDisplayRemaining - deltaTime);
+        RefreshTargetAreaIndicator();
     }
 
     internal bool TryAdd(EnemyRuntime enemy)
@@ -338,16 +330,13 @@ public sealed class DungeonTileView : MonoBehaviour, IPointerClickHandler
         return removed;
     }
 
-    internal void ShowAttackRange(int overlapCount = 1)
+    internal void ShowTargetArea()
     {
-        overlapCount = Mathf.Max(0, overlapCount);
-        if (overlapCount == 0)
-            return;
-
-        EnsureAttackRangeOverlay();
-        for (int index = 0; index < overlapCount; index++)
-            _attackRangeHitDurations.Add(AttackRangeDisplayDuration);
-        RefreshAttackRangeIndicator();
+        EnsureTargetAreaOverlay();
+        _targetAreaDisplayRemaining = Mathf.Max(
+            _targetAreaDisplayRemaining,
+            Mathf.Max(0.01f, targetAreaDisplayDuration));
+        RefreshTargetAreaIndicator();
     }
 
     internal void SetManualSelectionState(bool candidate, bool selected)
@@ -439,7 +428,7 @@ public sealed class DungeonTileView : MonoBehaviour, IPointerClickHandler
 
         _enemies.Clear();
         _cards.Clear();
-        ClearAttackRangeIndicator();
+        ClearTargetAreaIndicator();
         SetManualSelectionState(false, false);
     }
 
@@ -522,7 +511,7 @@ public sealed class DungeonTileView : MonoBehaviour, IPointerClickHandler
         EnemyClicked?.Invoke(enemy);
     }
 
-    private void EnsureAttackRangeOverlay()
+    private void EnsureTargetAreaOverlay()
     {
         if (attackRangeOverlay != null)
             return;
@@ -542,31 +531,35 @@ public sealed class DungeonTileView : MonoBehaviour, IPointerClickHandler
             manualSelectionOverlay = existing.GetComponent<Image>();
     }
 
-    private void RefreshAttackRangeIndicator()
+    private void RefreshTargetAreaIndicator()
     {
         if (attackRangeOverlay == null)
             return;
 
-        int overlapCount = _attackRangeHitDurations.Count;
-        if (overlapCount <= 0)
+        if (_targetAreaDisplayRemaining <= 0f)
         {
             attackRangeOverlay.enabled = false;
             return;
         }
 
-        int alpha = Mathf.Min(
-            AttackRangeMaximumAlpha,
-            AttackRangeMinimumAlpha +
-            (Mathf.Min(overlapCount, 4) - 1) * AttackRangeAlphaStep);
-        attackRangeOverlay.color = new Color32(255, 0, 0, (byte)alpha);
+        attackRangeOverlay.color = new Color(
+            Mathf.Clamp01(targetAreaColor.r),
+            Mathf.Clamp01(targetAreaColor.g),
+            Mathf.Clamp01(targetAreaColor.b),
+            Mathf.Clamp01(targetAreaColor.a));
         attackRangeOverlay.enabled = true;
     }
 
-    private void ClearAttackRangeIndicator()
+    private void ClearTargetAreaIndicator()
     {
-        _attackRangeHitDurations.Clear();
+        _targetAreaDisplayRemaining = 0f;
         if (attackRangeOverlay != null)
             attackRangeOverlay.enabled = false;
+    }
+
+    private void OnDisable()
+    {
+        ClearTargetAreaIndicator();
     }
 
     public void RefreshLayout(float cellSize)

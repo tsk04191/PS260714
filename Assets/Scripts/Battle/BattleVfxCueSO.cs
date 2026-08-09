@@ -78,6 +78,8 @@ public sealed class BattleVfxClipDefinition
     private GameObject prefab;
     [SerializeField]
     private AudioClip audioClip;
+    [SerializeField, Range(0, 100)]
+    private int audioVolumePercent = 100;
     [SerializeField]
     private bool required = true;
 
@@ -142,6 +144,11 @@ public sealed class BattleVfxClipDefinition
     public string ClipId => clipId ?? string.Empty;
     public GameObject Prefab => prefab;
     public AudioClip AudioClip => audioClip;
+    public int AudioVolumePercent => Mathf.Clamp(
+        audioVolumePercent,
+        0,
+        100);
+    public float AudioVolumeScale => AudioVolumePercent / 100f;
     public bool Required => required;
     public float StartTime => Mathf.Max(0f, startTime);
     public float Duration => Mathf.Max(0.01f, duration);
@@ -184,6 +191,7 @@ public sealed class BattleVfxClipDefinition
 
         RegenerateClipId();
         prefab = cue.LegacyPrefab;
+        audioVolumePercent = 100;
         placementArea = BattleVfxPlacementArea.Target;
         anchorType = cue.AnchorType;
         attachMode = cue.AttachMode;
@@ -209,6 +217,7 @@ public sealed class BattleVfxClipDefinition
         if (string.IsNullOrWhiteSpace(clipId))
             RegenerateClipId();
 
+        audioVolumePercent = Mathf.Clamp(audioVolumePercent, 0, 100);
         startTime = IsFinite(startTime)
             ? Mathf.Max(0f, startTime)
             : 0f;

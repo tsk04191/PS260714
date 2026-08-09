@@ -333,6 +333,76 @@ public sealed class BattleVfxCompositeTimelineTests
     }
 
     [Test]
+    public void CompositeCue_AppliesClipVolumeToEmbeddedAudioWithoutPoolingDrift()
+    {
+        AudioMixerGroup sfxGroup = LoadSfxMixerGroup();
+        GameObject prefab = CreatePrefab("ScaledEmbeddedAudioVfx");
+        AudioSource authoredSource = prefab.AddComponent<AudioSource>();
+        AudioClip authoredClip = AudioClip.Create(
+            "ScaledEmbeddedAudio",
+            64,
+            1,
+            44100,
+            false);
+        _createdObjects.Add(authoredClip);
+        authoredSource.clip = authoredClip;
+        authoredSource.playOnAwake = true;
+        authoredSource.volume = 0.5f;
+        BattleVfxClipDefinition clip = CreateClip(
+            "scaled-embedded-audio",
+            prefab,
+            BattleVfxPlacementArea.Target,
+            new Vector2(5f, 5f),
+            0f,
+            1f);
+        SetField(clip, "audioVolumePercent", 40);
+        BattleVfxCueSO cue = CreateCompositeCue(
+            "ScaledEmbeddedAudioCue",
+            clip);
+        BattleVfxPlayer player = CreatePlayer();
+        player.ConfigureAudioMixerGroup(sfxGroup);
+        BattleVfxRequest firstRequest = CreateRequest(
+            cue,
+            WorldFrame(Vector3.zero),
+            WorldFrame(Vector3.zero));
+
+        player.Enqueue(firstRequest);
+
+        Assert.That(
+            player.TryGetActiveInstance(
+                cue,
+                firstRequest.Target.Handle,
+                clip.ClipId,
+                out GameObject firstInstance),
+            Is.True);
+        AudioSource firstSource = firstInstance.GetComponent<AudioSource>();
+        Assert.That(firstSource.outputAudioMixerGroup, Is.SameAs(sfxGroup));
+        Assert.That(firstSource.volume, Is.EqualTo(0.2f).Within(0.0001f));
+
+        player.Advance(1.1f, 1.1f);
+        SetField(clip, "audioVolumePercent", 80);
+        cue.ValidateDefinition();
+        BattleVfxRequest secondRequest = CreateRequest(
+            cue,
+            WorldFrame(Vector3.zero),
+            WorldFrame(Vector3.zero));
+        player.Enqueue(secondRequest);
+
+        Assert.That(
+            player.TryGetActiveInstance(
+                cue,
+                secondRequest.Target.Handle,
+                clip.ClipId,
+                out GameObject reusedInstance),
+            Is.True);
+        Assert.That(reusedInstance, Is.SameAs(firstInstance));
+        AudioSource reusedSource = reusedInstance.GetComponent<AudioSource>();
+        Assert.That(reusedSource.outputAudioMixerGroup, Is.SameAs(sfxGroup));
+        Assert.That(reusedSource.volume, Is.EqualTo(0.4f).Within(0.0001f));
+        Assert.That(authoredSource.volume, Is.EqualTo(0.5f));
+    }
+
+    [Test]
     public void AudioOnlyCue_RoutesThePlayerAudioSourceToSfx()
     {
         AudioMixerGroup sfxGroup = LoadSfxMixerGroup();
@@ -365,6 +435,62 @@ public sealed class BattleVfxCompositeTimelineTests
         Assert.That(source.loop, Is.False);
         Assert.That(source.spatialBlend, Is.Zero);
         Assert.That(source.dopplerLevel, Is.Zero);
+    }
+
+    [TestCase(-10, 0, 0f)]
+    [TestCase(0, 0, 0f)]
+    [TestCase(35, 35, 0.35f)]
+    [TestCase(100, 100, 1f)]
+    [TestCase(150, 100, 1f)]
+    public void TimelineClipAudioVolume_ClampsAndResolvesScale(
+        int configuredPercent,
+        int expectedPercent,
+        float expectedScale)
+    {
+        BattleVfxClipDefinition clip = CreateClip(
+            "volume",
+            null,
+            BattleVfxPlacementArea.Target,
+            new Vector2(5f, 5f),
+            0f,
+            1f);
+        SetField(clip, "audioVolumePercent", configuredPercent);
+        CreateCompositeCue("VolumeCue", clip);
+
+        Assert.That(clip.AudioVolumePercent, Is.EqualTo(expectedPercent));
+        Assert.That(
+            clip.AudioVolumeScale,
+            Is.EqualTo(expectedScale).Within(0.0001f));
+    }
+
+    [Test]
+    public void MutedTimelineClip_DoesNotCreatePlaybackAudioSource()
+    {
+        AudioClip audioClip = AudioClip.Create(
+            "MutedTimelineAudio",
+            64,
+            1,
+            44100,
+            false);
+        _createdObjects.Add(audioClip);
+        BattleVfxClipDefinition clip = CreateClip(
+            "muted",
+            null,
+            BattleVfxPlacementArea.Target,
+            new Vector2(5f, 5f),
+            0f,
+            1f);
+        SetField(clip, "audioClip", audioClip);
+        SetField(clip, "audioVolumePercent", 0);
+        BattleVfxCueSO cue = CreateCompositeCue("MutedCue", clip);
+        BattleVfxPlayer player = CreatePlayer();
+
+        player.Enqueue(CreateRequest(
+            cue,
+            WorldFrame(Vector3.zero),
+            WorldFrame(Vector3.zero)));
+
+        Assert.That(player.GetComponent<AudioSource>(), Is.Null);
     }
 
     [Test]

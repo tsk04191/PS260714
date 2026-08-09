@@ -506,7 +506,7 @@ public sealed class BattleVfxPlayer : MonoBehaviour, IBattleVfxRequestSink
         if (request.Cue == null || clip == null)
             return;
 
-        PlayAudio(clip.AudioClip);
+        PlayAudio(clip.AudioClip, clip.AudioVolumeScale);
         if (clip.Prefab == null)
             return;
 
@@ -1242,6 +1242,7 @@ public sealed class BattleVfxPlayer : MonoBehaviour, IBattleVfxRequestSink
         BattleVfxAnchorSnapshot anchor)
     {
         pooled.Instance.transform.SetParent(GetOrCreateSpawnRoot(), false);
+        RestoreAuthoredAudioVolumes(pooled);
         ApplyTransform(pooled, cue, anchor);
         RoutePooledAudioToSfx(pooled);
         pooled.Instance.SetActive(true);
@@ -1255,6 +1256,8 @@ public sealed class BattleVfxPlayer : MonoBehaviour, IBattleVfxRequestSink
     {
         pooled.Instance.transform.SetParent(GetOrCreateSpawnRoot(), false);
         RestorePlaybackSettings(pooled);
+        RestoreAuthoredAudioVolumes(pooled);
+        ApplyEmbeddedAudioVolume(pooled, clip.AudioVolumeScale);
         ApplyClipTransform(pooled, clip, anchor);
         RoutePooledAudioToSfx(pooled);
         pooled.Instance.SetActive(true);
@@ -1835,6 +1838,38 @@ public sealed class BattleVfxPlayer : MonoBehaviour, IBattleVfxRequestSink
         }
     }
 
+    private static void RestoreAuthoredAudioVolumes(PooledVfx pooled)
+    {
+        if (pooled == null)
+            return;
+
+        for (int index = 0; index < pooled.AudioSources.Length; index++)
+        {
+            AudioSource source = pooled.AudioSources[index];
+            if (source != null)
+                source.volume = pooled.AudioSourceVolumes[index];
+        }
+    }
+
+    private static void ApplyEmbeddedAudioVolume(
+        PooledVfx pooled,
+        float volumeScale)
+    {
+        if (pooled == null)
+            return;
+
+        volumeScale = Mathf.Clamp01(volumeScale);
+        for (int index = 0; index < pooled.AudioSources.Length; index++)
+        {
+            AudioSource source = pooled.AudioSources[index];
+            if (source != null)
+            {
+                source.volume = Mathf.Clamp01(
+                    pooled.AudioSourceVolumes[index] * volumeScale);
+            }
+        }
+    }
+
     private static void Restart(PooledVfx pooled)
     {
         if (pooled == null)
@@ -1901,6 +1936,7 @@ public sealed class BattleVfxPlayer : MonoBehaviour, IBattleVfxRequestSink
         if (immediate)
             StopAndClear(pooled);
         RestorePlaybackSettings(pooled);
+        RestoreAuthoredAudioVolumes(pooled);
         pooled.Instance.SetActive(false);
         pooled.Instance.transform.SetParent(GetOrCreateSpawnRoot(), false);
         GetPool(pooled.Prefab).Push(pooled);
@@ -1936,12 +1972,14 @@ public sealed class BattleVfxPlayer : MonoBehaviour, IBattleVfxRequestSink
             return;
         }
 
-        PlayAudio(cue.AudioClip);
+        PlayAudio(cue.AudioClip, 1f);
     }
 
-    private void PlayAudio(AudioClip clip)
+    private void PlayAudio(AudioClip clip, float volumeScale)
     {
+        volumeScale = Mathf.Clamp01(volumeScale);
         if (clip == null ||
+            volumeScale <= 0f ||
             qualityProfile != null && !qualityProfile.EnableAudio)
         {
             return;
@@ -1956,7 +1994,7 @@ public sealed class BattleVfxPlayer : MonoBehaviour, IBattleVfxRequestSink
         audioSource.spatialBlend = 0f;
         audioSource.dopplerLevel = 0f;
         RouteAudioSourceToSfx(audioSource);
-        audioSource.PlayOneShot(clip);
+        audioSource.PlayOneShot(clip, volumeScale);
     }
 
     private void RouteAllPooledAudioToSfx()
@@ -2140,6 +2178,7 @@ public sealed class BattleVfxPlayer : MonoBehaviour, IBattleVfxRequestSink
         public Animator[] Animators { get; }
         public float[] AnimatorSpeeds { get; }
         public AudioSource[] AudioSources { get; }
+        public float[] AudioSourceVolumes { get; }
 
         public PooledVfx(GameObject instance, GameObject prefab)
         {
@@ -2181,6 +2220,13 @@ public sealed class BattleVfxPlayer : MonoBehaviour, IBattleVfxRequestSink
             AudioSources = instance != null
                 ? instance.GetComponentsInChildren<AudioSource>(true)
                 : Array.Empty<AudioSource>();
+            AudioSourceVolumes = new float[AudioSources.Length];
+            for (int index = 0; index < AudioSources.Length; index++)
+            {
+                AudioSourceVolumes[index] = AudioSources[index] != null
+                    ? AudioSources[index].volume
+                    : 1f;
+            }
         }
     }
 }

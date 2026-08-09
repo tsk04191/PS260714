@@ -692,6 +692,15 @@ public sealed class BattleVfxEditorWindow : EditorWindow
         EditorGUILayout.PropertyField(
             clip.FindPropertyRelative("audioClip"),
             new GUIContent("클립 오디오"));
+        SerializedProperty audioVolume =
+            clip.FindPropertyRelative("audioVolumePercent");
+        audioVolume.intValue = EditorGUILayout.IntSlider(
+            new GUIContent(
+                "클립 사운드 크기 (0~100)",
+                "이 타임라인 클립의 오디오 재생 크기를 설정합니다."),
+            audioVolume.intValue,
+            0,
+            100);
         EditorGUILayout.PropertyField(
             clip.FindPropertyRelative("required"),
             new GUIContent("필수 출력"));
@@ -792,6 +801,7 @@ public sealed class BattleVfxEditorWindow : EditorWindow
             Guid.NewGuid().ToString("N");
         clip.FindPropertyRelative("prefab").objectReferenceValue = null;
         clip.FindPropertyRelative("audioClip").objectReferenceValue = null;
+        clip.FindPropertyRelative("audioVolumePercent").intValue = 100;
         clip.FindPropertyRelative("required").boolValue = true;
         clip.FindPropertyRelative("startTime").floatValue = 0f;
         clip.FindPropertyRelative("duration").floatValue = 1f;

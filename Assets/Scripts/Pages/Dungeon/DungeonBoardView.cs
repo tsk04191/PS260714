@@ -1100,7 +1100,7 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
         }
 
         bool wasAlive = enemy.Health > 0;
-        tile.ShowAttackRange();
+        tile.ShowTargetArea();
         int appliedDamage = TryDamageTile(tile, damage);
         if (wasAlive && enemy.Health <= 0)
         {
@@ -1128,7 +1128,7 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
             tickInterval,
             tickDamage);
         if (applied && ReferenceEquals(tile.TopEnemy, enemy))
-            tile.ShowAttackRange();
+            tile.ShowTargetArea();
         return applied;
     }
 
@@ -1421,7 +1421,7 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
             if (tile == null || !uniqueTiles.Add(tile))
                 return;
 
-            tile.ShowAttackRange();
+            tile.ShowTargetArea();
             EnemyRuntime enemy = GetEnemyAtTile(tile);
             if (enemy != null && uniqueEnemies.Add(enemy))
                 result.Add(enemy);
@@ -1630,7 +1630,7 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
             }
 
             if (showAttackRange)
-                tile.ShowAttackRange();
+                tile.ShowTargetArea();
             totalDamage += TryDamageTile(
                 tile,
                 damage,
@@ -1662,7 +1662,7 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
             }
 
             if (showAttackRange)
-                tile.ShowAttackRange();
+                tile.ShowTargetArea();
             totalHealed += tile.TryHealTop(amount);
         }
 
@@ -1709,7 +1709,7 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
             }
 
             if (showAttackRange)
-                tile.ShowAttackRange();
+                tile.ShowTargetArea();
             totalGranted += tile.TryGrantShieldTop(amount);
         }
 
@@ -1793,7 +1793,7 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
             }
             if (targetApplied && showAttackRange &&
                 ReferenceEquals(tile.TopEnemy, enemy))
-                tile.ShowAttackRange();
+                tile.ShowTargetArea();
             applied |= targetApplied;
         }
 
@@ -1860,7 +1860,7 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
 
             if (showAttackRange &&
                 ReferenceEquals(tile.TopEnemy, enemy))
-                tile.ShowAttackRange();
+                tile.ShowTargetArea();
             removedAny = true;
         }
 
