@@ -19,9 +19,6 @@ public enum EMainSubPageType
 public sealed class MainSubPage : RuntimeMenuPageBase
 {
     [SerializeField] private EMainSubPageType pageType;
-    [SerializeField, HideInInspector]
-    private int fullScreenDesignerLayoutVersion;
-
     [Header("Page Navigation")]
     [SerializeField] private GameObject mainPage;
     [SerializeField] private GameObject enemyCodexPage;
@@ -157,7 +154,7 @@ public sealed class MainSubPage : RuntimeMenuPageBase
                 break;
             case EMainSubPageType.Recruit:
                 BuildRecruitBrowser();
-                BindOrCreateRecruitBackButton();
+                BindRecruitBackButton();
                 return;
             case EMainSubPageType.Storage:
                 CreateLocalizedPlaceholderButton(
@@ -215,8 +212,6 @@ public sealed class MainSubPage : RuntimeMenuPageBase
             "btnOWNEDCHARACTERS-EMPTY",
             false);
         SetLegacyRosterControlActive("btnBACK", false);
-        ConfigureFullScreenContainer();
-
         _rosterBrowser = OperatorRosterView.Build(ButtonRoot);
         _rosterBrowser.SetCallbacks(
             query =>
@@ -243,8 +238,6 @@ public sealed class MainSubPage : RuntimeMenuPageBase
             "btnRECRUITMENT-COMINGSOON",
             false);
         SetLegacyRosterControlActive("btnBACK", false);
-        ConfigureFullScreenContainer();
-
 #if UNITY_EDITOR
         _recruitBannerView = _recruitEditorSyncInProgress
             ? RecruitBannerView.BuildEditor(ButtonRoot)
@@ -265,18 +258,8 @@ public sealed class MainSubPage : RuntimeMenuPageBase
         RefreshRecruitBannerView();
     }
 
-    private void BindOrCreateRecruitBackButton()
+    private void BindRecruitBackButton()
     {
-#if UNITY_EDITOR
-        if (_recruitEditorSyncInProgress)
-        {
-            CreateLocalizedTopLeftOverlayMenuButton(
-                "btnBACKTOMAIN",
-                LocalizationKeys.UiCommonBack,
-                HandleBackClicked);
-            return;
-        }
-#endif
         BindLocalizedOverlayMenuButton(
             "btnBACKTOMAIN",
             LocalizationKeys.UiCommonBack,
@@ -369,7 +352,7 @@ public sealed class MainSubPage : RuntimeMenuPageBase
             {
                 BuildRecruitBrowser();
             }
-            BindOrCreateRecruitBackButton();
+            BindRecruitBackButton();
         }
         catch (Exception exception)
         {
@@ -430,74 +413,12 @@ public sealed class MainSubPage : RuntimeMenuPageBase
         }
 
         MarkDesignerLayoutCurrent();
-        fullScreenDesignerLayoutVersion = 1;
         UnityEditor.EditorUtility.SetDirty(this);
         UnityEditor.SceneManagement.EditorSceneManager.MarkSceneDirty(
             gameObject.scene);
         return true;
     }
 #endif
-
-    private void ConfigureFullScreenContainer()
-    {
-        if (ButtonRoot == null)
-            return;
-        if (fullScreenDesignerLayoutVersion > 0)
-            return;
-
-        RectTransform buttonRoot = ButtonRoot;
-        buttonRoot.anchorMin = Vector2.zero;
-        buttonRoot.anchorMax = Vector2.one;
-        buttonRoot.pivot = new Vector2(0.5f, 0.5f);
-        buttonRoot.anchoredPosition = Vector2.zero;
-        buttonRoot.sizeDelta = Vector2.zero;
-
-        LayoutGroup buttonLayout =
-            buttonRoot.GetComponent<LayoutGroup>();
-        if (buttonLayout != null)
-            buttonLayout.enabled = false;
-        LayoutElement buttonElement =
-            buttonRoot.GetComponent<LayoutElement>();
-        if (buttonElement != null)
-        {
-            buttonElement.ignoreLayout = true;
-            buttonElement.flexibleWidth = 1f;
-            buttonElement.flexibleHeight = 1f;
-        }
-
-        if (buttonRoot.parent is not RectTransform panel)
-            return;
-
-        LayoutGroup panelLayout = panel.GetComponent<LayoutGroup>();
-        if (panelLayout != null)
-            panelLayout.enabled = false;
-        panel.anchorMin = Vector2.zero;
-        panel.anchorMax = Vector2.one;
-        panel.pivot = new Vector2(0.5f, 0.5f);
-        panel.anchoredPosition = Vector2.zero;
-        panel.sizeDelta = Vector2.zero;
-        Image panelImage = panel.GetComponent<Image>();
-        if (panelImage != null)
-        {
-            panelImage.color = Color.clear;
-            panelImage.raycastTarget = false;
-        }
-
-        SetPanelChildActive(panel, "txtPageTitle", false);
-        SetPanelChildActive(panel, "txtPageDescription", false);
-    }
-
-    private static void SetPanelChildActive(
-        Transform panel,
-        string childName,
-        bool active)
-    {
-        Transform child = panel != null
-            ? panel.Find(childName)
-            : null;
-        if (child != null)
-            child.gameObject.SetActive(active);
-    }
 
     private void SetLegacyRosterControlActive(
         string objectName,
@@ -550,7 +471,7 @@ public sealed class MainSubPage : RuntimeMenuPageBase
                 data.StandingSprite != null
                     ? data.StandingSprite
                     : data.IconSprite,
-                data.ActiveAbilityIconSprite,
+                data.Role?.IconSprite,
                 data.Grade,
                 gradeStyle.BackgroundColor,
                 gradeStyle.PrimaryColor,
@@ -1085,7 +1006,7 @@ public readonly struct OperatorRosterItemModel
     public string Id { get; }
     public string DisplayName { get; }
     public Sprite Portrait { get; }
-    public Sprite SkillIcon { get; }
+    public Sprite RoleIcon { get; }
     public CharacterGrade Grade { get; }
     public Color CardColor { get; }
     public Color AccentColor { get; }
@@ -1096,7 +1017,7 @@ public readonly struct OperatorRosterItemModel
         string id,
         string displayName,
         Sprite portrait,
-        Sprite skillIcon,
+        Sprite roleIcon,
         CharacterGrade grade,
         Color cardColor,
         Color accentColor,
@@ -1106,7 +1027,7 @@ public readonly struct OperatorRosterItemModel
         Id = id ?? string.Empty;
         DisplayName = displayName ?? string.Empty;
         Portrait = portrait;
-        SkillIcon = skillIcon;
+        RoleIcon = roleIcon;
         Grade = CharacterGradePresentation.Clamp(grade);
         CardColor = cardColor;
         AccentColor = accentColor;
@@ -1119,29 +1040,6 @@ public sealed class OperatorRosterView
 {
     private const string RootName = "grpOperatorRoster";
     private const string CardPrefix = "btnOperatorCard_";
-    private const float CardWidth = 220f;
-    private const float CardHeight = 308f;
-
-    private static readonly Color BackdropColor =
-        new(0.035f, 0.045f, 0.043f, 1f);
-    private static readonly Color HeaderColor =
-        new(0.055f, 0.075f, 0.071f, 0.98f);
-    private static readonly Color RailColor =
-        new(0.045f, 0.06f, 0.058f, 0.99f);
-    private static readonly Color CardColor =
-        new(0.10f, 0.135f, 0.125f, 1f);
-    private static readonly Color CardPlateColor =
-        new(0.025f, 0.035f, 0.033f, 0.94f);
-    private static readonly Color AccentColor =
-        new(0.25f, 0.76f, 0.68f, 1f);
-    private static readonly Color ActiveButtonColor =
-        new(0.12f, 0.39f, 0.36f, 1f);
-    private static readonly Color InactiveButtonColor =
-        new(0.11f, 0.14f, 0.135f, 1f);
-    private static readonly Color TextColor =
-        new(0.91f, 0.94f, 0.89f, 1f);
-    private static readonly Color MutedTextColor =
-        new(0.48f, 0.55f, 0.52f, 1f);
 
     private sealed class CardView
     {
@@ -1150,8 +1048,8 @@ public sealed class OperatorRosterView
         public Image Portrait { get; }
         public TextMeshProUGUI PortraitFallback { get; }
         public TextMeshProUGUI Name { get; }
-        public GameObject SkillRoot { get; }
-        public Image SkillIcon { get; }
+        public GameObject RoleRoot { get; }
+        public Image RoleIcon { get; }
         public CharacterGradeIconStrip GradeIcons { get; }
         public Image Accent { get; }
         public Outline SelectionOutline { get; }
@@ -1165,8 +1063,8 @@ public sealed class OperatorRosterView
             Image portrait,
             TextMeshProUGUI portraitFallback,
             TextMeshProUGUI name,
-            GameObject skillRoot,
-            Image skillIcon,
+            GameObject roleRoot,
+            Image roleIcon,
             CharacterGradeIconStrip gradeIcons,
             Image accent,
             Outline selectionOutline,
@@ -1178,8 +1076,8 @@ public sealed class OperatorRosterView
             Portrait = portrait;
             PortraitFallback = portraitFallback;
             Name = name;
-            SkillRoot = skillRoot;
-            SkillIcon = skillIcon;
+            RoleRoot = roleRoot;
+            RoleIcon = roleIcon;
             GradeIcons = gradeIcons;
             Accent = accent;
             SelectionOutline = selectionOutline;
@@ -1207,6 +1105,7 @@ public sealed class OperatorRosterView
     private Button _sortButton;
     private Button _allFilterButton;
     private Transform _cardContent;
+    private GameObject _cardPrefab;
     private Action<string> _searchRequested;
     private Action _filterRequested;
     private Action _sortRequested;
@@ -1221,24 +1120,15 @@ public sealed class OperatorRosterView
     {
         OperatorRosterView view = new(host);
         view.HideLegacyBrowser();
-        bool createdLayout = false;
         if (!view.TryBindLayout())
         {
-            view.BuildLayout();
-            createdLayout = true;
-            if (!view.TryBindLayout())
-            {
-                throw new InvalidOperationException(
-                    "Failed to build the operator roster layout.");
-            }
+            throw new InvalidOperationException(
+                "The saved operator roster UI is incomplete. Repair the " +
+                "Scene hierarchy and inspector references.");
         }
 
-        view.ApplyRosterGridFlow();
         view.BindResponsiveGrid();
-        if (createdLayout)
-            view.ApplyHeaderLayout();
         view._root.gameObject.SetActive(true);
-        view._root.SetAsLastSibling();
         return view;
     }
 
@@ -1410,6 +1300,9 @@ public sealed class OperatorRosterView
         _emptyText = root?.Find("txtRosterEmpty")
             ?.GetComponent<TextMeshProUGUI>();
         _cardContent = content;
+        _cardPrefab = root
+            ?.GetComponent<OperatorRosterDesignerSettings>()
+            ?.CardPrefab;
 
         return _root != null &&
                _titleText != null &&
@@ -1427,363 +1320,8 @@ public sealed class OperatorRosterView
                _allFilterLabel != null &&
                _pendingFilterText != null &&
                _emptyText != null &&
-               _cardContent != null;
-    }
-
-    private void BuildLayout()
-    {
-        GameObject rootObject = CreateUiObject(
-            _host,
-            RootName,
-            typeof(CanvasRenderer),
-            typeof(Image));
-        _root = (RectTransform)rootObject.transform;
-        Stretch(_root);
-        Image rootImage = rootObject.GetComponent<Image>();
-        rootImage.color = BackdropColor;
-        rootImage.raycastTarget = true;
-
-        BuildHeader(_root);
-        BuildRosterList(_root);
-        BuildFilterRail(_root);
-
-        TextMeshProUGUI empty = CreateText(
-            _root,
-            "txtRosterEmpty",
-            24f,
-            TextAlignmentOptions.Center,
-            MutedTextColor);
-        RectTransform emptyRect = empty.rectTransform;
-        emptyRect.anchorMin = new Vector2(0f, 0f);
-        emptyRect.anchorMax = new Vector2(1f, 1f);
-        emptyRect.offsetMin = new Vector2(32f, 28f);
-        emptyRect.offsetMax = new Vector2(-144f, -132f);
-        empty.gameObject.SetActive(false);
-    }
-
-    private void BuildHeader(Transform parent)
-    {
-        GameObject headerObject = CreateUiObject(
-            parent,
-            "grpRosterHeader",
-            typeof(CanvasRenderer),
-            typeof(Image));
-        RectTransform header = (RectTransform)headerObject.transform;
-        ConfigureTopStretch(header, 112f);
-        Image headerImage = headerObject.GetComponent<Image>();
-        headerImage.color = HeaderColor;
-        headerImage.raycastTarget = false;
-
-        GameObject accentObject = CreateUiObject(
-            header,
-            "imgRosterHeaderAccent",
-            typeof(CanvasRenderer),
-            typeof(Image));
-        RectTransform accent = (RectTransform)accentObject.transform;
-        ConfigureTopLeft(
-            accent,
-            new Vector2(176f, -24f),
-            new Vector2(6f, 64f));
-        accentObject.GetComponent<Image>().color = AccentColor;
-
-        TextMeshProUGUI title = CreateText(
-            header,
-            "txtRosterTitle",
-            38f,
-            TextAlignmentOptions.MidlineLeft,
-            TextColor);
-        ConfigureTopLeft(
-            title.rectTransform,
-            new Vector2(200f, -16f),
-            new Vector2(236f, 52f));
-        title.fontStyle = FontStyles.Bold;
-
-        TextMeshProUGUI count = CreateText(
-            header,
-            "txtRosterCount",
-            17f,
-            TextAlignmentOptions.MidlineLeft,
-            AccentColor);
-        ConfigureTopLeft(
-            count.rectTransform,
-            new Vector2(200f, -70f),
-            new Vector2(236f, 28f));
-
-        BuildSearchInput(header);
-
-        BuildHeaderButton(
-            header,
-            "btnRosterSortName",
-            new Vector2(-716f, -28f),
-            new Vector2(120f, 52f),
-            true,
-            true);
-        BuildHeaderButton(
-            header,
-            "btnRosterSortLevel",
-            new Vector2(-586f, -28f),
-            new Vector2(120f, 52f),
-            false,
-            false);
-        BuildHeaderButton(
-            header,
-            "btnRosterSortRarity",
-            new Vector2(-456f, -28f),
-            new Vector2(120f, 52f),
-            false,
-            false);
-        BuildHeaderButton(
-            header,
-            "btnRosterSortTrust",
-            new Vector2(-326f, -28f),
-            new Vector2(120f, 52f),
-            false,
-            false);
-        BuildHeaderButton(
-            header,
-            "btnRosterSortDirection",
-            new Vector2(-146f, -28f),
-            new Vector2(170f, 52f),
-            true,
-            true);
-    }
-
-    private void BuildSearchInput(Transform header)
-    {
-        GameObject inputObject = CreateUiObject(
-            header,
-            "inpRosterSearch",
-            typeof(CanvasRenderer),
-            typeof(Image),
-            typeof(TMP_InputField));
-        RectTransform inputRect = (RectTransform)inputObject.transform;
-        ConfigureTopLeft(
-            inputRect,
-            new Vector2(456f, -28f),
-            new Vector2(300f, 52f));
-        inputObject.GetComponent<Image>().color =
-            new Color(0.025f, 0.04f, 0.038f, 1f);
-
-        GameObject viewportObject = CreateUiObject(
-            inputRect,
-            "vptRosterSearch",
-            typeof(RectMask2D));
-        RectTransform viewport =
-            (RectTransform)viewportObject.transform;
-        Stretch(viewport);
-        viewport.offsetMin = new Vector2(16f, 6f);
-        viewport.offsetMax = new Vector2(-16f, -6f);
-
-        TextMeshProUGUI valueText = CreateText(
-            viewport,
-            "txtRosterSearchValue",
-            18f,
-            TextAlignmentOptions.MidlineLeft,
-            TextColor);
-        Stretch(valueText.rectTransform);
-        valueText.textWrappingMode = TextWrappingModes.NoWrap;
-
-        TextMeshProUGUI placeholder = CreateText(
-            viewport,
-            "txtRosterSearchPlaceholder",
-            18f,
-            TextAlignmentOptions.MidlineLeft,
-            MutedTextColor);
-        Stretch(placeholder.rectTransform);
-        placeholder.fontStyle = FontStyles.Italic;
-        placeholder.textWrappingMode = TextWrappingModes.NoWrap;
-
-        TMP_InputField input = inputObject.GetComponent<TMP_InputField>();
-        input.textViewport = viewport;
-        input.textComponent = valueText;
-        input.placeholder = placeholder;
-        input.lineType = TMP_InputField.LineType.SingleLine;
-        input.characterLimit = 64;
-
-        Button searchButton = BuildHeaderButton(
-            header,
-            "btnRosterSearch",
-            Vector2.zero,
-            new Vector2(86f, 52f),
-            true,
-            true);
-        ConfigureTopLeft(
-            (RectTransform)searchButton.transform,
-            new Vector2(766f, -28f),
-            new Vector2(86f, 52f));
-        TextMeshProUGUI label = searchButton.transform
-            .Find("txtLabel")
-            ?.GetComponent<TextMeshProUGUI>();
-        if (label != null)
-            label.fontSize = 15f;
-    }
-
-    private Button BuildHeaderButton(
-        Transform parent,
-        string objectName,
-        Vector2 topRightPosition,
-        Vector2 size,
-        bool activeColor,
-        bool interactable)
-    {
-        GameObject buttonObject = CreateUiObject(
-            parent,
-            objectName,
-            typeof(CanvasRenderer),
-            typeof(Image),
-            typeof(Button));
-        RectTransform rect = (RectTransform)buttonObject.transform;
-        rect.anchorMin = Vector2.one;
-        rect.anchorMax = Vector2.one;
-        rect.pivot = Vector2.one;
-        rect.anchoredPosition = topRightPosition;
-        rect.sizeDelta = size;
-
-        Image image = buttonObject.GetComponent<Image>();
-        Color color = activeColor
-            ? ActiveButtonColor
-            : InactiveButtonColor;
-        image.color = color;
-        image.raycastTarget = interactable;
-
-        Button button = buttonObject.GetComponent<Button>();
-        button.targetGraphic = image;
-        button.interactable = interactable;
-        ApplyButtonColors(button, color);
-
-        TextMeshProUGUI label = CreateText(
-            rect,
-            "txtLabel",
-            17f,
-            TextAlignmentOptions.Center,
-            activeColor ? TextColor : MutedTextColor);
-        Stretch(label.rectTransform);
-        label.rectTransform.offsetMin = new Vector2(8f, 4f);
-        label.rectTransform.offsetMax = new Vector2(-8f, -4f);
-        return button;
-    }
-
-    private void BuildRosterList(Transform parent)
-    {
-        GameObject scrollObject = CreateUiObject(
-            parent,
-            "scrRosterList",
-            typeof(ScrollRect));
-        RectTransform scrollRect =
-            (RectTransform)scrollObject.transform;
-        Stretch(scrollRect);
-        scrollRect.offsetMin = new Vector2(28f, 28f);
-        scrollRect.offsetMax = new Vector2(-142f, -132f);
-
-        GameObject viewportObject = CreateUiObject(
-            scrollRect,
-            "vptRosterList",
-            typeof(CanvasRenderer),
-            typeof(Image),
-            typeof(RectMask2D));
-        RectTransform viewport =
-            (RectTransform)viewportObject.transform;
-        Stretch(viewport);
-        Image viewportImage = viewportObject.GetComponent<Image>();
-        viewportImage.color = new Color(0f, 0f, 0f, 0.01f);
-        viewportImage.raycastTarget = true;
-
-        GameObject contentObject = CreateUiObject(
-            viewport,
-            "grpRosterCardContent",
-            typeof(GridLayoutGroup),
-            typeof(ContentSizeFitter));
-        RectTransform content =
-            (RectTransform)contentObject.transform;
-        content.anchorMin = new Vector2(0f, 1f);
-        content.anchorMax = new Vector2(1f, 1f);
-        content.pivot = new Vector2(0.5f, 1f);
-        content.anchoredPosition = Vector2.zero;
-        content.sizeDelta = Vector2.zero;
-
-        GridLayoutGroup grid =
-            contentObject.GetComponent<GridLayoutGroup>();
-        grid.padding = new RectOffset(14, 14, 14, 14);
-        grid.cellSize = new Vector2(CardWidth, CardHeight);
-        grid.spacing = new Vector2(16f, 18f);
-        grid.startCorner = GridLayoutGroup.Corner.UpperLeft;
-        grid.startAxis = GridLayoutGroup.Axis.Horizontal;
-        grid.childAlignment = TextAnchor.UpperLeft;
-        grid.constraint =
-            GridLayoutGroup.Constraint.FixedColumnCount;
-        grid.constraintCount = 7;
-
-        ContentSizeFitter fitter =
-            contentObject.GetComponent<ContentSizeFitter>();
-        fitter.horizontalFit =
-            ContentSizeFitter.FitMode.Unconstrained;
-        fitter.verticalFit =
-            ContentSizeFitter.FitMode.PreferredSize;
-
-        ScrollRect scroll = scrollObject.GetComponent<ScrollRect>();
-        scroll.viewport = viewport;
-        scroll.content = content;
-        scroll.horizontal = false;
-        scroll.vertical = true;
-        scroll.movementType = ScrollRect.MovementType.Elastic;
-        scroll.elasticity = 0.08f;
-        scroll.scrollSensitivity = 44f;
-    }
-
-    private void BuildFilterRail(Transform parent)
-    {
-        GameObject railObject = CreateUiObject(
-            parent,
-            "grpRosterFilterRail",
-            typeof(CanvasRenderer),
-            typeof(Image));
-        RectTransform rail = (RectTransform)railObject.transform;
-        rail.anchorMin = new Vector2(1f, 0f);
-        rail.anchorMax = Vector2.one;
-        rail.pivot = new Vector2(1f, 0.5f);
-        rail.anchoredPosition = new Vector2(-18f, -52f);
-        rail.sizeDelta = new Vector2(106f, -160f);
-        Image railImage = railObject.GetComponent<Image>();
-        railImage.color = RailColor;
-        railImage.raycastTarget = true;
-
-        GameObject filterObject = CreateUiObject(
-            rail,
-            "btnRosterFilterAll",
-            typeof(CanvasRenderer),
-            typeof(Image),
-            typeof(Button));
-        RectTransform filterRect =
-            (RectTransform)filterObject.transform;
-        filterRect.anchorMin = new Vector2(0f, 1f);
-        filterRect.anchorMax = Vector2.one;
-        filterRect.pivot = new Vector2(0.5f, 1f);
-        filterRect.anchoredPosition = Vector2.zero;
-        filterRect.sizeDelta = new Vector2(0f, 82f);
-        Image filterImage = filterObject.GetComponent<Image>();
-        filterImage.color = ActiveButtonColor;
-        Button filterButton = filterObject.GetComponent<Button>();
-        filterButton.targetGraphic = filterImage;
-        ApplyButtonColors(filterButton, ActiveButtonColor);
-
-        TextMeshProUGUI filterLabel = CreateText(
-            filterRect,
-            "txtLabel",
-            22f,
-            TextAlignmentOptions.Center,
-            TextColor);
-        Stretch(filterLabel.rectTransform);
-
-        TextMeshProUGUI pending = CreateText(
-            rail,
-            "txtRosterFilterPending",
-            15f,
-            TextAlignmentOptions.Center,
-            MutedTextColor);
-        pending.rectTransform.anchorMin = new Vector2(0f, 0f);
-        pending.rectTransform.anchorMax = new Vector2(1f, 1f);
-        pending.rectTransform.offsetMin = new Vector2(8f, 18f);
-        pending.rectTransform.offsetMax = new Vector2(-8f, -104f);
+               _cardContent != null &&
+               _cardPrefab != null;
     }
 
     private CardView GetOrCreateCard(int index)
@@ -1791,186 +1329,19 @@ public sealed class OperatorRosterView
         while (_cards.Count <= index)
         {
             int cardIndex = _cards.Count;
-            Transform existing = _cardContent.Find(
+            Transform authored = _cardContent.Find(
                 CardPrefix + cardIndex);
-            _cards.Add(existing != null
-                ? BindExistingCard(existing.gameObject)
-                : BuildCard(cardIndex));
+            GameObject instance = authored != null
+                ? authored.gameObject
+                : UnityEngine.Object.Instantiate(
+                    _cardPrefab,
+                    _cardContent,
+                    false);
+            instance.name = CardPrefix + cardIndex;
+            _cards.Add(BindExistingCard(instance));
         }
 
         return _cards[index];
-    }
-
-    private CardView BuildCard(int index)
-    {
-        GameObject cardObject = CreateUiObject(
-            _cardContent,
-            CardPrefix + index,
-            typeof(CanvasRenderer),
-            typeof(Image),
-            typeof(Button),
-            typeof(Outline),
-            typeof(OperatorRosterCardHighlight));
-        Image background = cardObject.GetComponent<Image>();
-        background.color = CardColor;
-        background.raycastTarget = true;
-
-        Button button = cardObject.GetComponent<Button>();
-        button.targetGraphic = background;
-        button.transition = Selectable.Transition.None;
-
-        Outline outline = cardObject.GetComponent<Outline>();
-        outline.effectColor = AccentColor;
-        outline.effectDistance = new Vector2(3f, -3f);
-        outline.useGraphicAlpha = false;
-        outline.enabled = false;
-        OperatorRosterCardHighlight highlight =
-            cardObject.GetComponent<OperatorRosterCardHighlight>();
-        highlight.Configure(background, outline);
-
-        GameObject portraitObject = CreateUiObject(
-            cardObject.transform,
-            "imgOperatorPortrait",
-            typeof(CanvasRenderer),
-            typeof(Image));
-        RectTransform portraitRect =
-            (RectTransform)portraitObject.transform;
-        Stretch(portraitRect);
-        portraitRect.offsetMin = new Vector2(0f, 64f);
-        Image portrait = portraitObject.GetComponent<Image>();
-        portrait.color = Color.white;
-        portrait.preserveAspect = true;
-        portrait.raycastTarget = false;
-
-        TextMeshProUGUI fallback = CreateText(
-            cardObject.transform,
-            "txtOperatorPortraitFallback",
-            54f,
-            TextAlignmentOptions.Center,
-            MutedTextColor);
-        Stretch(fallback.rectTransform);
-        fallback.rectTransform.offsetMin = new Vector2(0f, 64f);
-        fallback.fontStyle = FontStyles.Bold;
-
-        GameObject markObject = CreateUiObject(
-            cardObject.transform,
-            "grpOperatorMark",
-            typeof(CanvasRenderer),
-            typeof(Image));
-        RectTransform markRect = (RectTransform)markObject.transform;
-        ConfigureTopLeft(
-            markRect,
-            new Vector2(10f, -10f),
-            new Vector2(38f, 38f));
-        markObject.GetComponent<Image>().color =
-            new Color(0.025f, 0.04f, 0.038f, 0.94f);
-        markObject.GetComponent<Image>().raycastTarget = false;
-        TextMeshProUGUI mark = CreateText(
-            markRect,
-            "txtMark",
-            18f,
-            TextAlignmentOptions.Center,
-            AccentColor);
-        Stretch(mark.rectTransform);
-        mark.text = "◆";
-
-        GameObject plateObject = CreateUiObject(
-            cardObject.transform,
-            "imgOperatorNamePlate",
-            typeof(CanvasRenderer),
-            typeof(Image));
-        RectTransform plate = (RectTransform)plateObject.transform;
-        plate.anchorMin = Vector2.zero;
-        plate.anchorMax = new Vector2(1f, 0f);
-        plate.pivot = new Vector2(0.5f, 0f);
-        plate.anchoredPosition = Vector2.zero;
-        plate.sizeDelta = new Vector2(0f, 64f);
-        Image plateImage = plateObject.GetComponent<Image>();
-        plateImage.color = CardPlateColor;
-        plateImage.raycastTarget = false;
-
-        GameObject accentObject = CreateUiObject(
-            plate,
-            "imgOperatorAccent",
-            typeof(CanvasRenderer),
-            typeof(Image));
-        RectTransform accent = (RectTransform)accentObject.transform;
-        accent.anchorMin = new Vector2(0f, 0f);
-        accent.anchorMax = new Vector2(1f, 0f);
-        accent.pivot = new Vector2(0.5f, 0f);
-        accent.anchoredPosition = Vector2.zero;
-        accent.sizeDelta = new Vector2(0f, 5f);
-        Image accentImage = accentObject.GetComponent<Image>();
-        accentImage.color = AccentColor;
-        accentImage.raycastTarget = false;
-
-        TextMeshProUGUI name = CreateText(
-            plate,
-            "txtOperatorName",
-            22f,
-            TextAlignmentOptions.MidlineLeft,
-            TextColor);
-        Stretch(name.rectTransform);
-        name.rectTransform.offsetMin = new Vector2(14f, 7f);
-        name.rectTransform.offsetMax = new Vector2(-62f, -5f);
-        name.fontStyle = FontStyles.Bold;
-        name.textWrappingMode = TextWrappingModes.NoWrap;
-        name.overflowMode = TextOverflowModes.Ellipsis;
-
-        CharacterGradeIconStrip gradeIcons =
-            CharacterGradeIconStrip.GetOrCreate(
-                plate,
-                "grpOperatorGradeIcons",
-                14f,
-                3f);
-
-        GameObject skillRoot = CreateUiObject(
-            plate,
-            "grpOperatorSkill",
-            typeof(CanvasRenderer),
-            typeof(Image));
-        RectTransform skillRect =
-            (RectTransform)skillRoot.transform;
-        skillRect.anchorMin = new Vector2(1f, 0.5f);
-        skillRect.anchorMax = new Vector2(1f, 0.5f);
-        skillRect.pivot = new Vector2(1f, 0.5f);
-        skillRect.anchoredPosition = new Vector2(-10f, 0f);
-        skillRect.sizeDelta = new Vector2(44f, 44f);
-        Image skillBackground = skillRoot.GetComponent<Image>();
-        skillBackground.color =
-            new Color(0.10f, 0.18f, 0.17f, 1f);
-        skillBackground.raycastTarget = false;
-
-        GameObject skillIconObject = CreateUiObject(
-            skillRect,
-            "imgOperatorSkillIcon",
-            typeof(CanvasRenderer),
-            typeof(Image));
-        RectTransform skillIconRect =
-            (RectTransform)skillIconObject.transform;
-        Stretch(skillIconRect);
-        skillIconRect.offsetMin = new Vector2(4f, 4f);
-        skillIconRect.offsetMax = new Vector2(-4f, -4f);
-        Image skillIcon = skillIconObject.GetComponent<Image>();
-        skillIcon.preserveAspect = true;
-        skillIcon.raycastTarget = false;
-
-        CardView card = new(
-            cardObject,
-            background,
-            portrait,
-            fallback,
-            name,
-            skillRoot,
-            skillIcon,
-            gradeIcons,
-            accentImage,
-            outline,
-            button,
-            highlight);
-        PrepareCardRaycastTargets(cardObject, background);
-        WireCardButton(card);
-        return card;
     }
 
     private CardView BindExistingCard(GameObject cardObject)
@@ -1979,16 +1350,25 @@ public sealed class OperatorRosterView
         Outline outline = cardObject.GetComponent<Outline>();
         Transform namePlate =
             cardObject.transform.Find("imgOperatorNamePlate");
+        Transform roleRoot = namePlate?.Find("grpOperatorRole");
+        Image roleIcon = roleRoot?.Find("imgOperatorRoleIcon")
+            ?.GetComponent<Image>();
         OperatorRosterCardHighlight highlight =
             cardObject.GetComponent<OperatorRosterCardHighlight>();
-        if (highlight == null)
+        Button button = cardObject.GetComponent<Button>();
+        if (background == null || outline == null ||
+            namePlate == null || roleRoot == null || roleIcon == null ||
+            highlight == null || button == null)
         {
-            highlight =
-                cardObject.AddComponent<OperatorRosterCardHighlight>();
+            throw new InvalidOperationException(
+                "Operator roster card prefab is incomplete: " +
+                $"Image={background != null}, Outline={outline != null}, " +
+                $"NamePlate={namePlate != null}, Role={roleRoot != null}, " +
+                $"RoleIcon={roleIcon != null}, Highlight={highlight != null}, " +
+                $"Button={button != null}.");
         }
         highlight.Configure(background, outline);
 
-        Button button = cardObject.GetComponent<Button>();
         button.transition = Selectable.Transition.None;
         CardView card = new(
             cardObject,
@@ -2000,16 +1380,10 @@ public sealed class OperatorRosterView
             cardObject.transform
                 .Find("imgOperatorNamePlate/txtOperatorName")
                 ?.GetComponent<TextMeshProUGUI>(),
-            cardObject.transform
-                .Find("imgOperatorNamePlate/grpOperatorSkill")
-                ?.gameObject,
-            cardObject.transform
-                .Find(
-                    "imgOperatorNamePlate/grpOperatorSkill/" +
-                    "imgOperatorSkillIcon")
-                ?.GetComponent<Image>(),
-            CharacterGradeIconStrip.GetOrCreate(
-                namePlate,
+            roleRoot.gameObject,
+            roleIcon,
+            CharacterGradeIconStrip.Bind(
+                cardObject.transform,
                 "grpOperatorGradeIcons",
                 14f,
                 3f),
@@ -2059,9 +1433,8 @@ public sealed class OperatorRosterView
         card.PortraitFallback.color = item.AccentColor;
         card.Name.color = item.TextColor;
         card.GradeIcons.SetGrade(item.Grade);
-        ApplyCardNameGradeLayout(card);
-        card.SkillRoot.SetActive(item.SkillIcon != null);
-        card.SkillIcon.sprite = item.SkillIcon;
+        card.RoleRoot.SetActive(item.RoleIcon != null);
+        card.RoleIcon.sprite = item.RoleIcon;
         if (card.Accent != null)
             card.Accent.color = item.AccentColor;
         card.SelectionOutline.effectColor = item.OutlineColor;
@@ -2069,41 +1442,6 @@ public sealed class OperatorRosterView
             item.CardColor,
             item.AccentColor,
             item.OutlineColor);
-    }
-
-    private static void ApplyCardNameGradeLayout(CardView card)
-    {
-        const float nameLeft = 14f;
-        const float skillReserve = 62f;
-        const float nameIconGap = 6f;
-
-        float iconWidth = card.GradeIcons.PreferredWidth;
-        float gap = iconWidth > 0f ? nameIconGap : 0f;
-        float maximumNameWidth = Mathf.Max(
-            36f,
-            CardWidth - nameLeft - skillReserve -
-            iconWidth - gap);
-        float preferredNameWidth =
-            card.Name.GetPreferredValues(card.Name.text).x + 2f;
-        float nameWidth = Mathf.Clamp(
-            preferredNameWidth,
-            36f,
-            maximumNameWidth);
-
-        RectTransform nameRect = card.Name.rectTransform;
-        nameRect.anchorMin = new Vector2(0f, 0f);
-        nameRect.anchorMax = new Vector2(0f, 1f);
-        nameRect.pivot = new Vector2(0f, 0.5f);
-        nameRect.anchoredPosition = new Vector2(nameLeft, 0f);
-        nameRect.sizeDelta = new Vector2(nameWidth, -12f);
-
-        RectTransform icons = card.GradeIcons.RectTransform;
-        icons.anchorMin = new Vector2(0f, 0.5f);
-        icons.anchorMax = new Vector2(0f, 0.5f);
-        icons.pivot = new Vector2(0f, 0.5f);
-        icons.anchoredPosition = new Vector2(
-            nameLeft + nameWidth + gap,
-            0f);
     }
 
     private static string CreateFallbackLabel(string displayName)
@@ -2124,52 +1462,6 @@ public sealed class OperatorRosterView
             label.text = value ?? string.Empty;
     }
 
-    private void ApplyHeaderLayout()
-    {
-        Transform header = _root != null
-            ? _root.Find("grpRosterHeader")
-            : null;
-        RectTransform accent = header
-            ?.Find("imgRosterHeaderAccent")
-            as RectTransform;
-        if (accent != null)
-        {
-            ConfigureTopLeft(
-                accent,
-                new Vector2(176f, -24f),
-                new Vector2(6f, 64f));
-        }
-
-        if (_titleText != null)
-        {
-            ConfigureTopLeft(
-                _titleText.rectTransform,
-                new Vector2(200f, -16f),
-                new Vector2(236f, 52f));
-        }
-
-        if (_countText != null)
-        {
-            ConfigureTopLeft(
-                _countText.rectTransform,
-                new Vector2(200f, -70f),
-                new Vector2(236f, 28f));
-        }
-    }
-
-    private void ApplyRosterGridFlow()
-    {
-        GridLayoutGroup grid = _cardContent != null
-            ? _cardContent.GetComponent<GridLayoutGroup>()
-            : null;
-        if (grid == null)
-            return;
-
-        grid.startCorner = GridLayoutGroup.Corner.UpperLeft;
-        grid.startAxis = GridLayoutGroup.Axis.Horizontal;
-        grid.childAlignment = TextAnchor.UpperLeft;
-    }
-
     private void BindResponsiveGrid()
     {
         GridLayoutGroup grid = _cardContent != null
@@ -2183,191 +1475,4 @@ public sealed class OperatorRosterView
             grid.transform.parent as RectTransform);
     }
 
-    private static GameObject CreateUiObject(
-        Transform parent,
-        string objectName,
-        params Type[] components)
-    {
-        List<Type> types = new() { typeof(RectTransform) };
-        if (components != null)
-            types.AddRange(components);
-        GameObject child = new(objectName, types.ToArray());
-        child.layer = parent != null ? parent.gameObject.layer : 0;
-        child.transform.SetParent(parent, false);
-        return child;
-    }
-
-    private static TextMeshProUGUI CreateText(
-        Transform parent,
-        string objectName,
-        float fontSize,
-        TextAlignmentOptions alignment,
-        Color color)
-    {
-        GameObject textObject = CreateUiObject(
-            parent,
-            objectName,
-            typeof(TextMeshProUGUI));
-        TextMeshProUGUI text =
-            textObject.GetComponent<TextMeshProUGUI>();
-        LocalizationFontResolver.ApplyGameDefault(text);
-        text.fontSize = fontSize;
-        text.fontSizeMax = fontSize;
-        text.fontSizeMin = Mathf.Max(12f, fontSize - 8f);
-        text.enableAutoSizing = true;
-        text.alignment = alignment;
-        text.color = color;
-        text.raycastTarget = false;
-        text.textWrappingMode = TextWrappingModes.Normal;
-        return text;
-    }
-
-    private static void ApplyButtonColors(
-        Button button,
-        Color baseColor)
-    {
-        ColorBlock colors = button.colors;
-        colors.normalColor = baseColor;
-        colors.highlightedColor =
-            Color.Lerp(baseColor, Color.white, 0.14f);
-        colors.pressedColor =
-            Color.Lerp(baseColor, Color.black, 0.2f);
-        colors.selectedColor = colors.highlightedColor;
-        colors.disabledColor =
-            Color.Lerp(baseColor, Color.black, 0.48f);
-        colors.fadeDuration = 0.08f;
-        button.colors = colors;
-    }
-
-    private static void Stretch(RectTransform rect)
-    {
-        rect.anchorMin = Vector2.zero;
-        rect.anchorMax = Vector2.one;
-        rect.pivot = new Vector2(0.5f, 0.5f);
-        rect.anchoredPosition = Vector2.zero;
-        rect.sizeDelta = Vector2.zero;
-    }
-
-    private static void ConfigureTopStretch(
-        RectTransform rect,
-        float height)
-    {
-        rect.anchorMin = new Vector2(0f, 1f);
-        rect.anchorMax = Vector2.one;
-        rect.pivot = new Vector2(0.5f, 1f);
-        rect.anchoredPosition = Vector2.zero;
-        rect.sizeDelta = new Vector2(0f, height);
-    }
-
-    private static void ConfigureTopLeft(
-        RectTransform rect,
-        Vector2 position,
-        Vector2 size)
-    {
-        rect.anchorMin = new Vector2(0f, 1f);
-        rect.anchorMax = new Vector2(0f, 1f);
-        rect.pivot = new Vector2(0f, 1f);
-        rect.anchoredPosition = position;
-        rect.sizeDelta = size;
-    }
-}
-
-[DisallowMultipleComponent]
-public sealed class OperatorRosterCardHighlight :
-    MonoBehaviour,
-    IPointerEnterHandler,
-    IPointerExitHandler,
-    IPointerDownHandler,
-    IPointerUpHandler
-{
-    private static readonly Color NormalColor =
-        new(0.10f, 0.135f, 0.125f, 1f);
-    private static readonly Color HoverColor =
-        new(0.16f, 0.30f, 0.27f, 1f);
-    private static readonly Color HoverOutlineColor =
-        new(0.64f, 0.96f, 0.88f, 1f);
-
-    private Image _background;
-    private Outline _outline;
-    private Color _normalColor = NormalColor;
-    private Color _hoverColor = HoverColor;
-    private Color _outlineColor = HoverOutlineColor;
-    private bool _hovered;
-    private bool _pressed;
-
-    public void Configure(Image background, Outline outline)
-    {
-        _background = background;
-        _outline = outline;
-        ApplyVisualState();
-    }
-
-    public void SetPalette(
-        Color normalColor,
-        Color accentColor,
-        Color outlineColor)
-    {
-        _normalColor = normalColor;
-        _hoverColor = Color.Lerp(normalColor, accentColor, 0.32f);
-        _outlineColor = outlineColor;
-        ApplyVisualState();
-    }
-
-    public void OnPointerEnter(PointerEventData eventData)
-    {
-        _hovered = true;
-        ApplyVisualState();
-    }
-
-    public void OnPointerExit(PointerEventData eventData)
-    {
-        _hovered = false;
-        _pressed = false;
-        ApplyVisualState();
-    }
-
-    public void OnPointerDown(PointerEventData eventData)
-    {
-        if (eventData.button != PointerEventData.InputButton.Left)
-            return;
-
-        _pressed = true;
-        ApplyVisualState();
-    }
-
-    public void OnPointerUp(PointerEventData eventData)
-    {
-        if (eventData.button != PointerEventData.InputButton.Left)
-            return;
-
-        _pressed = false;
-        ApplyVisualState();
-    }
-
-    private void OnDisable()
-    {
-        _hovered = false;
-        _pressed = false;
-        ApplyVisualState();
-    }
-
-    private void ApplyVisualState()
-    {
-        if (_background != null)
-        {
-            Color color = _hovered
-                ? _hoverColor
-                : _normalColor;
-            if (_pressed)
-                color = Color.Lerp(color, Color.black, 0.22f);
-            _background.color = color;
-        }
-
-        if (_outline == null)
-            return;
-
-        _outline.enabled = _hovered;
-        _outline.effectColor = _outlineColor;
-        _outline.effectDistance = new Vector2(4f, -4f);
-    }
 }

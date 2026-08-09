@@ -7,7 +7,7 @@ public sealed class BattleVfx3DMigrationTests
     private const string FireStatusPath =
         "Assets/Resources/StatusEffects/Fire.asset";
     private const string DungeonTilePath =
-        "Assets/Prefabs/UI/DungeonTile.prefab";
+        "Assets/Prefabs/UI/Dungeon/DungeonTile.prefab";
 
     [Test]
     public void FireStatus_UsesPersistent3DLoopCue()

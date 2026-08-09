@@ -7,6 +7,7 @@ using TMPro;
 using UnityEditor;
 using UnityEngine;
 using UnityEngine.EventSystems;
+using UnityEngine.TestTools;
 using UnityEngine.UI;
 
 public sealed class CharacterP0RegressionTests
@@ -767,388 +768,80 @@ public sealed class CharacterP0RegressionTests
     }
 
     [Test]
-    public void DungeonPauseMenu_UsesReadableRequestedButtonOrder()
+    public void DungeonPauseMenu_DoesNotCreateMissingFixedSceneUi()
     {
         GameObject root = new(
             "DungeonPauseMenuTest",
             typeof(RectTransform));
         _createdObjects.Add(root);
-        DungeonBattleTab tab =
-            root.AddComponent<DungeonBattleTab>();
-        GameObject overlay = new(
-            "grpPauseOverlay",
-            typeof(RectTransform),
-            typeof(CanvasRenderer),
-            typeof(Image));
-        overlay.transform.SetParent(root.transform, false);
-        GameObject templateObject = new(
-            "btnPauseTemplate",
-            typeof(RectTransform),
-            typeof(CanvasRenderer),
-            typeof(Image),
-            typeof(Button));
-        templateObject.transform.SetParent(root.transform, false);
-        Button template = templateObject.GetComponent<Button>();
-        template.targetGraphic = templateObject.GetComponent<Image>();
-        CreateText(templateObject.transform, "txtPauseTemplate");
+        root.AddComponent<DungeonBattleTab>();
 
-        SerializedObject serializedTab = new(tab);
-        serializedTab.FindProperty("pauseButton").objectReferenceValue =
-            template;
-        serializedTab.FindProperty("pauseOverlay").objectReferenceValue =
-            overlay;
-        serializedTab.ApplyModifiedPropertiesWithoutUndo();
-        MethodInfo ensureMenu = typeof(DungeonBattleTab).GetMethod(
-            "EnsurePauseNavigationButtons",
-            BindingFlags.Instance | BindingFlags.NonPublic);
-
-        Assert.That(ensureMenu, Is.Not.Null);
-        ensureMenu.Invoke(tab, null);
-
-        RectTransform panel = overlay.transform.Find(
-            "grpPauseMenuPanel") as RectTransform;
-        Assert.That(panel, Is.Not.Null);
-        Assert.That(panel.GetComponent<Image>().color.a, Is.GreaterThan(0.9f));
-        Assert.That(panel.GetChild(0).name, Is.EqualTo("btnContinue"));
-        Assert.That(panel.GetChild(1).name, Is.EqualTo("btnReturnToStage"));
-        Assert.That(panel.GetChild(2).name, Is.EqualTo("btnQuitGame"));
         Assert.That(
-            ((RectTransform)panel.GetChild(0)).anchoredPosition.y,
-            Is.GreaterThan(
-                ((RectTransform)panel.GetChild(1)).anchoredPosition.y));
-        Assert.That(
-            ((RectTransform)panel.GetChild(1)).anchoredPosition.y,
-            Is.GreaterThan(
-                ((RectTransform)panel.GetChild(2)).anchoredPosition.y));
-        Assert.That(
-            panel.GetChild(0).GetComponent<Button>().colors.normalColor
-                .grayscale,
-            Is.GreaterThan(0.25f));
+            typeof(DungeonBattleTab).GetMethod(
+                "EnsurePauseNavigationButtons",
+                BindingFlags.Instance | BindingFlags.NonPublic),
+            Is.Null);
+        Assert.That(root.transform.Find("grpPauseOverlay"), Is.Null);
+        Assert.That(root.transform.Find("grpPauseMenuPanel"), Is.Null);
     }
-
     [Test]
-    public void CodexBrowser_CardShowsIconAndNameAtOneByOnePointFourRatio()
+    public void CodexCard_IsDesignerEditablePrefab()
     {
-        GameObject root = new("CodexBrowserTest", typeof(RectTransform));
-        _createdObjects.Add(root);
-        Texture2D texture = new(8, 8, TextureFormat.RGBA32, false);
-        _createdObjects.Add(texture);
-        Sprite icon = Sprite.Create(
-            texture,
-            new Rect(0f, 0f, 8f, 8f),
-            new Vector2(0.5f, 0.5f));
-        _createdObjects.Add(icon);
-        string selectedId = null;
+        const string prefabPath =
+            "Assets/Resources/Presentation/CodexCard.prefab";
+        GameObject prefab = AssetDatabase.LoadAssetAtPath<GameObject>(
+            prefabPath);
 
-        CodexBrowserView browser =
-            CodexBrowserView.Build(root.transform);
-        browser.SetCallbacks(
-            _ => { },
-            () => { },
-            () => { },
-            id => selectedId = id);
-        browser.SetToolbar(
-            string.Empty,
-            "Search",
-            "Go",
-            "Filter",
-            "Sort");
-        browser.SetItems(
-            new[]
-            {
-                new CodexBrowserItemModel(
-                    "owned",
-                    "MIRINAE",
-                    icon,
-                    false,
-                    Color.cyan),
-                new CodexBrowserItemModel(
-                    "unowned",
-                    "SUIREN",
-                    icon,
-                    true,
-                    Color.cyan),
-            },
-            "owned");
-
-        Transform toolbar = root.transform.Find(
-            "grpCodexBrowser/grpCodexList/grpCodexListToolbar");
-        Assert.That(toolbar, Is.Not.Null);
-        Assert.That(toolbar.GetChild(0).name, Is.EqualTo("inpCodexSearch"));
-        Assert.That(toolbar.GetChild(1).name, Is.EqualTo("btnCodexSearch"));
-        Assert.That(toolbar.GetChild(2).name, Is.EqualTo("btnCodexFilter"));
-        Assert.That(toolbar.GetChild(3).name, Is.EqualTo("btnCodexSort"));
+        Assert.That(prefab, Is.Not.Null);
+        Assert.That(prefab.GetComponent<Button>(), Is.Not.Null);
+        Assert.That(prefab.GetComponent<Outline>(), Is.Not.Null);
         Assert.That(
-            toolbar.GetComponent<LayoutElement>().preferredHeight,
-            Is.EqualTo(46f));
-
-        GridLayoutGroup grid = root.transform.Find(
-                "grpCodexBrowser/grpCodexList/scrCodexList/" +
-                "vptCodexList/grpCodexCardContent")
-            ?.GetComponent<GridLayoutGroup>();
-        Assert.That(grid, Is.Not.Null);
+            prefab.transform.Find("imgCodexCardIcon")
+                ?.GetComponent<Image>(),
+            Is.Not.Null);
         Assert.That(
-            grid.cellSize.y / grid.cellSize.x,
-            Is.EqualTo(1.4f).Within(0.0001f));
-        Assert.That(
-            grid.constraint,
-            Is.EqualTo(GridLayoutGroup.Constraint.FixedColumnCount));
-        Assert.That(grid.constraintCount, Is.EqualTo(4));
-
-        Transform firstCard = grid.transform.Find("btnCodexCard_0");
-        Transform secondCard = grid.transform.Find("btnCodexCard_1");
-        Assert.That(
-            firstCard.Find("imgCodexCardIcon")
-                .GetComponent<Image>().sprite,
-            Is.SameAs(icon));
-        Assert.That(
-            firstCard.Find(
+            prefab.transform.Find(
                     "grpCodexCardNamePlate/txtCodexCardName")
-                .GetComponent<TextMeshProUGUI>().text,
-            Is.EqualTo("MIRINAE"));
-        Assert.That(
-            secondCard.GetComponent<Button>().interactable,
-            Is.True,
-            "Unowned cards must remain clickable.");
-        Assert.That(
-            secondCard.Find("imgCodexCardIcon")
-                .GetComponent<Image>().color.grayscale,
-            Is.LessThan(0.5f));
+                ?.GetComponent<TextMeshProUGUI>(),
+            Is.Not.Null);
 
-        secondCard.GetComponent<Button>().onClick.Invoke();
-        Assert.That(selectedId, Is.EqualTo("unowned"));
+        RectTransform rect = prefab.transform as RectTransform;
+        Assert.That(rect, Is.Not.Null);
+        Assert.That(
+            rect.rect.height / rect.rect.width,
+            Is.EqualTo(1.4f).Within(0.0001f));
     }
 
     [Test]
-    public void CodexBrowser_ExistingDesignerLayoutIsNotOverwritten()
+    public void CodexBrowser_DoesNotCreateMissingFixedHierarchy()
     {
         GameObject root = new(
-            "CodexDesignerLayoutTest",
+            "MissingCodexDesignerLayout",
             typeof(RectTransform));
         _createdObjects.Add(root);
 
-        CodexBrowserView.Build(root.transform);
-        LayoutElement toolbarLayout = root.transform.Find(
-                "grpCodexBrowser/grpCodexList/grpCodexListToolbar")
-            .GetComponent<LayoutElement>();
-        GridLayoutGroup grid = root.transform.Find(
-                "grpCodexBrowser/grpCodexList/scrCodexList/" +
-                "vptCodexList/grpCodexCardContent")
-            .GetComponent<GridLayoutGroup>();
-        toolbarLayout.preferredHeight = 73f;
-        grid.cellSize = new Vector2(133f, 211f);
-        grid.constraintCount = 3;
-
+        LogAssert.Expect(
+            LogType.Error,
+            new System.Text.RegularExpressions.Regex(
+                "Codex browser fixed UI is missing"));
         CodexBrowserView.Build(root.transform);
 
-        Assert.That(toolbarLayout.preferredHeight, Is.EqualTo(73f));
-        Assert.That(grid.cellSize, Is.EqualTo(new Vector2(133f, 211f)));
-        Assert.That(grid.constraintCount, Is.EqualTo(3));
+        Assert.That(root.transform.childCount, Is.Zero);
     }
 
     [Test]
-    public void CodexBrowser_ListOnlyModeUsesFullWidthOwnedCardGrid()
-    {
-        GameObject root = new(
-            "RosterListOnlyTest",
-            typeof(RectTransform));
-        _createdObjects.Add(root);
-
-        CodexBrowserView browser =
-            CodexBrowserView.Build(root.transform);
-        browser.SetListOnlyMode(true, 3);
-
-        RectTransform browserRoot = root.transform.Find(
-            "grpCodexBrowser") as RectTransform;
-        Transform listRoot = browserRoot?.Find("grpCodexList");
-        Transform detailRoot = browserRoot?.Find("grpCodexDetailHost");
-        GridLayoutGroup grid = listRoot?.Find(
-                "scrCodexList/vptCodexList/grpCodexCardContent")
-            ?.GetComponent<GridLayoutGroup>();
-        LayoutElement listLayout =
-            listRoot?.GetComponent<LayoutElement>();
-
-        Assert.That(browserRoot, Is.Not.Null);
-        Assert.That(browserRoot.anchorMin, Is.EqualTo(Vector2.zero));
-        Assert.That(browserRoot.anchorMax, Is.EqualTo(Vector2.one));
-        Assert.That(detailRoot, Is.Not.Null);
-        Assert.That(detailRoot.gameObject.activeSelf, Is.False);
-        Assert.That(listLayout, Is.Not.Null);
-        Assert.That(listLayout.flexibleWidth, Is.EqualTo(1f));
-        Assert.That(grid, Is.Not.Null);
-        Assert.That(grid.constraintCount, Is.EqualTo(3));
-    }
-
-    [Test]
-    public void StageSelectDesignerLayout_BuildsHorizontalStageTrack()
+    public void StageSelectSync_DoesNotCreateMissingFixedHierarchy()
     {
         GameObject pageObject = new(
-            "StageSelectDesignerLayoutTest",
+            "StageSelectValidationTest",
             typeof(RectTransform),
             typeof(StageSelectPage));
         _createdObjects.Add(pageObject);
-        pageObject.GetComponent<RectTransform>().sizeDelta =
-            new Vector2(1920f, 1080f);
         StageSelectPage page = pageObject.GetComponent<StageSelectPage>();
-        Assert.That(page.SyncEditorUi(out string error), Is.True, error);
-        pageObject.SetActive(false);
 
-        Transform runtimeRoot = pageObject.transform.Find(
-            RuntimeMenuPageBase.RuntimeRootObjectName);
-        ScrollRect scroll = runtimeRoot.Find(
-                "grpMenuPanel/grpMenuButtons/scrStageTrack")
-            .GetComponent<ScrollRect>();
-        Transform content = scroll.content;
-        IReadOnlyList<DungeonDefinition> definitions =
-            DungeonDefinitionCatalog.GetStageSelectDefinitions();
-
-        Assert.That(scroll.horizontal, Is.True);
-        Assert.That(scroll.vertical, Is.False);
-        Assert.That(scroll.viewport.GetComponent<RectMask2D>(), Is.Not.Null);
-        Assert.That(
-            content.GetComponent<HorizontalLayoutGroup>(),
-            Is.Not.Null);
-        Assert.That(
-            content.GetComponent<ContentSizeFitter>().horizontalFit,
-            Is.EqualTo(ContentSizeFitter.FitMode.PreferredSize));
-        Assert.That(
-            content.childCount,
-            Is.EqualTo(Mathf.Max(0, definitions.Count * 2 - 1)));
-        Assert.That(runtimeRoot.Find("btnBACK"), Is.Not.Null);
-
-        Image tintedCover = null;
-        for (int index = 0; index < content.childCount; index += 2)
-        {
-            Transform node = content.GetChild(index);
-            Transform coverTransform = node.Find("imgStageCover");
-            LayoutElement cover =
-                coverTransform.GetComponent<LayoutElement>();
-            RectTransform coverRect =
-                coverTransform.GetComponent<RectTransform>();
-            Image coverImage = coverTransform.GetComponent<Image>();
-            Assert.That(cover.preferredWidth, Is.EqualTo(320f));
-            Assert.That(cover.preferredHeight, Is.EqualTo(320f));
-            Assert.That(
-                cover.preferredWidth,
-                Is.EqualTo(cover.preferredHeight),
-                "Stage banner must remain square.");
-            Assert.That(
-                coverRect.sizeDelta,
-                Is.EqualTo(new Vector2(320f, 320f)));
-            DungeonDefinition definition = definitions[index / 2];
-            if (definition.StageCoverSprite != null)
-            {
-                Assert.That(coverImage.sprite, Is.Not.Null);
-                Assert.That(coverImage.color, Is.EqualTo(Color.white));
-                if (tintedCover == null)
-                {
-                    tintedCover = coverImage;
-                    tintedCover.color = new Color(0.12f, 0.17f, 0.145f, 1f);
-                }
-            }
-            Assert.That(
-                node.GetComponent<VerticalLayoutGroup>().enabled,
-                Is.False);
-            Assert.That(
-                node.Find("grpStageTitleBanner/txtStageSequence"),
-                Is.Not.Null);
-            Assert.That(
-                node.Find("grpStageTitleBanner/txtStageTitle"),
-                Is.Not.Null);
-            Assert.That(node.Find("imgStageProgressLine"), Is.Not.Null);
-            Assert.That(
-                node.Find("grpStageMarker/imgStageClearState"),
-                Is.Not.Null);
-            Assert.That(
-                node.Find(
-                    "grpStageMarker/imgStageClearState/" +
-                    "txtStageMarkerGlyph"),
-                Is.Not.Null);
-
-            RectTransform marker = node.Find(
-                    "grpStageMarker/imgStageClearState")
-                .GetComponent<RectTransform>();
-            Assert.That(marker.sizeDelta, Is.EqualTo(new Vector2(58f, 58f)));
-            Assert.That(marker.anchoredPosition.x, Is.EqualTo(24f));
-        }
-
-        if (content.childCount > 1)
-        {
-            RectTransform connectorLine = content.GetChild(1)
-                .Find("imgLine")
-                .GetComponent<RectTransform>();
-            Assert.That(connectorLine.anchorMin.y, Is.EqualTo(1f));
-            Assert.That(connectorLine.anchoredPosition.y, Is.EqualTo(-36f));
-        }
-
-        if (definitions.Count > 0)
-        {
-            Transform firstNode = content.GetChild(0);
-            GameObject decoration = new(
-                "DesignerDecoration",
-                typeof(RectTransform),
-                typeof(Image));
-            decoration.transform.SetParent(
-                firstNode.Find("imgStageCover"),
-                false);
-            RectTransform decorationRect =
-                decoration.GetComponent<RectTransform>();
-            decorationRect.anchoredPosition = new Vector2(17f, -23f);
-            Color designerColor = new(0.17f, 0.28f, 0.39f, 0.71f);
-            decoration.GetComponent<Image>().color = designerColor;
-
-            Assert.That(
-                page.SyncEditorUi(out string secondError),
-                Is.True,
-                secondError);
-            if (tintedCover != null)
-            {
-                Assert.That(
-                    tintedCover.color,
-                    Is.EqualTo(Color.white),
-                    "Stage sync must remove stale placeholder tint.");
-            }
-            Assert.That(content.GetChild(0), Is.SameAs(firstNode));
-            Assert.That(
-                firstNode.Find("imgStageCover/DesignerDecoration"),
-                Is.SameAs(decoration.transform));
-            Assert.That(
-                decorationRect.anchoredPosition,
-                Is.EqualTo(new Vector2(17f, -23f)));
-            Assert.That(
-                decoration.GetComponent<Image>().color,
-                Is.EqualTo(designerColor));
-
-            RectTransform titleBanner = firstNode.Find(
-                    "grpStageTitleBanner")
-                .GetComponent<RectTransform>();
-            Vector2 designerBannerPosition = new(91f, -137f);
-            titleBanner.anchoredPosition = designerBannerPosition;
-            RectTransform coverRect = firstNode.Find("imgStageCover")
-                .GetComponent<RectTransform>();
-            coverRect.sizeDelta = new Vector2(320f, 410f);
-            LayoutElement coverLayout =
-                coverRect.GetComponent<LayoutElement>();
-            coverLayout.preferredWidth = 320f;
-            coverLayout.preferredHeight = 410f;
-            SerializedObject serializedPage = new(page);
-            serializedPage.FindProperty("_stageBannerLayoutVersion")
-                .intValue = 0;
-            serializedPage.ApplyModifiedPropertiesWithoutUndo();
-
-            Assert.That(
-                page.SyncEditorUi(out string migrationError),
-                Is.True,
-                migrationError);
-            Assert.That(
-                coverRect.sizeDelta,
-                Is.EqualTo(new Vector2(320f, 320f)));
-            Assert.That(coverLayout.preferredHeight, Is.EqualTo(320f));
-            Assert.That(
-                titleBanner.anchoredPosition,
-                Is.EqualTo(designerBannerPosition),
-                "Square migration must preserve designer title placement.");
-        }
+        Assert.That(page.SyncEditorUi(out string error), Is.False);
+        Assert.That(error, Does.Contain("saved Stage Select"));
+        Assert.That(pageObject.transform.childCount, Is.Zero);
     }
 
     [Test]

@@ -16,16 +16,18 @@ public sealed class DungeonTileView : MonoBehaviour, IPointerClickHandler
     [SerializeField] private Image slotSurface;
     [SerializeField] private RectTransform stackRoot;
     [SerializeField] private EnemyCard enemyCardPrefab;
+    [SerializeField] private Image attackRangeOverlay;
+    [SerializeField] private Image manualSelectionOverlay;
 
     private readonly List<EnemyRuntime> _enemies = new();
     private readonly List<EnemyCard> _cards = new();
+    private readonly List<EnemyCard> _cardPool = new();
     private readonly List<float> _attackRangeHitDurations = new();
-    private Image _attackRangeOverlay;
-    private Image _manualSelectionOverlay;
     private int _maximumStackSize;
     private float _currentCellSize;
     private Color _baseSlotColor;
     private EnemyRuntime _exclusiveFootprintOccupant;
+    private bool _cardPoolPrepared;
 
     public int Row { get; private set; }
     public int Column { get; private set; }
@@ -61,6 +63,7 @@ public sealed class DungeonTileView : MonoBehaviour, IPointerClickHandler
             slotSurface.color = _baseSlotColor;
         }
 
+        PrepareEnemyCardPool();
         EnsureAttackRangeOverlay();
         ClearAttackRangeIndicator();
         SetManualSelectionState(false, false);
@@ -112,7 +115,7 @@ public sealed class DungeonTileView : MonoBehaviour, IPointerClickHandler
         if (!CanAddEnemy || enemy == null)
             return false;
 
-        EnemyCard card = Instantiate(enemyCardPrefab, stackRoot);
+        EnemyCard card = AcquireEnemyCard();
         card.ApplyGameDefaultFont();
         card.name = $"grpEnemyCard_{_cards.Count + 1}";
         card.Bind(enemy);
@@ -350,17 +353,16 @@ public sealed class DungeonTileView : MonoBehaviour, IPointerClickHandler
     internal void SetManualSelectionState(bool candidate, bool selected)
     {
         EnsureManualSelectionOverlay();
-        if (_manualSelectionOverlay == null)
+        if (manualSelectionOverlay == null)
             return;
 
-        _manualSelectionOverlay.enabled = candidate;
+        manualSelectionOverlay.enabled = candidate;
         if (!candidate)
             return;
 
-        _manualSelectionOverlay.color = selected
+        manualSelectionOverlay.color = selected
             ? new Color(1f, 0.78f, 0.12f, 0.42f)
             : new Color(0.2f, 0.9f, 0.5f, 0.28f);
-        _manualSelectionOverlay.rectTransform.SetAsLastSibling();
     }
 
     internal void TickStatusEffects(
@@ -417,7 +419,7 @@ public sealed class DungeonTileView : MonoBehaviour, IPointerClickHandler
         if (topCard != null)
         {
             topCard.Clicked -= HandleEnemyCardClicked;
-            DestroyEnemyCardObject(topCard);
+            topCard.gameObject.SetActive(false);
         }
 
         RefreshCardPositions();
@@ -431,7 +433,7 @@ public sealed class DungeonTileView : MonoBehaviour, IPointerClickHandler
             if (card != null)
             {
                 card.Clicked -= HandleEnemyCardClicked;
-                DestroyEnemyCardObject(card);
+                card.gameObject.SetActive(false);
             }
         }
 
@@ -441,20 +443,40 @@ public sealed class DungeonTileView : MonoBehaviour, IPointerClickHandler
         SetManualSelectionState(false, false);
     }
 
-    private static void DestroyEnemyCardObject(EnemyCard card)
+    private void PrepareEnemyCardPool()
     {
-        if (card == null)
+        if (_cardPoolPrepared || stackRoot == null)
             return;
 
-#if UNITY_EDITOR
-        if (!Application.isPlaying)
+        _cardPoolPrepared = true;
+        for (int index = 0; index < stackRoot.childCount; index++)
         {
-            UnityEngine.Object.DestroyImmediate(card.gameObject);
-            return;
-        }
-#endif
+            EnemyCard card = stackRoot.GetChild(index)
+                .GetComponent<EnemyCard>();
+            if (card == null || _cardPool.Contains(card))
+                continue;
 
-        UnityEngine.Object.Destroy(card.gameObject);
+            card.gameObject.SetActive(false);
+            _cardPool.Add(card);
+        }
+    }
+
+    private EnemyCard AcquireEnemyCard()
+    {
+        PrepareEnemyCardPool();
+        for (int index = 0; index < _cardPool.Count; index++)
+        {
+            EnemyCard candidate = _cardPool[index];
+            if (candidate != null && !_cards.Contains(candidate))
+            {
+                candidate.gameObject.SetActive(true);
+                return candidate;
+            }
+        }
+
+        EnemyCard instance = Instantiate(enemyCardPrefab, stackRoot);
+        _cardPool.Add(instance);
+        return instance;
     }
 
     internal List<EnemyRuntime> CopyEnemyRuntimes()
@@ -502,73 +524,33 @@ public sealed class DungeonTileView : MonoBehaviour, IPointerClickHandler
 
     private void EnsureAttackRangeOverlay()
     {
-        if (_attackRangeOverlay != null)
+        if (attackRangeOverlay != null)
             return;
 
         Transform existing = transform.Find("imgAttackRangeOverlay");
         if (existing != null)
-            _attackRangeOverlay = existing.GetComponent<Image>();
-        if (_attackRangeOverlay == null)
-        {
-            GameObject overlayObject = new(
-                "imgAttackRangeOverlay",
-                typeof(RectTransform),
-                typeof(CanvasRenderer),
-                typeof(Image));
-            overlayObject.transform.SetParent(transform, false);
-            _attackRangeOverlay = overlayObject.GetComponent<Image>();
-        }
-
-        RectTransform overlayRect = _attackRangeOverlay.rectTransform;
-        overlayRect.anchorMin = Vector2.zero;
-        overlayRect.anchorMax = Vector2.one;
-        overlayRect.offsetMin = Vector2.zero;
-        overlayRect.offsetMax = Vector2.zero;
-        overlayRect.localScale = Vector3.one;
-        overlayRect.SetAsLastSibling();
-        _attackRangeOverlay.raycastTarget = false;
-        _attackRangeOverlay.enabled = false;
+            attackRangeOverlay = existing.GetComponent<Image>();
     }
 
     private void EnsureManualSelectionOverlay()
     {
-        if (_manualSelectionOverlay != null)
+        if (manualSelectionOverlay != null)
             return;
 
         Transform existing = transform.Find("imgManualSelectionOverlay");
         if (existing != null)
-            _manualSelectionOverlay = existing.GetComponent<Image>();
-        if (_manualSelectionOverlay == null)
-        {
-            GameObject overlayObject = new(
-                "imgManualSelectionOverlay",
-                typeof(RectTransform),
-                typeof(CanvasRenderer),
-                typeof(Image));
-            overlayObject.transform.SetParent(transform, false);
-            _manualSelectionOverlay = overlayObject.GetComponent<Image>();
-        }
-
-        RectTransform overlayRect = _manualSelectionOverlay.rectTransform;
-        overlayRect.anchorMin = Vector2.zero;
-        overlayRect.anchorMax = Vector2.one;
-        overlayRect.offsetMin = Vector2.zero;
-        overlayRect.offsetMax = Vector2.zero;
-        overlayRect.localScale = Vector3.one;
-        overlayRect.SetAsLastSibling();
-        _manualSelectionOverlay.raycastTarget = false;
-        _manualSelectionOverlay.enabled = false;
+            manualSelectionOverlay = existing.GetComponent<Image>();
     }
 
     private void RefreshAttackRangeIndicator()
     {
-        if (_attackRangeOverlay == null)
+        if (attackRangeOverlay == null)
             return;
 
         int overlapCount = _attackRangeHitDurations.Count;
         if (overlapCount <= 0)
         {
-            _attackRangeOverlay.enabled = false;
+            attackRangeOverlay.enabled = false;
             return;
         }
 
@@ -576,16 +558,15 @@ public sealed class DungeonTileView : MonoBehaviour, IPointerClickHandler
             AttackRangeMaximumAlpha,
             AttackRangeMinimumAlpha +
             (Mathf.Min(overlapCount, 4) - 1) * AttackRangeAlphaStep);
-        _attackRangeOverlay.color = new Color32(255, 0, 0, (byte)alpha);
-        _attackRangeOverlay.enabled = true;
-        _attackRangeOverlay.rectTransform.SetAsLastSibling();
+        attackRangeOverlay.color = new Color32(255, 0, 0, (byte)alpha);
+        attackRangeOverlay.enabled = true;
     }
 
     private void ClearAttackRangeIndicator()
     {
         _attackRangeHitDurations.Clear();
-        if (_attackRangeOverlay != null)
-            _attackRangeOverlay.enabled = false;
+        if (attackRangeOverlay != null)
+            attackRangeOverlay.enabled = false;
     }
 
     public void RefreshLayout(float cellSize)

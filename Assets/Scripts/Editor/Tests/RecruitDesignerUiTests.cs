@@ -1,161 +1,125 @@
+using System.Linq;
 using System.Reflection;
 using NUnit.Framework;
-using UnityEditor;
+using UnityEditor.SceneManagement;
 using UnityEngine;
+using UnityEngine.SceneManagement;
 
 public sealed class RecruitDesignerUiTests
 {
     [Test]
-    public void RecruitPreview_CreatesDesignerOwnedFixedSceneUi()
+    public void RecruitScene_HasDesignerOwnedFixedUi()
     {
-        GameObject pageObject = CreateRecruitPage(
-            out MainSubPage page);
+        Scene scene = OpenClientScene(out bool opened);
         try
         {
-            bool synchronized =
-                page.SyncRecruitEditorPreview(
-                    0,
-                    0,
-                    out string error);
+            MainSubPage page = FindRecruitPage(scene);
+            Assert.That(page, Is.Not.Null);
+            Assert.That(
+                page.ValidateRecruitEditorUi(out string error),
+                Is.True,
+                error);
 
-            Assert.That(synchronized, Is.True, error);
             RecruitBannerDesignerBindings banner =
-                pageObject.GetComponentInChildren<
+                page.GetComponentInChildren<
                     RecruitBannerDesignerBindings>(true);
             RecruitRevealDesignerBindings reveal =
-                pageObject.GetComponentInChildren<
+                page.GetComponentInChildren<
                     RecruitRevealDesignerBindings>(true);
-            Assert.That(banner, Is.Not.Null);
-            Assert.That(banner.HasDesignerLayout, Is.True);
             Assert.That(banner.HasRequiredReferences, Is.True);
-            Assert.That(reveal, Is.Not.Null);
-            Assert.That(reveal.HasDesignerLayout, Is.True);
             Assert.That(reveal.HasRequiredReferences, Is.True);
             Assert.That(reveal.ResultRows.Count, Is.EqualTo(10));
-            for (int index = 0;
-                 index < reveal.ResultRows.Count;
-                 index++)
-            {
-                Assert.That(
-                    reveal.ResultRows[index].Find("imgRewardIcon"),
-                    Is.Not.Null);
-            }
+            foreach (RectTransform row in reveal.ResultRows)
+                Assert.That(row.Find("imgRewardIcon"), Is.Not.Null);
         }
         finally
         {
-            Object.DestroyImmediate(pageObject);
+            if (opened)
+                EditorSceneManager.CloseScene(scene, true);
         }
     }
 
     [Test]
-    public void RecruitPreview_RebindsRuntimeWrappersAfterScriptReload()
+    public void RecruitPreview_RebindsSavedRuntimeWrappers()
     {
-        GameObject pageObject = CreateRecruitPage(
-            out MainSubPage page);
+        Scene scene = OpenClientScene(out bool opened);
         try
         {
+            MainSubPage page = FindRecruitPage(scene);
+            Assert.That(page, Is.Not.Null);
             Assert.That(
-                page.SyncRecruitEditorPreview(
-                    0,
-                    0,
-                    out string firstError),
+                page.SyncRecruitEditorPreview(0, 0, out string firstError),
                 Is.True,
                 firstError);
 
             SetPrivateField(page, "_recruitBannerView", null);
             SetPrivateField(page, "_recruitRevealOverlay", null);
-
             Assert.That(
-                page.SyncRecruitEditorPreview(
-                    0,
-                    0,
-                    out string rebindError),
+                page.SyncRecruitEditorPreview(0, 0, out string rebindError),
                 Is.True,
                 rebindError);
         }
         finally
         {
-            Object.DestroyImmediate(pageObject);
+            if (opened)
+                EditorSceneManager.CloseScene(scene, true);
         }
     }
 
     [Test]
-    public void RecruitPreview_CanShowTenResultsAndHideAgain()
+    public void RecruitPreview_CanShowTenSavedRowsAndHideAgain()
     {
-        GameObject pageObject = CreateRecruitPage(
-            out MainSubPage page);
+        Scene scene = OpenClientScene(out bool opened);
         try
         {
+            MainSubPage page = FindRecruitPage(scene);
             Assert.That(
-                page.SyncRecruitEditorPreview(
-                    0,
-                    10,
-                    out string showError),
+                page.SyncRecruitEditorPreview(0, 10, out string showError),
                 Is.True,
                 showError);
             RecruitRevealDesignerBindings reveal =
-                pageObject.GetComponentInChildren<
+                page.GetComponentInChildren<
                     RecruitRevealDesignerBindings>(true);
-            Assert.That(reveal, Is.Not.Null);
             Assert.That(reveal.gameObject.activeSelf, Is.True);
-            for (int index = 0;
-                 index < reveal.ResultRows.Count;
-                 index++)
-            {
-                Assert.That(
-                    reveal.ResultRows[index].gameObject.activeSelf,
-                    Is.True);
-            }
+            Assert.That(
+                reveal.ResultRows.All(row => row.gameObject.activeSelf),
+                Is.True);
 
             Assert.That(
-                page.SyncRecruitEditorPreview(
-                    0,
-                    0,
-                    out string hideError),
+                page.SyncRecruitEditorPreview(0, 0, out string hideError),
                 Is.True,
                 hideError);
             Assert.That(reveal.gameObject.activeSelf, Is.False);
         }
         finally
         {
-            Object.DestroyImmediate(pageObject);
+            if (opened)
+                EditorSceneManager.CloseScene(scene, true);
         }
     }
 
     [Test]
     public void DesignerOwnedBanner_DoesNotRestoreDefaultRectOnRebind()
     {
-        GameObject pageObject = CreateRecruitPage(
-            out MainSubPage page);
+        Scene scene = OpenClientScene(out bool opened);
         try
         {
-            Assert.That(
-                page.SyncRecruitEditorPreview(
-                    0,
-                    0,
-                    out string error),
-                Is.True,
-                error);
+            MainSubPage page = FindRecruitPage(scene);
             RecruitBannerDesignerBindings banner =
-                pageObject.GetComponentInChildren<
+                page.GetComponentInChildren<
                     RecruitBannerDesignerBindings>(true);
-            Assert.That(banner, Is.Not.Null);
             Vector2 designerPosition = new(37f, -29f);
             banner.Root.anchoredPosition = designerPosition;
 
-            Transform buttonRoot = pageObject.transform.Find(
-                RuntimeMenuPageBase.RuntimeRootObjectName +
-                "/grpMenuPanel/grpMenuButtons");
-            Assert.That(buttonRoot, Is.Not.Null);
-            RecruitBannerView.Build(buttonRoot);
-
+            RecruitBannerView.Build(banner.Root.parent);
             Assert.That(
                 banner.Root.anchoredPosition,
                 Is.EqualTo(designerPosition));
         }
         finally
         {
-            Object.DestroyImmediate(pageObject);
+            if (opened)
+                EditorSceneManager.CloseScene(scene, true);
         }
     }
 
@@ -179,21 +143,22 @@ public sealed class RecruitDesignerUiTests
         }
     }
 
-    private static GameObject CreateRecruitPage(
-        out MainSubPage page)
+    private static Scene OpenClientScene(out bool opened)
     {
-        GameObject pageObject = new(
-            "pagRecruitTest",
-            typeof(RectTransform));
-        pageObject.SetActive(false);
-        page = pageObject.AddComponent<MainSubPage>();
-        SerializedObject serialized = new(page);
-        serialized.FindProperty("pageType").enumValueIndex =
-            (int)EMainSubPageType.Recruit;
-        serialized.ApplyModifiedPropertiesWithoutUndo();
-        pageObject.SetActive(true);
-        pageObject.SetActive(false);
-        return pageObject;
+        const string path = "Assets/Scenes/ClientScene.unity";
+        Scene scene = SceneManager.GetSceneByPath(path);
+        opened = !scene.IsValid() || !scene.isLoaded;
+        return opened
+            ? EditorSceneManager.OpenScene(path, OpenSceneMode.Additive)
+            : scene;
+    }
+
+    private static MainSubPage FindRecruitPage(Scene scene)
+    {
+        return scene.GetRootGameObjects()
+            .SelectMany(root =>
+                root.GetComponentsInChildren<MainSubPage>(true))
+            .FirstOrDefault(page => page.IsRecruitPage);
     }
 
     private static void SetPrivateField(

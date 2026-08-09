@@ -411,7 +411,7 @@ public sealed class StatusEffectEditorTests
                 PS260714EditorMenu.GenerateLocalizationPriority,
                 PS260714EditorMenu.RecruitEditorPriority,
                 PS260714EditorMenu.ValidateDesignerUiPriority,
-                PS260714EditorMenu.MigrateRuntimeUiPriority,
+                PS260714EditorMenu.InstallDynamicUiPreviewsPriority,
                 PS260714EditorMenu.MigrateBattleItemUsagePriority,
                 PS260714EditorMenu.MigrateCharacterModifierIdsPriority,
             },

@@ -280,7 +280,7 @@ public sealed class ItemDefinitionTests
                 0,
                 0f);
             MethodInfo resolveVisibleCardCount =
-                typeof(DungeonItemHandView).GetMethod(
+                typeof(DungeonItemHandViewBase).GetMethod(
                     "ResolveVisibleCardCount",
                     BindingFlags.Static | BindingFlags.NonPublic);
             Assert.That(resolveVisibleCardCount, Is.Not.Null);
@@ -334,6 +334,41 @@ public sealed class ItemDefinitionTests
             typeof(RectTransform),
             typeof(TextMeshProUGUI));
         amountObject.transform.SetParent(root.transform, false);
+        GameObject iconFrame = new(
+            "grpResourceIcon",
+            typeof(RectTransform));
+        iconFrame.transform.SetParent(root.transform, false);
+        GameObject iconObject = new(
+            "imgResourceIcon",
+            typeof(RectTransform),
+            typeof(CanvasRenderer),
+            typeof(Image));
+        iconObject.transform.SetParent(iconFrame.transform, false);
+        GameObject fallbackObject = new(
+            "txtResourceIcon",
+            typeof(RectTransform),
+            typeof(TextMeshProUGUI));
+        fallbackObject.transform.SetParent(iconFrame.transform, false);
+        GameObject cooldownObject = new(
+            "imgResourceCooldownOverlay",
+            typeof(RectTransform),
+            typeof(CanvasRenderer),
+            typeof(Image));
+        cooldownObject.transform.SetParent(iconFrame.transform, false);
+        Image authoredCooldown = cooldownObject.GetComponent<Image>();
+        authoredCooldown.type = Image.Type.Filled;
+        authoredCooldown.fillMethod = Image.FillMethod.Radial360;
+        authoredCooldown.fillOrigin = (int)Image.Origin360.Top;
+        authoredCooldown.fillClockwise = true;
+        GameObject tooltipObject = new(
+            "grpResourceTooltip",
+            typeof(RectTransform));
+        tooltipObject.transform.SetParent(root.transform, false);
+        GameObject tooltipTextObject = new(
+            "txtResourceTooltip",
+            typeof(RectTransform),
+            typeof(TextMeshProUGUI));
+        tooltipTextObject.transform.SetParent(tooltipObject.transform, false);
         try
         {
             DungeonActiveSkillResourceView view =

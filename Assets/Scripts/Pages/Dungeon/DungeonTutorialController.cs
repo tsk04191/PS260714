@@ -12,29 +12,23 @@ public sealed class DungeonTutorialController : MonoBehaviour
     private const float DescriptionHeight = 132f;
     private const float RootPadding = 18f;
 
-    private static readonly Color DimColor = new(0f, 0f, 0f, 0.78f);
-    private static readonly Color PanelColor =
-        new(0.055f, 0.07f, 0.06f, 0.98f);
-    private static readonly Color ButtonColor =
-        new(0.18f, 0.29f, 0.23f, 1f);
-    private static readonly Color TextColor =
-        new(0.96f, 0.96f, 0.92f, 1f);
-
-    private readonly RectTransform[] _dimmers = new RectTransform[4];
-    private readonly RectTransform[] _borders = new RectTransform[4];
+    [SerializeField] private RectTransform[] _dimmers =
+        new RectTransform[4];
+    [SerializeField] private RectTransform[] _borders =
+        new RectTransform[4];
     private readonly Vector3[] _worldCorners = new Vector3[4];
 
     private DungeonPage _page;
     private DungeonFieldView _fieldView;
     private DungeonTutorialDefinition _definition;
-    private RectTransform _overlayRoot;
-    private RectTransform _targetBlocker;
-    private RectTransform _descriptionPanel;
-    private RectTransform _messageRect;
-    private TextMeshProUGUI _progressText;
-    private TextMeshProUGUI _messageText;
-    private TextMeshProUGUI _nextButtonText;
-    private Button _nextButton;
+    [SerializeField] private RectTransform _overlayRoot;
+    [SerializeField] private RectTransform _targetBlocker;
+    [SerializeField] private RectTransform _descriptionPanel;
+    [SerializeField] private RectTransform _messageRect;
+    [SerializeField] private TextMeshProUGUI _progressText;
+    [SerializeField] private TextMeshProUGUI _messageText;
+    [SerializeField] private TextMeshProUGUI _nextButtonText;
+    [SerializeField] private Button _nextButton;
     private RectTransform _startingChoiceTarget;
     private int _stepIndex = -1;
     private bool _showingCompletion;
@@ -75,7 +69,6 @@ public sealed class DungeonTutorialController : MonoBehaviour
         _page.UpdateTutorialProgress(_stepIndex);
         _running = true;
         _overlayRoot.gameObject.SetActive(true);
-        _overlayRoot.SetAsLastSibling();
         Canvas.ForceUpdateCanvases();
         RefreshCopy();
         RefreshLayout();
@@ -99,7 +92,6 @@ public sealed class DungeonTutorialController : MonoBehaviour
         _showingCompletion = false;
         _page.UpdateTutorialProgress(_stepIndex);
         _overlayRoot.gameObject.SetActive(true);
-        _overlayRoot.SetAsLastSibling();
         Canvas.ForceUpdateCanvases();
         RefreshCopy();
         RefreshLayout();
@@ -124,7 +116,6 @@ public sealed class DungeonTutorialController : MonoBehaviour
         _page.UpdateTutorialProgress(-1);
         _running = true;
         _overlayRoot.gameObject.SetActive(true);
-        _overlayRoot.SetAsLastSibling();
         Canvas.ForceUpdateCanvases();
         RefreshCopy();
         RefreshLayout();
@@ -162,7 +153,6 @@ public sealed class DungeonTutorialController : MonoBehaviour
         if (_running && _overlayRoot != null &&
             _overlayRoot.gameObject.activeSelf)
         {
-            _overlayRoot.SetAsLastSibling();
             RefreshLayout();
         }
     }
@@ -420,141 +410,64 @@ public sealed class DungeonTutorialController : MonoBehaviour
 
     private void EnsureRuntimeUi()
     {
-        if (_overlayRoot != null)
+        _overlayRoot ??= transform.Find("grpTutorialOverlay")
+            as RectTransform;
+        if (_overlayRoot == null)
+        {
+            Debug.LogError(
+                "Tutorial overlay must be placed in the Scene.",
+                this);
             return;
-
-        GameObject rootObject = new("grpTutorialOverlay", typeof(RectTransform));
-        _overlayRoot = (RectTransform)rootObject.transform;
-        _overlayRoot.SetParent(transform, false);
-        _overlayRoot.anchorMin = Vector2.zero;
-        _overlayRoot.anchorMax = Vector2.one;
-        _overlayRoot.offsetMin = Vector2.zero;
-        _overlayRoot.offsetMax = Vector2.zero;
-
-        for (int index = 0; index < _dimmers.Length; index++)
-        {
-            Image dimmer = CreateImage(
-                _overlayRoot,
-                $"imgTutorialDim_{index + 1}",
-                DimColor,
-                true);
-            _dimmers[index] = dimmer.rectTransform;
         }
 
-        Image blocker = CreateImage(
-            _overlayRoot,
-            "imgTutorialTargetBlocker",
-            Color.clear,
-            true);
-        _targetBlocker = blocker.rectTransform;
-
-        for (int index = 0; index < _borders.Length; index++)
+        for (int index = 0; index < 4; index++)
         {
-            Image border = CreateImage(
-                _overlayRoot,
-                $"imgTutorialBorder_{index + 1}",
-                Color.white,
-                false);
-            _borders[index] = border.rectTransform;
+            _dimmers[index] ??= _overlayRoot
+                .Find($"imgTutorialDim_{index + 1}") as RectTransform;
+            _borders[index] ??= _overlayRoot
+                .Find($"imgTutorialBorder_{index + 1}") as RectTransform;
         }
 
-        Image panelImage = CreateImage(
-            _overlayRoot,
-            "grpTutorialDescription",
-            PanelColor,
-            true);
-        _descriptionPanel = panelImage.rectTransform;
+        _targetBlocker ??= _overlayRoot
+            .Find("imgTutorialTargetBlocker") as RectTransform;
+        _descriptionPanel ??= _overlayRoot
+            .Find("grpTutorialDescription") as RectTransform;
+        _progressText ??= _descriptionPanel
+            ?.Find("txtTutorialProgress")?.GetComponent<TextMeshProUGUI>();
+        _messageText ??= _descriptionPanel
+            ?.Find("txtTutorialMessage")?.GetComponent<TextMeshProUGUI>();
+        _messageRect ??= _messageText?.rectTransform;
+        _nextButton ??= _descriptionPanel
+            ?.Find("btnTutorialNext")?.GetComponent<Button>();
+        _nextButtonText ??= _nextButton
+            ?.GetComponentInChildren<TextMeshProUGUI>(true);
+        if (_targetBlocker == null || _descriptionPanel == null ||
+            _progressText == null || _messageText == null ||
+            _nextButton == null || _nextButtonText == null ||
+            ArrayHasNull(_dimmers) || ArrayHasNull(_borders))
+        {
+            Debug.LogError(
+                "Tutorial overlay Scene references are incomplete.",
+                this);
+            return;
+        }
 
-        _progressText = CreateText(
-            _descriptionPanel,
-            "txtTutorialProgress",
-            17f,
-            TextAlignmentOptions.Center);
-        RectTransform progressRect = _progressText.rectTransform;
-        progressRect.anchorMin = new Vector2(0.035f, 0.72f);
-        progressRect.anchorMax = new Vector2(0.16f, 0.96f);
-        progressRect.offsetMin = Vector2.zero;
-        progressRect.offsetMax = Vector2.zero;
-
-        _messageText = CreateText(
-            _descriptionPanel,
-            "txtTutorialMessage",
-            22f,
-            TextAlignmentOptions.MidlineLeft);
-        _messageText.enableAutoSizing = true;
-        _messageText.fontSizeMin = 15f;
-        _messageText.fontSizeMax = 22f;
-        _messageText.textWrappingMode = TextWrappingModes.Normal;
-        _messageRect = _messageText.rectTransform;
-        _messageRect.anchorMin = new Vector2(0.04f, 0.16f);
-        _messageRect.anchorMax = new Vector2(0.76f, 0.82f);
-        _messageRect.offsetMin = Vector2.zero;
-        _messageRect.offsetMax = Vector2.zero;
-
-        Image buttonImage = CreateImage(
-            _descriptionPanel,
-            "btnTutorialNext",
-            ButtonColor,
-            true);
-        RectTransform buttonRect = buttonImage.rectTransform;
-        buttonRect.anchorMin = new Vector2(0.79f, 0.26f);
-        buttonRect.anchorMax = new Vector2(0.965f, 0.74f);
-        buttonRect.offsetMin = Vector2.zero;
-        buttonRect.offsetMax = Vector2.zero;
-        _nextButton = buttonImage.gameObject.AddComponent<Button>();
-        _nextButton.targetGraphic = buttonImage;
+        _nextButton.onClick.RemoveAllListeners();
         _nextButton.onClick.AddListener(HandleNextClicked);
-
-        _nextButtonText = CreateText(
-            buttonRect,
-            "txtTutorialNext",
-            19f,
-            TextAlignmentOptions.Center);
-        RectTransform nextTextRect = _nextButtonText.rectTransform;
-        nextTextRect.anchorMin = Vector2.zero;
-        nextTextRect.anchorMax = Vector2.one;
-        nextTextRect.offsetMin = new Vector2(6f, 3f);
-        nextTextRect.offsetMax = new Vector2(-6f, -3f);
 
         _overlayRoot.gameObject.SetActive(false);
     }
 
-    private static Image CreateImage(
-        Transform parent,
-        string objectName,
-        Color color,
-        bool raycastTarget)
+    private static bool ArrayHasNull(RectTransform[] values)
     {
-        GameObject imageObject = new(
-            objectName,
-            typeof(RectTransform),
-            typeof(CanvasRenderer),
-            typeof(Image));
-        imageObject.transform.SetParent(parent, false);
-        Image image = imageObject.GetComponent<Image>();
-        image.color = color;
-        image.raycastTarget = raycastTarget;
-        return image;
-    }
-
-    private static TextMeshProUGUI CreateText(
-        Transform parent,
-        string objectName,
-        float fontSize,
-        TextAlignmentOptions alignment)
-    {
-        GameObject textObject = new(
-            objectName,
-            typeof(RectTransform),
-            typeof(TextMeshProUGUI));
-        textObject.transform.SetParent(parent, false);
-        TextMeshProUGUI text = textObject.GetComponent<TextMeshProUGUI>();
-        LocalizationFontResolver.ApplyGameDefault(text);
-        text.fontSize = fontSize;
-        text.color = TextColor;
-        text.alignment = alignment;
-        text.raycastTarget = false;
-        return text;
+        if (values == null || values.Length < 4)
+            return true;
+        for (int index = 0; index < 4; index++)
+        {
+            if (values[index] == null)
+                return true;
+        }
+        return false;
     }
 
     private static void SetRect(RectTransform target, Rect rect)

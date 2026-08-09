@@ -96,7 +96,6 @@ public sealed class TitlePage : RuntimeMenuPageBase
         }
 
         _noticePopup.SetActive(true);
-        _noticePopup.transform.SetAsLastSibling();
     }
 
     private void HideNotice()

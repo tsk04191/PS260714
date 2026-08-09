@@ -26,31 +26,24 @@ public sealed class RuntimeMenuPageBaseEditor : Editor
         string message = page.HasDesignerLayout
             ? "This page uses the designer-owned scene layout. " +
               "Runtime code will not overwrite its RectTransforms."
-            : "This page still uses a generated layout. Run the migration " +
-              "before editing RectTransforms.";
+            : "Saved designer UI references are incomplete. Repair the " +
+              "Scene hierarchy and inspector references directly.";
         EditorGUILayout.HelpBox(message, messageType);
 
         using (new EditorGUI.DisabledScope(
                    Application.isPlaying ||
                    targets.Length != 1))
         {
-            if (GUILayout.Button("Migrate / Unlock Runtime UI"))
-            {
-                MenuPageSceneBuilder.MigrateRuntimeUiForDesigner(
-                    page.gameObject.scene);
-            }
-
             if (page is StageSelectPage stageSelectPage &&
-                GUILayout.Button("Sync Stage Select UI & Save Scene"))
+                GUILayout.Button("Validate Stage Select UI"))
             {
-                if (stageSelectPage.SyncEditorUi(out string error))
+                if (!stageSelectPage.ValidateEditorUi(out string error))
                 {
-                    UnityEditor.SceneManagement.EditorSceneManager.SaveScene(
-                        page.gameObject.scene);
+                    Debug.LogError(error, stageSelectPage);
                 }
                 else
                 {
-                    Debug.LogError(error, stageSelectPage);
+                    Debug.Log("Stage Select UI validation passed.", page);
                 }
             }
 

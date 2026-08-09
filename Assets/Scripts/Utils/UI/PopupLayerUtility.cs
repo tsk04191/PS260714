@@ -195,9 +195,7 @@ public static class PopupLayerUtility
     }
 }
 
-[DisallowMultipleComponent]
-[RequireComponent(typeof(RectTransform))]
-public sealed class ResponsivePanelFitter : MonoBehaviour
+public abstract class ResponsivePanelFitterBase : MonoBehaviour
 {
     [SerializeField] private RectTransform viewport;
     [SerializeField] private bool allowUpscale;
@@ -216,12 +214,14 @@ public sealed class ResponsivePanelFitter : MonoBehaviour
             return null;
 
         ResponsivePanelFitter fitter =
-            panel.GetComponent<ResponsivePanelFitter>() ??
-            panel.gameObject.AddComponent<ResponsivePanelFitter>();
-        fitter.viewport = viewport != null
-            ? viewport
-            : panel.parent as RectTransform;
-        fitter.allowUpscale = allowUpscale;
+            panel.GetComponent<ResponsivePanelFitter>();
+        if (fitter == null)
+        {
+            Debug.LogError(
+                "ResponsivePanelFitter must be authored on the panel.",
+                panel);
+            return null;
+        }
         fitter.CaptureAuthoredLayout();
         fitter.RefreshLayout();
         return fitter;
@@ -262,18 +262,18 @@ public sealed class ResponsivePanelFitter : MonoBehaviour
             _authoredScale.z);
     }
 
-    private void Awake()
+    protected virtual void Awake()
     {
         EnsureReferences();
         CaptureAuthoredLayout();
     }
 
-    private void OnEnable()
+    protected virtual void OnEnable()
     {
         RefreshLayout();
     }
 
-    private void OnRectTransformDimensionsChange()
+    protected virtual void OnRectTransformDimensionsChange()
     {
         RefreshLayout();
     }
@@ -300,9 +300,7 @@ public sealed class ResponsivePanelFitter : MonoBehaviour
     }
 }
 
-[DisallowMultipleComponent]
-[RequireComponent(typeof(GridLayoutGroup))]
-public sealed class ResponsiveGridConstraint : MonoBehaviour
+public abstract class ResponsiveGridConstraintBase : MonoBehaviour
 {
     [SerializeField] private RectTransform viewport;
     [SerializeField, Min(1)] private int maximumColumns = int.MaxValue;
@@ -320,12 +318,14 @@ public sealed class ResponsiveGridConstraint : MonoBehaviour
             return null;
 
         ResponsiveGridConstraint constraint =
-            grid.GetComponent<ResponsiveGridConstraint>() ??
-            grid.gameObject.AddComponent<ResponsiveGridConstraint>();
-        constraint.viewport = viewport != null
-            ? viewport
-            : grid.transform.parent as RectTransform;
-        constraint.maximumColumns = Mathf.Max(1, maximumColumns);
+            grid.GetComponent<ResponsiveGridConstraint>();
+        if (constraint == null)
+        {
+            Debug.LogError(
+                "ResponsiveGridConstraint must be authored on the grid.",
+                grid);
+            return null;
+        }
         constraint._bound = true;
         if (constraint.viewport != null &&
             constraint.viewport.GetComponentInParent<Canvas>() != null)
@@ -386,22 +386,23 @@ public sealed class ResponsiveGridConstraint : MonoBehaviour
         _refreshing = false;
     }
 
-    private void Awake()
+    protected virtual void Awake()
     {
         _grid = GetComponent<GridLayoutGroup>();
+        _bound = true;
     }
 
-    private void OnEnable()
+    protected virtual void OnEnable()
     {
         RefreshLayout();
     }
 
-    private void Start()
+    protected virtual void Start()
     {
         RefreshLayout();
     }
 
-    private void OnRectTransformDimensionsChange()
+    protected virtual void OnRectTransformDimensionsChange()
     {
         RefreshLayout();
     }

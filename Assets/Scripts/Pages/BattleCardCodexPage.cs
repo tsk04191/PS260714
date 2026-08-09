@@ -108,77 +108,32 @@ public sealed class BattleCardCodexPage : RuntimeMenuPageBase
 
     private void BuildDetailPanel(Transform parent)
     {
-        bool created = parent.Find("grpBattleCardDetail") == null;
-        GameObject detailObject = GetOrCreateChild(
-            parent,
-            "grpBattleCardDetail",
-            typeof(RectTransform),
-            typeof(CanvasRenderer),
-            typeof(Image),
-            typeof(VerticalLayoutGroup),
-            typeof(LayoutElement));
-        _detailPanelImage = detailObject.GetComponent<Image>();
-        if (created)
+        Transform detail = parent?.Find("grpBattleCardDetail");
+        if (detail == null)
         {
-            _detailPanelImage.color = PanelColor;
-            _detailPanelImage.raycastTarget = false;
-
-            LayoutElement detailLayout =
-                detailObject.GetComponent<LayoutElement>();
-            detailLayout.preferredHeight = 390f;
-            detailLayout.flexibleHeight = 1f;
-
-            VerticalLayoutGroup layout =
-                detailObject.GetComponent<VerticalLayoutGroup>();
-            layout.padding = new RectOffset(28, 28, 22, 22);
-            layout.spacing = 9f;
-            layout.childAlignment = TextAnchor.UpperCenter;
-            layout.childControlWidth = true;
-            layout.childControlHeight = true;
-            layout.childForceExpandWidth = true;
-            layout.childForceExpandHeight = false;
+            Debug.LogError(
+                "Battle card detail UI must be authored in the Scene.",
+                this);
+            return;
         }
 
+        _detailPanelImage = detail.GetComponent<Image>();
         _detailTitle = CreateContentText(
-            detailObject.transform,
-            "txtBattleCardName",
-            string.Empty,
-            38f,
-            54f,
+            detail, "txtBattleCardName", string.Empty, 38f, 54f,
             FontStyles.Bold);
         _classificationText = CreateContentText(
-            detailObject.transform,
-            "txtBattleCardClassification",
-            string.Empty,
-            20f,
-            38f,
+            detail, "txtBattleCardClassification", string.Empty, 20f, 38f,
             FontStyles.Bold);
         _resourceText = CreateContentText(
-            detailObject.transform,
-            "txtBattleCardResource",
-            string.Empty,
-            21f,
-            52f);
+            detail, "txtBattleCardResource", string.Empty, 21f, 52f);
         _effectTitleText = CreateContentText(
-            detailObject.transform,
-            "txtBattleCardEffectTitle",
-            LocalizationService.Get(
-                LocalizationKeys.CodexBattleEffectTitle),
-            19f,
-            28f,
-            FontStyles.Bold);
+            detail, "txtBattleCardEffectTitle",
+            LocalizationService.Get(LocalizationKeys.CodexBattleEffectTitle),
+            19f, 28f, FontStyles.Bold);
         _effectText = CreateContentText(
-            detailObject.transform,
-            "txtBattleCardEffect",
-            string.Empty,
-            21f,
-            70f);
+            detail, "txtBattleCardEffect", string.Empty, 21f, 70f);
         _usageText = CreateContentText(
-            detailObject.transform,
-            "txtBattleCardUsage",
-            string.Empty,
-            18f,
-            62f);
+            detail, "txtBattleCardUsage", string.Empty, 18f, 62f);
     }
 
     private void RefreshBrowser()
@@ -489,27 +444,4 @@ public sealed class BattleCardCodexPage : RuntimeMenuPageBase
             "ko",
             StringComparison.OrdinalIgnoreCase) == true;
 
-    private static GameObject GetOrCreateChild(
-        Transform parent,
-        string objectName,
-        params Type[] componentTypes)
-    {
-        Transform existing = parent != null
-            ? parent.Find(objectName)
-            : null;
-        if (existing != null)
-            return existing.gameObject;
-
-        GameObject child = new(objectName, componentTypes);
-        child.transform.SetParent(parent, false);
-        return child;
-    }
-
-    private static void StretchToParent(RectTransform rectTransform)
-    {
-        rectTransform.anchorMin = Vector2.zero;
-        rectTransform.anchorMax = Vector2.one;
-        rectTransform.offsetMin = Vector2.zero;
-        rectTransform.offsetMax = Vector2.zero;
-    }
 }

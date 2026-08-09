@@ -111,8 +111,6 @@ public sealed class CharacterCodexPage : RuntimeMenuPageBase
             "btnBACKTOCODEX",
             LocalizationKeys.UiCommonBack,
             HandleBackClicked);
-        if (backButton != null)
-            backButton.transform.SetAsLastSibling();
         RefreshBrowser();
         ApplyPresentationMode();
         if (_operatorDetailMode)
@@ -417,308 +415,69 @@ public sealed class CharacterCodexPage : RuntimeMenuPageBase
 
     private void BuildDetailPanel(Transform parent)
     {
-        bool detailCreated = parent.Find("grpCharacterDetail") == null;
-        GameObject detailObject = GetOrCreateChild(
-            parent,
-            "grpCharacterDetail",
-            typeof(RectTransform),
-            typeof(CanvasRenderer),
-            typeof(Image),
-            typeof(HorizontalLayoutGroup),
-            typeof(LayoutElement));
-        _detailPanelImage = detailObject.GetComponent<Image>();
-        if (detailCreated)
+        Transform detail = parent?.Find("grpCharacterDetail");
+        Transform visuals = detail?.Find("grpCharacterVisuals");
+        Transform scroll = detail?.Find("scrCharacterDetails");
+        Transform viewport = scroll?.Find("vptCharacterDetails");
+        Transform content = viewport?.Find("grpCharacterDetailContent");
+        if (detail == null || visuals == null || scroll == null ||
+            viewport == null || content == null)
         {
-            _detailPanelImage.color = PanelColor;
-            _detailPanelImage.raycastTarget = false;
-
-            VerticalLayoutGroup obsoleteVerticalLayout =
-                detailObject.GetComponent<VerticalLayoutGroup>();
-            if (obsoleteVerticalLayout != null)
-                obsoleteVerticalLayout.enabled = false;
-
-            LayoutElement detailLayout =
-                detailObject.GetComponent<LayoutElement>();
-            detailLayout.preferredHeight = 440f;
-            detailLayout.flexibleHeight = 1f;
-
-            HorizontalLayoutGroup detailLayoutGroup =
-                detailObject.GetComponent<HorizontalLayoutGroup>();
-            detailLayoutGroup.padding = new RectOffset(20, 20, 18, 18);
-            detailLayoutGroup.spacing = 18f;
-            detailLayoutGroup.childAlignment = TextAnchor.UpperCenter;
-            detailLayoutGroup.childControlWidth = true;
-            detailLayoutGroup.childControlHeight = true;
-            detailLayoutGroup.childForceExpandWidth = false;
-            detailLayoutGroup.childForceExpandHeight = true;
+            Debug.LogError(
+                "Character detail UI must be authored in the Scene.",
+                this);
+            return;
         }
 
-        bool visualsCreated =
-            detailObject.transform.Find("grpCharacterVisuals") == null;
-        GameObject visualObject = GetOrCreateChild(
-            detailObject.transform,
-            "grpCharacterVisuals",
-            typeof(RectTransform),
-            typeof(VerticalLayoutGroup),
-            typeof(LayoutElement));
-        if (visualsCreated)
-        {
-            LayoutElement visualLayout =
-                visualObject.GetComponent<LayoutElement>();
-            visualLayout.minWidth = 280f;
-            visualLayout.preferredWidth = 340f;
-            visualLayout.flexibleWidth = 0f;
-            VerticalLayoutGroup visualGroup =
-                visualObject.GetComponent<VerticalLayoutGroup>();
-            visualGroup.spacing = 12f;
-            visualGroup.childAlignment = TextAnchor.UpperCenter;
-            visualGroup.childControlWidth = true;
-            visualGroup.childControlHeight = true;
-            visualGroup.childForceExpandWidth = false;
-            visualGroup.childForceExpandHeight = false;
-        }
-
-        bool standingCreated =
-            visualObject.transform.Find("imgCharacterStanding") == null;
-        _standingImage = CreateProfileImage(
-            visualObject.transform,
-            "imgCharacterStanding",
-            320f,
-            640f);
-        if (standingCreated)
-        {
-            LayoutElement standingLayout =
-                _standingImage.GetComponent<LayoutElement>();
-            standingLayout.minWidth = 220f;
-            standingLayout.minHeight = 400f;
-            standingLayout.flexibleHeight = 1f;
-        }
-
-        Transform obsoleteIcon =
-            visualObject.transform.Find("imgCharacterIcon");
-        if (obsoleteIcon != null)
-            obsoleteIcon.gameObject.SetActive(false);
-
-        bool scrollCreated =
-            detailObject.transform.Find("scrCharacterDetails") == null;
-        GameObject scrollObject = GetOrCreateChild(
-            detailObject.transform,
-            "scrCharacterDetails",
-            typeof(RectTransform),
-            typeof(CanvasRenderer),
-            typeof(Image),
-            typeof(ScrollRect),
-            typeof(LayoutElement));
-        Image scrollRaycastImage = scrollObject.GetComponent<Image>();
-        if (scrollCreated)
-        {
-            scrollRaycastImage.color = new Color(0f, 0f, 0f, 0.01f);
-            scrollRaycastImage.raycastTarget = true;
-            LayoutElement scrollLayout =
-                scrollObject.GetComponent<LayoutElement>();
-            scrollLayout.flexibleWidth = 1f;
-            scrollLayout.flexibleHeight = 1f;
-        }
-
-        bool viewportCreated =
-            scrollObject.transform.Find("vptCharacterDetails") == null;
-        GameObject viewportObject = GetOrCreateChild(
-            scrollObject.transform,
-            "vptCharacterDetails",
-            typeof(RectTransform),
-            typeof(RectMask2D));
-        if (viewportCreated)
-            StretchToParent((RectTransform)viewportObject.transform);
-
-        bool contentCreated =
-            viewportObject.transform.Find(
-                "grpCharacterDetailContent") == null;
-        GameObject contentObject = GetOrCreateChild(
-            viewportObject.transform,
-            "grpCharacterDetailContent",
-            typeof(RectTransform),
-            typeof(VerticalLayoutGroup),
-            typeof(ContentSizeFitter));
-        RectTransform contentRect = (RectTransform)contentObject.transform;
-        if (contentCreated)
-        {
-            contentRect.anchorMin = new Vector2(0f, 1f);
-            contentRect.anchorMax = new Vector2(1f, 1f);
-            contentRect.pivot = new Vector2(0.5f, 1f);
-            contentRect.anchoredPosition = Vector2.zero;
-            contentRect.sizeDelta = Vector2.zero;
-
-            VerticalLayoutGroup contentLayout =
-                contentObject.GetComponent<VerticalLayoutGroup>();
-            contentLayout.padding = new RectOffset(8, 12, 4, 12);
-            contentLayout.spacing = 6f;
-            contentLayout.childAlignment = TextAnchor.UpperLeft;
-            contentLayout.childControlWidth = true;
-            contentLayout.childControlHeight = true;
-            contentLayout.childForceExpandWidth = true;
-            contentLayout.childForceExpandHeight = false;
-            ContentSizeFitter contentFitter =
-                contentObject.GetComponent<ContentSizeFitter>();
-            contentFitter.horizontalFit =
-                ContentSizeFitter.FitMode.Unconstrained;
-            contentFitter.verticalFit =
-                ContentSizeFitter.FitMode.PreferredSize;
-        }
-
-        ScrollRect scrollRect = scrollObject.GetComponent<ScrollRect>();
-        _detailScrollRect = scrollRect;
-        scrollRect.viewport = (RectTransform)viewportObject.transform;
-        scrollRect.content = contentRect;
-        if (scrollCreated)
-        {
-            scrollRect.horizontal = false;
-            scrollRect.vertical = true;
-            scrollRect.inertia = true;
-            scrollRect.movementType = ScrollRect.MovementType.Clamped;
-            scrollRect.scrollSensitivity = 28f;
-        }
-
-        string[] detailTextNames =
-        {
-            "txtCharacterName",
-            "txtCharacterOwnership",
-            "txtCharacterIdentity",
-            "txtCharacterStats",
-            "txtPassiveTitle",
-            "txtPassive",
-            "txtNormalAttackTitle",
-            "txtNormalAttack",
-            "txtActiveSkillTitle",
-            "txtActiveSkill",
-            "txtCumulativeUpgradeTitle",
-            "txtCumulativeUpgrade",
-            "txtDungeonUpgradeTitle",
-            "txtDungeonUpgrade",
-        };
-        foreach (string textName in detailTextNames)
-        {
-            if (contentCreated)
-            {
-                MoveExistingChild(
-                    detailObject.transform,
-                    contentObject.transform,
-                    textName);
-            }
-        }
-
+        _detailPanelImage = detail.GetComponent<Image>();
+        _standingImage = visuals.Find("imgCharacterStanding")
+            ?.GetComponent<Image>();
+        _detailScrollRect = scroll.GetComponent<ScrollRect>();
         _detailTitle = CreateContentText(
-            contentObject.transform,
-            "txtCharacterName",
-            string.Empty,
-            34f,
-            46f,
-            FontStyles.Bold,
-            TextAlignmentOptions.MidlineLeft);
+            content, "txtCharacterName", string.Empty, 34f, 46f,
+            FontStyles.Bold, TextAlignmentOptions.MidlineLeft);
         _ownershipText = CreateContentText(
-            contentObject.transform,
-            "txtCharacterOwnership",
-            string.Empty,
-            18f,
-            28f,
-            FontStyles.Bold,
-            TextAlignmentOptions.MidlineLeft);
+            content, "txtCharacterOwnership", string.Empty, 18f, 28f,
+            FontStyles.Bold, TextAlignmentOptions.MidlineLeft);
         _identityText = CreateContentText(
-            contentObject.transform,
-            "txtCharacterIdentity",
-            string.Empty,
-            18f,
-            44f,
-            FontStyles.Normal,
-            TextAlignmentOptions.MidlineLeft);
+            content, "txtCharacterIdentity", string.Empty, 18f, 44f,
+            FontStyles.Normal, TextAlignmentOptions.MidlineLeft);
         _statText = CreateContentText(
-            contentObject.transform,
-            "txtCharacterStats",
-            string.Empty,
-            19f,
-            58f,
-            FontStyles.Normal,
-            TextAlignmentOptions.MidlineLeft);
+            content, "txtCharacterStats", string.Empty, 19f, 58f,
+            FontStyles.Normal, TextAlignmentOptions.MidlineLeft);
         _passiveTitleText = CreateContentText(
-            contentObject.transform,
-            "txtPassiveTitle",
-            string.Empty,
-            19f,
-            28f,
-            FontStyles.Bold,
-            TextAlignmentOptions.MidlineLeft);
+            content, "txtPassiveTitle", string.Empty, 19f, 28f,
+            FontStyles.Bold, TextAlignmentOptions.MidlineLeft);
         _passiveText = CreateContentText(
-            contentObject.transform,
-            "txtPassive",
-            string.Empty,
-            18f,
-            48f,
-            FontStyles.Normal,
-            TextAlignmentOptions.TopLeft);
+            content, "txtPassive", string.Empty, 18f, 48f,
+            FontStyles.Normal, TextAlignmentOptions.TopLeft);
         _normalAttackTitleText = CreateContentText(
-            contentObject.transform,
-            "txtNormalAttackTitle",
+            content, "txtNormalAttackTitle",
             LocalizationService.Get(
                 LocalizationKeys.CodexCharacterNormalAttack),
-            19f,
-            28f,
-            FontStyles.Bold,
+            19f, 28f, FontStyles.Bold,
             TextAlignmentOptions.MidlineLeft);
         _normalAttackText = CreateContentText(
-            contentObject.transform,
-            "txtNormalAttack",
-            string.Empty,
-            18f,
-            54f,
-            FontStyles.Normal,
-            TextAlignmentOptions.TopLeft);
+            content, "txtNormalAttack", string.Empty, 18f, 54f,
+            FontStyles.Normal, TextAlignmentOptions.TopLeft);
         _skillTitleText = CreateContentText(
-            contentObject.transform,
-            "txtActiveSkillTitle",
-            string.Empty,
-            19f,
-            28f,
-            FontStyles.Bold,
-            TextAlignmentOptions.MidlineLeft);
+            content, "txtActiveSkillTitle", string.Empty, 19f, 28f,
+            FontStyles.Bold, TextAlignmentOptions.MidlineLeft);
         _skillText = CreateContentText(
-            contentObject.transform,
-            "txtActiveSkill",
-            string.Empty,
-            18f,
-            54f,
-            FontStyles.Normal,
-            TextAlignmentOptions.TopLeft);
+            content, "txtActiveSkill", string.Empty, 18f, 54f,
+            FontStyles.Normal, TextAlignmentOptions.TopLeft);
         _cumulativeUpgradeTitleText = CreateContentText(
-            contentObject.transform,
-            "txtCumulativeUpgradeTitle",
-            string.Empty,
-            19f,
-            28f,
-            FontStyles.Bold,
-            TextAlignmentOptions.MidlineLeft);
+            content, "txtCumulativeUpgradeTitle", string.Empty, 19f, 28f,
+            FontStyles.Bold, TextAlignmentOptions.MidlineLeft);
         _cumulativeUpgradeText = CreateContentText(
-            contentObject.transform,
-            "txtCumulativeUpgrade",
-            string.Empty,
-            18f,
-            40f,
-            FontStyles.Normal,
-            TextAlignmentOptions.TopLeft);
+            content, "txtCumulativeUpgrade", string.Empty, 18f, 40f,
+            FontStyles.Normal, TextAlignmentOptions.TopLeft);
         _dungeonUpgradeTitleText = CreateContentText(
-            contentObject.transform,
-            "txtDungeonUpgradeTitle",
-            string.Empty,
-            19f,
-            28f,
-            FontStyles.Bold,
-            TextAlignmentOptions.MidlineLeft);
+            content, "txtDungeonUpgradeTitle", string.Empty, 19f, 28f,
+            FontStyles.Bold, TextAlignmentOptions.MidlineLeft);
         _dungeonUpgradeText = CreateContentText(
-            contentObject.transform,
-            "txtDungeonUpgrade",
-            string.Empty,
-            18f,
-            80f,
-            FontStyles.Normal,
-            TextAlignmentOptions.TopLeft);
+            content, "txtDungeonUpgrade", string.Empty, 18f, 80f,
+            FontStyles.Normal, TextAlignmentOptions.TopLeft);
     }
 
     private void RefreshBrowser()
@@ -1084,36 +843,6 @@ public sealed class CharacterCodexPage : RuntimeMenuPageBase
             text.gameObject.SetActive(active);
     }
 
-    private static Image CreateProfileImage(
-        Transform parent,
-        string objectName,
-        float preferredWidth,
-        float preferredHeight)
-    {
-        bool created = parent.Find(objectName) == null;
-        GameObject imageObject = GetOrCreateChild(
-            parent,
-            objectName,
-            typeof(RectTransform),
-            typeof(CanvasRenderer),
-            typeof(Image),
-            typeof(LayoutElement));
-        Image image = imageObject.GetComponent<Image>();
-        if (created)
-        {
-            image.preserveAspect = true;
-            image.raycastTarget = false;
-            LayoutElement layout = imageObject.GetComponent<LayoutElement>();
-            layout.minWidth = preferredWidth;
-            layout.preferredWidth = preferredWidth;
-            layout.minHeight = preferredHeight;
-            layout.preferredHeight = preferredHeight;
-            layout.flexibleWidth = 0f;
-            layout.flexibleHeight = 0f;
-        }
-        return image;
-    }
-
     private static void SetProfileImage(Image image, Sprite sprite)
     {
         if (image == null)
@@ -1123,56 +852,6 @@ public sealed class CharacterCodexPage : RuntimeMenuPageBase
         image.color = sprite != null
             ? Color.white
             : new Color(0.12f, 0.15f, 0.13f, 0.65f);
-    }
-
-    private static void MoveExistingChild(
-        Transform sourceParent,
-        Transform destinationParent,
-        string childName)
-    {
-        if (sourceParent == null || destinationParent == null)
-            return;
-
-        Transform source = sourceParent.Find(childName);
-        if (source == null || source.parent == destinationParent)
-            return;
-
-        Transform destination = destinationParent.Find(childName);
-        if (destination == null)
-            source.SetParent(destinationParent, false);
-        else
-            source.gameObject.SetActive(false);
-    }
-
-    private static GameObject GetOrCreateChild(
-        Transform parent,
-        string objectName,
-        params Type[] componentTypes)
-    {
-        Transform existing = parent != null
-            ? parent.Find(objectName)
-            : null;
-        if (existing != null)
-        {
-            foreach (Type componentType in componentTypes)
-            {
-                if (existing.GetComponent(componentType) == null)
-                    existing.gameObject.AddComponent(componentType);
-            }
-            return existing.gameObject;
-        }
-
-        GameObject child = new(objectName, componentTypes);
-        child.transform.SetParent(parent, false);
-        return child;
-    }
-
-    private static void StretchToParent(RectTransform rectTransform)
-    {
-        rectTransform.anchorMin = Vector2.zero;
-        rectTransform.anchorMax = Vector2.one;
-        rectTransform.offsetMin = Vector2.zero;
-        rectTransform.offsetMax = Vector2.zero;
     }
 
     private static bool IsKoreanLocale =>
@@ -1369,16 +1048,16 @@ public sealed class OperatorDetailView
     private TextMeshProUGUI _skillTitle;
     private TextMeshProUGUI _skillSummary;
     private ToggleSliderController _lobbyRepresentativeToggle;
-    private Toggle _legacyLobbyRepresentativeToggle;
     private TextMeshProUGUI _lobbyRepresentativeLabel;
     private Transform _passiveIconRoot;
     private Transform _skillIconRoot;
+    private GameObject _abilityIconPrefab;
     private Button _previousButton;
     private Button _nextButton;
     private Action _previousRequested;
     private Action _nextRequested;
     private Action<bool> _lobbyRepresentativeRequested;
-    private bool _usesAuthoredHeaderLayout;
+    private string _layoutError = string.Empty;
 
     private OperatorDetailView(Transform host)
     {
@@ -1388,24 +1067,17 @@ public sealed class OperatorDetailView
     public static OperatorDetailView Build(Transform host)
     {
         OperatorDetailView view = new(host);
-        view._usesAuthoredHeaderLayout = view.TryBindLayout();
-        if (!view._usesAuthoredHeaderLayout)
+        if (!view.TryBindLayout())
         {
-            view.BuildLayout();
-            if (!view.TryBindLayout())
-            {
-                throw new InvalidOperationException(
-                    "Failed to build the operator detail layout.");
-            }
+            throw new InvalidOperationException(
+                "The saved operator detail UI is incomplete. Repair the " +
+                "Scene hierarchy and inspector references. " +
+                view._layoutError);
         }
 
-        view.EnsureStatIconViews();
         SetNavigationLabel(view._previousButton, "<");
         SetNavigationLabel(view._nextButton, ">");
         view.EnsureGradeIconStrip();
-        if (!view._usesAuthoredHeaderLayout)
-            view.ApplyHeaderLayout();
-        view._root.SetAsLastSibling();
         view.SetVisible(false);
         return view;
     }
@@ -1432,13 +1104,6 @@ public sealed class OperatorDetailView
             _lobbyRepresentativeToggle.ValueChanged +=
                 HandleLobbyRepresentativeToggleChanged;
         }
-        if (_legacyLobbyRepresentativeToggle != null)
-        {
-            _legacyLobbyRepresentativeToggle.onValueChanged
-                .RemoveAllListeners();
-            _legacyLobbyRepresentativeToggle.onValueChanged.AddListener(
-                HandleLobbyRepresentativeToggleChanged);
-        }
     }
 
     private void HandleLobbyRepresentativeToggleChanged(bool selected)
@@ -1459,13 +1124,6 @@ public sealed class OperatorDetailView
                 toggleButton.interactable = interactable;
         }
 
-        if (_legacyLobbyRepresentativeToggle != null)
-        {
-            _legacyLobbyRepresentativeToggle.interactable =
-                interactable;
-            _legacyLobbyRepresentativeToggle.SetIsOnWithoutNotify(
-                selected);
-        }
     }
 
     public void SetVisible(bool visible)
@@ -1481,8 +1139,6 @@ public sealed class OperatorDetailView
 
         _nameText.text = model.Name;
         _gradeIcons.SetGrade(model.Grade);
-        if (!_usesAuthoredHeaderLayout)
-            ApplyNameGradeLayout();
         _idText.text = string.IsNullOrWhiteSpace(model.CharacterId)
             ? string.Empty
             : $"ID  {model.CharacterId}";
@@ -1553,8 +1209,6 @@ public sealed class OperatorDetailView
     {
         _nameText.text = message ?? string.Empty;
         _gradeIcons.SetGrade(CharacterGrade.Grade0);
-        if (!_usesAuthoredHeaderLayout)
-            ApplyNameGradeLayout();
         _idText.text = string.Empty;
         _positionText.text = string.Empty;
         _standingImage.sprite = null;
@@ -1602,7 +1256,7 @@ public sealed class OperatorDetailView
         Transform left = root?.Find("grpOperatorDetailVisual");
         Transform representative =
             left?.Find("tglLobbyRepresentative");
-        Transform attack = center?.Find("grpOperatorBasicAttack");
+        Transform attack = right?.Find("grpOperatorBasicAttack");
         Transform passive = right?.Find("grpOperatorPassives");
         Transform skill = right?.Find("grpOperatorSkills");
 
@@ -1626,8 +1280,6 @@ public sealed class OperatorDetailView
             representative
                 ?.GetComponentInChildren<
                     ToggleSliderController>(true);
-        _legacyLobbyRepresentativeToggle =
-            representative?.GetComponent<Toggle>();
         _lobbyRepresentativeLabel =
             representative?.Find("txtLabel")
                 ?.GetComponent<TextMeshProUGUI>();
@@ -1637,7 +1289,7 @@ public sealed class OperatorDetailView
             ?.GetComponent<TextMeshProUGUI>();
         _attackSummary = attack?.Find("txtBasicAttackSummary")
             ?.GetComponent<TextMeshProUGUI>();
-        _equipmentTitle = right?.Find("txtEquipmentTitle")
+        _equipmentTitle = center?.Find("txtEquipmentTitle")
             ?.GetComponent<TextMeshProUGUI>();
         _passiveTitle = passive?.Find("txtPassiveSectionTitle")
             ?.GetComponent<TextMeshProUGUI>();
@@ -1649,6 +1301,9 @@ public sealed class OperatorDetailView
             ?.GetComponent<TextMeshProUGUI>();
         _passiveIconRoot = passive?.Find("grpPassiveIconRoot");
         _skillIconRoot = skill?.Find("grpSkillIconRoot");
+        _abilityIconPrefab = root
+            ?.GetComponent<OperatorDetailDesignerSettings>()
+            ?.AbilityIconPrefab;
 
         for (int index = 0; index < StatCount; index++)
         {
@@ -1663,43 +1318,49 @@ public sealed class OperatorDetailView
 
         for (int index = 0; index < EquipmentSlotCount; index++)
         {
-            Transform slot = right?.Find($"grpEquipmentSlot_{index}");
+            Transform slot = center?.Find($"grpEquipmentSlot_{index}");
             _equipmentLabels[index] = slot?.Find("txtSlotLabel")
                 ?.GetComponent<TextMeshProUGUI>();
             _equipmentStatuses[index] = slot?.Find("txtSlotStatus")
                 ?.GetComponent<TextMeshProUGUI>();
         }
 
-        if (_root == null ||
-            _nameText == null ||
-            _idText == null ||
-            _positionText == null ||
-            _previousButton == null ||
-            _nextButton == null ||
-            _standingImage == null ||
-            _standingFallback == null ||
-            (_lobbyRepresentativeToggle == null &&
-             _legacyLobbyRepresentativeToggle == null) ||
-            _lobbyRepresentativeLabel == null ||
-            _statsTitle == null ||
-            _attackTitle == null ||
-            _attackSummary == null ||
-            _equipmentTitle == null ||
-            _passiveTitle == null ||
-            _passiveSummary == null ||
-            _skillTitle == null ||
-            _skillSummary == null ||
-            _passiveIconRoot == null ||
-            _skillIconRoot == null)
+        List<string> missing = new();
+        if (_root == null) missing.Add("Root");
+        if (_nameText == null) missing.Add("Name");
+        if (_idText == null) missing.Add("Id");
+        if (_positionText == null) missing.Add("Position");
+        if (_previousButton == null) missing.Add("Previous");
+        if (_nextButton == null) missing.Add("Next");
+        if (_standingImage == null) missing.Add("StandingImage");
+        if (_standingFallback == null) missing.Add("StandingFallback");
+        if (_lobbyRepresentativeToggle == null)
+            missing.Add("RepresentativeToggle");
+        if (_lobbyRepresentativeLabel == null) missing.Add("RepresentativeLabel");
+        if (_statsTitle == null) missing.Add("StatsTitle");
+        if (_attackTitle == null) missing.Add("AttackTitle");
+        if (_attackSummary == null) missing.Add("AttackSummary");
+        if (_equipmentTitle == null) missing.Add("EquipmentTitle");
+        if (_passiveTitle == null) missing.Add("PassiveTitle");
+        if (_passiveSummary == null) missing.Add("PassiveSummary");
+        if (_skillTitle == null) missing.Add("SkillTitle");
+        if (_skillSummary == null) missing.Add("SkillSummary");
+        if (_passiveIconRoot == null) missing.Add("PassiveIconRoot");
+        if (_skillIconRoot == null) missing.Add("SkillIconRoot");
+        if (_abilityIconPrefab == null) missing.Add("AbilityIconPrefab");
+        if (missing.Count > 0)
         {
+            _layoutError = "Missing: " + string.Join(", ", missing) + ".";
             return false;
         }
 
         for (int index = 0; index < StatCount; index++)
         {
             if (_statLabels[index] == null ||
-                _statValues[index] == null)
+                _statValues[index] == null ||
+                _statIcons[index] == null)
             {
+                _layoutError = $"Stat {index} references are incomplete.";
                 return false;
             }
         }
@@ -1709,644 +1370,13 @@ public sealed class OperatorDetailView
             if (_equipmentLabels[index] == null ||
                 _equipmentStatuses[index] == null)
             {
+                _layoutError = $"Equipment slot {index} references are incomplete.";
                 return false;
             }
         }
 
+        _layoutError = string.Empty;
         return true;
-    }
-
-    private void BuildLayout()
-    {
-        GameObject rootObject = GetOrCreateUiObject(
-            _host,
-            RootName,
-            typeof(CanvasRenderer),
-            typeof(Image));
-        RectTransform root = (RectTransform)rootObject.transform;
-        Stretch(root);
-        Image rootImage = rootObject.GetComponent<Image>();
-        rootImage.color = BackgroundColor;
-        rootImage.raycastTarget = true;
-
-        BuildHeader(root);
-        BuildVisualPanel(root);
-        BuildCenterPanel(root);
-        BuildRightPanel(root);
-    }
-
-    private void BuildHeader(Transform parent)
-    {
-        GameObject headerObject = GetOrCreateUiObject(
-            parent,
-            "grpOperatorDetailHeader",
-            typeof(CanvasRenderer),
-            typeof(Image));
-        RectTransform header = (RectTransform)headerObject.transform;
-        ConfigureTopStretch(header, 104f);
-        Image headerImage = headerObject.GetComponent<Image>();
-        headerImage.color = HeaderColor;
-        headerImage.raycastTarget = false;
-
-        GameObject accentObject = GetOrCreateUiObject(
-            header,
-            "imgOperatorDetailHeaderAccent",
-            typeof(CanvasRenderer),
-            typeof(Image));
-        RectTransform accent = (RectTransform)accentObject.transform;
-        ConfigureTopLeft(
-            accent,
-            new Vector2(176f, -20f),
-            new Vector2(6f, 66f));
-        Image accentImage = accentObject.GetComponent<Image>();
-        accentImage.color = AccentColor;
-        accentImage.raycastTarget = false;
-
-        TextMeshProUGUI name = CreateText(
-            header,
-            "txtOperatorDetailName",
-            38f,
-            TextAlignmentOptions.MidlineLeft,
-            TextColor);
-        ConfigureTopLeft(
-            name.rectTransform,
-            new Vector2(200f, -12f),
-            new Vector2(1050f, 50f));
-        name.fontStyle = FontStyles.Bold;
-
-        TextMeshProUGUI id = CreateText(
-            header,
-            "txtOperatorDetailId",
-            15f,
-            TextAlignmentOptions.MidlineLeft,
-            MutedTextColor);
-        ConfigureTopLeft(
-            id.rectTransform,
-            new Vector2(200f, -65f),
-            new Vector2(1050f, 24f));
-
-        TextMeshProUGUI position = CreateText(
-            header,
-            "txtOperatorDetailPosition",
-            18f,
-            TextAlignmentOptions.Center,
-            AccentColor);
-        RectTransform positionRect = position.rectTransform;
-        positionRect.anchorMin = Vector2.one;
-        positionRect.anchorMax = Vector2.one;
-        positionRect.pivot = Vector2.one;
-        positionRect.anchoredPosition = new Vector2(-272f, -36f);
-        positionRect.sizeDelta = new Vector2(116f, 40f);
-
-        BuildNavigationButton(
-            header,
-            "btnPreviousOperator",
-            "<",
-            new Vector2(-154f, -22f));
-        BuildNavigationButton(
-            header,
-            "btnNextOperator",
-            ">",
-            new Vector2(-48f, -22f));
-    }
-
-    private void BuildVisualPanel(Transform parent)
-    {
-        GameObject panelObject = BuildBodyPanel(
-            parent,
-            "grpOperatorDetailVisual",
-            28f,
-            594f);
-        Image panelImage = panelObject.GetComponent<Image>();
-        panelImage.color = new Color(0.025f, 0.038f, 0.036f, 1f);
-
-        GameObject imageObject = GetOrCreateUiObject(
-            panelObject.transform,
-            "imgOperatorDetailStanding",
-            typeof(CanvasRenderer),
-            typeof(Image));
-        RectTransform imageRect = (RectTransform)imageObject.transform;
-        Stretch(imageRect);
-        imageRect.offsetMin = new Vector2(18f, 18f);
-        imageRect.offsetMax = new Vector2(-18f, -18f);
-        Image image = imageObject.GetComponent<Image>();
-        image.preserveAspect = true;
-        image.raycastTarget = false;
-
-        TextMeshProUGUI fallback = CreateText(
-            panelObject.transform,
-            "txtOperatorDetailStandingFallback",
-            68f,
-            TextAlignmentOptions.Center,
-            MutedTextColor);
-        Stretch(fallback.rectTransform);
-        fallback.fontStyle = FontStyles.Bold;
-
-        BuildLobbyRepresentativeToggle(panelObject.transform);
-    }
-
-    private void BuildLobbyRepresentativeToggle(Transform parent)
-    {
-        ToggleSliderController togglePrefab =
-            GameManager.Instance?.LobbyRepresentativeTogglePrefab;
-        if (togglePrefab != null)
-        {
-            BuildPrefabLobbyRepresentativeToggle(
-                parent,
-                togglePrefab);
-            return;
-        }
-
-        Debug.LogWarning(
-            "GameManager has no lobby representative toggle prefab. " +
-            "Using the legacy runtime toggle.");
-
-        GameObject toggleObject = GetOrCreateUiObject(
-            parent,
-            "tglLobbyRepresentative",
-            typeof(CanvasRenderer),
-            typeof(Image),
-            typeof(Toggle),
-            typeof(Outline));
-        RectTransform toggleRect =
-            (RectTransform)toggleObject.transform;
-        toggleRect.anchorMin = Vector2.zero;
-        toggleRect.anchorMax = Vector2.zero;
-        toggleRect.pivot = Vector2.zero;
-        toggleRect.anchoredPosition = new Vector2(20f, 20f);
-        toggleRect.sizeDelta = new Vector2(360f, 68f);
-
-        Image background = toggleObject.GetComponent<Image>();
-        background.color =
-            new Color(0.025f, 0.045f, 0.042f, 0.96f);
-        background.raycastTarget = true;
-        Outline outline = toggleObject.GetComponent<Outline>();
-        outline.effectColor =
-            new Color(0.25f, 0.76f, 0.68f, 0.65f);
-        outline.effectDistance = new Vector2(1f, -1f);
-
-        GameObject boxObject = GetOrCreateUiObject(
-            toggleRect,
-            "imgToggleBox",
-            typeof(CanvasRenderer),
-            typeof(Image));
-        RectTransform box = (RectTransform)boxObject.transform;
-        box.anchorMin = new Vector2(0f, 0.5f);
-        box.anchorMax = new Vector2(0f, 0.5f);
-        box.pivot = new Vector2(0f, 0.5f);
-        box.anchoredPosition = new Vector2(16f, 0f);
-        box.sizeDelta = new Vector2(40f, 40f);
-        Image boxImage = boxObject.GetComponent<Image>();
-        boxImage.color =
-            new Color(0.10f, 0.16f, 0.15f, 1f);
-        boxImage.raycastTarget = false;
-
-        GameObject checkObject = GetOrCreateUiObject(
-            box,
-            "imgToggleCheck",
-            typeof(CanvasRenderer),
-            typeof(Image));
-        RectTransform check = (RectTransform)checkObject.transform;
-        Stretch(check);
-        check.offsetMin = new Vector2(7f, 7f);
-        check.offsetMax = new Vector2(-7f, -7f);
-        Image checkImage = checkObject.GetComponent<Image>();
-        checkImage.color = AccentColor;
-        checkImage.raycastTarget = false;
-
-        TextMeshProUGUI label = CreateText(
-            toggleRect,
-            "txtLabel",
-            18f,
-            TextAlignmentOptions.MidlineLeft,
-            TextColor);
-        Stretch(label.rectTransform);
-        label.rectTransform.offsetMin = new Vector2(72f, 8f);
-        label.rectTransform.offsetMax = new Vector2(-14f, -8f);
-        label.fontStyle = FontStyles.Bold;
-
-        Toggle toggle = toggleObject.GetComponent<Toggle>();
-        toggle.targetGraphic = background;
-        toggle.graphic = checkImage;
-        toggle.transition = Selectable.Transition.ColorTint;
-        ColorBlock colors = toggle.colors;
-        colors.normalColor = Color.white;
-        colors.highlightedColor =
-            Color.Lerp(Color.white, AccentColor, 0.18f);
-        colors.pressedColor =
-            Color.Lerp(Color.white, Color.black, 0.2f);
-        colors.selectedColor = Color.white;
-        colors.disabledColor =
-            new Color(0.45f, 0.48f, 0.46f, 0.7f);
-        colors.fadeDuration = 0.08f;
-        toggle.colors = colors;
-    }
-
-    private void BuildPrefabLobbyRepresentativeToggle(
-        Transform parent,
-        ToggleSliderController togglePrefab)
-    {
-        GameObject containerObject = GetOrCreateUiObject(
-            parent,
-            "tglLobbyRepresentative",
-            typeof(CanvasRenderer),
-            typeof(Image),
-            typeof(Outline));
-        RectTransform container =
-            (RectTransform)containerObject.transform;
-        container.anchorMin = Vector2.zero;
-        container.anchorMax = Vector2.zero;
-        container.pivot = Vector2.zero;
-        container.anchoredPosition = new Vector2(20f, 20f);
-        container.sizeDelta = new Vector2(360f, 68f);
-
-        Image background = containerObject.GetComponent<Image>();
-        background.color =
-            new Color(0.025f, 0.045f, 0.042f, 0.96f);
-        background.raycastTarget = false;
-
-        Outline outline = containerObject.GetComponent<Outline>();
-        outline.effectColor =
-            new Color(0.25f, 0.76f, 0.68f, 0.65f);
-        outline.effectDistance = new Vector2(1f, -1f);
-
-        TextMeshProUGUI label = CreateText(
-            container,
-            "txtLabel",
-            18f,
-            TextAlignmentOptions.MidlineLeft,
-            TextColor);
-        Stretch(label.rectTransform);
-        label.rectTransform.offsetMin = new Vector2(16f, 8f);
-        label.rectTransform.offsetMax = new Vector2(-122f, -8f);
-        label.fontStyle = FontStyles.Bold;
-
-        ToggleSliderController toggle =
-            container.Find("btnToggle")
-                ?.GetComponent<ToggleSliderController>();
-        if (toggle == null)
-        {
-            toggle = UnityEngine.Object.Instantiate(
-                togglePrefab,
-                container,
-                false);
-            toggle.name = "btnToggle";
-        }
-
-        RectTransform toggleRect =
-            toggle.transform as RectTransform;
-        if (toggleRect != null)
-        {
-            toggleRect.anchorMin = new Vector2(1f, 0.5f);
-            toggleRect.anchorMax = new Vector2(1f, 0.5f);
-            toggleRect.pivot = new Vector2(1f, 0.5f);
-            toggleRect.anchoredPosition = new Vector2(-14f, 0f);
-            toggleRect.sizeDelta = new Vector2(90f, 45f);
-            toggleRect.localScale = Vector3.one;
-        }
-    }
-
-    private void BuildCenterPanel(Transform parent)
-    {
-        GameObject panelObject = BuildBodyPanel(
-            parent,
-            "grpOperatorDetailCenter",
-            642f,
-            410f);
-        Transform panel = panelObject.transform;
-
-        TextMeshProUGUI title = CreateText(
-            panel,
-            "txtOperatorStatsTitle",
-            24f,
-            TextAlignmentOptions.MidlineLeft,
-            TextColor);
-        ConfigureTopLeft(
-            title.rectTransform,
-            new Vector2(20f, -18f),
-            new Vector2(370f, 34f));
-        title.fontStyle = FontStyles.Bold;
-
-        for (int index = 0; index < StatCount; index++)
-            BuildStatCell(panel, index);
-
-        GameObject attackObject = GetOrCreateUiObject(
-            panel,
-            "grpOperatorBasicAttack",
-            typeof(CanvasRenderer),
-            typeof(Image),
-            typeof(Outline));
-        RectTransform attack = (RectTransform)attackObject.transform;
-        ConfigureTopLeft(
-            attack,
-            new Vector2(20f, -372f),
-            new Vector2(370f, 514f));
-        Image attackImage = attackObject.GetComponent<Image>();
-        attackImage.color = SubPanelColor;
-        attackImage.raycastTarget = false;
-        Outline outline = attackObject.GetComponent<Outline>();
-        outline.effectColor = new Color(
-            AttackColor.r,
-            AttackColor.g,
-            AttackColor.b,
-            0.65f);
-        outline.effectDistance = new Vector2(2f, -2f);
-
-        TextMeshProUGUI attackTitle = CreateText(
-            attack,
-            "txtBasicAttackTitle",
-            23f,
-            TextAlignmentOptions.MidlineLeft,
-            AttackColor);
-        ConfigureTopLeft(
-            attackTitle.rectTransform,
-            new Vector2(18f, -14f),
-            new Vector2(334f, 38f));
-        attackTitle.fontStyle = FontStyles.Bold;
-
-        TextMeshProUGUI summary = CreateText(
-            attack,
-            "txtBasicAttackSummary",
-            17f,
-            TextAlignmentOptions.TopLeft,
-            TextColor);
-        Stretch(summary.rectTransform);
-        summary.rectTransform.offsetMin = new Vector2(18f, 18f);
-        summary.rectTransform.offsetMax = new Vector2(-18f, -64f);
-        summary.overflowMode = TextOverflowModes.Ellipsis;
-    }
-
-    private void BuildStatCell(Transform parent, int index)
-    {
-        int column = index % 2;
-        int row = index / 2;
-        GameObject cellObject = GetOrCreateUiObject(
-            parent,
-            $"grpOperatorStat_{index}",
-            typeof(CanvasRenderer),
-            typeof(Image));
-        RectTransform cell = (RectTransform)cellObject.transform;
-        ConfigureTopLeft(
-            cell,
-            new Vector2(
-                20f + column * 190f,
-                -62f - row * 98f),
-            new Vector2(180f, 88f));
-        Image cellImage = cellObject.GetComponent<Image>();
-        cellImage.color = SubPanelColor;
-        cellImage.raycastTarget = false;
-
-        TextMeshProUGUI label = CreateText(
-            cell,
-            "txtStatLabel",
-            14f,
-            TextAlignmentOptions.TopLeft,
-            MutedTextColor);
-        Stretch(label.rectTransform);
-        label.rectTransform.offsetMin = new Vector2(12f, 42f);
-        label.rectTransform.offsetMax = new Vector2(-12f, -8f);
-
-        TextMeshProUGUI value = CreateText(
-            cell,
-            "txtStatValue",
-            25f,
-            TextAlignmentOptions.BottomRight,
-            TextColor);
-        Stretch(value.rectTransform);
-        value.rectTransform.offsetMin = new Vector2(12f, 8f);
-        value.rectTransform.offsetMax = new Vector2(-12f, -34f);
-        value.fontStyle = FontStyles.Bold;
-
-        GetOrCreateStatIcon(cell);
-    }
-
-    private void EnsureStatIconViews()
-    {
-        for (int index = 0; index < StatCount; index++)
-        {
-            if (_statIcons[index] != null)
-                continue;
-
-            Transform cell = _statLabels[index]?.transform.parent;
-            _statIcons[index] = GetOrCreateStatIcon(cell);
-        }
-    }
-
-    private static Image GetOrCreateStatIcon(Transform cell)
-    {
-        if (cell == null)
-            return null;
-
-        GameObject iconObject = GetOrCreateUiObject(
-            cell,
-            "imgStatIcon",
-            typeof(CanvasRenderer),
-            typeof(Image));
-        RectTransform iconRect = (RectTransform)iconObject.transform;
-        ConfigureBottomLeft(
-            iconRect,
-            new Vector2(12f, 8f),
-            new Vector2(32f, 32f));
-        Image icon = iconObject.GetComponent<Image>();
-        icon.color = Color.white;
-        icon.preserveAspect = true;
-        icon.raycastTarget = false;
-        icon.enabled = false;
-        return icon;
-    }
-
-    private void BuildRightPanel(Transform parent)
-    {
-        GameObject panelObject = BuildBodyPanel(
-            parent,
-            "grpOperatorDetailRight",
-            1072f,
-            820f);
-        Transform panel = panelObject.transform;
-
-        TextMeshProUGUI equipmentTitle = CreateText(
-            panel,
-            "txtEquipmentTitle",
-            24f,
-            TextAlignmentOptions.MidlineLeft,
-            TextColor);
-        ConfigureTopLeft(
-            equipmentTitle.rectTransform,
-            new Vector2(20f, -18f),
-            new Vector2(780f, 34f));
-        equipmentTitle.fontStyle = FontStyles.Bold;
-
-        for (int index = 0; index < EquipmentSlotCount; index++)
-            BuildEquipmentSlot(panel, index);
-
-        BuildAbilitySection(
-            panel,
-            "grpOperatorPassives",
-            "txtPassiveSectionTitle",
-            "grpPassiveIconRoot",
-            "txtPassiveSummary",
-            318f,
-            240f,
-            PassiveColor);
-        BuildAbilitySection(
-            panel,
-            "grpOperatorSkills",
-            "txtSkillSectionTitle",
-            "grpSkillIconRoot",
-            "txtSkillSummary",
-            574f,
-            312f,
-            SkillColor);
-    }
-
-    private void BuildEquipmentSlot(Transform parent, int index)
-    {
-        int column = index % 3;
-        int row = index / 3;
-        GameObject slotObject = GetOrCreateUiObject(
-            parent,
-            $"grpEquipmentSlot_{index}",
-            typeof(CanvasRenderer),
-            typeof(Image),
-            typeof(Outline));
-        RectTransform slot = (RectTransform)slotObject.transform;
-        ConfigureTopLeft(
-            slot,
-            new Vector2(
-                20f + column * 262f,
-                -62f - row * 122f),
-            new Vector2(250f, 110f));
-        Image slotImage = slotObject.GetComponent<Image>();
-        slotImage.color = SlotColor;
-        slotImage.raycastTarget = false;
-        Outline outline = slotObject.GetComponent<Outline>();
-        outline.effectColor =
-            new Color(0.28f, 0.36f, 0.33f, 0.8f);
-        outline.effectDistance = new Vector2(1f, -1f);
-
-        TextMeshProUGUI label = CreateText(
-            slot,
-            "txtSlotLabel",
-            17f,
-            TextAlignmentOptions.TopLeft,
-            TextColor);
-        Stretch(label.rectTransform);
-        label.rectTransform.offsetMin = new Vector2(14f, 56f);
-        label.rectTransform.offsetMax = new Vector2(-14f, -12f);
-        label.fontStyle = FontStyles.Bold;
-
-        TextMeshProUGUI status = CreateText(
-            slot,
-            "txtSlotStatus",
-            14f,
-            TextAlignmentOptions.BottomRight,
-            MutedTextColor);
-        Stretch(status.rectTransform);
-        status.rectTransform.offsetMin = new Vector2(14f, 12f);
-        status.rectTransform.offsetMax = new Vector2(-14f, -56f);
-    }
-
-    private void BuildAbilitySection(
-        Transform parent,
-        string objectName,
-        string titleName,
-        string iconRootName,
-        string summaryName,
-        float top,
-        float height,
-        Color accentColor)
-    {
-        GameObject sectionObject = GetOrCreateUiObject(
-            parent,
-            objectName,
-            typeof(CanvasRenderer),
-            typeof(Image),
-            typeof(Outline));
-        RectTransform section = (RectTransform)sectionObject.transform;
-        ConfigureTopLeft(
-            section,
-            new Vector2(20f, -top),
-            new Vector2(780f, height));
-        Image sectionImage = sectionObject.GetComponent<Image>();
-        sectionImage.color = SubPanelColor;
-        sectionImage.raycastTarget = false;
-        Outline outline = sectionObject.GetComponent<Outline>();
-        outline.effectColor = new Color(
-            accentColor.r,
-            accentColor.g,
-            accentColor.b,
-            0.5f);
-        outline.effectDistance = new Vector2(1f, -1f);
-
-        TextMeshProUGUI title = CreateText(
-            section,
-            titleName,
-            21f,
-            TextAlignmentOptions.MidlineLeft,
-            accentColor);
-        ConfigureTopLeft(
-            title.rectTransform,
-            new Vector2(16f, -10f),
-            new Vector2(748f, 34f));
-        title.fontStyle = FontStyles.Bold;
-
-        GameObject iconRootObject = GetOrCreateUiObject(
-            section,
-            iconRootName);
-        RectTransform iconRoot =
-            (RectTransform)iconRootObject.transform;
-        ConfigureTopLeft(
-            iconRoot,
-            new Vector2(14f, -50f),
-            new Vector2(752f, 82f));
-
-        TextMeshProUGUI summary = CreateText(
-            section,
-            summaryName,
-            15f,
-            TextAlignmentOptions.TopLeft,
-            TextColor);
-        Stretch(summary.rectTransform);
-        summary.rectTransform.offsetMin = new Vector2(16f, 14f);
-        summary.rectTransform.offsetMax =
-            new Vector2(-16f, -142f);
-        summary.overflowMode = TextOverflowModes.Ellipsis;
-    }
-
-    private Button BuildNavigationButton(
-        Transform parent,
-        string objectName,
-        string label,
-        Vector2 topRightPosition)
-    {
-        GameObject buttonObject = GetOrCreateUiObject(
-            parent,
-            objectName,
-            typeof(CanvasRenderer),
-            typeof(Image),
-            typeof(Button));
-        RectTransform buttonRect =
-            (RectTransform)buttonObject.transform;
-        buttonRect.anchorMin = Vector2.one;
-        buttonRect.anchorMax = Vector2.one;
-        buttonRect.pivot = Vector2.one;
-        buttonRect.anchoredPosition = topRightPosition;
-        buttonRect.sizeDelta = new Vector2(92f, 60f);
-        Image image = buttonObject.GetComponent<Image>();
-        image.color = SubPanelColor;
-        Button button = buttonObject.GetComponent<Button>();
-        button.targetGraphic = image;
-        ApplyButtonColors(button, AccentColor);
-
-        TextMeshProUGUI text = CreateText(
-            buttonRect,
-            "txtLabel",
-            38f,
-            TextAlignmentOptions.Center,
-            TextColor);
-        Stretch(text.rectTransform);
-        text.text = label;
-        return button;
     }
 
     private void BindAbilityIcons(
@@ -2366,8 +1396,7 @@ public sealed class OperatorDetailView
                 parent,
                 views,
                 prefix,
-                index,
-                accentColor);
+                index);
             OperatorAbilityIconModel item = items[index];
             bool overflow = itemCount > MaximumVisibleAbilities &&
                             index == MaximumVisibleAbilities - 1;
@@ -2419,110 +1448,23 @@ public sealed class OperatorDetailView
         Transform parent,
         List<AbilityIconView> views,
         string prefix,
-        int index,
-        Color accentColor)
+        int index)
     {
         while (views.Count <= index)
         {
             int viewIndex = views.Count;
-            Transform existing = parent.Find(prefix + viewIndex);
-            views.Add(existing != null
-                ? BindExistingAbilityIcon(existing.gameObject)
-                : BuildAbilityIcon(
+            Transform authored = parent.Find(prefix + viewIndex);
+            GameObject instance = authored != null
+                ? authored.gameObject
+                : UnityEngine.Object.Instantiate(
+                    _abilityIconPrefab,
                     parent,
-                    prefix + viewIndex,
-                    viewIndex,
-                    accentColor));
+                    false);
+            instance.name = prefix + viewIndex;
+            views.Add(BindExistingAbilityIcon(instance));
         }
 
         return views[index];
-    }
-
-    private AbilityIconView BuildAbilityIcon(
-        Transform parent,
-        string objectName,
-        int index,
-        Color accentColor)
-    {
-        GameObject rootObject = GetOrCreateUiObject(
-            parent,
-            objectName,
-            typeof(CanvasRenderer),
-            typeof(Image),
-            typeof(Button));
-        RectTransform root = (RectTransform)rootObject.transform;
-        ConfigureTopLeft(
-            root,
-            new Vector2(index * 106f, 0f),
-            new Vector2(96f, 80f));
-        Image background = rootObject.GetComponent<Image>();
-        background.color = Color.Lerp(
-            SlotColor,
-            accentColor,
-            0.18f);
-        Button button = rootObject.GetComponent<Button>();
-        button.targetGraphic = background;
-        button.onClick.RemoveAllListeners();
-        ApplyButtonColors(button, accentColor);
-
-        GameObject iconObject = GetOrCreateUiObject(
-            root,
-            "imgAbilityIcon",
-            typeof(CanvasRenderer),
-            typeof(Image));
-        RectTransform iconRect = (RectTransform)iconObject.transform;
-        ConfigureTopLeft(
-            iconRect,
-            new Vector2(8f, -8f),
-            new Vector2(48f, 48f));
-        Image icon = iconObject.GetComponent<Image>();
-        icon.preserveAspect = true;
-        icon.raycastTarget = false;
-
-        TextMeshProUGUI fallback = CreateText(
-            root,
-            "txtAbilityFallback",
-            22f,
-            TextAlignmentOptions.Center,
-            accentColor);
-        ConfigureTopLeft(
-            fallback.rectTransform,
-            new Vector2(8f, -8f),
-            new Vector2(48f, 48f));
-        fallback.fontStyle = FontStyles.Bold;
-
-        TextMeshProUGUI label = CreateText(
-            root,
-            "txtAbilityLabel",
-            12f,
-            TextAlignmentOptions.BottomLeft,
-            TextColor);
-        Stretch(label.rectTransform);
-        label.rectTransform.offsetMin = new Vector2(8f, 6f);
-        label.rectTransform.offsetMax = new Vector2(-6f, -54f);
-        label.textWrappingMode = TextWrappingModes.NoWrap;
-
-        TextMeshProUGUI badge = CreateText(
-            root,
-            "txtAbilityBadge",
-            13f,
-            TextAlignmentOptions.Center,
-            TextColor);
-        badge.rectTransform.anchorMin = Vector2.one;
-        badge.rectTransform.anchorMax = Vector2.one;
-        badge.rectTransform.pivot = Vector2.one;
-        badge.rectTransform.anchoredPosition =
-            new Vector2(-5f, -5f);
-        badge.rectTransform.sizeDelta = new Vector2(30f, 24f);
-        badge.fontStyle = FontStyles.Bold;
-
-        return new AbilityIconView(
-            rootObject,
-            background,
-            icon,
-            fallback,
-            label,
-            badge);
     }
 
     private static AbilityIconView BindExistingAbilityIcon(
@@ -2530,43 +1472,32 @@ public sealed class OperatorDetailView
     {
         Button button = rootObject.GetComponent<Button>();
         Image background = rootObject.GetComponent<Image>();
+        Image icon = rootObject.transform.Find("imgAbilityIcon")
+            ?.GetComponent<Image>();
+        TextMeshProUGUI fallback = rootObject.transform
+            .Find("txtAbilityFallback")
+            ?.GetComponent<TextMeshProUGUI>();
+        TextMeshProUGUI label = rootObject.transform
+            .Find("txtAbilityLabel")
+            ?.GetComponent<TextMeshProUGUI>();
+        TextMeshProUGUI badge = rootObject.transform
+            .Find("txtAbilityBadge")
+            ?.GetComponent<TextMeshProUGUI>();
+        if (button == null || background == null || icon == null ||
+            fallback == null || label == null || badge == null)
+        {
+            throw new InvalidOperationException(
+                "Operator ability icon prefab is incomplete.");
+        }
         button.targetGraphic = background;
         button.onClick.RemoveAllListeners();
-        ApplyButtonColors(button, AccentColor);
         return new AbilityIconView(
             rootObject,
             background,
-            rootObject.transform.Find("imgAbilityIcon")
-                ?.GetComponent<Image>(),
-            rootObject.transform.Find("txtAbilityFallback")
-                ?.GetComponent<TextMeshProUGUI>(),
-            rootObject.transform.Find("txtAbilityLabel")
-                ?.GetComponent<TextMeshProUGUI>(),
-            rootObject.transform.Find("txtAbilityBadge")
-                ?.GetComponent<TextMeshProUGUI>());
-    }
-
-    private GameObject BuildBodyPanel(
-        Transform parent,
-        string objectName,
-        float left,
-        float width)
-    {
-        GameObject panelObject = GetOrCreateUiObject(
-            parent,
-            objectName,
-            typeof(CanvasRenderer),
-            typeof(Image));
-        RectTransform panel = (RectTransform)panelObject.transform;
-        panel.anchorMin = new Vector2(0f, 0f);
-        panel.anchorMax = new Vector2(0f, 1f);
-        panel.pivot = new Vector2(0f, 0.5f);
-        panel.anchoredPosition = new Vector2(left, -50f);
-        panel.sizeDelta = new Vector2(width, -148f);
-        Image image = panelObject.GetComponent<Image>();
-        image.color = PanelColor;
-        image.raycastTarget = false;
-        return panelObject;
+            icon,
+            fallback,
+            label,
+            badge);
     }
 
     private static int ExtractTotalCount(string positionLabel)
@@ -2594,89 +1525,6 @@ public sealed class OperatorDetailView
             : normalized.Substring(0, 2);
     }
 
-    private static GameObject GetOrCreateUiObject(
-        Transform parent,
-        string objectName,
-        params Type[] componentTypes)
-    {
-        Transform existing = parent != null
-            ? parent.Find(objectName)
-            : null;
-        GameObject target;
-        if (existing != null)
-        {
-            target = existing.gameObject;
-        }
-        else
-        {
-            target = new GameObject(
-                objectName,
-                typeof(RectTransform));
-            target.layer = parent != null
-                ? parent.gameObject.layer
-                : 0;
-            target.transform.SetParent(parent, false);
-        }
-
-        if (componentTypes != null)
-        {
-            foreach (Type componentType in componentTypes)
-            {
-                if (componentType != null &&
-                    target.GetComponent(componentType) == null)
-                {
-                    target.AddComponent(componentType);
-                }
-            }
-        }
-
-        return target;
-    }
-
-    private static TextMeshProUGUI CreateText(
-        Transform parent,
-        string objectName,
-        float fontSize,
-        TextAlignmentOptions alignment,
-        Color color)
-    {
-        GameObject textObject = GetOrCreateUiObject(
-            parent,
-            objectName,
-            typeof(TextMeshProUGUI));
-        TextMeshProUGUI text =
-            textObject.GetComponent<TextMeshProUGUI>();
-        LocalizationFontResolver.ApplyGameDefault(text);
-        text.fontSize = fontSize;
-        text.fontSizeMin = Mathf.Max(11f, fontSize - 7f);
-        text.fontSizeMax = fontSize;
-        text.enableAutoSizing = true;
-        text.alignment = alignment;
-        text.color = color;
-        text.raycastTarget = false;
-        text.textWrappingMode = TextWrappingModes.Normal;
-        return text;
-    }
-
-    private static void ApplyButtonColors(
-        Button button,
-        Color accentColor)
-    {
-        ColorBlock colors = button.colors;
-        colors.normalColor = Color.white;
-        colors.highlightedColor = Color.Lerp(
-            Color.white,
-            accentColor,
-            0.32f);
-        colors.pressedColor =
-            Color.Lerp(Color.white, Color.black, 0.22f);
-        colors.selectedColor = colors.highlightedColor;
-        colors.disabledColor =
-            new Color(0.45f, 0.48f, 0.46f, 0.7f);
-        colors.fadeDuration = 0.08f;
-        button.colors = colors;
-    }
-
     private static void SetNavigationLabel(
         Button button,
         string label)
@@ -2691,120 +1539,18 @@ public sealed class OperatorDetailView
 
     private void EnsureGradeIconStrip()
     {
-        Transform header = _root != null
-            ? _root.Find("grpOperatorDetailHeader")
+        Transform visual = _root != null
+            ? _root.Find("grpOperatorDetailVisual")
             : null;
-        if (header == null)
+        if (visual == null)
             return;
 
-        _gradeIcons = CharacterGradeIconStrip.GetOrCreate(
-            header,
+        _gradeIcons = CharacterGradeIconStrip.Bind(
+            visual,
             "grpOperatorDetailGradeIcons",
             28f,
             6f);
         _gradeIcons.SetGrade(CharacterGrade.Grade0);
     }
 
-    private void ApplyNameGradeLayout()
-    {
-        if (_nameText == null || _gradeIcons == null)
-            return;
-
-        const float nameLeft = 200f;
-        const float maximumRowWidth = 1050f;
-        const float nameIconGap = 12f;
-
-        float iconWidth = _gradeIcons.PreferredWidth;
-        float gap = iconWidth > 0f ? nameIconGap : 0f;
-        float maximumNameWidth = Mathf.Max(
-            180f,
-            maximumRowWidth - iconWidth - gap);
-        float preferredNameWidth =
-            _nameText.GetPreferredValues(_nameText.text).x + 4f;
-        float nameWidth = Mathf.Clamp(
-            preferredNameWidth,
-            80f,
-            maximumNameWidth);
-        ConfigureTopLeft(
-            _nameText.rectTransform,
-            new Vector2(nameLeft, -12f),
-            new Vector2(nameWidth, 50f));
-        _nameText.overflowMode = TextOverflowModes.Ellipsis;
-
-        ConfigureTopLeft(
-            _gradeIcons.RectTransform,
-            new Vector2(nameLeft + nameWidth + gap, -23f),
-            new Vector2(iconWidth, 28f));
-    }
-
-    private void ApplyHeaderLayout()
-    {
-        Transform header = _root != null
-            ? _root.Find("grpOperatorDetailHeader")
-            : null;
-        RectTransform accent = header
-            ?.Find("imgOperatorDetailHeaderAccent")
-            as RectTransform;
-        if (accent != null)
-        {
-            ConfigureTopLeft(
-                accent,
-                new Vector2(176f, -20f),
-                new Vector2(6f, 66f));
-        }
-
-        ApplyNameGradeLayout();
-
-        if (_idText != null)
-        {
-            ConfigureTopLeft(
-                _idText.rectTransform,
-                new Vector2(200f, -65f),
-                new Vector2(1050f, 24f));
-        }
-    }
-
-    private static void Stretch(RectTransform rect)
-    {
-        rect.anchorMin = Vector2.zero;
-        rect.anchorMax = Vector2.one;
-        rect.pivot = new Vector2(0.5f, 0.5f);
-        rect.anchoredPosition = Vector2.zero;
-        rect.sizeDelta = Vector2.zero;
-    }
-
-    private static void ConfigureTopStretch(
-        RectTransform rect,
-        float height)
-    {
-        rect.anchorMin = new Vector2(0f, 1f);
-        rect.anchorMax = Vector2.one;
-        rect.pivot = new Vector2(0.5f, 1f);
-        rect.anchoredPosition = Vector2.zero;
-        rect.sizeDelta = new Vector2(0f, height);
-    }
-
-    private static void ConfigureTopLeft(
-        RectTransform rect,
-        Vector2 position,
-        Vector2 size)
-    {
-        rect.anchorMin = new Vector2(0f, 1f);
-        rect.anchorMax = new Vector2(0f, 1f);
-        rect.pivot = new Vector2(0f, 1f);
-        rect.anchoredPosition = position;
-        rect.sizeDelta = size;
-    }
-
-    private static void ConfigureBottomLeft(
-        RectTransform rect,
-        Vector2 position,
-        Vector2 size)
-    {
-        rect.anchorMin = Vector2.zero;
-        rect.anchorMax = Vector2.zero;
-        rect.pivot = Vector2.zero;
-        rect.anchoredPosition = position;
-        rect.sizeDelta = size;
-    }
 }

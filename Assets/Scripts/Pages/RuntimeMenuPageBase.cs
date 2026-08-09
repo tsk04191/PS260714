@@ -28,7 +28,6 @@ public abstract class RuntimeMenuPageBase : MonoBehaviour, IPage
 
     private bool _initialized;
     private bool _localeEventBound;
-    private bool _usesDesignerLayout;
     private ResponsivePanelFitter _designerPanelFitter;
 
     protected abstract string PageTitle { get; }
@@ -134,72 +133,25 @@ public abstract class RuntimeMenuPageBase : MonoBehaviour, IPage
             return null;
 
         Transform existingButton = parent.Find(objectName);
-        bool created = existingButton == null;
-        GameObject buttonObject;
-        if (existingButton != null &&
-            existingButton.TryGetComponent(out Button existing))
+        Button button = existingButton != null
+            ? existingButton.GetComponent<Button>()
+            : null;
+        TextMeshProUGUI text = existingButton != null
+            ? existingButton.Find("txtLabel")
+                ?.GetComponent<TextMeshProUGUI>()
+            : null;
+        if (button == null || text == null)
         {
-            buttonObject = existingButton.gameObject;
-        }
-        else
-        {
-            buttonObject = new GameObject(
-                objectName,
-                typeof(RectTransform),
-                typeof(CanvasRenderer),
-                typeof(Image),
-                typeof(Button),
-                typeof(LayoutElement));
-            buttonObject.transform.SetParent(parent, false);
+            Debug.LogError(
+                $"{name}: required scene button '{objectName}' is " +
+                "missing or incomplete.",
+                this);
+            return null;
         }
 
-        Image image = buttonObject.GetComponent<Image>();
-        if (created)
-        {
-            image.color = ButtonColor;
-            image.raycastTarget = true;
-
-            LayoutElement buttonLayout =
-                buttonObject.GetComponent<LayoutElement>();
-            buttonLayout.preferredHeight = preferredHeight;
-        }
-
-        Button button = buttonObject.GetComponent<Button>();
         button.onClick.RemoveAllListeners();
-        button.targetGraphic = image;
-        if (created)
-        {
-            ColorBlock colors = button.colors;
-            colors.normalColor = ButtonColor;
-            colors.highlightedColor =
-                Color.Lerp(ButtonColor, Color.white, 0.14f);
-            colors.pressedColor =
-                Color.Lerp(ButtonColor, Color.black, 0.18f);
-            colors.selectedColor = colors.highlightedColor;
-            colors.disabledColor =
-                Color.Lerp(ButtonColor, Color.black, 0.5f);
-            colors.fadeDuration = 0.08f;
-            button.colors = colors;
-        }
         if (action != null)
             button.onClick.AddListener(() => action());
-
-        TextMeshProUGUI text = CreateText(
-            buttonObject.transform.Find("txtLabel") is Transform labelTransform
-                ? labelTransform
-                : buttonObject.transform,
-            "txtLabel",
-            26f,
-            preferredHeight,
-            buttonObject.transform.Find("txtLabel") == null);
-        if (created)
-        {
-            RectTransform textRect = text.rectTransform;
-            textRect.anchorMin = Vector2.zero;
-            textRect.anchorMax = Vector2.one;
-            textRect.offsetMin = new Vector2(16f, 4f);
-            textRect.offsetMax = new Vector2(-16f, -4f);
-        }
         ApplyLocalizedText(text, localizationKey, label);
         return button;
     }
@@ -216,20 +168,16 @@ public abstract class RuntimeMenuPageBase : MonoBehaviour, IPage
         if (parent == null)
             return null;
 
-        Transform existingText = parent.Find(objectName);
-        bool created = existingText == null;
-        TextMeshProUGUI text = CreateText(
-            existingText != null ? existingText : parent,
-            objectName,
-            fontSize,
-            preferredHeight,
-            existingText == null);
-        text.text = content;
-        if (created)
+        TextMeshProUGUI text = parent.Find(objectName)
+            ?.GetComponent<TextMeshProUGUI>();
+        if (text == null)
         {
-            text.fontStyle = fontStyle;
-            text.alignment = alignment;
+            Debug.LogError(
+                $"{name}: required scene text '{objectName}' is missing.",
+                this);
+            return null;
         }
+        text.text = content;
         return text;
     }
 
@@ -313,91 +261,10 @@ public abstract class RuntimeMenuPageBase : MonoBehaviour, IPage
         if (_runtimeRoot == null)
             return null;
 
-        if (topLeftCompact && _buttonRoot != null)
-        {
-            Transform obsoleteButton = _buttonRoot.Find(objectName);
-            if (obsoleteButton != null)
-                obsoleteButton.gameObject.SetActive(false);
-        }
-
-        Transform existingButton = _runtimeRoot.Find(objectName);
-        bool created = existingButton == null;
-        GameObject buttonObject;
-        if (existingButton != null &&
-            existingButton.TryGetComponent(out Button existing))
-        {
-            buttonObject = existingButton.gameObject;
-        }
-        else
-        {
-            buttonObject = new GameObject(
-                objectName,
-                typeof(RectTransform),
-                typeof(CanvasRenderer),
-                typeof(Image),
-                typeof(Button));
-            buttonObject.transform.SetParent(_runtimeRoot, false);
-        }
-        buttonObject.SetActive(true);
-
-        Image image = buttonObject.GetComponent<Image>();
-        if (created)
-        {
-            RectTransform buttonRect =
-                (RectTransform)buttonObject.transform;
-            Vector2 cornerAnchor = topLeftCompact
-                ? new Vector2(0f, 1f)
-                : Vector2.one;
-            buttonRect.anchorMin = cornerAnchor;
-            buttonRect.anchorMax = cornerAnchor;
-            buttonRect.pivot = cornerAnchor;
-            buttonRect.anchoredPosition = topLeftCompact
-                ? new Vector2(24f, -24f)
-                : new Vector2(-32f, -32f);
-            buttonRect.sizeDelta = topLeftCompact
-                ? new Vector2(120f, 46f)
-                : new Vector2(180f, 60f);
-            image.color = ButtonColor;
-            image.raycastTarget = true;
-        }
-
-        Button button = buttonObject.GetComponent<Button>();
-        button.onClick.RemoveAllListeners();
-        button.targetGraphic = image;
-        if (created)
-        {
-            ColorBlock colors = button.colors;
-            colors.normalColor = ButtonColor;
-            colors.highlightedColor =
-                Color.Lerp(ButtonColor, Color.white, 0.14f);
-            colors.pressedColor =
-                Color.Lerp(ButtonColor, Color.black, 0.18f);
-            colors.selectedColor = colors.highlightedColor;
-            colors.disabledColor =
-                Color.Lerp(ButtonColor, Color.black, 0.5f);
-            colors.fadeDuration = 0.08f;
-            button.colors = colors;
-        }
-        if (action != null)
-            button.onClick.AddListener(() => action());
-
-        Transform existingLabel = buttonObject.transform.Find("txtLabel");
-        TextMeshProUGUI text = CreateText(
-            existingLabel != null ? existingLabel : buttonObject.transform,
-            "txtLabel",
-            topLeftCompact ? 18f : 22f,
-            topLeftCompact ? 46f : 60f,
-            existingLabel == null);
-        if (created)
-        {
-            RectTransform textRect = text.rectTransform;
-            textRect.anchorMin = Vector2.zero;
-            textRect.anchorMax = Vector2.one;
-            textRect.offsetMin = new Vector2(12f, 4f);
-            textRect.offsetMax = new Vector2(-12f, -4f);
-        }
-        ApplyLocalizedText(text, localizationKey, label);
-        return button;
+        return BindLocalizedOverlayMenuButton(
+            objectName,
+            localizationKey,
+            action);
     }
 
     protected void NavigateTo(
@@ -423,122 +290,18 @@ public abstract class RuntimeMenuPageBase : MonoBehaviour, IPage
             return true;
         }
 
-        if (Application.isPlaying && RequiresSavedDesignerUiAtRuntime)
-        {
-            Debug.LogError(
-                $"{name}: saved designer UI is required. Open the page " +
-                "editor, synchronize the UI, and save the scene before " +
-                "entering Play Mode.",
-                this);
-            return false;
-        }
-
-        _usesDesignerLayout = false;
-        GameObject rootObject = new(
-            RuntimeRootObjectName,
-            typeof(RectTransform),
-            typeof(CanvasRenderer),
-            typeof(Image));
-        _runtimeRoot = (RectTransform)rootObject.transform;
-        _runtimeRoot.SetParent(transform, false);
-        _runtimeRoot.anchorMin = Vector2.zero;
-        _runtimeRoot.anchorMax = Vector2.one;
-        _runtimeRoot.offsetMin = Vector2.zero;
-        _runtimeRoot.offsetMax = Vector2.zero;
-        Image background = rootObject.GetComponent<Image>();
-        background.color = BackgroundColor;
-        background.raycastTarget = true;
-
-        GameObject panelObject = new(
-            "grpMenuPanel",
-            typeof(RectTransform),
-            typeof(CanvasRenderer),
-            typeof(Image),
-            typeof(VerticalLayoutGroup));
-        _panel = (RectTransform)panelObject.transform;
-        _panel.SetParent(_runtimeRoot, false);
-        _panel.anchorMin = new Vector2(0.5f, 0.5f);
-        _panel.anchorMax = new Vector2(0.5f, 0.5f);
-        _panel.pivot = new Vector2(0.5f, 0.5f);
-        _panel.anchoredPosition = Vector2.zero;
-        _panel.sizeDelta = PanelSize;
-        panelObject.GetComponent<Image>().color = PanelColor;
-
-        VerticalLayoutGroup panelLayout =
-            panelObject.GetComponent<VerticalLayoutGroup>();
-        panelLayout.padding = new RectOffset(40, 40, 40, 40);
-        panelLayout.spacing = 20f;
-        panelLayout.childAlignment = TextAnchor.UpperCenter;
-        panelLayout.childControlWidth = true;
-        panelLayout.childForceExpandWidth = true;
-        panelLayout.childControlHeight = true;
-        panelLayout.childForceExpandHeight = false;
-
-        _titleText = CreateText(
-            _panel,
-            "txtPageTitle",
-            46f,
-            82f,
-            true);
-        ApplyLocalizedText(
-            _titleText,
-            PageTitleLocalizationKey,
-            PageTitle);
-
-        if (!string.IsNullOrWhiteSpace(PageDescriptionLocalizationKey) ||
-            !string.IsNullOrWhiteSpace(PageDescription))
-        {
-            _descriptionText = CreateText(
-                _panel,
-                "txtPageDescription",
-                20f,
-                64f,
-                true);
-            _descriptionText.fontStyle = FontStyles.Normal;
-            ApplyLocalizedText(
-                _descriptionText,
-                PageDescriptionLocalizationKey,
-                PageDescription);
-        }
-
-        GameObject buttonRootObject = new(
-            "grpMenuButtons",
-            typeof(RectTransform),
-            typeof(VerticalLayoutGroup),
-            typeof(LayoutElement));
-        _buttonRoot = (RectTransform)buttonRootObject.transform;
-        _buttonRoot.SetParent(_panel, false);
-        LayoutElement rootLayout =
-            buttonRootObject.GetComponent<LayoutElement>();
-        rootLayout.preferredHeight = 280f;
-        rootLayout.flexibleHeight = 1f;
-
-        VerticalLayoutGroup buttonLayout =
-            buttonRootObject.GetComponent<VerticalLayoutGroup>();
-        buttonLayout.spacing = 14f;
-        buttonLayout.childAlignment = TextAnchor.MiddleCenter;
-        buttonLayout.childControlWidth = true;
-        buttonLayout.childForceExpandWidth = true;
-        buttonLayout.childControlHeight = true;
-        buttonLayout.childForceExpandHeight = false;
-        return true;
+        Debug.LogError(
+            $"{name}: required scene UI references are missing. " +
+            "Fixed UI is not created at runtime.",
+            this);
+        return false;
     }
 
     private bool TryBindExistingUi()
     {
-        Transform existingRoot = _runtimeRoot != null
-            ? _runtimeRoot
-            : transform.Find(RuntimeRootObjectName);
-        Transform existingPanel = _panel != null
-            ? _panel
-            : existingRoot != null
-                ? existingRoot.Find("grpMenuPanel")
-                : null;
-        Transform existingButtonRoot = _buttonRoot != null
-            ? _buttonRoot
-            : existingPanel != null
-                ? existingPanel.Find("grpMenuButtons")
-                : null;
+        Transform existingRoot = _runtimeRoot;
+        Transform existingPanel = _panel;
+        Transform existingButtonRoot = _buttonRoot;
         if (existingRoot is not RectTransform rootRect ||
             existingPanel is not RectTransform panelRect ||
             existingButtonRoot is not RectTransform buttonRootRect)
@@ -549,61 +312,24 @@ public abstract class RuntimeMenuPageBase : MonoBehaviour, IPage
         _runtimeRoot = rootRect;
         _panel = panelRect;
         _buttonRoot = buttonRootRect;
-        _titleText ??= existingPanel.Find("txtPageTitle")
-            ?.GetComponent<TextMeshProUGUI>();
-        _descriptionText ??= existingPanel.Find("txtPageDescription")
-            ?.GetComponent<TextMeshProUGUI>();
-        _usesDesignerLayout = true;
-        if (panelRect.anchorMin == panelRect.anchorMax &&
-            panelRect.rect.width > 0f && panelRect.rect.height > 0f)
-        {
-            _designerPanelFitter = ResponsivePanelFitter.Bind(
-                panelRect,
-                rootRect);
-        }
-        return true;
+        _designerPanelFitter =
+            panelRect.GetComponent<ResponsivePanelFitter>();
+        return _titleText != null;
     }
 
 #if UNITY_EDITOR
     public void MarkDesignerLayoutCurrent()
     {
         _designerLayoutVersion = 1;
-        _usesDesignerLayout = true;
         UnityEditor.EditorUtility.SetDirty(this);
     }
 
     public void RebuildEditorPreview()
     {
-        if (Application.isPlaying)
-            return;
-        if (RequiresSavedDesignerUiAtRuntime)
-        {
-            Debug.LogError(
-                $"{name}: destructive preview rebuilding is disabled for " +
-                "saved designer UI. Use the page-specific editor sync.",
-                this);
-            return;
-        }
-
-        Transform existingRoot = transform.Find(RuntimeRootObjectName);
-        if (existingRoot != null)
-            DestroyImmediate(existingRoot.gameObject);
-
-        _runtimeRoot = null;
-        _panel = null;
-        _buttonRoot = null;
-        _titleText = null;
-        _descriptionText = null;
-        _designerPanelFitter = null;
-        _initialized = false;
-        if (!BuildRuntimeUi())
-            return;
-        BuildButtons();
-        RefreshPageLocalization();
-        RefreshLayout();
-        UnityEditor.EditorUtility.SetDirty(this);
-        UnityEditor.SceneManagement.EditorSceneManager.MarkSceneDirty(
-            gameObject.scene);
+        Debug.LogError(
+            $"{name}: fixed UI rebuilding is disabled. Edit the saved " +
+            "scene hierarchy directly.",
+            this);
     }
 #endif
 
@@ -612,37 +338,7 @@ public abstract class RuntimeMenuPageBase : MonoBehaviour, IPage
         if (_runtimeRoot == null || _panel == null)
             return;
 
-        _runtimeRoot.anchorMin = Vector2.zero;
-        _runtimeRoot.anchorMax = Vector2.one;
-        _runtimeRoot.offsetMin = Vector2.zero;
-        _runtimeRoot.offsetMax = Vector2.zero;
-
-        if (_usesDesignerLayout)
-        {
-            _designerPanelFitter?.RefreshLayout();
-            return;
-        }
-
-        RectTransform pageRect = transform as RectTransform;
-        float pageWidth = pageRect != null && pageRect.rect.width > 0f
-            ? pageRect.rect.width
-            : PanelSize.x;
-        float pageHeight = pageRect != null && pageRect.rect.height > 0f
-            ? pageRect.rect.height
-            : PanelSize.y;
-        if (FillAvailableSpace)
-        {
-            _panel.sizeDelta = new Vector2(
-                Mathf.Max(360f, pageWidth),
-                Mathf.Max(340f, pageHeight));
-            return;
-        }
-
-        float availableWidth = pageWidth - 48f;
-        float availableHeight = pageHeight - 48f;
-        _panel.sizeDelta = new Vector2(
-            Mathf.Min(PanelSize.x, Mathf.Max(360f, availableWidth)),
-            Mathf.Min(PanelSize.y, Mathf.Max(340f, availableHeight)));
+        _designerPanelFitter?.RefreshLayout();
     }
 
     private void BindLocaleEvent()
@@ -694,10 +390,7 @@ public abstract class RuntimeMenuPageBase : MonoBehaviour, IPage
             return;
         }
 
-        LocalizedText localizedText = text.GetComponent<LocalizedText>();
-        if (localizedText == null)
-            localizedText = text.gameObject.AddComponent<LocalizedText>();
-        localizedText.SetKey(localizationKey);
+        text.text = LocalizationService.Get(localizationKey);
     }
 
     protected static TextMeshProUGUI CreateText(
@@ -707,40 +400,19 @@ public abstract class RuntimeMenuPageBase : MonoBehaviour, IPage
         float preferredHeight,
         bool createObject)
     {
-        GameObject textObject;
-        if (createObject)
+        Transform target = createObject
+            ? parent?.Find(objectName)
+            : parent;
+        TextMeshProUGUI text = target != null
+            ? target.GetComponent<TextMeshProUGUI>()
+            : null;
+        if (text == null)
         {
-            textObject = new GameObject(
-                objectName,
-                typeof(RectTransform),
-                typeof(TextMeshProUGUI),
-                typeof(LayoutElement));
-            textObject.transform.SetParent(parent, false);
+            Debug.LogError(
+                $"Fixed text '{objectName}' is missing from the " +
+                "authored UI hierarchy.",
+                parent);
         }
-        else
-        {
-            textObject = parent.gameObject;
-        }
-
-        TextMeshProUGUI text = textObject.GetComponent<TextMeshProUGUI>();
-        if (createObject)
-        {
-            LocalizationFontResolver.ApplyGameDefault(text);
-            text.fontSize = fontSize;
-            text.fontSizeMax = fontSize;
-            text.fontSizeMin = Mathf.Max(14f, fontSize - 10f);
-            text.enableAutoSizing = true;
-            text.fontStyle = FontStyles.Bold;
-            text.color = TextColor;
-            text.alignment = TextAlignmentOptions.Center;
-            text.textWrappingMode = TextWrappingModes.Normal;
-            text.raycastTarget = false;
-        }
-        LayoutElement layout = textObject.GetComponent<LayoutElement>();
-        if (layout == null)
-            layout = textObject.AddComponent<LayoutElement>();
-        if (createObject)
-            layout.preferredHeight = preferredHeight;
         return text;
     }
 
@@ -833,8 +505,6 @@ public sealed class CodexBrowserView
         }
     }
 
-    private static readonly Color BrowserPanelColor =
-        new(0.055f, 0.072f, 0.062f, 0.98f);
     private static readonly Color CardColor =
         new(0.16f, 0.235f, 0.19f, 1f);
     private static readonly Color CardTextColor =
@@ -870,7 +540,13 @@ public sealed class CodexBrowserView
     {
         CodexBrowserView view = new(host);
         if (!view.TryBindLayout())
-            view.BuildLayout();
+        {
+            Debug.LogError(
+                "Codex browser fixed UI is missing. Author the browser " +
+                "hierarchy in the Scene and assign its designer settings.",
+                host);
+            return view;
+        }
         view.BindResponsiveGrid();
         return view;
     }
@@ -997,49 +673,6 @@ public sealed class CodexBrowserView
         }
     }
 
-    public void SetListOnlyMode(bool enabled, int columnCount = 3)
-    {
-        if (_browserRoot == null || _listRoot == null ||
-            DetailRoot == null)
-        {
-            return;
-        }
-
-        DetailRoot.gameObject.SetActive(!enabled);
-        LayoutElement listLayout =
-            _listRoot.GetComponent<LayoutElement>();
-        if (listLayout != null)
-        {
-            listLayout.minWidth = enabled ? 0f : 700f;
-            listLayout.preferredWidth = enabled ? 0f : 720f;
-            listLayout.flexibleWidth = enabled ? 1f : 0f;
-        }
-
-        if (enabled && _browserRoot is RectTransform browserRect)
-        {
-            browserRect.anchorMin = Vector2.zero;
-            browserRect.anchorMax = Vector2.one;
-            browserRect.pivot = new Vector2(0.5f, 0.5f);
-            browserRect.anchoredPosition = Vector2.zero;
-            browserRect.sizeDelta = Vector2.zero;
-        }
-
-        GridLayoutGroup grid =
-            _cardContent != null
-                ? _cardContent.GetComponent<GridLayoutGroup>()
-                : null;
-        if (grid != null)
-        {
-            grid.constraint =
-                GridLayoutGroup.Constraint.FixedColumnCount;
-            grid.constraintCount = Mathf.Max(1, columnCount);
-            ResponsiveGridConstraint.Bind(
-                grid,
-                grid.transform.parent as RectTransform,
-                Mathf.Max(1, columnCount));
-        }
-    }
-
     private void BindResponsiveGrid()
     {
         GridLayoutGroup grid = _cardContent != null
@@ -1048,94 +681,18 @@ public sealed class CodexBrowserView
         if (grid == null)
             return;
 
-        ResponsiveGridConstraint.Bind(
-            grid,
-            grid.transform.parent as RectTransform);
-    }
-
-    private void BuildLayout()
-    {
-        GameObject browserObject = GetOrCreateChild(
-            _host,
-            "grpCodexBrowser",
-            typeof(RectTransform),
-            typeof(HorizontalLayoutGroup),
-            typeof(LayoutElement));
-        _browserRoot = browserObject.transform;
-        _designerSettings =
-            browserObject.GetComponent<CodexBrowserDesignerSettings>();
-        if (_designerSettings == null)
+        ResponsiveGridConstraint constraint =
+            grid.GetComponent<ResponsiveGridConstraint>();
+        if (constraint == null)
         {
-            _designerSettings =
-                browserObject.AddComponent<CodexBrowserDesignerSettings>();
+            Debug.LogError(
+                "Codex card grid requires a pre-authored " +
+                "ResponsiveGridConstraint component.",
+                grid);
+            return;
         }
-        browserObject.SetActive(true);
-        browserObject.transform.SetSiblingIndex(0);
-        LayoutElement browserLayout =
-            browserObject.GetComponent<LayoutElement>();
-        browserLayout.preferredHeight = 500f;
-        browserLayout.flexibleHeight = 1f;
-        HorizontalLayoutGroup browserGroup =
-            browserObject.GetComponent<HorizontalLayoutGroup>();
-        browserGroup.spacing = 18f;
-        browserGroup.childAlignment = TextAnchor.UpperCenter;
-        browserGroup.childControlWidth = true;
-        browserGroup.childControlHeight = true;
-        browserGroup.childForceExpandWidth = false;
-        browserGroup.childForceExpandHeight = true;
 
-        GameObject listObject = GetOrCreateChild(
-            browserObject.transform,
-            "grpCodexList",
-            typeof(RectTransform),
-            typeof(CanvasRenderer),
-            typeof(Image),
-            typeof(VerticalLayoutGroup),
-            typeof(LayoutElement));
-        _listRoot = listObject.transform;
-        Image listImage = listObject.GetComponent<Image>();
-        listImage.color = BrowserPanelColor;
-        listImage.raycastTarget = true;
-        LayoutElement listLayout = listObject.GetComponent<LayoutElement>();
-        listLayout.minWidth = 700f;
-        listLayout.preferredWidth = 720f;
-        listLayout.flexibleWidth = 0f;
-        VerticalLayoutGroup listGroup =
-            listObject.GetComponent<VerticalLayoutGroup>();
-        listGroup.padding = new RectOffset(10, 10, 10, 10);
-        listGroup.spacing = 10f;
-        listGroup.childAlignment = TextAnchor.UpperCenter;
-        listGroup.childControlWidth = true;
-        listGroup.childControlHeight = true;
-        listGroup.childForceExpandWidth = true;
-        listGroup.childForceExpandHeight = false;
-
-        BuildToolbar(listObject.transform);
-        BuildScrollView(listObject.transform);
-
-        GameObject detailHost = GetOrCreateChild(
-            browserObject.transform,
-            "grpCodexDetailHost",
-            typeof(RectTransform),
-            typeof(VerticalLayoutGroup),
-            typeof(LayoutElement));
-        DetailRoot = detailHost.transform;
-        LayoutElement detailLayout =
-            detailHost.GetComponent<LayoutElement>();
-        detailLayout.minWidth = 430f;
-        detailLayout.flexibleWidth = 1f;
-        detailLayout.flexibleHeight = 1f;
-        VerticalLayoutGroup detailGroup =
-            detailHost.GetComponent<VerticalLayoutGroup>();
-        detailGroup.childAlignment = TextAnchor.UpperCenter;
-        detailGroup.childControlWidth = true;
-        detailGroup.childControlHeight = true;
-        detailGroup.childForceExpandWidth = true;
-        detailGroup.childForceExpandHeight = true;
-
-        listObject.transform.SetSiblingIndex(0);
-        detailHost.transform.SetSiblingIndex(1);
-        _designerSettings.CaptureReferencesFromHierarchy();
+        constraint.RefreshLayout();
     }
 
     private bool TryBindLayout()
@@ -1249,172 +806,6 @@ public sealed class CodexBrowserView
                DetailRoot != null;
     }
 
-    private void BuildToolbar(Transform parent)
-    {
-        GameObject toolbarObject = GetOrCreateChild(
-            parent,
-            "grpCodexListToolbar",
-            typeof(RectTransform),
-            typeof(HorizontalLayoutGroup),
-            typeof(LayoutElement));
-        LayoutElement toolbarLayout =
-            toolbarObject.GetComponent<LayoutElement>();
-        toolbarLayout.preferredHeight = 46f;
-        HorizontalLayoutGroup toolbarGroup =
-            toolbarObject.GetComponent<HorizontalLayoutGroup>();
-        toolbarGroup.spacing = 6f;
-        toolbarGroup.childAlignment = TextAnchor.MiddleCenter;
-        toolbarGroup.childControlWidth = true;
-        toolbarGroup.childControlHeight = true;
-        toolbarGroup.childForceExpandWidth = false;
-        toolbarGroup.childForceExpandHeight = true;
-
-        _searchInput = BuildSearchInput(toolbarObject.transform);
-        _searchButton = BuildToolbarButton(
-            toolbarObject.transform,
-            "btnCodexSearch",
-            64f,
-            out _searchButtonLabel);
-        _filterButton = BuildToolbarButton(
-            toolbarObject.transform,
-            "btnCodexFilter",
-            92f,
-            out _filterButtonLabel);
-        _sortButton = BuildToolbarButton(
-            toolbarObject.transform,
-            "btnCodexSort",
-            100f,
-            out _sortButtonLabel);
-
-        _searchInput.transform.SetSiblingIndex(0);
-        _searchButton.transform.SetSiblingIndex(1);
-        _filterButton.transform.SetSiblingIndex(2);
-        _sortButton.transform.SetSiblingIndex(3);
-    }
-
-    private TMP_InputField BuildSearchInput(Transform parent)
-    {
-        GameObject inputObject = GetOrCreateChild(
-            parent,
-            "inpCodexSearch",
-            typeof(RectTransform),
-            typeof(CanvasRenderer),
-            typeof(Image),
-            typeof(TMP_InputField),
-            typeof(LayoutElement));
-        Image inputImage = inputObject.GetComponent<Image>();
-        inputImage.color = new Color(0.035f, 0.05f, 0.043f, 1f);
-        inputImage.raycastTarget = true;
-        LayoutElement inputLayout =
-            inputObject.GetComponent<LayoutElement>();
-        inputLayout.minWidth = 140f;
-        inputLayout.preferredWidth = 160f;
-        inputLayout.flexibleWidth = 1f;
-
-        GameObject viewportObject = GetOrCreateChild(
-            inputObject.transform,
-            "vptCodexSearch",
-            typeof(RectTransform),
-            typeof(RectMask2D));
-        RectTransform viewportRect =
-            (RectTransform)viewportObject.transform;
-        viewportRect.anchorMin = Vector2.zero;
-        viewportRect.anchorMax = Vector2.one;
-        viewportRect.offsetMin = new Vector2(10f, 4f);
-        viewportRect.offsetMax = new Vector2(-10f, -4f);
-
-        TextMeshProUGUI inputText = GetOrCreateText(
-            viewportObject.transform,
-            "txtCodexSearchValue",
-            18f,
-            TextAlignmentOptions.MidlineLeft);
-        StretchToParent(inputText.rectTransform);
-        inputText.raycastTarget = false;
-
-        _searchPlaceholder = GetOrCreateText(
-            viewportObject.transform,
-            "txtCodexSearchPlaceholder",
-            17f,
-            TextAlignmentOptions.MidlineLeft);
-        StretchToParent(_searchPlaceholder.rectTransform);
-        _searchPlaceholder.color =
-            new Color(0.65f, 0.66f, 0.59f, 0.8f);
-        _searchPlaceholder.fontStyle = FontStyles.Italic;
-        _searchPlaceholder.raycastTarget = false;
-
-        TMP_InputField input = inputObject.GetComponent<TMP_InputField>();
-        input.targetGraphic = inputImage;
-        input.textViewport = viewportRect;
-        input.textComponent = inputText;
-        input.placeholder = _searchPlaceholder;
-        input.lineType = TMP_InputField.LineType.SingleLine;
-        input.characterLimit = 64;
-        return input;
-    }
-
-    private void BuildScrollView(Transform parent)
-    {
-        GameObject scrollObject = GetOrCreateChild(
-            parent,
-            "scrCodexList",
-            typeof(RectTransform),
-            typeof(CanvasRenderer),
-            typeof(Image),
-            typeof(ScrollRect),
-            typeof(LayoutElement));
-        Image scrollImage = scrollObject.GetComponent<Image>();
-        scrollImage.color = new Color(0f, 0f, 0f, 0.01f);
-        scrollImage.raycastTarget = true;
-        LayoutElement scrollLayout =
-            scrollObject.GetComponent<LayoutElement>();
-        scrollLayout.preferredHeight = 400f;
-        scrollLayout.flexibleHeight = 1f;
-
-        GameObject viewportObject = GetOrCreateChild(
-            scrollObject.transform,
-            "vptCodexList",
-            typeof(RectTransform),
-            typeof(RectMask2D));
-        StretchToParent((RectTransform)viewportObject.transform);
-
-        GameObject contentObject = GetOrCreateChild(
-            viewportObject.transform,
-            "grpCodexCardContent",
-            typeof(RectTransform),
-            typeof(GridLayoutGroup),
-            typeof(ContentSizeFitter));
-        _cardContent = contentObject.transform;
-        RectTransform contentRect =
-            (RectTransform)contentObject.transform;
-        contentRect.anchorMin = new Vector2(0f, 1f);
-        contentRect.anchorMax = new Vector2(1f, 1f);
-        contentRect.pivot = new Vector2(0.5f, 1f);
-        contentRect.anchoredPosition = Vector2.zero;
-        contentRect.sizeDelta = Vector2.zero;
-
-        GridLayoutGroup grid = contentObject.GetComponent<GridLayoutGroup>();
-        grid.padding = new RectOffset(4, 4, 4, 10);
-        grid.spacing = new Vector2(8f, 10f);
-        grid.cellSize = CardSize;
-        grid.childAlignment = TextAnchor.UpperCenter;
-        grid.startAxis = GridLayoutGroup.Axis.Horizontal;
-        grid.constraint = GridLayoutGroup.Constraint.FixedColumnCount;
-        grid.constraintCount = 4;
-        ContentSizeFitter fitter =
-            contentObject.GetComponent<ContentSizeFitter>();
-        fitter.horizontalFit = ContentSizeFitter.FitMode.Unconstrained;
-        fitter.verticalFit = ContentSizeFitter.FitMode.PreferredSize;
-
-        ScrollRect scroll = scrollObject.GetComponent<ScrollRect>();
-        scroll.viewport = (RectTransform)viewportObject.transform;
-        scroll.content = contentRect;
-        scroll.horizontal = false;
-        scroll.vertical = true;
-        scroll.inertia = true;
-        scroll.movementType = ScrollRect.MovementType.Clamped;
-        scroll.scrollSensitivity = 30f;
-    }
-
     private CardView GetOrCreateCard(int index)
     {
         while (_cards.Count <= index)
@@ -1429,82 +820,43 @@ public sealed class CodexBrowserView
             GameObject template = _designerSettings != null
                 ? _designerSettings.CardTemplate
                 : null;
-            GameObject cardObject;
-            if (template != null && template.transform.parent == _cardContent)
+            if (template == null)
             {
-                cardObject = UnityEngine.Object.Instantiate(
-                    template,
-                    _cardContent,
-                    false);
-                cardObject.name = $"btnCodexCard_{cardIndex}";
-                cardObject.SetActive(true);
+                throw new InvalidOperationException(
+                    "CodexBrowserDesignerSettings.CardTemplate must " +
+                    "reference a prefab asset.");
             }
-            else
-            {
-                cardObject = GetOrCreateChild(
-                    _cardContent,
-                    $"btnCodexCard_{cardIndex}",
-                    typeof(RectTransform),
-                    typeof(CanvasRenderer),
-                    typeof(Image),
-                    typeof(Button),
-                    typeof(Outline));
-            }
+
+            GameObject cardObject = UnityEngine.Object.Instantiate(
+                template,
+                _cardContent,
+                false);
+            cardObject.name = $"btnCodexCard_{cardIndex}";
+            cardObject.SetActive(true);
             Image background = cardObject.GetComponent<Image>();
             Button button = cardObject.GetComponent<Button>();
-            button.targetGraphic = background;
             Outline outline = cardObject.GetComponent<Outline>();
-            outline.effectDistance = new Vector2(3f, -3f);
-            outline.enabled = false;
 
-            GameObject iconObject = GetOrCreateChild(
-                cardObject.transform,
-                "imgCodexCardIcon",
-                typeof(RectTransform),
-                typeof(CanvasRenderer),
-                typeof(Image));
-            RectTransform iconRect = (RectTransform)iconObject.transform;
-            iconRect.anchorMin = new Vector2(0f, 0.285f);
-            iconRect.anchorMax = Vector2.one;
-            iconRect.offsetMin = new Vector2(8f, 8f);
-            iconRect.offsetMax = new Vector2(-8f, -8f);
-            Image icon = iconObject.GetComponent<Image>();
-            icon.preserveAspect = true;
-            icon.raycastTarget = false;
-
-            TextMeshProUGUI fallbackIcon = GetOrCreateText(
-                iconObject.transform,
-                "txtCodexCardFallbackIcon",
-                54f,
-                TextAlignmentOptions.Center);
-            StretchToParent(fallbackIcon.rectTransform);
-            fallbackIcon.fontStyle = FontStyles.Bold;
-
-            GameObject namePlateObject = GetOrCreateChild(
-                cardObject.transform,
-                "grpCodexCardNamePlate",
-                typeof(RectTransform),
-                typeof(CanvasRenderer),
-                typeof(Image));
-            RectTransform namePlateRect =
-                (RectTransform)namePlateObject.transform;
-            namePlateRect.anchorMin = Vector2.zero;
-            namePlateRect.anchorMax = new Vector2(1f, 0.285f);
-            namePlateRect.offsetMin = new Vector2(5f, 5f);
-            namePlateRect.offsetMax = new Vector2(-5f, -3f);
-            Image namePlate = namePlateObject.GetComponent<Image>();
-            namePlate.color = new Color(0.025f, 0.035f, 0.03f, 0.9f);
-            namePlate.raycastTarget = false;
-
-            TextMeshProUGUI name = GetOrCreateText(
-                namePlateObject.transform,
-                "txtCodexCardName",
-                17f,
-                TextAlignmentOptions.Center);
-            StretchToParent(name.rectTransform);
-            name.rectTransform.offsetMin = new Vector2(5f, 3f);
-            name.rectTransform.offsetMax = new Vector2(-5f, -3f);
-            name.fontStyle = FontStyles.Bold;
+            Transform iconObject = cardObject.transform.Find(
+                "imgCodexCardIcon");
+            Image icon = iconObject != null
+                ? iconObject.GetComponent<Image>()
+                : null;
+            TextMeshProUGUI fallbackIcon = iconObject != null
+                ? iconObject.Find("txtCodexCardFallbackIcon")
+                    ?.GetComponent<TextMeshProUGUI>()
+                : null;
+            TextMeshProUGUI name = cardObject.transform.Find(
+                    "grpCodexCardNamePlate/txtCodexCardName")
+                ?.GetComponent<TextMeshProUGUI>();
+            if (background == null || button == null || outline == null ||
+                icon == null || fallbackIcon == null || name == null)
+            {
+                UnityEngine.Object.Destroy(cardObject);
+                throw new InvalidOperationException(
+                    "The Codex card prefab is missing required UI " +
+                    "components or named child references.");
+            }
 
             CardView card = new(
                 cardObject,
@@ -1640,41 +992,6 @@ public sealed class CodexBrowserView
             () => _itemSelected?.Invoke(selectedItemId));
     }
 
-    private static Button BuildToolbarButton(
-        Transform parent,
-        string objectName,
-        float preferredWidth,
-        out TextMeshProUGUI label)
-    {
-        GameObject buttonObject = GetOrCreateChild(
-            parent,
-            objectName,
-            typeof(RectTransform),
-            typeof(CanvasRenderer),
-            typeof(Image),
-            typeof(Button),
-            typeof(LayoutElement));
-        LayoutElement layout = buttonObject.GetComponent<LayoutElement>();
-        layout.minWidth = preferredWidth;
-        layout.preferredWidth = preferredWidth;
-        layout.flexibleWidth = 0f;
-        Image image = buttonObject.GetComponent<Image>();
-        image.color = CardColor;
-        image.raycastTarget = true;
-        Button button = buttonObject.GetComponent<Button>();
-        button.targetGraphic = image;
-        label = GetOrCreateText(
-            buttonObject.transform,
-            "txtLabel",
-            16f,
-            TextAlignmentOptions.Center);
-        StretchToParent(label.rectTransform);
-        label.rectTransform.offsetMin = new Vector2(4f, 2f);
-        label.rectTransform.offsetMax = new Vector2(-4f, -2f);
-        label.fontStyle = FontStyles.Bold;
-        return button;
-    }
-
     private void SubmitSearch()
     {
         _searchRequested?.Invoke(_searchInput.text ?? string.Empty);
@@ -1689,63 +1006,4 @@ public sealed class CodexBrowserView
         return trimmed.Substring(0, 1).ToUpperInvariant();
     }
 
-    private static TextMeshProUGUI GetOrCreateText(
-        Transform parent,
-        string objectName,
-        float fontSize,
-        TextAlignmentOptions alignment)
-    {
-        GameObject textObject = GetOrCreateChild(
-            parent,
-            objectName,
-            typeof(RectTransform),
-            typeof(TextMeshProUGUI));
-        TextMeshProUGUI text =
-            textObject.GetComponent<TextMeshProUGUI>();
-        LocalizationFontResolver.ApplyGameDefault(text);
-        text.fontSize = fontSize;
-        text.fontSizeMax = fontSize;
-        text.fontSizeMin = Mathf.Max(11f, fontSize - 6f);
-        text.enableAutoSizing = true;
-        text.color = CardTextColor;
-        text.alignment = alignment;
-        text.textWrappingMode = TextWrappingModes.Normal;
-        text.raycastTarget = false;
-        return text;
-    }
-
-    private static GameObject GetOrCreateChild(
-        Transform parent,
-        string objectName,
-        params Type[] componentTypes)
-    {
-        Transform existing = parent != null
-            ? parent.Find(objectName)
-            : null;
-        GameObject child;
-        if (existing != null)
-        {
-            child = existing.gameObject;
-            foreach (Type componentType in componentTypes)
-            {
-                if (child.GetComponent(componentType) == null)
-                    child.AddComponent(componentType);
-            }
-        }
-        else
-        {
-            child = new GameObject(objectName, componentTypes);
-            child.transform.SetParent(parent, false);
-        }
-
-        return child;
-    }
-
-    private static void StretchToParent(RectTransform rectTransform)
-    {
-        rectTransform.anchorMin = Vector2.zero;
-        rectTransform.anchorMax = Vector2.one;
-        rectTransform.offsetMin = Vector2.zero;
-        rectTransform.offsetMax = Vector2.zero;
-    }
 }

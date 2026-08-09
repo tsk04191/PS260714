@@ -57,7 +57,7 @@ public sealed class CharacterGradeIconStrip
     public float PreferredWidth { get; private set; }
     public int VisibleIconCount { get; private set; }
 
-    public static CharacterGradeIconStrip GetOrCreate(
+    public static CharacterGradeIconStrip Bind(
         Transform parent,
         string objectName,
         float iconSize,
@@ -66,22 +66,15 @@ public sealed class CharacterGradeIconStrip
         Transform existing = parent != null
             ? parent.Find(objectName)
             : null;
-        GameObject root;
-        if (existing != null)
+        if (existing == null ||
+            existing.GetComponent<RectTransform>() == null ||
+            existing.GetComponent<HorizontalLayoutGroup>() == null)
         {
-            root = existing.gameObject;
-            if (root.GetComponent<RectTransform>() == null)
-                root.AddComponent<RectTransform>();
-        }
-        else
-        {
-            root = new GameObject(
-                objectName,
-                typeof(RectTransform));
-            root.transform.SetParent(parent, false);
+            throw new InvalidOperationException(
+                $"The authored grade icon strip '{objectName}' is incomplete.");
         }
 
-        CharacterGradeIconStrip strip = new(root);
+        CharacterGradeIconStrip strip = new(existing.gameObject);
         strip.Configure(iconSize, spacing);
         return strip;
     }
@@ -117,8 +110,6 @@ public sealed class CharacterGradeIconStrip
             ? iconCount * _iconSize +
               (iconCount - 1) * _spacing
             : 0f;
-        RectTransform.sizeDelta =
-            new Vector2(PreferredWidth, _iconSize);
         _root.SetActive(iconCount > 0);
         LayoutRebuilder.MarkLayoutForRebuild(RectTransform);
     }
@@ -128,15 +119,6 @@ public sealed class CharacterGradeIconStrip
         _iconSize = Mathf.Max(1f, iconSize);
         _spacing = Mathf.Max(0f, spacing);
         _layout = _root.GetComponent<HorizontalLayoutGroup>();
-        if (_layout == null)
-            _layout = _root.AddComponent<HorizontalLayoutGroup>();
-        _layout.padding = new RectOffset();
-        _layout.spacing = _spacing;
-        _layout.childAlignment = TextAnchor.MiddleLeft;
-        _layout.childControlWidth = true;
-        _layout.childControlHeight = true;
-        _layout.childForceExpandWidth = false;
-        _layout.childForceExpandHeight = false;
         CaptureExistingIcons();
     }
 
@@ -162,28 +144,11 @@ public sealed class CharacterGradeIconStrip
 
     private void EnsureIconCount(int count)
     {
-        while (_icons.Count < count)
+        if (_icons.Count < count)
         {
-            int index = _icons.Count;
-            GameObject iconObject = new(
-                $"imgCharacterGrade_{index}",
-                typeof(RectTransform),
-                typeof(CanvasRenderer),
-                typeof(Image),
-                typeof(LayoutElement));
-            iconObject.transform.SetParent(_root.transform, false);
-
-            Image icon = iconObject.GetComponent<Image>();
-            icon.raycastTarget = false;
-            LayoutElement layout =
-                iconObject.GetComponent<LayoutElement>();
-            layout.minWidth = _iconSize;
-            layout.preferredWidth = _iconSize;
-            layout.minHeight = _iconSize;
-            layout.preferredHeight = _iconSize;
-            layout.flexibleWidth = 0f;
-            layout.flexibleHeight = 0f;
-            _icons.Add(icon);
+            throw new InvalidOperationException(
+                $"Grade icon strip '{_root.name}' requires {count} authored icons, " +
+                $"but only {_icons.Count} are available.");
         }
 
         foreach (Image icon in _icons)
@@ -191,11 +156,10 @@ public sealed class CharacterGradeIconStrip
             LayoutElement layout =
                 icon.GetComponent<LayoutElement>();
             if (layout == null)
-                layout = icon.gameObject.AddComponent<LayoutElement>();
-            layout.minWidth = _iconSize;
-            layout.preferredWidth = _iconSize;
-            layout.minHeight = _iconSize;
-            layout.preferredHeight = _iconSize;
+            {
+                throw new InvalidOperationException(
+                    $"Grade icon '{icon.name}' requires an authored LayoutElement.");
+            }
         }
     }
 }

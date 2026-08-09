@@ -6,57 +6,6 @@ using UnityEditor.SceneManagement;
 using UnityEngine;
 using UnityEngine.SceneManagement;
 
-[InitializeOnLoad]
-public static class DesignerUiSceneSaveCoordinator
-{
-    private const string ClientScenePath = "Assets/Scenes/ClientScene.unity";
-    private static bool _synchronizing;
-
-    static DesignerUiSceneSaveCoordinator()
-    {
-        EditorSceneManager.sceneSaving += HandleSceneSaving;
-    }
-
-    private static void HandleSceneSaving(Scene scene, string path)
-    {
-        if (_synchronizing ||
-            EditorApplication.isPlayingOrWillChangePlaymode ||
-            !scene.IsValid() ||
-            !scene.isLoaded ||
-            path != ClientScenePath)
-        {
-            return;
-        }
-
-        _synchronizing = true;
-        try
-        {
-            foreach (GameObject root in scene.GetRootGameObjects())
-            {
-                foreach (StageSelectPage page in
-                         root.GetComponentsInChildren<StageSelectPage>(true))
-                {
-                    if (!page.SyncEditorUi(out string error))
-                        Debug.LogError(error, page);
-                }
-
-                foreach (MainSubPage page in
-                         root.GetComponentsInChildren<MainSubPage>(true))
-                {
-                    if (!page.IsRecruitPage)
-                        continue;
-                    if (!page.SyncRecruitEditorPreview(0, 0, out string error))
-                        Debug.LogError(error, page);
-                }
-            }
-        }
-        finally
-        {
-            _synchronizing = false;
-        }
-    }
-}
-
 public sealed class DesignerUiBuildValidator : IPreprocessBuildWithReport
 {
     private const string ClientScenePath = "Assets/Scenes/ClientScene.unity";

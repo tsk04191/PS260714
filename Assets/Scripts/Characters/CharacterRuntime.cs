@@ -399,12 +399,14 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
         CharacterAbilityIconKind.Active;
     private readonly Dictionary<string, CharacterBuffIconView>
         _buffIconViews = new(System.StringComparer.Ordinal);
+    private readonly List<CharacterBuffIconView> _buffIconPool = new();
     private readonly HashSet<string> _activeBuffIconIds =
         new(System.StringComparer.Ordinal);
     private readonly List<string> _staleBuffIconIds = new();
     private readonly List<StatusEffectRuntimeState> _displayedBuffStates =
         new();
     private bool _buffIconPrefabErrorLogged;
+    private bool _buffIconPoolPrepared;
     private readonly Dictionary<CharacterPassiveDefinition, float>
         _passiveCooldowns = new();
     private bool _lastAttackAttempted;
@@ -4948,6 +4950,8 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
         if (resolvedPrefab == null)
             return;
 
+        PrepareBuffIconPool();
+
         _displayedBuffStates.Clear();
         foreach (StatusEffectRuntimeState state in _statusEffects.Values)
         {
@@ -4975,14 +4979,12 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
                     out CharacterBuffIconView view) ||
                 view == null)
             {
-                view = Instantiate(
-                    resolvedPrefab,
-                    buffIconContainer,
-                    false);
+                view = AcquireBuffIconView(resolvedPrefab);
                 view.name = $"icoBuff_{statusId.Replace('.', '_')}";
                 _buffIconViews[statusId] = view;
             }
 
+            view.gameObject.SetActive(true);
             view.transform.SetSiblingIndex(index);
             view.Refresh(
                 state.Definition.Icon,
@@ -5007,11 +5009,47 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
                 continue;
 
             view.gameObject.SetActive(false);
-            if (Application.isPlaying)
-                Destroy(view.gameObject);
-            else
-                DestroyImmediate(view.gameObject);
         }
+    }
+
+    private void PrepareBuffIconPool()
+    {
+        if (_buffIconPoolPrepared || buffIconContainer == null)
+            return;
+
+        _buffIconPoolPrepared = true;
+        for (int index = 0; index < buffIconContainer.childCount; index++)
+        {
+            CharacterBuffIconView view = buffIconContainer.GetChild(index)
+                .GetComponent<CharacterBuffIconView>();
+            if (view == null || _buffIconPool.Contains(view))
+                continue;
+
+            view.gameObject.SetActive(false);
+            _buffIconPool.Add(view);
+        }
+    }
+
+    private CharacterBuffIconView AcquireBuffIconView(
+        CharacterBuffIconView prefab)
+    {
+        for (int index = 0; index < _buffIconPool.Count; index++)
+        {
+            CharacterBuffIconView candidate = _buffIconPool[index];
+            if (candidate != null &&
+                !_buffIconViews.ContainsValue(candidate))
+            {
+                return candidate;
+            }
+        }
+
+        CharacterBuffIconView instance = Instantiate(
+            prefab,
+            buffIconContainer,
+            false);
+        instance.gameObject.SetActive(false);
+        _buffIconPool.Add(instance);
+        return instance;
     }
 
     private CharacterBuffIconView ResolveBuffIconPrefab()

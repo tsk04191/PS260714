@@ -216,76 +216,32 @@ public sealed class EnemyCodexPage : RuntimeMenuPageBase
 
     private void BuildDetailPanel(Transform parent)
     {
-        bool created = parent.Find("grpEnemyDetail") == null;
-        GameObject detailObject = GetOrCreateChild(
-            parent,
-            "grpEnemyDetail",
-            typeof(RectTransform),
-            typeof(CanvasRenderer),
-            typeof(Image),
-            typeof(VerticalLayoutGroup),
-            typeof(LayoutElement));
-        _detailPanelImage = detailObject.GetComponent<Image>();
-        if (created)
+        Transform detail = parent?.Find("grpEnemyDetail");
+        if (detail == null)
         {
-            _detailPanelImage.color = PanelColor;
-            _detailPanelImage.raycastTarget = false;
-
-            LayoutElement detailLayout =
-                detailObject.GetComponent<LayoutElement>();
-            detailLayout.preferredHeight = 400f;
-            detailLayout.flexibleHeight = 1f;
-
-            VerticalLayoutGroup layout =
-                detailObject.GetComponent<VerticalLayoutGroup>();
-            layout.padding = new RectOffset(28, 28, 22, 22);
-            layout.spacing = 8f;
-            layout.childAlignment = TextAnchor.UpperCenter;
-            layout.childControlWidth = true;
-            layout.childControlHeight = true;
-            layout.childForceExpandWidth = true;
-            layout.childForceExpandHeight = false;
+            Debug.LogError(
+                "Enemy detail UI must be authored in the Scene.",
+                this);
+            return;
         }
 
+        _detailPanelImage = detail.GetComponent<Image>();
         _detailTitle = CreateContentText(
-            detailObject.transform,
-            "txtEnemyName",
-            string.Empty,
-            38f,
-            58f,
+            detail, "txtEnemyName", string.Empty, 38f, 58f,
             FontStyles.Bold);
         _identityText = CreateContentText(
-            detailObject.transform,
-            "txtEnemyIdentity",
-            string.Empty,
-            20f,
-            42f,
+            detail, "txtEnemyIdentity", string.Empty, 20f, 42f,
             FontStyles.Bold);
         _enemyDescriptionText = CreateContentText(
-            detailObject.transform,
-            "txtEnemyDescription",
-            string.Empty,
-            19f,
-            54f);
+            detail, "txtEnemyDescription", string.Empty, 19f, 54f);
         _statText = CreateContentText(
-            detailObject.transform,
-            "txtEnemyStats",
-            string.Empty,
-            22f,
-            92f);
+            detail, "txtEnemyStats", string.Empty, 22f, 92f);
         _abilityTitleText = CreateContentText(
-            detailObject.transform,
-            "txtAbilityTitle",
+            detail, "txtAbilityTitle",
             LocalizationService.Get(LocalizationKeys.CodexEnemyAbility),
-            20f,
-            32f,
-            FontStyles.Bold);
+            20f, 32f, FontStyles.Bold);
         _abilityText = CreateContentText(
-            detailObject.transform,
-            "txtEnemyAbility",
-            string.Empty,
-            21f,
-            108f);
+            detail, "txtEnemyAbility", string.Empty, 21f, 108f);
     }
 
     private void RefreshBrowser()
@@ -605,30 +561,6 @@ public sealed class EnemyCodexPage : RuntimeMenuPageBase
             EEnemyGrade.Boss => new Color(0.72f, 0.2f, 0.18f, 1f),
             _ => new Color(0.22f, 0.48f, 0.64f, 1f),
         };
-    }
-
-    private static GameObject GetOrCreateChild(
-        Transform parent,
-        string objectName,
-        params Type[] componentTypes)
-    {
-        Transform existing = parent != null
-            ? parent.Find(objectName)
-            : null;
-        if (existing != null)
-            return existing.gameObject;
-
-        GameObject child = new(objectName, componentTypes);
-        child.transform.SetParent(parent, false);
-        return child;
-    }
-
-    private static void StretchToParent(RectTransform rectTransform)
-    {
-        rectTransform.anchorMin = Vector2.zero;
-        rectTransform.anchorMax = Vector2.one;
-        rectTransform.offsetMin = Vector2.zero;
-        rectTransform.offsetMax = Vector2.zero;
     }
 
     private static void ReleaseTemporaryDefinition(EnemySO definition)

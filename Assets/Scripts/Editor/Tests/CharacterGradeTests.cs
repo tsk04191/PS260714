@@ -1,8 +1,12 @@
 using System;
+using System.Collections.Generic;
 using System.Reflection;
+using System.Linq;
 using NUnit.Framework;
 using UnityEditor;
+using UnityEditor.SceneManagement;
 using UnityEngine;
+using UnityEngine.SceneManagement;
 using UnityEngine.UI;
 
 public sealed class CharacterGradeTests
@@ -75,47 +79,47 @@ public sealed class CharacterGradeTests
     }
 
     [Test]
-    public void OperatorRoster_UsesUpperLeftFlowAndGradeColors()
+    public void OperatorRoster_PreservesAuthoredGridAndUsesGradeColors()
     {
-        GameObject host = new(
-            "OperatorRosterGradeTest",
-            typeof(RectTransform));
+        Scene scene = OpenClientScene(out bool opened);
         try
         {
+            Transform roster = FindSceneTransform(
+                scene,
+                "grpOperatorRoster");
+            Assert.That(roster, Is.Not.Null);
             CharacterGradeStyle style =
                 CharacterGradePresentation.GetStyle(
                     CharacterGrade.Grade2);
+            CharacterRoleSO role = AssetDatabase.LoadAssetAtPath<
+                CharacterRoleSO>(
+                "Assets/Resources/Presentation/Roles/RoleScout.asset");
+            Assert.That(role, Is.Not.Null);
+            Assert.That(role.IconSprite, Is.Not.Null);
+            Transform content = roster.Find(
+                "scrRosterList/vptRosterList/" +
+                "grpRosterCardContent");
+            GridLayoutGroup grid =
+                content?.GetComponent<GridLayoutGroup>();
+            Assert.That(grid, Is.Not.Null);
+            GridLayoutGroup.Corner authoredCorner = grid.startCorner;
+            GridLayoutGroup.Axis authoredAxis = grid.startAxis;
+            TextAnchor authoredAlignment = grid.childAlignment;
             OperatorRosterView view =
-                OperatorRosterView.Build(host.transform);
+                OperatorRosterView.Build(roster.parent);
             view.SetItems(new[]
             {
                 new OperatorRosterItemModel(
                     "operator-grade-2",
                     "GRADE 2",
                     null,
-                    null,
+                    role.IconSprite,
                     CharacterGrade.Grade2,
                     style.BackgroundColor,
                     style.PrimaryColor,
                     style.OutlineColor,
                     style.TextColor),
             });
-
-            Transform content = host.transform.Find(
-                "grpOperatorRoster/scrRosterList/vptRosterList/" +
-                "grpRosterCardContent");
-            GridLayoutGroup grid =
-                content?.GetComponent<GridLayoutGroup>();
-            Assert.That(grid, Is.Not.Null);
-            Assert.That(
-                grid.startCorner,
-                Is.EqualTo(GridLayoutGroup.Corner.UpperLeft));
-            Assert.That(
-                grid.startAxis,
-                Is.EqualTo(GridLayoutGroup.Axis.Horizontal));
-            Assert.That(
-                grid.childAlignment,
-                Is.EqualTo(TextAnchor.UpperLeft));
 
             Transform card = content.Find("btnOperatorCard_0");
             Assert.That(
@@ -128,10 +132,34 @@ public sealed class CharacterGradeTests
             Assert.That(
                 card.GetComponent<Outline>().effectColor,
                 Is.EqualTo(style.OutlineColor));
-            Transform gradeIcons = card.Find(
-                "imgOperatorNamePlate/grpOperatorGradeIcons");
+            Assert.That(card.Find("grpOperatorMark"), Is.Null);
+            Transform roleRoot = card.Find(
+                "imgOperatorNamePlate/grpOperatorRole");
+            Assert.That(roleRoot, Is.Not.Null);
+            Assert.That(roleRoot.gameObject.activeSelf, Is.True);
+            Assert.That(
+                roleRoot.Find("imgOperatorRoleIcon")
+                    ?.GetComponent<Image>()?.sprite,
+                Is.SameAs(role.IconSprite));
+            Transform gradeIcons = card.Find("grpOperatorGradeIcons");
+            Assert.That(gradeIcons, Is.Not.Null);
+            Assert.That(gradeIcons.parent, Is.SameAs(card));
             Assert.That(gradeIcons.gameObject.activeSelf, Is.True);
-            Assert.That(gradeIcons.childCount, Is.EqualTo(2));
+            RectTransform gradeRect = gradeIcons as RectTransform;
+            Assert.That(gradeRect.anchorMin, Is.EqualTo(Vector2.right));
+            Assert.That(gradeRect.anchorMax, Is.EqualTo(Vector2.right));
+            Assert.That(gradeRect.pivot, Is.EqualTo(Vector2.right));
+            HorizontalLayoutGroup gradeLayout =
+                gradeIcons.GetComponent<HorizontalLayoutGroup>();
+            Assert.That(
+                gradeLayout.childAlignment,
+                Is.EqualTo(TextAnchor.MiddleRight));
+            Assert.That(gradeLayout.reverseArrangement, Is.True);
+            Assert.That(gradeIcons.childCount, Is.EqualTo(3));
+            Assert.That(
+                gradeIcons.Cast<Transform>().Count(icon =>
+                    icon.gameObject.activeSelf),
+                Is.EqualTo(2));
             for (int index = 0;
                  index < gradeIcons.childCount;
                  index++)
@@ -141,23 +169,34 @@ public sealed class CharacterGradeTests
                         .GetComponent<Image>().color,
                     Is.EqualTo(Color.white));
             }
+            Assert.That(grid.startCorner, Is.EqualTo(authoredCorner));
+            Assert.That(grid.startAxis, Is.EqualTo(authoredAxis));
+            Assert.That(grid.childAlignment, Is.EqualTo(authoredAlignment));
         }
         finally
         {
-            UnityEngine.Object.DestroyImmediate(host);
+            if (opened)
+                EditorSceneManager.CloseScene(scene, true);
         }
     }
 
     [Test]
-    public void OperatorDetail_ShowsGradeIconsBesideName()
+    public void OperatorDetail_UsesRequestedThreeColumnLayout()
     {
-        GameObject host = new(
-            "OperatorDetailGradeTest",
-            typeof(RectTransform));
+        Scene scene = OpenClientScene(out bool opened);
         try
         {
+            Transform detail = FindSceneTransform(
+                scene,
+                "grpOperatorDetail");
+            Assert.That(detail, Is.Not.Null);
             OperatorDetailView view =
-                OperatorDetailView.Build(host.transform);
+                OperatorDetailView.Build(detail.parent);
+            bool? toggleRequest = null;
+            view.SetCallbacks(
+                null,
+                null,
+                selected => toggleRequest = selected);
             view.SetData(new OperatorDetailModel(
                 "GRADE 3 OPERATOR",
                 "operator-grade-3",
@@ -177,13 +216,43 @@ public sealed class CharacterGradeTests
                 Array.Empty<OperatorAbilityIconModel>(),
                 string.Empty,
                 string.Empty,
-                false,
+                true,
                 string.Empty));
 
-            Transform gradeIcons = host.transform.Find(
-                "grpOperatorDetail/grpOperatorDetailHeader/" +
-                "grpOperatorDetailGradeIcons");
+            Transform visual = detail.Find("grpOperatorDetailVisual");
+            Transform center = detail.Find("grpOperatorDetailCenter");
+            Transform right = detail.Find("grpOperatorDetailRight");
+            Assert.That(visual, Is.Not.Null);
+            Assert.That(center, Is.Not.Null);
+            Assert.That(right, Is.Not.Null);
+
+            Transform representative = visual.Find(
+                "tglLobbyRepresentative");
+            Assert.That(representative, Is.Not.Null);
+            Assert.That(representative.GetComponent<Toggle>(), Is.Null);
+            Transform toggle = representative.Find("btnToggle");
+            Assert.That(toggle, Is.Not.Null);
+            ToggleSliderController toggleController =
+                toggle.GetComponent<ToggleSliderController>();
+            Assert.That(toggleController, Is.Not.Null);
+            Assert.That(toggleController.Value, Is.True);
+            GameObject toggleSource = PrefabUtility
+                .GetCorrespondingObjectFromSource(toggle.gameObject);
+            Assert.That(toggleSource, Is.Not.Null);
+            Assert.That(
+                AssetDatabase.GetAssetPath(toggleSource),
+                Is.EqualTo("Assets/Prefabs/UI/Util/btnToggle.prefab"));
+            toggleController.OnClick();
+            Assert.That(toggleController.Value, Is.False);
+            Assert.That(toggleRequest, Is.False);
+
+            RectTransform gradeIcons = visual.Find(
+                    "grpOperatorDetailGradeIcons")
+                as RectTransform;
+            Assert.That(gradeIcons, Is.Not.Null);
             Assert.That(gradeIcons.gameObject.activeSelf, Is.True);
+            Assert.That(gradeIcons.anchorMin, Is.EqualTo(Vector2.up));
+            Assert.That(gradeIcons.anchorMax, Is.EqualTo(Vector2.up));
             Assert.That(gradeIcons.childCount, Is.EqualTo(3));
             for (int index = 0;
                  index < gradeIcons.childCount;
@@ -194,11 +263,242 @@ public sealed class CharacterGradeTests
                         .GetComponent<Image>().color,
                     Is.EqualTo(Color.white));
             }
+
+            RectTransform stat0 = center.Find("grpOperatorStat_0")
+                as RectTransform;
+            RectTransform stat2 = center.Find("grpOperatorStat_2")
+                as RectTransform;
+            RectTransform stat4 = center.Find("grpOperatorStat_4")
+                as RectTransform;
+            Assert.That(stat0, Is.Not.Null);
+            Assert.That(stat2, Is.Not.Null);
+            Assert.That(stat4, Is.Not.Null);
+            Assert.That(
+                stat0.anchoredPosition.y - stat0.rect.height,
+                Is.GreaterThan(stat2.anchoredPosition.y));
+            Assert.That(
+                stat2.anchoredPosition.y - stat2.rect.height,
+                Is.GreaterThan(stat4.anchoredPosition.y));
+
+            RectTransform equipmentTitle = center.Find(
+                    "txtEquipmentTitle")
+                as RectTransform;
+            Assert.That(equipmentTitle, Is.Not.Null);
+            Assert.That(
+                stat4.anchoredPosition.y - stat4.rect.height,
+                Is.GreaterThan(equipmentTitle.anchoredPosition.y));
+            for (int index = 0; index < 6; index++)
+            {
+                Assert.That(
+                    center.Find($"grpEquipmentSlot_{index}"),
+                    Is.Not.Null);
+            }
+
+            RectTransform attack = right.Find(
+                    "grpOperatorBasicAttack")
+                as RectTransform;
+            RectTransform passives = right.Find(
+                    "grpOperatorPassives")
+                as RectTransform;
+            RectTransform skills = right.Find("grpOperatorSkills")
+                as RectTransform;
+            Assert.That(attack, Is.Not.Null);
+            Assert.That(passives, Is.Not.Null);
+            Assert.That(skills, Is.Not.Null);
+            Assert.That(
+                attack.anchorMin.y,
+                Is.GreaterThan(passives.anchorMax.y));
+            Assert.That(
+                passives.anchorMin.y,
+                Is.GreaterThan(skills.anchorMax.y));
         }
         finally
         {
-            UnityEngine.Object.DestroyImmediate(host);
+            if (opened)
+                EditorSceneManager.CloseScene(scene, true);
         }
+    }
+
+    [Test]
+    public void ClientScene_FixedUiComponentsSurviveSceneReload()
+    {
+        Scene scene = OpenClientScene(out bool opened);
+        try
+        {
+            List<string> missingScripts = new();
+            foreach (GameObject root in scene.GetRootGameObjects())
+            {
+                foreach (Transform item in
+                         root.GetComponentsInChildren<Transform>(true))
+                {
+                    if (item.GetComponents<Component>()
+                        .Any(component => component == null))
+                    {
+                        missingScripts.Add(item.name);
+                    }
+                }
+            }
+
+            Assert.That(
+                missingScripts,
+                Is.Empty,
+                "ClientScene contains missing scripts: " +
+                string.Join(", ", missingScripts));
+
+            MainSubPage rosterPage = FindSceneTransform(scene, "pagRoster")
+                ?.GetComponent<MainSubPage>();
+            Assert.That(rosterPage, Is.Not.Null);
+            SerializedObject rosterSerialized = new(rosterPage);
+            RectTransform rosterPanel = rosterSerialized
+                .FindProperty("_panel").objectReferenceValue as RectTransform;
+            Assert.That(rosterPanel, Is.Not.Null);
+            Assert.That(rosterPanel.anchorMin, Is.EqualTo(Vector2.zero));
+            Assert.That(rosterPanel.anchorMax, Is.EqualTo(Vector2.one));
+            Assert.That(rosterPanel.sizeDelta, Is.EqualTo(Vector2.zero));
+
+            Transform rosterContent = FindSceneTransform(
+                scene,
+                "grpRosterCardContent");
+            Assert.That(
+                rosterContent?.GetComponent<ResponsiveGridConstraint>(),
+                Is.Not.Null);
+
+            CharacterCodexPage characterPage = FindSceneTransform(
+                    scene,
+                    "pagCharacterCodex")
+                ?.GetComponent<CharacterCodexPage>();
+            Assert.That(characterPage, Is.Not.Null);
+            SerializedObject characterSerialized = new(characterPage);
+            RectTransform characterRoot = characterSerialized
+                .FindProperty("_runtimeRoot")
+                .objectReferenceValue as RectTransform;
+            Assert.That(characterRoot, Is.Not.Null);
+            Transform operatorDetail = characterRoot.Find(
+                "grpOperatorDetail");
+            Transform characterBackButton = characterRoot.Find(
+                "btnBACKTOCODEX");
+            Assert.That(operatorDetail, Is.Not.Null);
+            Assert.That(characterBackButton, Is.Not.Null);
+            Assert.That(characterBackButton.gameObject.activeSelf, Is.True);
+            Assert.That(
+                characterBackButton.GetComponent<Button>(),
+                Is.Not.Null);
+            Assert.That(
+                characterBackButton.Find("txtLabel")
+                    ?.GetComponent<TMPro.TextMeshProUGUI>(),
+                Is.Not.Null);
+            Assert.That(
+                characterBackButton.GetSiblingIndex(),
+                Is.GreaterThan(operatorDetail.GetSiblingIndex()),
+                "Character detail back button must render above the " +
+                "full-screen operator detail layout.");
+
+            DungeonPage dungeonPage = FindSceneTransform(scene, "pagDungeon")
+                ?.GetComponent<DungeonPage>();
+            Assert.That(dungeonPage, Is.Not.Null);
+            SerializedObject dungeonSerialized = new(dungeonPage);
+            Assert.That(
+                dungeonSerialized.FindProperty("characterInfoPrefab")
+                    .objectReferenceValue,
+                Is.Not.Null);
+
+            DungeonBattleTab battleTab = dungeonSerialized
+                .FindProperty("battleTab").objectReferenceValue
+                as DungeonBattleTab;
+            Assert.That(battleTab, Is.Not.Null);
+            SerializedObject battleSerialized = new(battleTab);
+            Assert.That(
+                battleSerialized.FindProperty("_pausePanelFitter")
+                    .objectReferenceValue,
+                Is.Not.Null);
+            Assert.That(
+                battleSerialized.FindProperty("_activeSkillResourceView")
+                    .objectReferenceValue,
+                Is.Not.Null);
+            DungeonActiveSkillResourceView activeSkillResourceView =
+                battleSerialized.FindProperty("_activeSkillResourceView")
+                    .objectReferenceValue
+                as DungeonActiveSkillResourceView;
+            Assert.That(activeSkillResourceView, Is.Not.Null);
+            SerializedObject resourceSerialized =
+                new(activeSkillResourceView);
+            string[] requiredResourceReferences =
+            {
+                "_iconImage",
+                "_cooldownOverlay",
+                "_fallbackIconText",
+                "_amountText",
+                "_tooltipText",
+                "_tooltip",
+            };
+            foreach (string propertyName in requiredResourceReferences)
+            {
+                Assert.That(
+                    resourceSerialized.FindProperty(propertyName)
+                        .objectReferenceValue,
+                    Is.Not.Null,
+                    $"Active skill resource reference is missing: " +
+                    propertyName);
+            }
+            Assert.That(
+                battleSerialized.FindProperty("_itemHandView")
+                    .objectReferenceValue,
+                Is.Not.Null);
+
+            MethodInfo validateReferences = typeof(DungeonBattleTab)
+                .GetMethod(
+                    "ValidateReferences",
+                    BindingFlags.Instance | BindingFlags.NonPublic);
+            Assert.That(validateReferences, Is.Not.Null);
+            Assert.That(
+                (bool)validateReferences.Invoke(battleTab, null),
+                Is.True);
+
+            Transform attendancePanel = FindSceneTransform(
+                scene,
+                "grpAttendancePanel");
+            Assert.That(
+                attendancePanel?.GetComponent<ResponsivePanelFitter>(),
+                Is.Not.Null);
+
+            GameObject rewardCard = AssetDatabase.LoadAssetAtPath<GameObject>(
+                "Assets/Resources/Presentation/DungeonRewardCard.prefab");
+            Assert.That(rewardCard, Is.Not.Null);
+            Assert.That(
+                rewardCard.GetComponent<DungeonRewardCardHoverView>(),
+                Is.Not.Null);
+            Assert.That(
+                rewardCard.GetComponents<Component>()
+                    .Any(component => component == null),
+                Is.False);
+        }
+        finally
+        {
+            if (opened)
+                EditorSceneManager.CloseScene(scene, true);
+        }
+    }
+
+    private static Scene OpenClientScene(out bool opened)
+    {
+        const string path = "Assets/Scenes/ClientScene.unity";
+        Scene scene = SceneManager.GetSceneByPath(path);
+        opened = !scene.IsValid() || !scene.isLoaded;
+        return opened
+            ? EditorSceneManager.OpenScene(path, OpenSceneMode.Additive)
+            : scene;
+    }
+
+    private static Transform FindSceneTransform(Scene scene, string name)
+    {
+        foreach (GameObject root in scene.GetRootGameObjects())
+        {
+            Transform match = root.GetComponentsInChildren<Transform>(true)
+                .FirstOrDefault(item => item.name == name);
+            if (match != null)
+                return match;
+        }
+        return null;
     }
 }
 

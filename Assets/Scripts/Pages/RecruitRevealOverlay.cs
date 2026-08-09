@@ -67,7 +67,7 @@ public sealed class RecruitRevealOverlay
         MonoBehaviour runner,
         Transform host)
     {
-        return BuildInternal(runner, host, false);
+        return BuildInternal(runner, host);
     }
 
 #if UNITY_EDITOR
@@ -75,14 +75,13 @@ public sealed class RecruitRevealOverlay
         MonoBehaviour runner,
         Transform host)
     {
-        return BuildInternal(runner, host, true);
+        return BuildInternal(runner, host);
     }
 #endif
 
     private static RecruitRevealOverlay BuildInternal(
         MonoBehaviour runner,
-        Transform host,
-        bool allowEditorCreation)
+        Transform host)
     {
         if (runner == null || host == null)
             return null;
@@ -102,20 +101,9 @@ public sealed class RecruitRevealOverlay
                     "rebuilding the scene layout.");
             }
 
-            if (!allowEditorCreation)
-            {
-                throw new InvalidOperationException(
-                    "The saved recruit reveal UI is missing. Synchronize " +
-                    "the Recruit editor and save the scene before entering " +
-                    "Play Mode.");
-            }
-
-            overlay.BuildLayout();
-            if (!overlay.TryBindDesignerLayout())
-            {
-                throw new InvalidOperationException(
-                    "Failed to build the recruit reveal designer layout.");
-            }
+            throw new InvalidOperationException(
+                "The saved recruit reveal UI is missing. Repair the Scene " +
+                "hierarchy and designer bindings.");
         }
         overlay.WireButtons();
         overlay.CancelAndHide(false);
@@ -130,22 +118,14 @@ public sealed class RecruitRevealOverlay
         _designerBindings ??=
             _root.GetComponent<RecruitRevealDesignerBindings>();
         if (_designerBindings == null)
-        {
-            _designerBindings =
-                UnityEditor.Undo.AddComponent<
-                    RecruitRevealDesignerBindings>(
-                    _root.gameObject);
-        }
+            return false;
 
         if (!_designerBindings.HasRequiredReferences &&
             !_designerBindings.CaptureReferencesFromHierarchy())
         {
             return false;
         }
-        for (int index = 0; index < _rows.Count; index++)
-            _rows[index].EnsureRewardIconSlot();
         if (!_designerBindings.HasDesignerLayout)
-            _root.SetAsLastSibling();
         _designerBindings.MarkDesignerLayoutCurrent();
         UnityEditor.EditorUtility.SetDirty(_root.gameObject);
         return true;
@@ -224,7 +204,6 @@ public sealed class RecruitRevealOverlay
         _shownAt = Time.unscaledTime;
         _canvasGroup.alpha = 0f;
         _root.gameObject.SetActive(true);
-        _root.SetAsLastSibling();
 
         _title.text = korean
             ? "모집 행선 정보"
@@ -499,8 +478,6 @@ public sealed class RecruitRevealOverlay
         if (_designerBindings == null)
             return false;
         if (!_designerBindings.HasRequiredReferences)
-            _designerBindings.CaptureReferencesFromHierarchy();
-        if (!_designerBindings.HasRequiredReferences)
             return false;
 
         _root = _designerBindings.Root;
@@ -535,134 +512,6 @@ public sealed class RecruitRevealOverlay
         return _rows.Count == _presentation.MaximumRows;
     }
 
-    private void BuildLayout()
-    {
-        GameObject rootObject = GetOrCreateUiObject(
-            _host,
-            RootName,
-            typeof(CanvasRenderer),
-            typeof(Image),
-            typeof(Button),
-            typeof(CanvasGroup),
-            typeof(RecruitRevealDesignerBindings));
-        _root = (RectTransform)rootObject.transform;
-        Stretch(_root);
-        _backdrop = rootObject.GetComponent<Image>();
-        _backdrop.color = _presentation.BackdropColor;
-        _backdrop.raycastTarget = true;
-        _backdropButton = rootObject.GetComponent<Button>();
-        _backdropButton.targetGraphic = _backdrop;
-        _backdropButton.transition = Selectable.Transition.None;
-        _canvasGroup = rootObject.GetComponent<CanvasGroup>();
-        _canvasGroup.blocksRaycasts = true;
-        _canvasGroup.interactable = true;
-
-        GameObject accentObject = GetOrCreateUiObject(
-            _root,
-            "imgRevealTopAccent",
-            typeof(CanvasRenderer),
-            typeof(Image));
-        RectTransform accent =
-            (RectTransform)accentObject.transform;
-        accent.anchorMin = new Vector2(0.12f, 1f);
-        accent.anchorMax = new Vector2(0.88f, 1f);
-        accent.pivot = new Vector2(0.5f, 1f);
-        accent.anchoredPosition = new Vector2(0f, -96f);
-        accent.sizeDelta = new Vector2(0f, 4f);
-        Image accentImage = accentObject.GetComponent<Image>();
-        accentImage.color = _presentation.AccentColor;
-        accentImage.raycastTarget = false;
-
-        _title = CreateText(
-            _root,
-            "txtRevealTitle",
-            34f,
-            TextAlignmentOptions.Center,
-            Color.white);
-        _title.rectTransform.anchorMin =
-            new Vector2(0.12f, 1f);
-        _title.rectTransform.anchorMax =
-            new Vector2(0.88f, 1f);
-        _title.rectTransform.pivot =
-            new Vector2(0.5f, 1f);
-        _title.rectTransform.anchoredPosition =
-            new Vector2(0f, -42f);
-        _title.rectTransform.sizeDelta =
-            new Vector2(0f, 48f);
-        _title.fontStyle = FontStyles.Bold;
-
-        GameObject rowsObject = GetOrCreateUiObject(
-            _root,
-            "grpRevealRows",
-            typeof(VerticalLayoutGroup));
-        _rowsContainer =
-            (RectTransform)rowsObject.transform;
-        _rowsContainer.anchorMin = new Vector2(0.12f, 0.16f);
-        _rowsContainer.anchorMax = new Vector2(0.88f, 0.84f);
-        _rowsContainer.offsetMin = Vector2.zero;
-        _rowsContainer.offsetMax = Vector2.zero;
-        _rowsLayout =
-            rowsObject.GetComponent<VerticalLayoutGroup>();
-        _rowsLayout.padding = new RectOffset(0, 0, 0, 0);
-        _rowsLayout.childAlignment = TextAnchor.MiddleCenter;
-        _rowsLayout.childControlWidth = true;
-        _rowsLayout.childControlHeight = true;
-        _rowsLayout.childForceExpandWidth = true;
-        _rowsLayout.childForceExpandHeight = false;
-
-        for (int index = 0;
-             index < _presentation.MaximumRows;
-             index++)
-        {
-            _rows.Add(RecruitFlipRowView.Build(
-                _rowsContainer,
-                index,
-                _presentation));
-        }
-
-        _instruction = CreateText(
-            _root,
-            "txtRevealInstruction",
-            17f,
-            TextAlignmentOptions.Center,
-            _presentation.NeutralTextColor);
-        _instruction.rectTransform.anchorMin =
-            new Vector2(0.18f, 0f);
-        _instruction.rectTransform.anchorMax =
-            new Vector2(0.82f, 0f);
-        _instruction.rectTransform.pivot =
-            new Vector2(0.5f, 0f);
-        _instruction.rectTransform.anchoredPosition =
-            new Vector2(0f, 42f);
-        _instruction.rectTransform.sizeDelta =
-            new Vector2(0f, 36f);
-
-        _skipButton = BuildButton(
-            _root,
-            "btnRevealSkip",
-            new Vector2(1f, 1f),
-            new Vector2(1f, 1f),
-            new Vector2(1f, 1f),
-            new Vector2(-42f, -38f),
-            new Vector2(142f, 52f),
-            new Color(0.10f, 0.14f, 0.15f, 0.96f),
-            out _skipLabel);
-        _confirmButton = BuildButton(
-            _root,
-            "btnRevealConfirm",
-            new Vector2(0.5f, 0f),
-            new Vector2(0.5f, 0f),
-            new Vector2(0.5f, 0f),
-            new Vector2(0f, 34f),
-            new Vector2(220f, 58f),
-            new Color(0.16f, 0.48f, 0.43f, 0.98f),
-            out _confirmLabel);
-
-        _designerBindings =
-            rootObject.GetComponent<RecruitRevealDesignerBindings>();
-        _designerBindings.CaptureReferencesFromHierarchy();
-    }
-
     private void WireButtons()
     {
         _backdropButton.onClick.RemoveAllListeners();
@@ -673,131 +522,6 @@ public sealed class RecruitRevealOverlay
             CompleteImmediately);
         _confirmButton.onClick.RemoveAllListeners();
         _confirmButton.onClick.AddListener(Close);
-    }
-
-    private static Button BuildButton(
-        Transform parent,
-        string objectName,
-        Vector2 anchorMin,
-        Vector2 anchorMax,
-        Vector2 pivot,
-        Vector2 position,
-        Vector2 size,
-        Color color,
-        out TextMeshProUGUI label)
-    {
-        GameObject buttonObject = GetOrCreateUiObject(
-            parent,
-            objectName,
-            typeof(CanvasRenderer),
-            typeof(Image),
-            typeof(Button),
-            typeof(Outline));
-        RectTransform rect =
-            (RectTransform)buttonObject.transform;
-        rect.anchorMin = anchorMin;
-        rect.anchorMax = anchorMax;
-        rect.pivot = pivot;
-        rect.anchoredPosition = position;
-        rect.sizeDelta = size;
-
-        Image image = buttonObject.GetComponent<Image>();
-        image.color = color;
-        Button button = buttonObject.GetComponent<Button>();
-        button.targetGraphic = image;
-        Outline outline = buttonObject.GetComponent<Outline>();
-        outline.effectColor = new Color(0.35f, 0.8f, 0.7f, 0.7f);
-        outline.effectDistance = new Vector2(1f, -1f);
-
-        label = CreateText(
-            rect,
-            "txtLabel",
-            19f,
-            TextAlignmentOptions.Center,
-            Color.white);
-        Stretch(label.rectTransform);
-        label.fontStyle = FontStyles.Bold;
-        return button;
-    }
-
-    private static GameObject GetOrCreateUiObject(
-        Transform parent,
-        string objectName,
-        params Type[] componentTypes)
-    {
-        Transform existing = parent.Find(objectName);
-        GameObject target;
-        if (existing != null)
-        {
-            target = existing.gameObject;
-        }
-        else
-        {
-            target = new GameObject(
-                objectName,
-                typeof(RectTransform));
-            target.transform.SetParent(parent, false);
-#if UNITY_EDITOR
-            if (!Application.isPlaying)
-            {
-                UnityEditor.Undo.RegisterCreatedObjectUndo(
-                    target,
-                    "Create Recruit Reveal Designer UI");
-            }
-#endif
-        }
-
-        for (int index = 0;
-             index < componentTypes.Length;
-             index++)
-        {
-            Type type = componentTypes[index];
-            if (target.GetComponent(type) == null)
-            {
-#if UNITY_EDITOR
-                if (!Application.isPlaying)
-                    UnityEditor.Undo.AddComponent(target, type);
-                else
-                    target.AddComponent(type);
-#else
-                target.AddComponent(type);
-#endif
-            }
-        }
-        return target;
-    }
-
-    private static TextMeshProUGUI CreateText(
-        Transform parent,
-        string objectName,
-        float fontSize,
-        TextAlignmentOptions alignment,
-        Color color)
-    {
-        GameObject textObject = GetOrCreateUiObject(
-            parent,
-            objectName,
-            typeof(CanvasRenderer),
-            typeof(TextMeshProUGUI));
-        TextMeshProUGUI text =
-            textObject.GetComponent<TextMeshProUGUI>();
-        text.fontSize = fontSize;
-        text.alignment = alignment;
-        text.color = color;
-        text.textWrappingMode = TextWrappingModes.NoWrap;
-        text.overflowMode = TextOverflowModes.Ellipsis;
-        text.raycastTarget = false;
-        LocalizationFontResolver.ApplyGameDefault(text);
-        return text;
-    }
-
-    private static void Stretch(RectTransform rect)
-    {
-        rect.anchorMin = Vector2.zero;
-        rect.anchorMax = Vector2.one;
-        rect.pivot = new Vector2(0.5f, 0.5f);
-        rect.anchoredPosition = Vector2.zero;
-        rect.sizeDelta = Vector2.zero;
     }
 
     private sealed class RecruitFlipRowView
@@ -819,17 +543,6 @@ public sealed class RecruitRevealOverlay
         private RecruitFlipRowView(int index)
         {
             _index = index;
-        }
-
-        public static RecruitFlipRowView Build(
-            Transform parent,
-            int index,
-            RecruitRevealPresentationSO presentation)
-        {
-            RecruitFlipRowView row =
-                new RecruitFlipRowView(index);
-            row.BuildLayout(parent, presentation);
-            return row;
         }
 
         public static RecruitFlipRowView Bind(
@@ -1074,151 +787,5 @@ public sealed class RecruitRevealOverlay
                    _splitLine != null;
         }
 
-        public void EnsureRewardIconSlot()
-        {
-            if (_root == null || _rewardIcon != null)
-                return;
-
-            GameObject iconObject = GetOrCreateUiObject(
-                _root,
-                "imgRewardIcon",
-                typeof(CanvasRenderer),
-                typeof(Image));
-            RectTransform iconRect =
-                (RectTransform)iconObject.transform;
-            iconRect.anchorMin = new Vector2(0f, 0.5f);
-            iconRect.anchorMax = new Vector2(0f, 0.5f);
-            iconRect.pivot = new Vector2(0.5f, 0.5f);
-            iconRect.anchoredPosition = new Vector2(110f, 0f);
-            iconRect.sizeDelta = new Vector2(46f, 46f);
-            iconRect.SetAsLastSibling();
-            _rewardIcon = iconObject.GetComponent<Image>();
-            _rewardIcon.raycastTarget = false;
-            _rewardIcon.preserveAspect = true;
-            _rewardIcon.enabled = false;
-
-            if (_baseLabel != null)
-            {
-                Vector2 offset = _baseLabel.rectTransform.offsetMin;
-                _baseLabel.rectTransform.offsetMin =
-                    new Vector2(Mathf.Max(offset.x, 148f), offset.y);
-            }
-            if (_flapLabel != null)
-            {
-                Vector2 offset = _flapLabel.rectTransform.offsetMin;
-                _flapLabel.rectTransform.offsetMin =
-                    new Vector2(Mathf.Max(offset.x, 70f), offset.y);
-            }
-        }
-
-        private void BuildLayout(
-            Transform parent,
-            RecruitRevealPresentationSO presentation)
-        {
-            GameObject rowObject = GetOrCreateUiObject(
-                parent,
-                $"grpRevealRow{_index + 1:00}",
-                typeof(CanvasRenderer),
-                typeof(Image),
-                typeof(Outline),
-                typeof(LayoutElement));
-            _root = (RectTransform)rowObject.transform;
-            _layout = rowObject.GetComponent<LayoutElement>();
-            _layout.flexibleWidth = 1f;
-            _background = rowObject.GetComponent<Image>();
-            _background.raycastTarget = false;
-            _outline = rowObject.GetComponent<Outline>();
-            _outline.effectDistance = new Vector2(1f, -1f);
-
-            GameObject accentObject = GetOrCreateUiObject(
-                _root,
-                "imgRowAccent",
-                typeof(CanvasRenderer),
-                typeof(Image));
-            RectTransform accentRect =
-                (RectTransform)accentObject.transform;
-            accentRect.anchorMin = Vector2.zero;
-            accentRect.anchorMax = new Vector2(0f, 1f);
-            accentRect.pivot = new Vector2(0f, 0.5f);
-            accentRect.anchoredPosition = Vector2.zero;
-            accentRect.sizeDelta = new Vector2(7f, 0f);
-            _accent = accentObject.GetComponent<Image>();
-            _accent.raycastTarget = false;
-
-            _indexLabel = CreateText(
-                _root,
-                "txtRowIndex",
-                18f,
-                TextAlignmentOptions.Center,
-                presentation.AccentColor);
-            _indexLabel.rectTransform.anchorMin =
-                new Vector2(0f, 0f);
-            _indexLabel.rectTransform.anchorMax =
-                new Vector2(0f, 1f);
-            _indexLabel.rectTransform.pivot =
-                new Vector2(0f, 0.5f);
-            _indexLabel.rectTransform.anchoredPosition =
-                new Vector2(16f, 0f);
-            _indexLabel.rectTransform.sizeDelta =
-                new Vector2(62f, 0f);
-            _indexLabel.fontStyle = FontStyles.Bold;
-
-            _baseLabel = CreateText(
-                _root,
-                "txtRowBase",
-                22f,
-                TextAlignmentOptions.Center,
-                presentation.NeutralTextColor);
-            Stretch(_baseLabel.rectTransform);
-            _baseLabel.rectTransform.offsetMin =
-                new Vector2(86f, 4f);
-            _baseLabel.rectTransform.offsetMax =
-                new Vector2(-24f, -4f);
-            _baseLabel.fontStyle = FontStyles.Bold;
-
-            GameObject flapObject = GetOrCreateUiObject(
-                _root,
-                "grpRowFlap",
-                typeof(CanvasRenderer),
-                typeof(Image));
-            _flap = (RectTransform)flapObject.transform;
-            Stretch(_flap);
-            _flap.offsetMin = new Vector2(78f, 0f);
-            _flap.offsetMax = Vector2.zero;
-            _flap.pivot = new Vector2(0.5f, 0.5f);
-            _flapImage = flapObject.GetComponent<Image>();
-            _flapImage.raycastTarget = false;
-
-            _flapLabel = CreateText(
-                _flap,
-                "txtRowFlap",
-                22f,
-                TextAlignmentOptions.Center,
-                presentation.NeutralTextColor);
-            Stretch(_flapLabel.rectTransform);
-            _flapLabel.rectTransform.offsetMin =
-                new Vector2(8f, 4f);
-            _flapLabel.rectTransform.offsetMax =
-                new Vector2(-24f, -4f);
-            _flapLabel.fontStyle = FontStyles.Bold;
-
-            GameObject splitObject = GetOrCreateUiObject(
-                _root,
-                "imgRowSplit",
-                typeof(CanvasRenderer),
-                typeof(Image));
-            RectTransform split =
-                (RectTransform)splitObject.transform;
-            split.anchorMin = new Vector2(0f, 0.5f);
-            split.anchorMax = new Vector2(1f, 0.5f);
-            split.pivot = new Vector2(0.5f, 0.5f);
-            split.anchoredPosition = Vector2.zero;
-            split.sizeDelta = new Vector2(0f, 2f);
-            _splitLine = splitObject.GetComponent<Image>();
-            _splitLine.raycastTarget = false;
-
-            EnsureRewardIconSlot();
-            ApplyNeutralStyle(presentation);
-        }
     }
 }

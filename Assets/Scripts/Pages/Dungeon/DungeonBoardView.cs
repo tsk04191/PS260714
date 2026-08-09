@@ -2914,7 +2914,12 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
         if (vfxPlayer == null)
             vfxPlayer = GetComponent<BattleVfxPlayer>();
         if (vfxPlayer == null)
-            vfxPlayer = gameObject.AddComponent<BattleVfxPlayer>();
+        {
+            Debug.LogError(
+                "DungeonBoardView requires an authored BattleVfxPlayer component.",
+                this);
+            return;
+        }
 
         if (vfxQualityProfile != null)
             vfxPlayer.ConfigureQuality(vfxQualityProfile);

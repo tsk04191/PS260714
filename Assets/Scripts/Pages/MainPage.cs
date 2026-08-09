@@ -25,11 +25,12 @@ public sealed class MainPage : RuntimeMenuPageBase
     private Sprite _defaultLobbyCharacterSprite;
     private string _defaultLobbyCharacterName;
     private string _defaultLobbyCharacterCaption;
-    private Button _noticeButton;
-    private Button _attendanceButton;
-    private NotificationDotView _attendanceBadge;
-    private MonthlyAttendancePopupView _attendancePopup;
-    private LobbyNoticePopupView _noticePopup;
+    [Header("Scene UI")]
+    [SerializeField] private Button _noticeButton;
+    [SerializeField] private Button _attendanceButton;
+    [SerializeField] private NotificationDotView _attendanceBadge;
+    [SerializeField] private MonthlyAttendancePopupView _attendancePopup;
+    [SerializeField] private LobbyNoticePopupView _noticePopup;
     private AttendanceData _boundAttendanceData;
     private GameEventManager _gameEvents;
     private float _nextAttendanceRefreshTime;
@@ -81,14 +82,23 @@ public sealed class MainPage : RuntimeMenuPageBase
             "btnATTENDANCEOverlay",
             LocalizationKeys.UiMainAttendance,
             HandleAttendanceClicked);
-        AlignUtilityButtonAfter(_noticeButton, _attendanceButton);
-        _attendanceBadge = NotificationDotView.BuildOrBind(
-            _attendanceButton.transform as RectTransform);
-        _noticePopup = LobbyNoticePopupView.BuildOrBind(RuntimeRoot);
-        _attendancePopup = MonthlyAttendancePopupView.BuildOrBind(
-            RuntimeRoot);
+        ValidateSceneUiReferences();
         BindLobbyCharacterView();
         RefreshLobbyCharacterView();
+    }
+
+    private void ValidateSceneUiReferences()
+    {
+        if (_noticeButton == null || _attendanceButton == null ||
+            _attendanceBadge == null || _noticePopup == null ||
+            _attendancePopup == null)
+        {
+            Debug.LogError(
+                "MainPage fixed UI is incomplete. Place the notice and " +
+                "attendance UI in ClientScene and assign every Scene UI " +
+                "reference in the inspector.",
+                this);
+        }
     }
 
     private void OnEnable()
@@ -236,34 +246,6 @@ public sealed class MainPage : RuntimeMenuPageBase
             _attendanceBadge.SetVisible(
                 status?.Availability ==
                 AttendanceAvailability.Claimable);
-        }
-    }
-
-    private static void AlignUtilityButtonAfter(
-        Button leadingButton,
-        Button trailingButton)
-    {
-        if (leadingButton == null || trailingButton == null)
-            return;
-
-        RectTransform leading =
-            leadingButton.transform as RectTransform;
-        RectTransform trailing =
-            trailingButton.transform as RectTransform;
-        if (leading == null || trailing == null)
-            return;
-
-        trailing.anchorMin = leading.anchorMin;
-        trailing.anchorMax = leading.anchorMax;
-        trailing.pivot = leading.pivot;
-        trailing.anchoredPosition = new Vector2(
-            leading.anchoredPosition.x + leading.rect.width,
-            leading.anchoredPosition.y);
-        if (trailing.rect.height <= 0f)
-        {
-            trailing.SetSizeWithCurrentAnchors(
-                RectTransform.Axis.Vertical,
-                leading.rect.height);
         }
     }
 

@@ -13,16 +13,12 @@ public class GameManager : MonoBehaviour
 
     [Header("Main Lobby")]
     [SerializeField] private CharacterSO defaultLobbyRepresentative;
-    [SerializeField] private ToggleSliderController
-        lobbyRepresentativeTogglePrefab;
 
     public CharacterSO DefaultLobbyRepresentative =>
         IsEligibleDefaultLobbyRepresentative(
             defaultLobbyRepresentative)
             ? defaultLobbyRepresentative
             : null;
-    public ToggleSliderController LobbyRepresentativeTogglePrefab =>
-        lobbyRepresentativeTogglePrefab;
 
     private void Awake()
     {

@@ -42,8 +42,23 @@ public sealed class DungeonSpawnQueueView : MonoBehaviour
         }
 
         LocalizationFontResolver.ApplyGameDefault(timerText);
+        CollectAuthoredItems();
         _initialized = true;
         return true;
+    }
+
+    private void CollectAuthoredItems()
+    {
+        for (int index = 0; index < content.childCount; index++)
+        {
+            DungeonSpawnQueueItemView item = content.GetChild(index)
+                .GetComponent<DungeonSpawnQueueItemView>();
+            if (item == null || _items.Contains(item))
+                continue;
+
+            item.gameObject.SetActive(false);
+            _items.Add(item);
+        }
     }
 
     private void OnRectTransformDimensionsChange()

@@ -282,7 +282,13 @@ public sealed class DungeonFlowController : MonoBehaviour
 
             LocalizedText localizedText = text.GetComponent<LocalizedText>();
             if (localizedText == null)
-                localizedText = text.gameObject.AddComponent<LocalizedText>();
+            {
+                Debug.LogError(
+                    $"Dungeon placeholder '{objectName}' requires an " +
+                    "authored LocalizedText component.",
+                    text);
+                return;
+            }
             localizedText.SetKey(localizationKey);
             return;
         }

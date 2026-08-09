@@ -16,14 +16,14 @@ public sealed class DungeonBattleTab : MonoBehaviour
     [SerializeField] private TextMeshProUGUI pauseText;
     [SerializeField] private GameObject pauseOverlay;
     internal Button PauseButtonTemplate => pauseButton;
-    private RectTransform _pauseMenuPanel;
-    private Button _continueButton;
-    private TextMeshProUGUI _continueText;
-    private Button _returnToStageButton;
-    private TextMeshProUGUI _returnToStageText;
-    private Button _quitGameButton;
-    private TextMeshProUGUI _quitGameText;
-    private ResponsivePanelFitter _pausePanelFitter;
+    [SerializeField] private RectTransform _pauseMenuPanel;
+    [SerializeField] private Button _continueButton;
+    [SerializeField] private TextMeshProUGUI _continueText;
+    [SerializeField] private Button _returnToStageButton;
+    [SerializeField] private TextMeshProUGUI _returnToStageText;
+    [SerializeField] private Button _quitGameButton;
+    [SerializeField] private TextMeshProUGUI _quitGameText;
+    [SerializeField] private ResponsivePanelFitter _pausePanelFitter;
 
     [Header("Battle Time")]
     [SerializeField] private TextMeshProUGUI battleTimeText;
@@ -42,14 +42,15 @@ public sealed class DungeonBattleTab : MonoBehaviour
 
     private BattleManager _battleManager;
     private DungeonPage _page;
-    private DungeonItemHandView _itemHandView;
+    [SerializeField] private DungeonItemHandView _itemHandView;
+    [SerializeField]
     private DungeonActiveSkillResourceView _activeSkillResourceView;
-    private TextMeshProUGUI _pauseOverlayText;
+    [SerializeField] private TextMeshProUGUI _pauseOverlayText;
     private bool _initialized;
     private bool _controlEventsBound;
     private bool _battleEventsBound;
     private bool _localizationEventsBound;
-    private RectTransform _partyInfoRect;
+    [SerializeField] private RectTransform _partyInfoRect;
 
     public float BottomReservedHeight
     {
@@ -186,8 +187,7 @@ public sealed class DungeonBattleTab : MonoBehaviour
             activeSkillResourceText = text;
         }
 
-        ConfigurePlayerPartyLayout();
-        EnsureActiveSkillResourceView();
+        ResolveActiveSkillResourceView();
 
         if (settingsButton != null)
         {
@@ -195,18 +195,11 @@ public sealed class DungeonBattleTab : MonoBehaviour
                 settingsButton.GetComponentInChildren<TextMeshProUGUI>(true);
             if (settingsLabel != null)
             {
-                LocalizedText localizedText =
-                    settingsLabel.GetComponent<LocalizedText>();
-                if (localizedText == null)
-                {
-                    localizedText = settingsLabel.gameObject
-                        .AddComponent<LocalizedText>();
-                }
-
-                localizedText.SetKey(LocalizationKeys.UiCommonSettings);
+                settingsLabel.text = LocalizationService.Get(
+                    LocalizationKeys.UiCommonSettings);
             }
         }
-        EnsurePauseNavigationButtons();
+        ResolvePauseNavigationButtons();
 
         if (speedButton == null || speedText == null || pauseButton == null ||
             pauseText == null || pauseOverlay == null ||
@@ -218,6 +211,9 @@ public sealed class DungeonBattleTab : MonoBehaviour
             _returnToStageButton == null ||
             _returnToStageText == null ||
             _quitGameButton == null || _quitGameText == null ||
+            _pausePanelFitter == null ||
+            _activeSkillResourceView == null ||
+            _itemHandView == null || _partyInfoRect == null ||
             settingsButton == null || dungeonPage == null ||
             settingPage == null)
         {
@@ -473,220 +469,59 @@ public sealed class DungeonBattleTab : MonoBehaviour
             pauseOverlay.SetActive(isPaused || isDefeated);
     }
 
-    private void EnsurePauseNavigationButtons()
+    private void ResolvePauseNavigationButtons()
     {
-        if (pauseOverlay == null || pauseButton == null)
+        if (pauseOverlay == null)
             return;
 
-        _pauseMenuPanel = EnsurePauseMenuPanel();
+        if (_pauseMenuPanel == null)
+        {
+            _pauseMenuPanel = pauseOverlay.transform
+                .Find("grpPauseMenuPanel") as RectTransform;
+        }
         if (_pauseMenuPanel == null)
             return;
 
-        if (_pauseOverlayText != null &&
-            _pauseOverlayText.transform.parent != _pauseMenuPanel)
+        if (_pauseOverlayText == null)
         {
-            _pauseOverlayText.transform.SetParent(
-                _pauseMenuPanel,
-                false);
+            _pauseOverlayText = _pauseMenuPanel
+                .Find("txtPauseOverlay")?.GetComponent<TextMeshProUGUI>();
         }
-
-        _continueButton = ResolveOrClonePauseButton(
-            _continueButton,
-            "btnContinue",
-            "txtContinue",
-            LocalizationKeys.UiDungeonResume,
-            new Vector2(0f, 55f),
-            out _continueText);
-        _returnToStageButton = ResolveOrClonePauseButton(
-            _returnToStageButton,
-            "btnReturnToStage",
-            "txtReturnToStage",
-            LocalizationKeys.UiDungeonReturnToStage,
-            new Vector2(0f, -25f),
-            out _returnToStageText);
-        _quitGameButton = ResolveOrClonePauseButton(
-            _quitGameButton,
-            "btnQuitGame",
-            "txtQuitGame",
-            LocalizationKeys.UiSettingsQuitGame,
-            new Vector2(0f, -105f),
-            out _quitGameText);
-
-        if (_pauseOverlayText != null)
+        if (_continueButton == null)
         {
-            RectTransform titleRect =
-                _pauseOverlayText.rectTransform;
-            titleRect.anchorMin = new Vector2(0.5f, 0.5f);
-            titleRect.anchorMax = new Vector2(0.5f, 0.5f);
-            titleRect.pivot = new Vector2(0.5f, 0.5f);
-            titleRect.anchoredPosition = new Vector2(0f, 145f);
-            titleRect.sizeDelta = new Vector2(380f, 72f);
-            _pauseOverlayText.fontSize = 46f;
-            _pauseOverlayText.color =
-                new Color(0.98f, 0.94f, 0.78f, 1f);
-            _pauseOverlayText.alignment =
-                TextAlignmentOptions.Center;
-            _pauseOverlayText.raycastTarget = false;
-            titleRect.SetAsLastSibling();
+            _continueButton = _pauseMenuPanel.Find("btnContinue")
+                ?.GetComponent<Button>();
         }
-
-        Button[] overlayButtons =
-            pauseOverlay.GetComponentsInChildren<Button>(true);
-        foreach (Button button in overlayButtons)
+        if (_returnToStageButton == null)
         {
-            if (button == null ||
-                button == _continueButton ||
-                button == _returnToStageButton ||
-                button == _quitGameButton)
-            {
-                continue;
-            }
-
-            button.gameObject.SetActive(false);
+            _returnToStageButton = _pauseMenuPanel.Find("btnReturnToStage")
+                ?.GetComponent<Button>();
         }
-    }
-
-    private RectTransform EnsurePauseMenuPanel()
-    {
-        if (_pauseMenuPanel == null)
+        if (_quitGameButton == null)
         {
-            Transform existing =
-                pauseOverlay.transform.Find("grpPauseMenuPanel");
-            _pauseMenuPanel = existing as RectTransform;
+            _quitGameButton = _pauseMenuPanel.Find("btnQuitGame")
+                ?.GetComponent<Button>();
         }
-
-        if (_pauseMenuPanel == null)
+        if (_continueText == null && _continueButton != null)
         {
-            GameObject panelObject = new(
-                "grpPauseMenuPanel",
-                typeof(RectTransform),
-                typeof(CanvasRenderer),
-                typeof(Image),
-                typeof(Outline));
-            panelObject.transform.SetParent(
-                pauseOverlay.transform,
-                false);
-            _pauseMenuPanel =
-                panelObject.GetComponent<RectTransform>();
+            _continueText = _continueButton
+                .GetComponentInChildren<TextMeshProUGUI>(true);
         }
-
-        _pauseMenuPanel.anchorMin = new Vector2(0.5f, 0.5f);
-        _pauseMenuPanel.anchorMax = new Vector2(0.5f, 0.5f);
-        _pauseMenuPanel.pivot = new Vector2(0.5f, 0.5f);
-        _pauseMenuPanel.anchoredPosition = Vector2.zero;
-        _pauseMenuPanel.sizeDelta = new Vector2(440f, 430f);
-        _pauseMenuPanel.localScale = Vector3.one;
-        _pausePanelFitter = ResponsivePanelFitter.Bind(
-            _pauseMenuPanel,
-            pauseOverlay.transform as RectTransform);
-        _pauseMenuPanel.SetAsFirstSibling();
-
-        Image background =
-            _pauseMenuPanel.GetComponent<Image>();
-        background.color = new Color(
-            0.055f,
-            0.075f,
-            0.065f,
-            0.98f);
-        background.raycastTarget = true;
-
-        Outline outline =
-            _pauseMenuPanel.GetComponent<Outline>();
-        outline.effectColor =
-            new Color(0.52f, 0.68f, 0.52f, 0.9f);
-        outline.effectDistance = new Vector2(3f, -3f);
-        outline.useGraphicAlpha = true;
-        return _pauseMenuPanel;
-    }
-
-    private Button ResolveOrClonePauseButton(
-        Button current,
-        string objectName,
-        string labelName,
-        string localizationKey,
-        Vector2 anchoredPosition,
-        out TextMeshProUGUI label)
-    {
-        Button button = current;
-        if (button == null)
+        if (_returnToStageText == null && _returnToStageButton != null)
         {
-            Transform existing =
-                _pauseMenuPanel.Find(objectName);
-            button = existing != null
-                ? existing.GetComponent<Button>()
-                : null;
+            _returnToStageText = _returnToStageButton
+                .GetComponentInChildren<TextMeshProUGUI>(true);
         }
-
-        if (button == null)
+        if (_quitGameText == null && _quitGameButton != null)
         {
-            button = Instantiate(
-                pauseButton,
-                _pauseMenuPanel,
-                false);
-            button.name = objectName;
+            _quitGameText = _quitGameButton
+                .GetComponentInChildren<TextMeshProUGUI>(true);
         }
-        else if (button.transform.parent != _pauseMenuPanel)
+        if (_pausePanelFitter == null)
         {
-            button.transform.SetParent(_pauseMenuPanel, false);
+            _pausePanelFitter =
+                _pauseMenuPanel.GetComponent<ResponsivePanelFitter>();
         }
-
-        button.onClick = new Button.ButtonClickedEvent();
-        RectTransform rect = button.transform as RectTransform;
-        if (rect != null)
-        {
-            rect.anchorMin = new Vector2(0.5f, 0.5f);
-            rect.anchorMax = new Vector2(0.5f, 0.5f);
-            rect.pivot = new Vector2(0.5f, 0.5f);
-            rect.anchoredPosition = anchoredPosition;
-            rect.sizeDelta = new Vector2(340f, 64f);
-            rect.localScale = Vector3.one;
-        }
-
-        Image buttonImage = button.targetGraphic as Image ??
-                            button.GetComponent<Image>();
-        if (buttonImage != null)
-        {
-            button.targetGraphic = buttonImage;
-            buttonImage.color =
-                new Color(0.2f, 0.38f, 0.3f, 1f);
-            buttonImage.raycastTarget = true;
-        }
-
-        ColorBlock colors = button.colors;
-        colors.normalColor =
-            new Color(0.2f, 0.38f, 0.3f, 1f);
-        colors.highlightedColor =
-            new Color(0.3f, 0.55f, 0.42f, 1f);
-        colors.pressedColor =
-            new Color(0.12f, 0.26f, 0.2f, 1f);
-        colors.selectedColor =
-            new Color(0.26f, 0.48f, 0.36f, 1f);
-        colors.disabledColor =
-            new Color(0.12f, 0.15f, 0.13f, 0.75f);
-        colors.colorMultiplier = 1f;
-        button.colors = colors;
-
-        label = button.GetComponentInChildren<TextMeshProUGUI>(true);
-        if (label != null)
-        {
-            label.name = labelName;
-            LocalizedText localizedText =
-                label.GetComponent<LocalizedText>();
-            if (localizedText == null)
-                localizedText =
-                    label.gameObject.AddComponent<LocalizedText>();
-            localizedText.SetKey(localizationKey);
-            LocalizationFontResolver.ApplyGameDefault(label);
-            label.fontSize = 28f;
-            label.fontStyle = FontStyles.Bold;
-            label.color = Color.white;
-            label.alignment = TextAlignmentOptions.Center;
-            label.raycastTarget = false;
-        }
-
-        button.gameObject.SetActive(true);
-        button.transform.SetAsLastSibling();
-        return button;
     }
 
     private void RefreshBattleTime()
@@ -760,33 +595,6 @@ public sealed class DungeonBattleTab : MonoBehaviour
         }
     }
 
-    private void ConfigurePlayerPartyLayout()
-    {
-        Transform partyInfo = transform.Find("grpPlayerPartyInfo");
-        if (partyInfo == null && activeSkillResourceText != null)
-            partyInfo = activeSkillResourceText.transform.parent;
-        if (partyInfo == null)
-            return;
-
-        _partyInfoRect = partyInfo as RectTransform;
-
-        HorizontalLayoutGroup layout =
-            partyInfo.GetComponentInChildren<HorizontalLayoutGroup>(true);
-        if (layout == null)
-            return;
-
-        layout.padding = new RectOffset(16, 16, 4, 4);
-        layout.spacing = 16f;
-        layout.childAlignment = TextAnchor.MiddleCenter;
-        layout.childControlWidth = false;
-        layout.childControlHeight = false;
-        layout.childForceExpandWidth = false;
-        layout.childForceExpandHeight = false;
-
-        LayoutRebuilder.MarkLayoutForRebuild(
-            layout.transform as RectTransform);
-    }
-
     private void RefreshResponsiveLayout()
     {
         _pausePanelFitter?.RefreshLayout();
@@ -798,7 +606,7 @@ public sealed class DungeonBattleTab : MonoBehaviour
                 : null);
     }
 
-    private void EnsureActiveSkillResourceView()
+    private void ResolveActiveSkillResourceView()
     {
         if (activeSkillResourceText == null)
             return;
@@ -809,37 +617,17 @@ public sealed class DungeonBattleTab : MonoBehaviour
                 GetComponentInChildren<DungeonActiveSkillResourceView>(true);
         }
 
-        Transform partyInfo = transform.Find("grpPlayerPartyInfo");
-        if (_activeSkillResourceView == null)
+        if (_partyInfoRect == null)
         {
-            GameObject resourceObject = new(
-                "grpActiveSkillResource",
-                typeof(RectTransform),
-                typeof(CanvasRenderer),
-                typeof(Image),
-                typeof(Outline),
-                typeof(DungeonActiveSkillResourceView));
-            resourceObject.transform.SetParent(transform, false);
-            _activeSkillResourceView =
-                resourceObject.GetComponent<DungeonActiveSkillResourceView>();
-            if (partyInfo != null)
-            {
-                resourceObject.transform.SetSiblingIndex(
-                    partyInfo.GetSiblingIndex());
-            }
+            _partyInfoRect = transform.Find("grpPlayerPartyInfo")
+                as RectTransform;
         }
-
-        RectTransform resourceRect =
-            _activeSkillResourceView.transform as RectTransform;
-        resourceRect.anchorMin = Vector2.zero;
-        resourceRect.anchorMax = Vector2.zero;
-        resourceRect.pivot = Vector2.zero;
-        resourceRect.anchoredPosition = new Vector2(24f, 164f);
-        resourceRect.sizeDelta = new Vector2(104f, 104f);
-        resourceRect.localScale = Vector3.one;
-        _activeSkillResourceView.Configure(
-            activeSkillResourceIcon,
-            activeSkillResourceText);
+        if (_activeSkillResourceView != null)
+        {
+            _activeSkillResourceView.Configure(
+                activeSkillResourceIcon,
+                activeSkillResourceText);
+        }
     }
 
     private void EnsureItemHandView()
@@ -851,12 +639,10 @@ public sealed class DungeonBattleTab : MonoBehaviour
             _itemHandView = GetComponentInChildren<DungeonItemHandView>(true);
         if (_itemHandView == null)
         {
-            GameObject handObject = new(
-                "grpBattleItemHand",
-                typeof(RectTransform),
-                typeof(DungeonItemHandView));
-            handObject.transform.SetParent(transform, false);
-            _itemHandView = handObject.GetComponent<DungeonItemHandView>();
+            Debug.LogError(
+                "Dungeon battle item hand must be placed in the Scene.",
+                this);
+            return;
         }
 
         _itemHandView.ConfigureResponsiveBounds(
@@ -868,108 +654,62 @@ public sealed class DungeonBattleTab : MonoBehaviour
     }
 }
 
-[DisallowMultipleComponent]
-public sealed class DungeonActiveSkillResourceView : MonoBehaviour,
+public abstract class DungeonActiveSkillResourceViewBase : MonoBehaviour,
     IPointerEnterHandler,
     IPointerExitHandler
 {
-    private Image _iconImage;
-    private Image _cooldownOverlay;
-    private TextMeshProUGUI _fallbackIconText;
-    private TextMeshProUGUI _amountText;
-    private TextMeshProUGUI _tooltipText;
-    private GameObject _tooltip;
+    [SerializeField] private Image _iconImage;
+    [SerializeField] private Image _cooldownOverlay;
+    [SerializeField] private TextMeshProUGUI _fallbackIconText;
+    [SerializeField] private TextMeshProUGUI _amountText;
+    [SerializeField] private TextMeshProUGUI _tooltipText;
+    [SerializeField] private GameObject _tooltip;
 
     public void Configure(
         Sprite iconSprite,
         TextMeshProUGUI amountText)
     {
-        Image hitArea = GetComponent<Image>() ??
-                        gameObject.AddComponent<Image>();
-        hitArea.color = Color.clear;
-        hitArea.raycastTarget = true;
+        Transform iconFrame = transform.Find("grpResourceIcon");
+        if (_iconImage == null)
+        {
+            _iconImage = iconFrame?.Find("imgResourceIcon")
+                ?.GetComponent<Image>();
+        }
+        if (_fallbackIconText == null)
+        {
+            _fallbackIconText = iconFrame?.Find("txtResourceIcon")
+                ?.GetComponent<TextMeshProUGUI>();
+        }
+        if (_cooldownOverlay == null)
+        {
+            _cooldownOverlay = iconFrame
+                ?.Find("imgResourceCooldownOverlay")?.GetComponent<Image>();
+        }
+        if (_tooltip == null)
+            _tooltip = transform.Find("grpResourceTooltip")?.gameObject;
+        if (_tooltipText == null && _tooltip != null)
+        {
+            _tooltipText = _tooltip.transform.Find("txtResourceTooltip")
+                ?.GetComponent<TextMeshProUGUI>();
+        }
+        _amountText = amountText != null ? amountText : _amountText;
+        if (_iconImage == null || _fallbackIconText == null ||
+            _cooldownOverlay == null || _amountText == null ||
+            _tooltip == null || _tooltipText == null)
+        {
+            Debug.LogError(
+                "Active skill resource Scene references are incomplete.",
+                this);
+            return;
+        }
 
-        Outline outline = GetComponent<Outline>() ??
-                          gameObject.AddComponent<Outline>();
-        outline.effectColor = new Color(0.2f, 0.78f, 0.58f, 0.75f);
-        outline.effectDistance = new Vector2(1f, -1f);
-
-        Image iconFrame = EnsureImage(transform, "grpResourceIcon");
-        RectTransform iconFrameRect = iconFrame.rectTransform;
-        iconFrameRect.anchorMin = Vector2.zero;
-        iconFrameRect.anchorMax = Vector2.zero;
-        iconFrameRect.pivot = Vector2.zero;
-        iconFrameRect.anchoredPosition = Vector2.zero;
-        iconFrameRect.sizeDelta = new Vector2(104f, 104f);
-        iconFrame.color = new Color(0.035f, 0.075f, 0.065f, 0.96f);
-
-        _iconImage = EnsureImage(iconFrameRect, "imgResourceIcon");
-        RectTransform iconRect = _iconImage.rectTransform;
-        iconRect.anchorMin = Vector2.zero;
-        iconRect.anchorMax = Vector2.one;
-        iconRect.offsetMin = new Vector2(10f, 10f);
-        iconRect.offsetMax = new Vector2(-10f, -10f);
         _iconImage.sprite = iconSprite;
-        _iconImage.preserveAspect = true;
         _iconImage.enabled = iconSprite != null;
-        _iconImage.color = new Color(0.35f, 0.92f, 0.68f, 0.72f);
-
-        _fallbackIconText = EnsureText(iconFrameRect, "txtResourceIcon");
-        RectTransform fallbackIconRect = _fallbackIconText.rectTransform;
-        fallbackIconRect.anchorMin = Vector2.zero;
-        fallbackIconRect.anchorMax = Vector2.one;
-        fallbackIconRect.offsetMin = Vector2.zero;
-        fallbackIconRect.offsetMax = Vector2.zero;
-        _fallbackIconText.text = "◆";
-        _fallbackIconText.fontSize = 68f;
-        _fallbackIconText.color =
-            new Color(0.35f, 0.92f, 0.68f, 0.38f);
-        _fallbackIconText.alignment = TextAlignmentOptions.Center;
-        _fallbackIconText.raycastTarget = false;
         _fallbackIconText.enabled = iconSprite == null;
-        LocalizationFontResolver.ApplyGameDefault(_fallbackIconText);
-
-        _cooldownOverlay =
-            EnsureImage(iconFrameRect, "imgResourceCooldownOverlay");
-        RectTransform overlayRect = _cooldownOverlay.rectTransform;
-        overlayRect.anchorMin = Vector2.zero;
-        overlayRect.anchorMax = Vector2.one;
-        overlayRect.offsetMin = new Vector2(10f, 10f);
-        overlayRect.offsetMax = new Vector2(-10f, -10f);
         _cooldownOverlay.sprite = iconSprite;
-        _cooldownOverlay.preserveAspect = true;
-        _cooldownOverlay.color = new Color(0f, 0f, 0f, 0.68f);
-        _cooldownOverlay.type = Image.Type.Filled;
-        _cooldownOverlay.fillMethod = Image.FillMethod.Radial360;
-        _cooldownOverlay.fillOrigin = (int)Image.Origin360.Top;
-        _cooldownOverlay.fillClockwise = true;
         _cooldownOverlay.fillAmount = 0f;
         _cooldownOverlay.enabled = false;
-
-        _amountText = amountText;
-        _amountText.transform.SetParent(iconFrameRect, false);
-        RectTransform amountRect = _amountText.rectTransform;
-        amountRect.anchorMin = Vector2.zero;
-        amountRect.anchorMax = Vector2.one;
-        amountRect.offsetMin = new Vector2(4f, 4f);
-        amountRect.offsetMax = new Vector2(-4f, -4f);
-        amountRect.localScale = Vector3.one;
-        _amountText.alignment = TextAlignmentOptions.Center;
-        _amountText.fontSize = 25f;
-        _amountText.fontStyle = FontStyles.Bold;
-        _amountText.enableAutoSizing = true;
-        _amountText.fontSizeMin = 16f;
-        _amountText.fontSizeMax = 25f;
-        _amountText.color = Color.white;
-        _amountText.raycastTarget = false;
-        LocalizationFontResolver.ApplyGameDefault(_amountText);
-        _amountText.transform.SetAsLastSibling();
-
-        Transform legacyGauge = transform.Find("grpResourceRechargeGauge");
-        if (legacyGauge != null)
-            legacyGauge.gameObject.SetActive(false);
-
-        EnsureTooltip();
+        _tooltip.SetActive(false);
     }
 
     public void Refresh(
@@ -1001,129 +741,39 @@ public sealed class DungeonActiveSkillResourceView : MonoBehaviour,
 
     public void OnPointerEnter(PointerEventData eventData)
     {
-        _tooltip?.SetActive(true);
+        if (_tooltip != null)
+            _tooltip.SetActive(true);
     }
 
     public void OnPointerExit(PointerEventData eventData)
     {
-        _tooltip?.SetActive(false);
+        HideTooltip();
     }
 
-    private void OnDisable()
+    protected virtual void OnDisable()
     {
-        _tooltip?.SetActive(false);
+        HideTooltip();
     }
 
-    private void EnsureTooltip()
+    private void HideTooltip()
     {
         if (_tooltip != null)
-            return;
-
-        Transform existing = transform.Find("grpResourceTooltip");
-        _tooltip = existing != null
-            ? existing.gameObject
-            : new GameObject(
-                "grpResourceTooltip",
-                typeof(RectTransform),
-                typeof(CanvasRenderer),
-                typeof(Image));
-        if (existing == null)
-            _tooltip.transform.SetParent(transform, false);
-
-        RectTransform tooltipRect = _tooltip.transform as RectTransform;
-        tooltipRect.anchorMin = new Vector2(0f, 0.5f);
-        tooltipRect.anchorMax = new Vector2(0f, 0.5f);
-        tooltipRect.pivot = new Vector2(0f, 0.5f);
-        tooltipRect.anchoredPosition = new Vector2(114f, 0f);
-        tooltipRect.sizeDelta = new Vector2(360f, 118f);
-        Image tooltipImage = _tooltip.GetComponent<Image>() ??
-                             _tooltip.AddComponent<Image>();
-        tooltipImage.color = new Color(0.035f, 0.055f, 0.045f, 0.99f);
-        tooltipImage.raycastTarget = false;
-
-        Transform existingText = tooltipRect.Find("txtResourceTooltip");
-        if (existingText != null)
-        {
-            _tooltipText = existingText.GetComponent<TextMeshProUGUI>();
-        }
-        else
-        {
-            GameObject textObject = new(
-                "txtResourceTooltip",
-                typeof(RectTransform),
-                typeof(TextMeshProUGUI));
-            textObject.transform.SetParent(tooltipRect, false);
-            _tooltipText = textObject.GetComponent<TextMeshProUGUI>();
-        }
-
-        RectTransform textRect = _tooltipText.rectTransform;
-        textRect.anchorMin = Vector2.zero;
-        textRect.anchorMax = Vector2.one;
-        textRect.offsetMin = new Vector2(12f, 10f);
-        textRect.offsetMax = new Vector2(-12f, -10f);
-        LocalizationFontResolver.ApplyGameDefault(_tooltipText);
-        _tooltipText.fontSize = 17f;
-        _tooltipText.fontStyle = FontStyles.Bold;
-        _tooltipText.color = new Color(0.94f, 0.91f, 0.78f, 1f);
-        _tooltipText.alignment = TextAlignmentOptions.MidlineLeft;
-        _tooltipText.raycastTarget = false;
-        _tooltip.SetActive(false);
+            _tooltip.SetActive(false);
     }
 
-    private static Image EnsureImage(Transform parent, string objectName)
-    {
-        Transform existing = parent.Find(objectName);
-        GameObject imageObject = existing != null
-            ? existing.gameObject
-            : new GameObject(
-                objectName,
-                typeof(RectTransform),
-                typeof(CanvasRenderer),
-                typeof(Image));
-        if (existing == null)
-            imageObject.transform.SetParent(parent, false);
-        Image image = imageObject.GetComponent<Image>() ??
-                      imageObject.AddComponent<Image>();
-        image.raycastTarget = false;
-        return image;
-    }
-
-    private static TextMeshProUGUI EnsureText(
-        Transform parent,
-        string objectName)
-    {
-        Transform existing = parent.Find(objectName);
-        GameObject textObject = existing != null
-            ? existing.gameObject
-            : new GameObject(
-                objectName,
-                typeof(RectTransform),
-                typeof(TextMeshProUGUI));
-        if (existing == null)
-            textObject.transform.SetParent(parent, false);
-        return textObject.GetComponent<TextMeshProUGUI>() ??
-               textObject.AddComponent<TextMeshProUGUI>();
-    }
 }
 
-[DisallowMultipleComponent]
-public sealed class DungeonItemHandView : MonoBehaviour
+public abstract class DungeonItemHandViewBase : MonoBehaviour
 {
-    private const string DefaultCardPrefabResourcePath =
-        "Presentation/BattleItemCard";
-
     [SerializeField] private DungeonItemCardView cardPrefab;
+    [SerializeField] private TextMeshProUGUI _instructionText;
 
     private readonly List<DungeonItemCardView> _cards = new();
     private readonly List<CharacterRuntime> _boundTurrets = new();
     private DungeonPage _page;
     private BattleManager _battleManager;
-    private TextMeshProUGUI _instructionText;
     private BattleItemSO _selectedItem;
     private bool _initialized;
-    private bool _refreshingLayout;
-    private RectTransform _bottomReservedArea;
-    private RectTransform _topAlignedArea;
 
     public RectTransform HighlightRect
     {
@@ -1156,6 +806,7 @@ public sealed class DungeonItemHandView : MonoBehaviour
         _page = page;
         _battleManager = battleManager;
         ConfigureRoot();
+        CollectAuthoredCards();
         _page.BattleItemsChanged += RebuildCards;
         _battleManager.ActiveSkillResourceChanged += HandleEnergyChanged;
         _battleManager.StateChanged += HandleBattleStateChanged;
@@ -1177,9 +828,6 @@ public sealed class DungeonItemHandView : MonoBehaviour
         RectTransform bottomReservedArea,
         RectTransform topAlignedArea)
     {
-        _bottomReservedArea = bottomReservedArea;
-        _topAlignedArea = topAlignedArea;
-        ConfigureRoot();
         RefreshCardLayout();
     }
 
@@ -1211,21 +859,17 @@ public sealed class DungeonItemHandView : MonoBehaviour
         _initialized = false;
     }
 
-    private void OnDestroy()
+    protected virtual void OnDestroy()
     {
         Teardown();
     }
 
-    private void OnRectTransformDimensionsChange()
+    protected virtual void OnRectTransformDimensionsChange()
     {
-        if (_refreshingLayout)
-            return;
-
-        ConfigureRoot();
         RefreshCardLayout();
     }
 
-    private void Update()
+    protected virtual void Update()
     {
         if (!_initialized || _battleManager == null)
             return;
@@ -1235,84 +879,18 @@ public sealed class DungeonItemHandView : MonoBehaviour
 
     private void ConfigureRoot()
     {
-        RectTransform root = (RectTransform)transform;
-        RectTransform parent = root.parent as RectTransform;
-        DungeonItemCardView resolvedCardPrefab = ResolveCardPrefab();
-        RectTransform prefabRect = resolvedCardPrefab != null
-            ? resolvedCardPrefab.transform as RectTransform
-            : null;
-        if (parent == null || prefabRect == null || parent.rect.height <= 0f)
-            return;
-
-        float leftInset = 0f;
-        HorizontalLayoutGroup partyLayout = _bottomReservedArea != null
-            ? _bottomReservedArea.GetComponentInChildren<
-                HorizontalLayoutGroup>(true)
-            : null;
-        if (partyLayout != null)
-            leftInset = partyLayout.padding.left;
-
-        Vector3[] corners = new Vector3[4];
-        float bottomInset = 0f;
-        if (_bottomReservedArea != null)
+        if (_instructionText == null)
         {
-            _bottomReservedArea.GetWorldCorners(corners);
-            bottomInset = Mathf.Max(
-                0f,
-                parent.InverseTransformPoint(corners[1]).y -
-                parent.rect.yMin);
+            _instructionText = transform.Find("txtItemTargetInstruction")
+                ?.GetComponent<TextMeshProUGUI>();
         }
-
-        float topInset = 0f;
-        if (_topAlignedArea != null)
+        if (_instructionText == null || cardPrefab == null)
         {
-            _topAlignedArea.GetWorldCorners(corners);
-            topInset = Mathf.Max(
-                0f,
-                parent.rect.yMax -
-                parent.InverseTransformPoint(corners[1]).y);
+            Debug.LogError(
+                "Dungeon item hand Scene references are incomplete. " +
+                "Assign the instruction text and card prefab.",
+                this);
         }
-
-        _refreshingLayout = true;
-        root.anchorMin = Vector2.zero;
-        root.anchorMax = new Vector2(0f, 1f);
-        root.pivot = new Vector2(0f, 0.5f);
-        root.anchoredPosition = new Vector2(
-            leftInset,
-            (bottomInset - topInset) * 0.5f);
-        float availableHeight = Mathf.Max(
-            1f,
-            parent.rect.height - bottomInset - topInset);
-        root.sizeDelta = new Vector2(
-            prefabRect.rect.width,
-            availableHeight - parent.rect.height);
-        root.SetAsLastSibling();
-        _refreshingLayout = false;
-
-        if (_instructionText != null)
-            return;
-
-        GameObject instructionObject = new(
-            "txtItemTargetInstruction",
-            typeof(RectTransform),
-            typeof(TextMeshProUGUI));
-        instructionObject.transform.SetParent(transform, false);
-        RectTransform instructionRect =
-            (RectTransform)instructionObject.transform;
-        instructionRect.anchorMin = new Vector2(0f, 1f);
-        instructionRect.anchorMax = Vector2.one;
-        instructionRect.pivot = new Vector2(0.5f, 1f);
-        instructionRect.anchoredPosition = new Vector2(0f, 0f);
-        instructionRect.sizeDelta = new Vector2(
-            0f,
-            prefabRect.rect.height - prefabRect.rect.width);
-        _instructionText = instructionObject.GetComponent<TextMeshProUGUI>();
-        LocalizationFontResolver.ApplyGameDefault(_instructionText);
-        _instructionText.fontSize = 18f;
-        _instructionText.fontStyle = FontStyles.Bold;
-        _instructionText.color = new Color(0.94f, 0.91f, 0.78f, 1f);
-        _instructionText.alignment = TextAlignmentOptions.Left;
-        _instructionText.raycastTarget = false;
     }
 
     private void RebuildCards()
@@ -1323,19 +901,14 @@ public sealed class DungeonItemHandView : MonoBehaviour
         foreach (DungeonItemCardView card in _cards)
         {
             if (card != null)
-            {
                 card.gameObject.SetActive(false);
-                Destroy(card.gameObject);
-            }
         }
-        _cards.Clear();
 
         DungeonItemCardView resolvedCardPrefab = ResolveCardPrefab();
         if (resolvedCardPrefab == null)
         {
             Debug.LogError(
-                $"Battle item card prefab was not found at Resources/" +
-                $"{DefaultCardPrefabResourcePath}.",
+                "Battle item card prefab is not assigned in the inspector.",
                 this);
             return;
         }
@@ -1369,13 +942,13 @@ public sealed class DungeonItemHandView : MonoBehaviour
 
             for (int copyIndex = 0; copyIndex < itemCardCount; copyIndex++)
             {
-                DungeonItemCardView card = Instantiate(
-                    resolvedCardPrefab,
-                    transform,
-                    false);
+                DungeonItemCardView card = GetOrCreateCard(
+                    visibleIndex,
+                    resolvedCardPrefab);
                 card.name =
                     $"crdBattleItem_{item.ItemId.Replace('.', '_')}_" +
                     $"{copyIndex + 1}";
+                card.gameObject.SetActive(true);
                 RectTransform cardRect =
                     card.transform as RectTransform;
                 cardRect.anchorMin = new Vector2(0f, 0.5f);
@@ -1389,10 +962,9 @@ public sealed class DungeonItemHandView : MonoBehaviour
 
                 if (!card.Initialize(item, HandleCardClicked))
                 {
-                    Destroy(card.gameObject);
+                    card.gameObject.SetActive(false);
                     continue;
                 }
-                _cards.Add(card);
                 visibleIndex++;
             }
         }
@@ -1400,6 +972,37 @@ public sealed class DungeonItemHandView : MonoBehaviour
         RefreshTurretBindings();
         RefreshCardLayout();
         RefreshCards();
+    }
+
+    private void CollectAuthoredCards()
+    {
+        for (int index = 0; index < transform.childCount; index++)
+        {
+            DungeonItemCardView card = transform.GetChild(index)
+                .GetComponent<DungeonItemCardView>();
+            if (card == null || _cards.Contains(card))
+                continue;
+
+            card.gameObject.SetActive(false);
+            _cards.Add(card);
+        }
+    }
+
+    private DungeonItemCardView GetOrCreateCard(
+        int index,
+        DungeonItemCardView prefab)
+    {
+        while (_cards.Count <= index)
+        {
+            DungeonItemCardView instance = Instantiate(
+                prefab,
+                transform,
+                false);
+            instance.gameObject.SetActive(false);
+            _cards.Add(instance);
+        }
+
+        return _cards[index];
     }
 
     private void RefreshCardLayout()
@@ -1453,15 +1056,6 @@ public sealed class DungeonItemHandView : MonoBehaviour
 
     private DungeonItemCardView ResolveCardPrefab()
     {
-        if (cardPrefab == null)
-        {
-            GameObject prefabObject = Resources.Load<GameObject>(
-                DefaultCardPrefabResourcePath);
-            cardPrefab = prefabObject != null
-                ? prefabObject.GetComponent<DungeonItemCardView>()
-                : null;
-        }
-
         return cardPrefab;
     }
 

@@ -30,7 +30,7 @@ internal static class PS260714EditorMenu
     public const int StageSelectEditorPriority = DungeonEditorPriority;
     public const int RecruitEditorPriority = 112;
     public const int ValidateDesignerUiPriority = 113;
-    public const int MigrateRuntimeUiPriority = 114;
+    public const int InstallDynamicUiPreviewsPriority = 114;
     public const int MigrateBattleItemUsagePriority = 115;
     public const int MigrateCharacterModifierIdsPriority = 116;
 
@@ -69,8 +69,8 @@ internal static class PS260714EditorMenu
         LocalizationRoot + "Generate C#";
     public const string ValidateDesignerUi =
         UiRoot + "Validate Designer UI";
-    public const string MigrateRuntimeUi =
-        UiRoot + "Migrate Runtime UI For Designer";
+    public const string InstallDynamicUiPreviews =
+        UiRoot + "Install Dynamic UI Scene Previews";
     public const string MigrateBattleItemUsage =
         DataRoot + "Migrate Battle Item Usage Schema";
     public const string MigrateCharacterModifierIds =

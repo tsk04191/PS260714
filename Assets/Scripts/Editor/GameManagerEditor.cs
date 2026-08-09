@@ -12,16 +12,12 @@ using UnityEngine;
 public sealed class GameManagerEditor : Editor
 {
     private SerializedProperty _defaultLobbyRepresentative;
-    private SerializedProperty _lobbyRepresentativeTogglePrefab;
 
     private void OnEnable()
     {
         _defaultLobbyRepresentative =
             serializedObject.FindProperty(
                 "defaultLobbyRepresentative");
-        _lobbyRepresentativeTogglePrefab =
-            serializedObject.FindProperty(
-                "lobbyRepresentativeTogglePrefab");
     }
 
     public override void OnInspectorGUI()
@@ -30,26 +26,13 @@ public sealed class GameManagerEditor : Editor
         DrawPropertiesExcluding(
             serializedObject,
             "m_Script",
-            "defaultLobbyRepresentative",
-            "lobbyRepresentativeTogglePrefab");
+            "defaultLobbyRepresentative");
 
         EditorGUILayout.Space(10f);
         EditorGUILayout.LabelField(
             "메인 화면 대표 대원",
             EditorStyles.boldLabel);
         DrawDefaultRepresentativePopup();
-        EditorGUILayout.PropertyField(
-            _lobbyRepresentativeTogglePrefab,
-            new GUIContent("대표 설정 토글 프리팹"));
-
-        if (_lobbyRepresentativeTogglePrefab.objectReferenceValue ==
-            null)
-        {
-            EditorGUILayout.HelpBox(
-                "대원 상세 화면에서 사용할 btnToggle 프리팹을 " +
-                "지정하세요.",
-                MessageType.Warning);
-        }
 
         DrawCommonSettings();
         serializedObject.ApplyModifiedProperties();

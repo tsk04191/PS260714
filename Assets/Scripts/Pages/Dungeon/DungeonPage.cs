@@ -31,41 +31,6 @@ public readonly struct DungeonBattlePlan
     }
 }
 
-[DisallowMultipleComponent]
-public sealed class DungeonRewardCardHoverView : MonoBehaviour,
-    IPointerEnterHandler,
-    IPointerExitHandler
-{
-    private bool _hovered;
-
-    private void Update()
-    {
-        Vector3 targetScale = _hovered
-            ? new Vector3(1.03f, 1.03f, 1f)
-            : Vector3.one;
-        transform.localScale = Vector3.Lerp(
-            transform.localScale,
-            targetScale,
-            1f - Mathf.Exp(-18f * Time.unscaledDeltaTime));
-    }
-
-    private void OnDisable()
-    {
-        _hovered = false;
-        transform.localScale = Vector3.one;
-    }
-
-    public void OnPointerEnter(PointerEventData eventData)
-    {
-        _hovered = true;
-    }
-
-    public void OnPointerExit(PointerEventData eventData)
-    {
-        _hovered = false;
-    }
-}
-
 public class DungeonPage : MonoBehaviour, IPage
 {
     public const int MaximumPartySize = 4;
@@ -85,11 +50,6 @@ public class DungeonPage : MonoBehaviour, IPage
     private const float TutorialDamageBudgetRatio = 0.9f;
     private const int StartingChoiceSeedSalt = unchecked((int)0x5A17C0DE);
     private const int StartingItemSeedSalt = unchecked((int)0x1E7A51A9);
-    private const string DefaultCharacterInfoPrefabResourcePath =
-        "Presentation/CharacterInfo";
-    private const string DefaultStartingItemCardResourcePath =
-        "Presentation/BattleItemCard";
-
     private static readonly Color[] DefaultPartySlotColors =
     {
         new Color32(0x45, 0xB7, 0xFF, 0xFF),
@@ -125,16 +85,18 @@ public class DungeonPage : MonoBehaviour, IPage
 
     [Header("Player Party")]
     [SerializeField] private CharacterRuntime characterInfoPrefab;
+    [SerializeField] private RectTransform playerCharacterRoot;
     [SerializeField] private CharacterRuntime[] playerCharacters =
         new CharacterRuntime[MaximumPartySize];
     [SerializeField, ColorUsage(false, false)]
     private Color[] partySlotColors = new Color[MaximumPartySize];
 
-    [Header("Starting Item Selection")]
-    [SerializeField, Tooltip(
-        "Designer-editable card prefab used by the starting-item screen. " +
-        "Falls back to Resources/Presentation/BattleItemCard.")]
-    private DungeonItemCardView startingItemCardPrefab;
+    [Header("Dynamic Dungeon UI Prefabs")]
+    [SerializeField] private DungeonRewardCardView rewardCardPrefab;
+    [SerializeField]
+    private DungeonDynamicChoiceButtonView choiceButtonPrefab;
+    [SerializeField]
+    private DungeonStartingItemSlotView startingItemSlotPrefab;
 
     [Header("First Battle")]
     [SerializeField, HideInInspector] private BattleSO firstBattle;
@@ -168,11 +130,11 @@ public class DungeonPage : MonoBehaviour, IPage
     private BattleManager _battleManager;
     private DungeonEventTab _eventTab;
     private DungeonEventTab _battleRewardOverlay;
-    private GameObject _battleRewardOverlayRoot;
+    [SerializeField] private GameObject _battleRewardOverlayRoot;
     private DungeonRoomView _eventRoomView;
     private DungeonRoomView _restRoomView;
     private DungeonRoomView _shopRoomView;
-    private DungeonTutorialController _tutorialController;
+    [SerializeField] private DungeonTutorialController _tutorialController;
     [SerializeField] private DungeonFieldView fieldView;
     private DungeonDefinition _pendingDefinition;
     private readonly DungeonRunSession _session = new();
@@ -235,8 +197,11 @@ public class DungeonPage : MonoBehaviour, IPage
     public bool IsTutorialBattle =>
         _session.IsActive && _session.Definition != null &&
         _session.Definition.HasTutorial;
-    public DungeonItemCardView StartingItemCardPrefab =>
-        ResolveStartingItemCardPrefab();
+    internal DungeonRewardCardView RewardCardPrefab => rewardCardPrefab;
+    internal DungeonDynamicChoiceButtonView ChoiceButtonPrefab =>
+        choiceButtonPrefab;
+    internal DungeonStartingItemSlotView StartingItemSlotPrefab =>
+        startingItemSlotPrefab;
 
     public IReadOnlyList<EnemySO> GetCodexEnemyDefinitions()
     {
@@ -2399,36 +2364,16 @@ public class DungeonPage : MonoBehaviour, IPage
 
     private void InitializeBattleRewardOverlay()
     {
-        GameObject battleRoot = flowController != null
-            ? flowController.BattleTab
-            : null;
-        if (battleRoot == null || _battleRewardOverlayRoot != null)
+        if (_battleRewardOverlayRoot == null)
+        {
+            Debug.LogError(
+                "Dungeon battle reward overlay must be placed in the " +
+                "Scene and assigned in the inspector.",
+                this);
             return;
+        }
 
-        _battleRewardOverlayRoot = new GameObject(
-            "grpBattleRewardOverlay",
-            typeof(RectTransform),
-            typeof(CanvasRenderer),
-            typeof(Image),
-            typeof(CanvasGroup));
-        RectTransform overlayRect =
-            (RectTransform)_battleRewardOverlayRoot.transform;
-        overlayRect.SetParent(battleRoot.transform, false);
-        overlayRect.anchorMin = Vector2.zero;
-        overlayRect.anchorMax = Vector2.one;
-        overlayRect.offsetMin = Vector2.zero;
-        overlayRect.offsetMax = Vector2.zero;
-        overlayRect.SetAsLastSibling();
-
-        Image backdrop = _battleRewardOverlayRoot.GetComponent<Image>();
-        backdrop.color = new Color(0.015f, 0.025f, 0.02f, 0.72f);
-        backdrop.raycastTarget = true;
-        CanvasGroup canvasGroup =
-            _battleRewardOverlayRoot.GetComponent<CanvasGroup>();
-        canvasGroup.interactable = true;
-        canvasGroup.blocksRaycasts = true;
-
-        _battleRewardOverlay = new DungeonEventTab();
+        _battleRewardOverlay ??= new DungeonEventTab();
         _battleRewardOverlay.Initialize(
             _battleRewardOverlayRoot,
             this,
@@ -2466,7 +2411,6 @@ public class DungeonPage : MonoBehaviour, IPage
             return;
 
         _battleRewardOverlayRoot.SetActive(true);
-        _battleRewardOverlayRoot.transform.SetAsLastSibling();
         _battleRewardOverlay?.ShowUpgradeEvent();
     }
 
@@ -2488,7 +2432,12 @@ public class DungeonPage : MonoBehaviour, IPage
         if (_tutorialController == null)
             _tutorialController = GetComponent<DungeonTutorialController>();
         if (_tutorialController == null)
-            _tutorialController = gameObject.AddComponent<DungeonTutorialController>();
+        {
+            Debug.LogError(
+                "DungeonTutorialController must be placed on DungeonPage.",
+                this);
+            return;
+        }
 
         _tutorialController.Initialize(this, fieldView);
     }
@@ -2498,7 +2447,12 @@ public class DungeonPage : MonoBehaviour, IPage
         if (fieldView == null)
             fieldView = GetComponent<DungeonFieldView>();
         if (fieldView == null)
-            fieldView = gameObject.AddComponent<DungeonFieldView>();
+        {
+            Debug.LogError(
+                "DungeonFieldView must be placed on DungeonPage.",
+                this);
+            return;
+        }
 
         fieldView.BindSceneStructure(
             board,
@@ -3115,22 +3069,6 @@ public class DungeonPage : MonoBehaviour, IPage
             System.Array.Resize(ref playerCharacters, MaximumPartySize);
     }
 
-    private DungeonItemCardView ResolveStartingItemCardPrefab()
-    {
-        if (startingItemCardPrefab != null)
-            return startingItemCardPrefab;
-
-        GameObject prefabObject = Resources.Load<GameObject>(
-            DefaultStartingItemCardResourcePath);
-        if (prefabObject != null)
-        {
-            startingItemCardPrefab =
-                prefabObject.GetComponent<DungeonItemCardView>();
-        }
-
-        return startingItemCardPrefab;
-    }
-
     private void EnsureCharacterInfoInstances()
     {
         if (_characterInfoInstancesPrepared)
@@ -3140,30 +3078,13 @@ public class DungeonPage : MonoBehaviour, IPage
         CharacterRuntime prefab = characterInfoPrefab;
         if (prefab == null)
         {
-            GameObject prefabObject = Resources.Load<GameObject>(
-                DefaultCharacterInfoPrefabResourcePath);
-            if (prefabObject != null)
-                prefab = prefabObject.GetComponent<CharacterRuntime>();
-        }
-
-        if (prefab == null)
-        {
             Debug.LogError(
-                $"Character info prefab was not found at Resources/{DefaultCharacterInfoPrefabResourcePath}.",
+                "Character info prefab is not assigned on DungeonPage.",
                 this);
             return;
         }
 
-        Transform slotParent = null;
-        for (int index = 0; index < playerCharacters.Length; index++)
-        {
-            if (playerCharacters[index] != null &&
-                playerCharacters[index].transform.parent != null)
-            {
-                slotParent = playerCharacters[index].transform.parent;
-                break;
-            }
-        }
+        Transform slotParent = playerCharacterRoot;
 
         if (slotParent == null && battleTab != null)
         {
@@ -3179,6 +3100,8 @@ public class DungeonPage : MonoBehaviour, IPage
             return;
         }
 
+        playerCharacterRoot = slotParent as RectTransform;
+
         CharacterSO[] definitions =
             new CharacterSO[MaximumPartySize];
         CharacterRuntime[] previousSlots = playerCharacters;
@@ -3190,7 +3113,24 @@ public class DungeonPage : MonoBehaviour, IPage
 
         CharacterRuntime[] instances =
             new CharacterRuntime[MaximumPartySize];
-        for (int index = 0; index < instances.Length; index++)
+        int instanceCount = 0;
+        for (int index = 0;
+             index < slotParent.childCount &&
+             instanceCount < instances.Length;
+             index++)
+        {
+            CharacterRuntime existing = slotParent.GetChild(index)
+                .GetComponent<CharacterRuntime>();
+            if (existing == null)
+                continue;
+
+            instances[instanceCount] = existing;
+            if (definitions[instanceCount] == null)
+                definitions[instanceCount] = existing.Definition;
+            instanceCount++;
+        }
+
+        for (int index = instanceCount; index < instances.Length; index++)
         {
             CharacterRuntime instance = Instantiate(
                 prefab,
@@ -3203,22 +3143,21 @@ public class DungeonPage : MonoBehaviour, IPage
             instances[index] = instance;
         }
 
+        for (int index = 0; index < instances.Length; index++)
+        {
+            CharacterRuntime instance = instances[index];
+            instance.name = $"grpPlayerCharacterSlot_{index + 1}";
+            instance.transform.SetSiblingIndex(index);
+            if (definitions[index] != null &&
+                instance.Definition != definitions[index])
+            {
+                instance.ConfigureDefinition(definitions[index]);
+            }
+        }
+
         playerCharacters = instances;
         characterInfoPrefab = prefab;
         _characterInfoInstancesPrepared = true;
-
-        for (int index = 0; index < previousSlots.Length; index++)
-        {
-            CharacterRuntime previous = previousSlots[index];
-            if (previous == null)
-                continue;
-
-            previous.gameObject.SetActive(false);
-            if (Application.isPlaying)
-                Destroy(previous.gameObject);
-            else
-                DestroyImmediate(previous.gameObject);
-        }
     }
 
     private void EnsurePartySlotColors()
@@ -3428,10 +3367,6 @@ public sealed class DungeonEventTab
         }
     }
 
-    private readonly Color _panelColor = new(0.075f, 0.095f, 0.08f, 0.98f);
-    private readonly Color _buttonColor = new(0.19f, 0.28f, 0.22f, 1f);
-    private readonly Color _textColor = new(0.94f, 0.91f, 0.78f, 1f);
-
     private DungeonPage _page;
     private GameObject _root;
     private RectTransform _panel;
@@ -3445,6 +3380,11 @@ public sealed class DungeonEventTab
     private RectTransform _firstStartingChoiceRect;
     private readonly List<RewardOption> _currentRewardOptions = new();
     private readonly List<CharacterSO> _startingChoices = new();
+    private readonly List<DungeonRewardCardView> _rewardCards = new();
+    private readonly List<DungeonStartingItemSlotView> _startingItemSlots =
+        new();
+    private readonly List<DungeonDynamicChoiceButtonView> _choiceButtons =
+        new();
     private EViewMode _viewMode;
     private int _startingAvailableCount;
     private int _startingItemAvailableCount;
@@ -3475,13 +3415,6 @@ public sealed class DungeonEventTab
             return;
         }
 
-        foreach (TextMeshProUGUI text in
-                 _root.GetComponentsInChildren<TextMeshProUGUI>(true))
-        {
-            if (text.name == "txtEventPlaceholder")
-                text.gameObject.SetActive(false);
-        }
-
         BuildRuntimeUi();
         _initialized = true;
         BindLocalizationEvents();
@@ -3492,6 +3425,9 @@ public sealed class DungeonEventTab
         UnbindLocalizationEvents();
         _startingChoices.Clear();
         _currentRewardOptions.Clear();
+        _rewardCards.Clear();
+        _startingItemSlots.Clear();
+        _choiceButtons.Clear();
         _replacementDefinition = null;
         _startingItemAvailableCount = 0;
         _startingItemRequiredCount = 0;
@@ -4164,161 +4100,53 @@ public sealed class DungeonEventTab
 
     private void BuildRuntimeUi()
     {
-        GameObject panelObject = new(
-            "grpRuntimeEventPanel",
-            typeof(RectTransform),
-            typeof(Image),
-            typeof(VerticalLayoutGroup));
-        _panel = (RectTransform)panelObject.transform;
-        _panel.SetParent(_root.transform, false);
-        _panel.anchorMin = new Vector2(0.5f, 0.5f);
-        _panel.anchorMax = new Vector2(0.5f, 0.5f);
-        _panel.pivot = new Vector2(0.5f, 0.5f);
-        _panel.sizeDelta = new Vector2(900f, 650f);
+        _panel = _root.transform.Find("grpRuntimeEventPanel")
+            as RectTransform;
+        _titleText = _panel?.Find("txtEventTitle")
+            ?.GetComponent<TextMeshProUGUI>();
+        _descriptionText = _panel?.Find("txtEventDescription")
+            ?.GetComponent<TextMeshProUGUI>();
+        _rewardCardRoot = _panel?.Find("grpRewardCards")
+            as RectTransform;
+        _rewardCardLayout = _rewardCardRoot != null
+            ? _rewardCardRoot.GetComponent<GridLayoutGroup>()
+            : null;
+        _buttonRoot = _panel?.Find("grpEventButtons")
+            as RectTransform;
+        BindPreparationNavigationButton();
+        if (_panel == null || _titleText == null ||
+            _descriptionText == null || _rewardCardRoot == null ||
+            _rewardCardLayout == null || _buttonRoot == null ||
+            _preparationNavigationButton == null ||
+            _preparationNavigationText == null)
+        {
+            Debug.LogError(
+                "Dungeon event fixed UI is incomplete. Author it in the " +
+                "Scene instead of creating it at runtime.",
+                _root);
+            return;
+        }
 
-        Color panelColor = _panelColor;
-        if (_isBattleRewardOverlay)
-            panelColor.a = 0.92f;
-        panelObject.GetComponent<Image>().color = panelColor;
-        VerticalLayoutGroup layout = panelObject.GetComponent<VerticalLayoutGroup>();
-        layout.padding = new RectOffset(32, 32, 32, 32);
-        layout.spacing = 16f;
-        layout.childAlignment = TextAnchor.UpperCenter;
-        layout.childControlWidth = true;
-        layout.childForceExpandWidth = true;
-        layout.childControlHeight = true;
-        layout.childForceExpandHeight = false;
-
-        _titleText = CreateText(_panel, "txtEventTitle", 34f, 56f);
-        _descriptionText = CreateText(
-            _panel,
-            "txtEventDescription",
-            21f,
-            76f);
-
-        GameObject rewardCardRootObject = new(
-            "grpRewardCards",
-            typeof(RectTransform),
-            typeof(GridLayoutGroup),
-            typeof(LayoutElement));
-        _rewardCardRoot =
-            (RectTransform)rewardCardRootObject.transform;
-        _rewardCardRoot.SetParent(_panel, false);
-        LayoutElement rewardRootLayout =
-            rewardCardRootObject.GetComponent<LayoutElement>();
-        rewardRootLayout.preferredHeight = 350f;
-        rewardRootLayout.flexibleHeight = 1f;
-        _rewardCardLayout =
-            rewardCardRootObject.GetComponent<GridLayoutGroup>();
-        _rewardCardLayout.padding = new RectOffset(0, 0, 0, 0);
-        _rewardCardLayout.spacing = new Vector2(20f, 0f);
-        _rewardCardLayout.startCorner = GridLayoutGroup.Corner.UpperLeft;
-        _rewardCardLayout.startAxis = GridLayoutGroup.Axis.Horizontal;
-        _rewardCardLayout.childAlignment = TextAnchor.MiddleCenter;
-        _rewardCardLayout.constraint = GridLayoutGroup.Constraint.FixedColumnCount;
-        _rewardCardLayout.constraintCount = RewardChoiceCount;
-        _rewardCardLayout.cellSize = new Vector2(250f, 350f);
-
-        GameObject buttonRootObject = new(
-            "grpEventButtons",
-            typeof(RectTransform),
-            typeof(VerticalLayoutGroup),
-            typeof(LayoutElement));
-        _buttonRoot = (RectTransform)buttonRootObject.transform;
-        _buttonRoot.SetParent(_panel, false);
-        LayoutElement rootLayout = buttonRootObject.GetComponent<LayoutElement>();
-        rootLayout.preferredHeight = 420f;
-        rootLayout.flexibleHeight = 1f;
-        VerticalLayoutGroup buttonLayout =
-            buttonRootObject.GetComponent<VerticalLayoutGroup>();
-        buttonLayout.spacing = 10f;
-        buttonLayout.childAlignment = TextAnchor.UpperCenter;
-        buttonLayout.childControlWidth = true;
-        buttonLayout.childForceExpandWidth = true;
-        buttonLayout.childControlHeight = false;
-        buttonLayout.childForceExpandHeight = false;
+        CollectAuthoredViews(_rewardCardRoot, _rewardCards);
+        CollectAuthoredViews(_rewardCardRoot, _startingItemSlots);
+        CollectAuthoredViews(_buttonRoot, _choiceButtons);
 
         _rewardCardRoot.gameObject.SetActive(false);
         _buttonRoot.gameObject.SetActive(false);
-        BuildPreparationNavigationButton();
-        RefreshRuntimeLayout();
-        ResponsivePanelFitter.Bind(
-            _panel,
-            _root.transform as RectTransform);
     }
 
-    private void BuildPreparationNavigationButton()
+    private void BindPreparationNavigationButton()
     {
-        Button template = _page?.PreparationNavigationButtonTemplate;
-        if (template != null)
-        {
-            _preparationNavigationButton = UnityEngine.Object.Instantiate(
-                template,
-                _root.transform,
-                false);
-        }
-        else
-        {
-            GameObject buttonObject = new(
-                "btnPreparationReturnToStage",
-                typeof(RectTransform),
-                typeof(CanvasRenderer),
-                typeof(Image),
-                typeof(Outline),
-                typeof(Button));
-            buttonObject.transform.SetParent(_root.transform, false);
-            Image image = buttonObject.GetComponent<Image>();
-            image.color = new Color(0.105f, 0.22f, 0.2f, 1f);
-            _preparationNavigationButton =
-                buttonObject.GetComponent<Button>();
-            _preparationNavigationButton.targetGraphic = image;
-        }
+        _preparationNavigationButton ??= _root.transform
+            .Find("btnPreparationReturnToStage")?.GetComponent<Button>();
+        if (_preparationNavigationButton == null)
+            return;
 
-        _preparationNavigationButton.name =
-            "btnPreparationReturnToStage";
-        _preparationNavigationButton.onClick =
-            new Button.ButtonClickedEvent();
+        _preparationNavigationButton.onClick.RemoveAllListeners();
         _preparationNavigationButton.onClick.AddListener(
             () => _page?.ReturnToStageSelect());
-
-        RectTransform buttonRect =
-            _preparationNavigationButton.transform as RectTransform;
-        buttonRect.anchorMin = new Vector2(1f, 1f);
-        buttonRect.anchorMax = new Vector2(1f, 1f);
-        buttonRect.pivot = new Vector2(1f, 1f);
-        buttonRect.anchoredPosition = new Vector2(-32f, -28f);
-        buttonRect.sizeDelta = new Vector2(112f, 56f);
-        buttonRect.localScale = Vector3.one;
-
         _preparationNavigationText = _preparationNavigationButton
             .GetComponentInChildren<TextMeshProUGUI>(true);
-        if (_preparationNavigationText == null)
-        {
-            GameObject textObject = new(
-                "txtPreparationReturnToStage",
-                typeof(RectTransform),
-                typeof(TextMeshProUGUI));
-            textObject.transform.SetParent(buttonRect, false);
-            _preparationNavigationText =
-                textObject.GetComponent<TextMeshProUGUI>();
-            RectTransform textRect =
-                _preparationNavigationText.rectTransform;
-            textRect.anchorMin = Vector2.zero;
-            textRect.anchorMax = Vector2.one;
-            textRect.offsetMin = new Vector2(6f, 4f);
-            textRect.offsetMax = new Vector2(-6f, -4f);
-        }
-
-        _preparationNavigationText.name =
-            "txtPreparationReturnToStage";
-        LocalizationFontResolver.ApplyGameDefault(
-            _preparationNavigationText);
-        _preparationNavigationText.enableAutoSizing = true;
-        _preparationNavigationText.fontSizeMax = 22f;
-        _preparationNavigationText.fontSizeMin = 10f;
-        _preparationNavigationText.alignment =
-            TextAlignmentOptions.Center;
-        _preparationNavigationText.raycastTarget = false;
         _preparationNavigationButton.gameObject.SetActive(false);
     }
 
@@ -4335,8 +4163,6 @@ public sealed class DungeonEventTab
                 LocalizationKeys.UiDungeonReturnToStage);
         }
         _preparationNavigationButton.gameObject.SetActive(visible);
-        if (visible)
-            _preparationNavigationButton.transform.SetAsLastSibling();
     }
 
     private void SetRewardCardMode(bool showRewardCards)
@@ -4383,56 +4209,9 @@ public sealed class DungeonEventTab
 
     private void RefreshRuntimeLayout()
     {
-        if (_panel == null)
-            return;
-
-        RectTransform rootRect = _root != null
-            ? _root.transform as RectTransform
-            : null;
-        float rootWidth = rootRect != null && rootRect.rect.width > 0f
-            ? rootRect.rect.width
-            : 960f;
-        float rootHeight = rootRect != null && rootRect.rect.height > 0f
-            ? rootRect.rect.height
-            : 700f;
-        float panelWidth = Mathf.Min(900f, Mathf.Max(540f, rootWidth - 48f));
-        float maximumPanelHeight =
-            _viewMode == EViewMode.StartingItemSelection ? 760f : 650f;
-        float panelHeight = Mathf.Min(
-            maximumPanelHeight,
-            Mathf.Max(500f, rootHeight - 48f));
-        _panel.sizeDelta = new Vector2(panelWidth, panelHeight);
-
-        if (_rewardCardLayout == null || _rewardCardRoot == null)
-            return;
-
-        const float horizontalPadding = 64f;
-        const float reservedHeaderHeight = 228f;
-        bool startingItems =
-            _viewMode == EViewMode.StartingItemSelection;
-        int columnCount = startingItems
-            ? Mathf.Max(1, _page?.StartingItemChoices?.Count ?? 1)
-            : RewardChoiceCount;
-        float totalCardSpacing = Mathf.Max(0, columnCount - 1) *
-                                 _rewardCardLayout.spacing.x;
-        float widthBound =
-            (panelWidth - horizontalPadding - totalCardSpacing) /
-            columnCount;
-        float buttonAllowance = startingItems ? 62f : 0f;
-        float heightBound =
-            Mathf.Max(140f, panelHeight - reservedHeaderHeight -
-                            buttonAllowance) / 1.4f;
-        float cardWidth = Mathf.Clamp(
-            Mathf.Min(widthBound, heightBound),
-            140f,
-            250f);
-        float cardHeight = cardWidth * 1.4f;
-        float cellHeight = cardHeight + buttonAllowance;
-        _rewardCardLayout.cellSize = new Vector2(cardWidth, cellHeight);
-        LayoutElement rewardLayout =
-            _rewardCardRoot.GetComponent<LayoutElement>();
-        if (rewardLayout != null)
-            rewardLayout.preferredHeight = cellHeight;
+        _panel?.GetComponent<ResponsivePanelFitter>()?.RefreshLayout();
+        _rewardCardRoot?.GetComponent<ResponsiveGridConstraint>()
+            ?.RefreshLayout();
     }
 
     private void CreateStartingItemSlot(int slotIndex, BattleItemSO item)
@@ -4440,40 +4219,25 @@ public sealed class DungeonEventTab
         if (_rewardCardRoot == null || item == null)
             return;
 
-        GameObject slotObject = new(
-            $"grpStartingItem{slotIndex + 1}",
-            typeof(RectTransform));
-        RectTransform slotRect = (RectTransform)slotObject.transform;
-        slotRect.SetParent(_rewardCardRoot, false);
-
-        DungeonItemCardView prefab = _page.StartingItemCardPrefab;
-        if (prefab == null)
+        DungeonStartingItemSlotView slotPrefab =
+            _page.StartingItemSlotPrefab;
+        if (slotPrefab == null)
         {
             Debug.LogError(
-                "Starting item selection requires a DungeonItemCardView " +
-                "prefab on DungeonPage or at Resources/" +
-                "Presentation/BattleItemCard.");
+                "Starting item slot prefab is not assigned on DungeonPage.");
             return;
         }
 
-        DungeonItemCardView card = UnityEngine.Object.Instantiate(
-            prefab,
-            slotRect,
-            false);
-        card.name = $"StartingItemCard{slotIndex + 1}";
-        RectTransform cardRect = card.transform as RectTransform;
-        float cardWidth = Mathf.Max(
-            1f,
-            _rewardCardLayout != null
-                ? _rewardCardLayout.cellSize.x
-                : 220f);
-        float cardHeight = cardWidth * 1.4f;
-        cardRect.anchorMin = new Vector2(0.5f, 1f);
-        cardRect.anchorMax = new Vector2(0.5f, 1f);
-        cardRect.pivot = new Vector2(0.5f, 1f);
-        cardRect.anchoredPosition = Vector2.zero;
-        cardRect.sizeDelta = new Vector2(cardWidth, cardHeight);
-        card.Initialize(item, null);
+        DungeonStartingItemSlotView slot = AcquireView(
+            _startingItemSlots,
+            slotPrefab,
+            _rewardCardRoot);
+        slot.name = $"grpStartingItem{slotIndex + 1}";
+        if (!slot.BindItem(item))
+        {
+            slot.gameObject.SetActive(false);
+            return;
+        }
 
         int remaining = _page.GetStartingItemRerollsRemaining(slotIndex);
         bool canReroll = _page.CanRerollStartingItem(slotIndex);
@@ -4483,82 +4247,10 @@ public sealed class DungeonEventTab
                 LocalizationService.Arg("count", remaining))
             : LocalizationService.Get(
                 LocalizationKeys.UiDungeonStartingItemsRerollUsed);
-        CreateStartingItemRerollButton(
-            slotRect,
+        slot.BindReroll(
             label,
             canReroll,
             () => _page.TryRerollStartingItem(slotIndex));
-    }
-
-    private void CreateStartingItemRerollButton(
-        RectTransform parent,
-        string label,
-        bool interactable,
-        Action action)
-    {
-        GameObject buttonObject = new(
-            "btnStartingItemReroll",
-            typeof(RectTransform),
-            typeof(Image),
-            typeof(Button));
-        RectTransform buttonRect =
-            (RectTransform)buttonObject.transform;
-        buttonRect.SetParent(parent, false);
-        buttonRect.anchorMin = new Vector2(0f, 0f);
-        buttonRect.anchorMax = new Vector2(1f, 0f);
-        buttonRect.pivot = new Vector2(0.5f, 0f);
-        buttonRect.anchoredPosition = Vector2.zero;
-        buttonRect.sizeDelta = new Vector2(0f, 52f);
-
-        Image image = buttonObject.GetComponent<Image>();
-        image.color = interactable
-            ? _buttonColor
-            : Color.Lerp(_buttonColor, Color.black, 0.55f);
-        Button button = buttonObject.GetComponent<Button>();
-        button.targetGraphic = image;
-        button.interactable = interactable;
-        if (action != null)
-            button.onClick.AddListener(() => action());
-
-        GameObject textObject = new(
-            "txtStartingItemReroll",
-            typeof(RectTransform),
-            typeof(TextMeshProUGUI));
-        RectTransform textRect = (RectTransform)textObject.transform;
-        textRect.SetParent(buttonRect, false);
-        textRect.anchorMin = Vector2.zero;
-        textRect.anchorMax = Vector2.one;
-        textRect.offsetMin = new Vector2(8f, 2f);
-        textRect.offsetMax = new Vector2(-8f, -2f);
-        TextMeshProUGUI text =
-            textObject.GetComponent<TextMeshProUGUI>();
-        LocalizationFontResolver.ApplyGameDefault(text);
-        text.text = label;
-        text.fontSize = 18f;
-        text.color = _textColor;
-        text.alignment = TextAlignmentOptions.Center;
-        text.raycastTarget = false;
-    }
-
-    private TextMeshProUGUI CreateText(
-        Transform parent,
-        string objectName,
-        float fontSize,
-        float preferredHeight)
-    {
-        GameObject textObject = new(
-            objectName,
-            typeof(RectTransform),
-            typeof(TextMeshProUGUI),
-            typeof(LayoutElement));
-        textObject.transform.SetParent(parent, false);
-        TextMeshProUGUI text = textObject.GetComponent<TextMeshProUGUI>();
-        LocalizationFontResolver.ApplyGameDefault(text);
-        text.fontSize = fontSize;
-        text.color = _textColor;
-        text.alignment = TextAlignmentOptions.Center;
-        textObject.GetComponent<LayoutElement>().preferredHeight = preferredHeight;
-        return text;
     }
 
     private RectTransform CreateRewardCard(
@@ -4568,188 +4260,114 @@ public sealed class DungeonEventTab
         if (_rewardCardRoot == null)
             return null;
 
-        GameObject cardObject = new(
-            "btnRewardCard",
-            typeof(RectTransform),
-            typeof(CanvasRenderer),
-            typeof(Image),
-            typeof(Button),
-            typeof(DungeonRewardCardHoverView));
-        cardObject.transform.SetParent(_rewardCardRoot, false);
+        DungeonRewardCardView prefab = _page.RewardCardPrefab;
+        if (prefab == null)
+        {
+            Debug.LogError(
+                "Dungeon reward card prefab is not assigned on DungeonPage.");
+            return null;
+        }
 
-        Color normalColor = Color.Lerp(
-            _buttonColor,
+        DungeonRewardCardView card = AcquireView(
+            _rewardCards,
+            prefab,
+            _rewardCardRoot);
+        card.name = "btnRewardCard";
+        card.Bind(
+            content.Category,
+            content.Title,
+            content.Description,
+            content.Footer,
             content.AccentColor,
-            0.18f);
-        Image cardImage = cardObject.GetComponent<Image>();
-        cardImage.color = normalColor;
-        cardImage.raycastTarget = true;
-
-        Button button = cardObject.GetComponent<Button>();
-        button.targetGraphic = cardImage;
-        ColorBlock colors = button.colors;
-        colors.normalColor = normalColor;
-        colors.highlightedColor = Color.Lerp(normalColor, Color.white, 0.14f);
-        colors.pressedColor = Color.Lerp(normalColor, content.AccentColor, 0.5f);
-        colors.selectedColor = colors.highlightedColor;
-        colors.disabledColor = Color.Lerp(normalColor, Color.black, 0.5f);
-        colors.colorMultiplier = 1f;
-        colors.fadeDuration = 0.08f;
-        button.colors = colors;
-        if (action != null)
-            button.onClick.AddListener(() => action());
-
-        GameObject accentObject = new(
-            "imgRewardAccent",
-            typeof(RectTransform),
-            typeof(CanvasRenderer),
-            typeof(Image));
-        accentObject.transform.SetParent(cardObject.transform, false);
-        RectTransform accentRect =
-            (RectTransform)accentObject.transform;
-        accentRect.anchorMin = new Vector2(0f, 1f);
-        accentRect.anchorMax = new Vector2(1f, 1f);
-        accentRect.pivot = new Vector2(0.5f, 1f);
-        accentRect.anchoredPosition = Vector2.zero;
-        accentRect.sizeDelta = new Vector2(0f, 8f);
-        Image accentImage = accentObject.GetComponent<Image>();
-        accentImage.color = content.AccentColor;
-        accentImage.raycastTarget = false;
-
-        TextMeshProUGUI category = CreateRewardCardText(
-            cardObject.transform,
-            "txtRewardCategory",
-            new Vector2(0f, 0.83f),
-            new Vector2(1f, 0.96f),
-            14f);
-        category.color = Color.Lerp(_textColor, content.AccentColor, 0.45f);
-        category.text = content.Category;
-
-        TextMeshProUGUI title = CreateRewardCardText(
-            cardObject.transform,
-            "txtRewardTitle",
-            new Vector2(0f, 0.63f),
-            new Vector2(1f, 0.83f),
-            24f);
-        title.text = content.Title;
-
-        TextMeshProUGUI description = CreateRewardCardText(
-            cardObject.transform,
-            "txtRewardDescription",
-            new Vector2(0f, 0.22f),
-            new Vector2(1f, 0.63f),
-            18f);
-        description.fontStyle = FontStyles.Normal;
-        description.text = content.Description;
-
-        TextMeshProUGUI footer = CreateRewardCardText(
-            cardObject.transform,
-            "txtRewardFooter",
-            new Vector2(0f, 0.04f),
-            new Vector2(1f, 0.2f),
-            14f);
-        footer.color = Color.Lerp(_textColor, content.AccentColor, 0.35f);
-        footer.text = content.Footer;
-        return cardObject.transform as RectTransform;
-    }
-
-    private TextMeshProUGUI CreateRewardCardText(
-        Transform parent,
-        string objectName,
-        Vector2 anchorMin,
-        Vector2 anchorMax,
-        float maximumFontSize)
-    {
-        GameObject textObject = new(
-            objectName,
-            typeof(RectTransform),
-            typeof(TextMeshProUGUI));
-        textObject.transform.SetParent(parent, false);
-        RectTransform textRect = (RectTransform)textObject.transform;
-        textRect.anchorMin = anchorMin;
-        textRect.anchorMax = anchorMax;
-        textRect.offsetMin = new Vector2(14f, 4f);
-        textRect.offsetMax = new Vector2(-14f, -4f);
-
-        TextMeshProUGUI text = textObject.GetComponent<TextMeshProUGUI>();
-        LocalizationFontResolver.ApplyGameDefault(text);
-        text.fontSize = maximumFontSize;
-        text.fontSizeMax = maximumFontSize;
-        text.fontSizeMin = Mathf.Max(11f, maximumFontSize - 6f);
-        text.enableAutoSizing = true;
-        text.textWrappingMode = TextWrappingModes.Normal;
-        text.overflowMode = TextOverflowModes.Ellipsis;
-        text.fontStyle = FontStyles.Bold;
-        text.color = _textColor;
-        text.alignment = TextAlignmentOptions.Center;
-        text.raycastTarget = false;
-        return text;
+            action);
+        return card.transform as RectTransform;
     }
 
     private void CreateButton(string label, Action action)
     {
-        GameObject buttonObject = new(
-            "btnEventChoice",
-            typeof(RectTransform),
-            typeof(Image),
-            typeof(Button),
-            typeof(LayoutElement));
-        buttonObject.transform.SetParent(_buttonRoot, false);
-        buttonObject.GetComponent<Image>().color = _buttonColor;
-        float buttonHeight = label != null && label.Contains("\n")
-            ? 88f
-            : 64f;
-        buttonObject.GetComponent<LayoutElement>().preferredHeight =
-            buttonHeight;
+        DungeonDynamicChoiceButtonView prefab =
+            _page.ChoiceButtonPrefab;
+        if (prefab == null)
+        {
+            Debug.LogError(
+                "Dungeon choice button prefab is not assigned on " +
+                "DungeonPage.");
+            return;
+        }
 
-        Button button = buttonObject.GetComponent<Button>();
-        if (action != null)
-            button.onClick.AddListener(() => action());
-
-        TextMeshProUGUI text = CreateText(
-            buttonObject.transform,
-            "txtChoice",
-            label != null && label.Contains("\n") ? 18f : 22f,
-            buttonHeight);
-        RectTransform textRect = text.rectTransform;
-        textRect.anchorMin = Vector2.zero;
-        textRect.anchorMax = Vector2.one;
-        textRect.offsetMin = new Vector2(12f, 4f);
-        textRect.offsetMax = new Vector2(-12f, -4f);
-        text.text = label;
+        DungeonDynamicChoiceButtonView button = AcquireView(
+            _choiceButtons,
+            prefab,
+            _buttonRoot);
+        button.name = "btnEventChoice";
+        button.Bind(label, true, action);
     }
 
     private void ClearButtons()
     {
         _firstStartingChoiceRect = null;
-        ClearChildren(_rewardCardRoot);
-        ClearChildren(_buttonRoot);
+        DeactivateViews(_rewardCards);
+        DeactivateViews(_startingItemSlots);
+        DeactivateViews(_choiceButtons);
         RefreshPreparationNavigationButton();
     }
 
-    private static void ClearChildren(RectTransform root)
+    private static void CollectAuthoredViews<T>(
+        Transform root,
+        List<T> views)
+        where T : Component
     {
         if (root == null)
             return;
 
-        for (int index = root.childCount - 1; index >= 0; index--)
+        for (int index = 0; index < root.childCount; index++)
         {
-            GameObject child = root.GetChild(index).gameObject;
-            child.SetActive(false);
-            UnityEngine.Object.Destroy(child);
+            T view = root.GetChild(index).GetComponent<T>();
+            if (view == null || views.Contains(view))
+                continue;
+
+            view.gameObject.SetActive(false);
+            views.Add(view);
+        }
+    }
+
+    private static T AcquireView<T>(
+        List<T> views,
+        T prefab,
+        Transform parent)
+        where T : Component
+    {
+        for (int index = 0; index < views.Count; index++)
+        {
+            T view = views[index];
+            if (view == null || view.gameObject.activeSelf)
+                continue;
+
+            view.gameObject.SetActive(true);
+            return view;
+        }
+
+        T instance = UnityEngine.Object.Instantiate(
+            prefab,
+            parent,
+            false);
+        views.Add(instance);
+        return instance;
+    }
+
+    private static void DeactivateViews<T>(List<T> views)
+        where T : Component
+    {
+        for (int index = 0; index < views.Count; index++)
+        {
+            if (views[index] != null)
+                views[index].gameObject.SetActive(false);
         }
     }
 }
 
 public sealed class DungeonRoomView
 {
-    private readonly Color _panelColor =
-        new(0.055f, 0.085f, 0.075f, 0.98f);
-    private readonly Color _buttonColor =
-        new(0.14f, 0.25f, 0.2f, 1f);
-    private readonly Color _textColor =
-        new(0.94f, 0.91f, 0.8f, 1f);
-
     private GameObject _root;
     private DungeonPage _page;
     private EDungeonPhase _phase;
@@ -4763,6 +4381,8 @@ public sealed class DungeonRoomView
     private DungeonRoomSO _room;
     private int _roomIndex;
     private bool _localizationEventsBound;
+    private readonly List<DungeonDynamicChoiceButtonView> _choiceButtons =
+        new();
     private readonly List<DungeonEventChoiceNodeDefinition>
         _activeEventChoices = new();
 
@@ -4779,7 +4399,6 @@ public sealed class DungeonRoomView
         _root = root;
         _page = page;
         _phase = phase;
-        HidePlaceholderText();
         BuildRuntimeUi();
         BindLocalizationEvents();
         Hide();
@@ -4816,6 +4435,7 @@ public sealed class DungeonRoomView
         _buttonRoot = null;
         _room = null;
         _activeEventChoices.Clear();
+        _choiceButtons.Clear();
     }
 
     private void Render()
@@ -5023,142 +4643,32 @@ public sealed class DungeonRoomView
 
     private void BuildRuntimeUi()
     {
-        GameObject panelObject = new(
-            $"grp{_phase}RoomPanel",
-            typeof(RectTransform),
-            typeof(CanvasRenderer),
-            typeof(Image),
-            typeof(RectMask2D));
-        _panel = (RectTransform)panelObject.transform;
-        _panel.SetParent(_root.transform, false);
-        _panel.anchorMin = new Vector2(0.5f, 0.5f);
-        _panel.anchorMax = new Vector2(0.5f, 0.5f);
-        _panel.pivot = new Vector2(0.5f, 0.5f);
-        _panel.sizeDelta = new Vector2(1920f, 1080f);
-        panelObject.GetComponent<Image>().color = Color.black;
+        _panel = _root.transform.Find($"grp{_phase}RoomPanel")
+            as RectTransform;
+        Transform content = _panel?.Find("grpRoomContent");
+        _banner = _panel?.Find("imgRoomBanner")?.GetComponent<Image>();
+        _bannerAspect = _banner != null
+            ? _banner.GetComponent<AspectRatioFitter>()
+            : null;
+        _title = content?.Find("txtRoomTitle")
+            ?.GetComponent<TextMeshProUGUI>();
+        _description = content?.Find("txtRoomDescription")
+            ?.GetComponent<TextMeshProUGUI>();
+        _currency = content?.Find("txtRunCurrency")
+            ?.GetComponent<TextMeshProUGUI>();
+        _buttonRoot = content?.Find("grpRoomChoices")
+            as RectTransform;
+        if (_panel == null || _banner == null || _bannerAspect == null ||
+            _title == null || _description == null || _currency == null ||
+            _buttonRoot == null)
+        {
+            Debug.LogError(
+                $"Dungeon {_phase} fixed room UI is incomplete. " +
+                "Author it in the Scene.",
+                _root);
+        }
 
-        GameObject bannerObject = new(
-            "imgRoomBanner",
-            typeof(RectTransform),
-            typeof(CanvasRenderer),
-            typeof(Image),
-            typeof(AspectRatioFitter));
-        bannerObject.transform.SetParent(_panel, false);
-        RectTransform bannerRect =
-            (RectTransform)bannerObject.transform;
-        bannerRect.anchorMin = Vector2.zero;
-        bannerRect.anchorMax = Vector2.one;
-        bannerRect.offsetMin = Vector2.zero;
-        bannerRect.offsetMax = Vector2.zero;
-        _banner = bannerObject.GetComponent<Image>();
-        _banner.preserveAspect = false;
-        _banner.raycastTarget = false;
-        _bannerAspect = bannerObject.GetComponent<AspectRatioFitter>();
-        _bannerAspect.aspectMode = AspectRatioFitter.AspectMode.EnvelopeParent;
-        _bannerAspect.aspectRatio = 16f / 9f;
-
-        GameObject shadeObject = new(
-            "imgRoomBannerShade",
-            typeof(RectTransform),
-            typeof(CanvasRenderer),
-            typeof(Image));
-        shadeObject.transform.SetParent(_panel, false);
-        RectTransform shadeRect = (RectTransform)shadeObject.transform;
-        shadeRect.anchorMin = _phase == EDungeonPhase.Event
-            ? new Vector2(0.62f, 0f)
-            : Vector2.zero;
-        shadeRect.anchorMax = Vector2.one;
-        shadeRect.offsetMin = Vector2.zero;
-        shadeRect.offsetMax = Vector2.zero;
-        Image shade = shadeObject.GetComponent<Image>();
-        Color shadeColor = _panelColor;
-        shadeColor.a = 0.72f;
-        shade.color = shadeColor;
-        shade.raycastTarget = false;
-
-        GameObject contentObject = new(
-            "grpRoomContent",
-            typeof(RectTransform),
-            typeof(VerticalLayoutGroup));
-        RectTransform content = (RectTransform)contentObject.transform;
-        content.SetParent(_panel, false);
-        content.anchorMin = _phase == EDungeonPhase.Event
-            ? new Vector2(0.62f, 0f)
-            : new Vector2(0.22f, 0f);
-        content.anchorMax = _phase == EDungeonPhase.Event
-            ? Vector2.one
-            : new Vector2(0.78f, 1f);
-        content.offsetMin = Vector2.zero;
-        content.offsetMax = Vector2.zero;
-        VerticalLayoutGroup layout =
-            contentObject.GetComponent<VerticalLayoutGroup>();
-        layout.padding = new RectOffset(40, 40, 40, 40);
-        layout.spacing = 14f;
-        layout.childAlignment = TextAnchor.UpperCenter;
-        layout.childControlWidth = true;
-        layout.childForceExpandWidth = true;
-        layout.childControlHeight = true;
-        layout.childForceExpandHeight = false;
-
-        _title = CreateText(content, "txtRoomTitle", 36f, 66f);
-        _title.fontStyle = FontStyles.Bold;
-        _description = CreateText(
-            content,
-            "txtRoomDescription",
-            21f,
-            128f);
-        _currency = CreateText(content, "txtRunCurrency", 22f, 42f);
-        _currency.alignment = TextAlignmentOptions.Right;
-
-        GameObject buttonRootObject = new(
-            "grpRoomChoices",
-            typeof(RectTransform),
-            typeof(VerticalLayoutGroup),
-            typeof(LayoutElement));
-        _buttonRoot = (RectTransform)buttonRootObject.transform;
-        _buttonRoot.SetParent(content, false);
-        VerticalLayoutGroup buttonLayout =
-            buttonRootObject.GetComponent<VerticalLayoutGroup>();
-        buttonLayout.spacing = 10f;
-        buttonLayout.childAlignment = TextAnchor.UpperCenter;
-        buttonLayout.childControlWidth = true;
-        buttonLayout.childForceExpandWidth = true;
-        buttonLayout.childControlHeight = false;
-        buttonLayout.childForceExpandHeight = false;
-        LayoutElement buttonRootLayout =
-            buttonRootObject.GetComponent<LayoutElement>();
-        buttonRootLayout.flexibleHeight = 1f;
-
-        ResponsivePanelFitter.Bind(
-            _panel,
-            _root.transform as RectTransform);
-    }
-
-    private TextMeshProUGUI CreateText(
-        Transform parent,
-        string objectName,
-        float fontSize,
-        float preferredHeight)
-    {
-        GameObject textObject = new(
-            objectName,
-            typeof(RectTransform),
-            typeof(TextMeshProUGUI),
-            typeof(LayoutElement));
-        textObject.transform.SetParent(parent, false);
-        TextMeshProUGUI text = textObject.GetComponent<TextMeshProUGUI>();
-        LocalizationFontResolver.ApplyGameDefault(text);
-        text.fontSize = fontSize;
-        text.enableAutoSizing = true;
-        text.fontSizeMax = fontSize;
-        text.fontSizeMin = Mathf.Max(12f, fontSize - 9f);
-        text.color = _textColor;
-        text.alignment = TextAlignmentOptions.Center;
-        text.textWrappingMode = TextWrappingModes.Normal;
-        text.raycastTarget = false;
-        textObject.GetComponent<LayoutElement>().preferredHeight =
-            preferredHeight;
-        return text;
+        CollectAuthoredButtons();
     }
 
     private void CreateButton(
@@ -5166,67 +4676,67 @@ public sealed class DungeonRoomView
         bool interactable,
         Action action)
     {
-        GameObject buttonObject = new(
-            "btnRoomChoice",
-            typeof(RectTransform),
-            typeof(CanvasRenderer),
-            typeof(Image),
-            typeof(Button),
-            typeof(LayoutElement));
-        buttonObject.transform.SetParent(_buttonRoot, false);
-        Color normalColor = interactable
-            ? _buttonColor
-            : Color.Lerp(_buttonColor, Color.black, 0.55f);
-        Image image = buttonObject.GetComponent<Image>();
-        image.color = normalColor;
-        Button button = buttonObject.GetComponent<Button>();
-        button.targetGraphic = image;
-        button.interactable = interactable;
-        if (action != null)
-            button.onClick.AddListener(() => action());
+        DungeonDynamicChoiceButtonView prefab =
+            _page.ChoiceButtonPrefab;
+        if (prefab == null)
+        {
+            Debug.LogError(
+                "Dungeon choice button prefab is not assigned on " +
+                "DungeonPage.");
+            return;
+        }
 
-        int lineCount = string.IsNullOrEmpty(label)
-            ? 1
-            : label.Split('\n').Length;
-        float height = Mathf.Clamp(54f + (lineCount - 1) * 23f, 54f, 112f);
-        buttonObject.GetComponent<LayoutElement>().preferredHeight = height;
-        TextMeshProUGUI text = CreateText(
-            buttonObject.transform,
-            "txtRoomChoice",
-            lineCount > 1 ? 19f : 22f,
-            height);
-        RectTransform textRect = text.rectTransform;
-        textRect.anchorMin = Vector2.zero;
-        textRect.anchorMax = Vector2.one;
-        textRect.offsetMin = new Vector2(16f, 5f);
-        textRect.offsetMax = new Vector2(-16f, -5f);
-        text.text = label;
+        DungeonDynamicChoiceButtonView button = AcquireButton(prefab);
+        button.name = "btnRoomChoice";
+        button.Bind(label, interactable, action);
     }
 
     private void ClearButtons()
     {
         if (_buttonRoot == null)
             return;
-        for (int index = _buttonRoot.childCount - 1; index >= 0; index--)
+        for (int index = 0; index < _choiceButtons.Count; index++)
         {
-            GameObject child = _buttonRoot.GetChild(index).gameObject;
-            child.SetActive(false);
-            UnityEngine.Object.Destroy(child);
+            if (_choiceButtons[index] != null)
+                _choiceButtons[index].gameObject.SetActive(false);
         }
     }
 
-    private void HidePlaceholderText()
+    private void CollectAuthoredButtons()
     {
-        foreach (TextMeshProUGUI text in
-                 _root.GetComponentsInChildren<TextMeshProUGUI>(true))
+        if (_buttonRoot == null)
+            return;
+
+        for (int index = 0; index < _buttonRoot.childCount; index++)
         {
-            if (text.name == "txtEventPlaceholder" ||
-                text.name == "txtRestPlaceholder" ||
-                text.name == "txtShopPlaceholder")
-            {
-                text.gameObject.SetActive(false);
-            }
+            DungeonDynamicChoiceButtonView button =
+                _buttonRoot.GetChild(index)
+                    .GetComponent<DungeonDynamicChoiceButtonView>();
+            if (button == null || _choiceButtons.Contains(button))
+                continue;
+
+            button.gameObject.SetActive(false);
+            _choiceButtons.Add(button);
         }
+    }
+
+    private DungeonDynamicChoiceButtonView AcquireButton(
+        DungeonDynamicChoiceButtonView prefab)
+    {
+        for (int index = 0; index < _choiceButtons.Count; index++)
+        {
+            DungeonDynamicChoiceButtonView button = _choiceButtons[index];
+            if (button == null || button.gameObject.activeSelf)
+                continue;
+
+            button.gameObject.SetActive(true);
+            return button;
+        }
+
+        DungeonDynamicChoiceButtonView instance =
+            UnityEngine.Object.Instantiate(prefab, _buttonRoot, false);
+        _choiceButtons.Add(instance);
+        return instance;
     }
 
     private void BindLocalizationEvents()

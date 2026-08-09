@@ -449,7 +449,7 @@ public sealed class AttendanceTests
     }
 
     [Test]
-    public void NotificationDot_OverlapsTopRightByOneQuarter()
+    public void NotificationDot_DoesNotOverwriteAuthoredLayout()
     {
         GameObject buttonObject = new("Button", typeof(RectTransform));
         GameObject dotObject = new(
@@ -462,14 +462,17 @@ public sealed class AttendanceTests
         {
             NotificationDotView dot =
                 dotObject.GetComponent<NotificationDotView>();
-            dot.ApplyLayout((RectTransform)buttonObject.transform);
-
             RectTransform rect = (RectTransform)dotObject.transform;
-            Assert.That(rect.sizeDelta.x, Is.EqualTo(18f));
-            Assert.That(rect.sizeDelta.y, Is.EqualTo(18f));
-            Assert.That(rect.anchoredPosition.x, Is.EqualTo(4.5f));
-            Assert.That(rect.anchoredPosition.y, Is.EqualTo(4.5f));
-            Assert.That(dot.raycastTarget, Is.False);
+            rect.sizeDelta = new Vector2(27f, 31f);
+            rect.anchoredPosition = new Vector2(8f, 11f);
+
+            dot.SetVisible(false);
+            dot.SetVisible(true);
+
+            Assert.That(rect.sizeDelta, Is.EqualTo(new Vector2(27f, 31f)));
+            Assert.That(
+                rect.anchoredPosition,
+                Is.EqualTo(new Vector2(8f, 11f)));
         }
         finally
         {

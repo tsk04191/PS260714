@@ -8,8 +8,6 @@ using UnityEngine.UI;
 [DisallowMultipleComponent]
 public sealed class MonthlyAttendancePopupView : MonoBehaviour
 {
-    private const string ResourcePath = "Presentation/AttendancePopup";
-
     [Header("Popup")]
     [SerializeField] private Button backdropButton;
     [SerializeField] private Button closeButton;
@@ -28,40 +26,10 @@ public sealed class MonthlyAttendancePopupView : MonoBehaviour
     [SerializeField] private TextMeshProUGUI resetText;
     [SerializeField] private Button claimButton;
     [SerializeField] private TextMeshProUGUI claimLabel;
+    [SerializeField] private ResponsivePanelFitter panelFitter;
 
     private readonly List<AttendanceRewardCellView> _cells = new();
     private AttendanceService _service;
-    private ResponsivePanelFitter _panelFitter;
-
-    public static MonthlyAttendancePopupView BuildOrBind(
-        RectTransform parent)
-    {
-        if (parent == null)
-            return null;
-
-        MonthlyAttendancePopupView existing =
-            parent.GetComponentInChildren<MonthlyAttendancePopupView>(true);
-        if (existing != null)
-            return existing;
-
-        MonthlyAttendancePopupView prefab =
-            Resources.Load<MonthlyAttendancePopupView>(ResourcePath);
-        if (prefab == null)
-        {
-            Debug.LogError(
-                $"Attendance popup prefab is missing at Resources/" +
-                $"{ResourcePath}.",
-                parent);
-            return null;
-        }
-
-        MonthlyAttendancePopupView instance =
-            Instantiate(prefab, parent, false);
-        instance.name = "grpAttendancePopup";
-        instance.gameObject.SetActive(false);
-        return instance;
-    }
-
     public bool HasRequiredReferences =>
         backdropButton != null && closeButton != null &&
         titleText != null && descriptionText != null && monthText != null &&
@@ -79,7 +47,6 @@ public sealed class MonthlyAttendancePopupView : MonoBehaviour
     public void Show()
     {
         gameObject.SetActive(true);
-        transform.SetAsLastSibling();
         Refresh();
     }
 
@@ -109,7 +76,7 @@ public sealed class MonthlyAttendancePopupView : MonoBehaviour
 
     private void Awake()
     {
-        EnsureResponsiveLayout();
+        ResolveSceneReferences();
         if (!HasRequiredReferences)
         {
             Debug.LogError(
@@ -132,15 +99,14 @@ public sealed class MonthlyAttendancePopupView : MonoBehaviour
 
     private void OnEnable()
     {
-        EnsureResponsiveLayout();
-        _panelFitter?.RefreshLayout();
+        panelFitter?.RefreshLayout();
         LocalizationService.LocaleChanged += HandleLocaleChanged;
         Refresh();
     }
 
     private void OnRectTransformDimensionsChange()
     {
-        _panelFitter?.RefreshLayout();
+        panelFitter?.RefreshLayout();
     }
 
     private void OnDisable()
@@ -153,7 +119,7 @@ public sealed class MonthlyAttendancePopupView : MonoBehaviour
         LocalizationService.LocaleChanged -= HandleLocaleChanged;
     }
 
-    private void EnsureCells()
+    private bool EnsureCells()
     {
         _cells.Clear();
         for (int index = 0; index < calendarRoot.childCount; index++)
@@ -165,33 +131,44 @@ public sealed class MonthlyAttendancePopupView : MonoBehaviour
                 _cells.Add(existing);
         }
 
-        while (_cells.Count < AttendanceRewardScheduleSO.CycleRewardCount)
+        if (_cells.Count != AttendanceRewardScheduleSO.CycleRewardCount)
         {
-            AttendanceRewardCellView cell = Instantiate(
-                rewardCellPrefab,
-                calendarRoot,
-                false);
-            cell.name = $"grpAttendanceReward{_cells.Count + 1:00}";
-            cell.gameObject.SetActive(true);
-            _cells.Add(cell);
+            Debug.LogError(
+                $"Attendance calendar requires exactly " +
+                $"{AttendanceRewardScheduleSO.CycleRewardCount} " +
+                $"pre-authored reward cells in ClientScene, but " +
+                $"{_cells.Count} were found.",
+                this);
+            return false;
         }
+
         for (int index = 0; index < _cells.Count; index++)
         {
-            _cells[index].gameObject.SetActive(
-                index < AttendanceRewardScheduleSO.CycleRewardCount);
+            AttendanceRewardCellView cell = _cells[index];
+            cell.name = $"grpAttendanceReward{index + 1:00}";
+            cell.gameObject.SetActive(true);
         }
+
+        return true;
     }
 
-    private void EnsureResponsiveLayout()
+    public void ResolveSceneReferences()
     {
-        if (_panelFitter != null)
+        if (panelFitter != null)
             return;
 
         RectTransform panel = transform.Find("grpAttendancePanel")
             as RectTransform;
-        _panelFitter = ResponsivePanelFitter.Bind(
-            panel,
-            transform as RectTransform);
+        panelFitter = panel != null
+            ? panel.GetComponent<ResponsivePanelFitter>()
+            : null;
+        if (panelFitter == null)
+        {
+            Debug.LogError(
+                "Attendance popup requires a pre-authored " +
+                "ResponsivePanelFitter on grpAttendancePanel.",
+                this);
+        }
     }
 
     private void RefreshProgress(
@@ -212,7 +189,8 @@ public sealed class MonthlyAttendancePopupView : MonoBehaviour
         AttendanceRewardScheduleSO schedule,
         AttendanceStatus status)
     {
-        EnsureCells();
+        if (!EnsureCells())
+            return;
         int claimedCount = status?.ClaimedInDisplayedCycle ?? 0;
         AttendanceAvailability availability =
             status?.Availability ?? AttendanceAvailability.NotReady;

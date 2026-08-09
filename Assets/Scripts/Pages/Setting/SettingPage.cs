@@ -12,8 +12,6 @@ public sealed class SettingPage : MonoBehaviour, IPage
         new(0.18f, 0.36f, 0.32f, 1f);
     private static readonly Color UnselectedTabColor =
         new(0.08f, 0.16f, 0.15f, 1f);
-    private static readonly Color DataManagementCardColor =
-        new(0.075f, 0.14f, 0.13f, 1f);
     private static readonly Color DestructiveButtonColor =
         new(0.52f, 0.12f, 0.1f, 1f);
     private static readonly Color ContinueButtonColor =
@@ -66,7 +64,7 @@ public sealed class SettingPage : MonoBehaviour, IPage
     [SerializeField] private TextMeshProUGUI uiVolumeValueText;
     [SerializeField] private ToggleSliderController muteInBackgroundToggle;
 
-    [Header("Game Controls (Optional - generated at runtime)")]
+    [Header("Game Controls")]
     [SerializeField] private TMP_Dropdown localeDropdown;
     [SerializeField] private TMP_Dropdown fontDropdown;
 
@@ -76,13 +74,14 @@ public sealed class SettingPage : MonoBehaviour, IPage
     [SerializeField] private Button quitOkButton;
     [SerializeField] private Button quitCancelButton;
 
-    private Button _deleteLocalDataButton;
-    private GameObject _localDataResetPopup;
-    private Button _localDataResetConfirmButton;
-    private Button _localDataResetCancelButton;
-    private TextMeshProUGUI _localDataResetTitleText;
-    private TextMeshProUGUI _localDataResetMessageText;
-    private TextMeshProUGUI _localDataResetConfirmText;
+    [Header("Local Data Controls")]
+    [SerializeField] private Button _deleteLocalDataButton;
+    [SerializeField] private GameObject _localDataResetPopup;
+    [SerializeField] private Button _localDataResetConfirmButton;
+    [SerializeField] private Button _localDataResetCancelButton;
+    [SerializeField] private TextMeshProUGUI _localDataResetTitleText;
+    [SerializeField] private TextMeshProUGUI _localDataResetMessageText;
+    [SerializeField] private TextMeshProUGUI _localDataResetConfirmText;
     private int _localDataResetConfirmationStep;
     private bool _initialized;
     private bool _eventsBound;
@@ -95,8 +94,8 @@ public sealed class SettingPage : MonoBehaviour, IPage
     private readonly List<string> _supportedResolutions = new();
     private readonly List<string> _supportedLocaleIds = new();
     private readonly List<string> _supportedFontIds = new();
-    private TextMeshProUGUI _localeLabelText;
-    private TextMeshProUGUI _fontLabelText;
+    [SerializeField] private TextMeshProUGUI _localeLabelText;
+    [SerializeField] private TextMeshProUGUI _fontLabelText;
     private bool _openedFromDungeon;
 
     public AudioSource Speaker { get; set; }
@@ -184,11 +183,9 @@ public sealed class SettingPage : MonoBehaviour, IPage
         if (_initialized)
             return;
 
-        EnsureLocalizationControls();
         if (!ValidateReferences())
             return;
 
-        EnsureLocalDataResetControls();
         BindSceneLocalizedTexts();
 
         ResolveSettingManagers();
@@ -221,8 +218,17 @@ public sealed class SettingPage : MonoBehaviour, IPage
             sfxVolumeSlider == null || sfxVolumeValueText == null ||
             uiVolumeSlider == null || uiVolumeValueText == null ||
             muteInBackgroundToggle == null ||
+            localeDropdown == null || fontDropdown == null ||
+            _localeLabelText == null || _fontLabelText == null ||
             quitButton == null || quitConfirmationPopup == null ||
-            quitOkButton == null || quitCancelButton == null)
+            quitOkButton == null || quitCancelButton == null ||
+            _deleteLocalDataButton == null ||
+            _localDataResetPopup == null ||
+            _localDataResetConfirmButton == null ||
+            _localDataResetCancelButton == null ||
+            _localDataResetTitleText == null ||
+            _localDataResetMessageText == null ||
+            _localDataResetConfirmText == null)
         {
             Debug.LogError("SettingPage scene references are incomplete.", this);
             return false;
@@ -548,7 +554,6 @@ public sealed class SettingPage : MonoBehaviour, IPage
     {
         HideLocalDataResetConfirmation();
         quitConfirmationPopup.SetActive(true);
-        quitConfirmationPopup.transform.SetAsLastSibling();
     }
 
     private void HandleQuitOkClicked()
@@ -640,7 +645,6 @@ public sealed class SettingPage : MonoBehaviour, IPage
         }
 
         _localDataResetPopup.SetActive(true);
-        _localDataResetPopup.transform.SetAsLastSibling();
     }
 
     private void HideLocalDataResetConfirmation()
@@ -960,247 +964,6 @@ public sealed class SettingPage : MonoBehaviour, IPage
         fontDropdown.RefreshShownValue();
     }
 
-    private void EnsureLocalizationControls()
-    {
-        if (gameTab == null || resolutionDropdown == null)
-            return;
-
-        HideGameTabPlaceholder();
-        localeDropdown = ResolveOrCloneDropdown(
-            localeDropdown,
-            "drdLocale",
-            new Vector2(0.38f, 0.64f),
-            new Vector2(0.9f, 0.64f));
-        fontDropdown = ResolveOrCloneDropdown(
-            fontDropdown,
-            "drdFont",
-            new Vector2(0.38f, 0.44f),
-            new Vector2(0.9f, 0.44f));
-
-        _localeLabelText = EnsureControlLabel(
-            "txtLocaleLabel",
-            LocalizationKeys.UiSettingsLanguage,
-            new Vector2(0.08f, 0.64f),
-            new Vector2(0.34f, 0.64f));
-        _fontLabelText = EnsureControlLabel(
-            "txtFontLabel",
-            LocalizationKeys.UiSettingsFont,
-            new Vector2(0.08f, 0.44f),
-            new Vector2(0.34f, 0.44f));
-
-        RefreshLocalizationPresentation();
-    }
-
-    private void EnsureLocalDataResetControls()
-    {
-        if (miscTab == null || quitButton == null ||
-            quitConfirmationPopup == null)
-        {
-            return;
-        }
-
-        TextMeshProUGUI miscHeading =
-            FindDescendantByName(
-                miscTab.transform,
-                "txtMiscPlaceholder")
-            ?.GetComponent<TextMeshProUGUI>();
-        if (miscHeading == null)
-            return;
-
-        RectTransform headingRect = miscHeading.rectTransform;
-        headingRect.anchorMin = new Vector2(0.06f, 0.78f);
-        headingRect.anchorMax = new Vector2(0.94f, 0.94f);
-        headingRect.anchoredPosition = Vector2.zero;
-        headingRect.sizeDelta = Vector2.zero;
-        miscHeading.alignment = TextAlignmentOptions.MidlineLeft;
-
-        GameObject cardObject = new(
-            "grpLocalDataManagement",
-            typeof(RectTransform),
-            typeof(CanvasRenderer),
-            typeof(Image));
-        cardObject.layer = miscTab.layer;
-        cardObject.transform.SetParent(miscTab.transform, false);
-
-        RectTransform cardRect =
-            cardObject.GetComponent<RectTransform>();
-        cardRect.anchorMin = new Vector2(0.06f, 0.42f);
-        cardRect.anchorMax = new Vector2(0.94f, 0.72f);
-        cardRect.anchoredPosition = Vector2.zero;
-        cardRect.sizeDelta = Vector2.zero;
-
-        Image cardImage = cardObject.GetComponent<Image>();
-        cardImage.color = DataManagementCardColor;
-        cardImage.raycastTarget = false;
-
-        CreateRuntimeLocalizedText(
-            miscHeading,
-            cardObject.transform,
-            "txtLocalDataTitle",
-            LocalizationKeys.UiSettingsLocalDataTitle,
-            new Vector2(0.04f, 0.52f),
-            new Vector2(0.7f, 0.9f),
-            28f,
-            TextAlignmentOptions.MidlineLeft,
-            FontStyles.Bold);
-        TextMeshProUGUI description =
-            CreateRuntimeLocalizedText(
-                miscHeading,
-                cardObject.transform,
-                "txtLocalDataDescription",
-                LocalizationKeys.UiSettingsLocalDataDescription,
-                new Vector2(0.04f, 0.1f),
-                new Vector2(0.7f, 0.52f),
-                20f,
-                TextAlignmentOptions.MidlineLeft,
-                FontStyles.Normal);
-        description.color = new Color(0.78f, 0.82f, 0.79f, 1f);
-        description.enableAutoSizing = true;
-        description.fontSizeMin = 16f;
-        description.fontSizeMax = 20f;
-
-        _deleteLocalDataButton = Instantiate(
-            quitButton,
-            cardObject.transform,
-            false);
-        _deleteLocalDataButton.name = "btnDeleteLocalData";
-        _deleteLocalDataButton.onClick.RemoveAllListeners();
-        _deleteLocalDataButton.gameObject.SetActive(true);
-        if (_deleteLocalDataButton.targetGraphic != null)
-        {
-            _deleteLocalDataButton.targetGraphic.color =
-                DestructiveButtonColor;
-        }
-
-        RectTransform deleteButtonRect =
-            _deleteLocalDataButton.transform as RectTransform;
-        if (deleteButtonRect != null)
-        {
-            deleteButtonRect.anchorMin = new Vector2(0.84f, 0.5f);
-            deleteButtonRect.anchorMax = new Vector2(0.84f, 0.5f);
-            deleteButtonRect.pivot = new Vector2(0.5f, 0.5f);
-            deleteButtonRect.anchoredPosition = Vector2.zero;
-            deleteButtonRect.sizeDelta = new Vector2(260f, 64f);
-            deleteButtonRect.localScale = Vector3.one;
-        }
-
-        TextMeshProUGUI deleteButtonText =
-            _deleteLocalDataButton.GetComponentInChildren<
-                TextMeshProUGUI>(true);
-        if (deleteButtonText != null)
-        {
-            deleteButtonText.name = "txtDeleteLocalData";
-            SetLocalizedTextKey(
-                deleteButtonText,
-                LocalizationKeys.UiSettingsLocalDataDelete);
-        }
-
-        CreateLocalDataResetPopup();
-    }
-
-    private void CreateLocalDataResetPopup()
-    {
-        _localDataResetPopup = Instantiate(
-            quitConfirmationPopup,
-            quitConfirmationPopup.transform.parent,
-            false);
-        _localDataResetPopup.name = "grpLocalDataResetPopup";
-
-        Transform titleTransform = FindDescendantByName(
-            _localDataResetPopup.transform,
-            "txtQuitConfirmationTitle");
-        Transform messageTransform = FindDescendantByName(
-            _localDataResetPopup.transform,
-            "txtQuitConfirmationMessage");
-        Transform confirmTransform = FindDescendantByName(
-            _localDataResetPopup.transform,
-            "btnQuitOk");
-        Transform cancelTransform = FindDescendantByName(
-            _localDataResetPopup.transform,
-            "btnQuitCancel");
-
-        _localDataResetTitleText =
-            titleTransform?.GetComponent<TextMeshProUGUI>();
-        _localDataResetMessageText =
-            messageTransform?.GetComponent<TextMeshProUGUI>();
-        _localDataResetConfirmButton =
-            confirmTransform?.GetComponent<Button>();
-        _localDataResetCancelButton =
-            cancelTransform?.GetComponent<Button>();
-
-        if (titleTransform != null)
-            titleTransform.name = "txtLocalDataConfirmationTitle";
-        if (messageTransform != null)
-            messageTransform.name = "txtLocalDataConfirmationMessage";
-        if (confirmTransform != null)
-            confirmTransform.name = "btnLocalDataConfirm";
-        if (cancelTransform != null)
-            cancelTransform.name = "btnLocalDataCancel";
-
-        _localDataResetConfirmButton?.onClick.RemoveAllListeners();
-        _localDataResetCancelButton?.onClick.RemoveAllListeners();
-
-        _localDataResetConfirmText =
-            _localDataResetConfirmButton
-                ?.GetComponentInChildren<TextMeshProUGUI>(true);
-        if (_localDataResetConfirmText != null)
-            _localDataResetConfirmText.name = "txtLocalDataConfirm";
-
-        TextMeshProUGUI cancelText =
-            _localDataResetCancelButton
-                ?.GetComponentInChildren<TextMeshProUGUI>(true);
-        if (cancelText != null)
-        {
-            cancelText.name = "txtLocalDataCancel";
-            SetLocalizedTextKey(
-                cancelText,
-                LocalizationKeys.UiCommonCancel);
-        }
-
-        if (_localDataResetMessageText != null)
-        {
-            _localDataResetMessageText.enableAutoSizing = true;
-            _localDataResetMessageText.fontSizeMin = 17f;
-            _localDataResetMessageText.fontSizeMax = 24f;
-        }
-
-        _localDataResetPopup.SetActive(false);
-    }
-
-    private static TextMeshProUGUI CreateRuntimeLocalizedText(
-        TextMeshProUGUI template,
-        Transform parent,
-        string objectName,
-        string localizationKey,
-        Vector2 anchorMin,
-        Vector2 anchorMax,
-        float fontSize,
-        TextAlignmentOptions alignment,
-        FontStyles fontStyle)
-    {
-        TextMeshProUGUI text = Instantiate(
-            template,
-            parent,
-            false);
-        text.name = objectName;
-        text.raycastTarget = false;
-        text.fontSize = fontSize;
-        text.fontSizeMax = fontSize;
-        text.fontStyle = fontStyle;
-        text.alignment = alignment;
-
-        RectTransform rect = text.rectTransform;
-        rect.anchorMin = anchorMin;
-        rect.anchorMax = anchorMax;
-        rect.pivot = new Vector2(0.5f, 0.5f);
-        rect.anchoredPosition = Vector2.zero;
-        rect.sizeDelta = Vector2.zero;
-        rect.localScale = Vector3.one;
-
-        SetLocalizedTextKey(text, localizationKey);
-        return text;
-    }
-
     private static void SetLocalizedTextKey(
         TextMeshProUGUI text,
         string localizationKey)
@@ -1208,34 +971,7 @@ public sealed class SettingPage : MonoBehaviour, IPage
         if (text == null)
             return;
 
-        LocalizedText localizedText =
-            text.GetComponent<LocalizedText>();
-        if (localizedText == null)
-            localizedText = text.gameObject.AddComponent<LocalizedText>();
-        localizedText.SetKey(localizationKey);
-    }
-
-    private static Transform FindDescendantByName(
-        Transform root,
-        string objectName)
-    {
-        if (root == null || string.IsNullOrWhiteSpace(objectName))
-            return null;
-
-        Transform[] descendants =
-            root.GetComponentsInChildren<Transform>(true);
-        for (int index = 0; index < descendants.Length; index++)
-        {
-            if (string.Equals(
-                descendants[index].name,
-                objectName,
-                StringComparison.Ordinal))
-            {
-                return descendants[index];
-            }
-        }
-
-        return null;
+        text.text = LocalizationService.Get(localizationKey);
     }
 
     private void BindSceneLocalizedTexts()
@@ -1262,11 +998,7 @@ public sealed class SettingPage : MonoBehaviour, IPage
             if (string.IsNullOrWhiteSpace(localizationKey))
                 continue;
 
-            LocalizedText localizedText =
-                text.GetComponent<LocalizedText>();
-            if (localizedText == null)
-                localizedText = text.gameObject.AddComponent<LocalizedText>();
-            localizedText.SetKey(localizationKey);
+            text.text = LocalizationService.Get(localizationKey);
         }
     }
 
@@ -1327,100 +1059,17 @@ public sealed class SettingPage : MonoBehaviour, IPage
                 LocalizationKeys.UiSettingsUiVolume,
             "txtMuteInBackgroundLabel" =>
                 LocalizationKeys.UiSettingsMuteBackground,
+            "txtLocaleLabel" => LocalizationKeys.UiSettingsLanguage,
+            "txtFontLabel" => LocalizationKeys.UiSettingsFont,
+            "txtLocalDataTitle" =>
+                LocalizationKeys.UiSettingsLocalDataTitle,
+            "txtLocalDataDescription" =>
+                LocalizationKeys.UiSettingsLocalDataDescription,
+            "txtDeleteLocalData" =>
+                LocalizationKeys.UiSettingsLocalDataDelete,
+            "txtLocalDataCancel" => LocalizationKeys.UiCommonCancel,
             _ => string.Empty,
         };
-    }
-
-    private TMP_Dropdown ResolveOrCloneDropdown(
-        TMP_Dropdown current,
-        string objectName,
-        Vector2 anchorMin,
-        Vector2 anchorMax)
-    {
-        TMP_Dropdown dropdown = current;
-        if (dropdown == null)
-        {
-            Transform existing = gameTab.transform.Find(objectName);
-            if (existing != null)
-                dropdown = existing.GetComponent<TMP_Dropdown>();
-        }
-
-        if (dropdown == null)
-        {
-            dropdown = Instantiate(
-                resolutionDropdown,
-                gameTab.transform,
-                false);
-            dropdown.name = objectName;
-            dropdown.onValueChanged.RemoveAllListeners();
-        }
-
-        RectTransform rect = dropdown.transform as RectTransform;
-        if (rect != null)
-        {
-            rect.anchorMin = anchorMin;
-            rect.anchorMax = anchorMax;
-            rect.pivot = new Vector2(0.5f, 0.5f);
-            rect.anchoredPosition = Vector2.zero;
-            rect.sizeDelta = new Vector2(0f, 72f);
-            rect.localScale = Vector3.one;
-        }
-
-        Navigation navigation = dropdown.navigation;
-        navigation.mode = Navigation.Mode.Automatic;
-        dropdown.navigation = navigation;
-        dropdown.gameObject.SetActive(true);
-        ApplyDropdownFont(dropdown);
-        return dropdown;
-    }
-
-    private TextMeshProUGUI EnsureControlLabel(
-        string objectName,
-        string localizationKey,
-        Vector2 anchorMin,
-        Vector2 anchorMax)
-    {
-        Transform existing = gameTab.transform.Find(objectName);
-        TextMeshProUGUI text = existing != null
-            ? existing.GetComponent<TextMeshProUGUI>()
-            : null;
-        if (text == null)
-        {
-            GameObject labelObject = new(
-                objectName,
-                typeof(RectTransform),
-                typeof(CanvasRenderer),
-                typeof(TextMeshProUGUI));
-            labelObject.layer = gameTab.layer;
-            labelObject.transform.SetParent(gameTab.transform, false);
-            text = labelObject.GetComponent<TextMeshProUGUI>();
-
-            TMP_Text template = resolutionDropdown.captionText;
-            if (template != null)
-            {
-                text.font = template.font;
-                text.fontSize = template.fontSize;
-                text.color = template.color;
-            }
-
-            text.raycastTarget = false;
-            text.alignment = TextAlignmentOptions.MidlineLeft;
-        }
-
-        LocalizedText localizedText = text.GetComponent<LocalizedText>();
-        if (localizedText == null)
-            localizedText = text.gameObject.AddComponent<LocalizedText>();
-        localizedText.SetKey(localizationKey);
-
-        RectTransform rect = text.rectTransform;
-        rect.anchorMin = anchorMin;
-        rect.anchorMax = anchorMax;
-        rect.pivot = new Vector2(0.5f, 0.5f);
-        rect.anchoredPosition = Vector2.zero;
-        rect.sizeDelta = new Vector2(0f, 72f);
-        rect.localScale = Vector3.one;
-        text.gameObject.SetActive(true);
-        return text;
     }
 
     private void RefreshLocalizationPresentation()
@@ -1462,20 +1111,6 @@ public sealed class SettingPage : MonoBehaviour, IPage
 
         LocalizationFontResolver.ApplyGameDefault(dropdown.captionText);
         LocalizationFontResolver.ApplyGameDefault(dropdown.itemText);
-    }
-
-    private void HideGameTabPlaceholder()
-    {
-        for (int index = 0; index < gameTab.transform.childCount; index++)
-        {
-            Transform child = gameTab.transform.GetChild(index);
-            if (child.name.IndexOf(
-                "placeholder",
-                StringComparison.OrdinalIgnoreCase) >= 0)
-            {
-                child.gameObject.SetActive(false);
-            }
-        }
     }
 
     private static int IndexOfStableId(List<string> values, string value)
