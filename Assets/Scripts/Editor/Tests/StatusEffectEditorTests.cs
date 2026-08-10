@@ -634,6 +634,67 @@ public sealed class BattleEffectCoreTests
     }
 
     [Test]
+    public void BattleContext_SupportsSourceCurrentAndMaximumHealthScaling()
+    {
+        FakeBattleCharacter source = new(
+            currentHealth: 40,
+            maximumHealth: 120);
+        BattleStatusTarget sourceTarget =
+            BattleStatusTarget.FromAlly(source);
+        BattleEffectContext context = BattleEffectContext.ForStatus(
+            sourceTarget,
+            sourceTarget,
+            null,
+            sourceAttackPower: 0f,
+            previousStacks: 0,
+            currentStacks: 1,
+            occurrenceCount: 1);
+        ScalingValue scaling =
+            ScalingValue.SourceCurrentHealth(0.5f) +
+            ScalingValue.SourceMaximumHealth(0.25f);
+
+        Assert.That(context.SourceCurrentHealth, Is.EqualTo(40));
+        Assert.That(context.SourceMaximumHealth, Is.EqualTo(120));
+        Assert.That(scaling.EvaluateBattle(context), Is.EqualTo(50f));
+    }
+
+    [Test]
+    public void CharacterConditions_SupportMaximumHealthAndHealthPerformance()
+    {
+        FakeBattleCharacter character = new(
+            currentHealth: 130,
+            maximumHealth: 150);
+        CharacterNumericCondition condition = new();
+        SetPrivateField(
+            condition,
+            "comparison",
+            CharacterNumericComparison.GreaterThanOrEqual);
+        SetPrivateField(condition, "threshold", 150f);
+        SetPrivateField(
+            condition,
+            "metric",
+            CharacterNumericConditionMetric.MaximumHealth);
+
+        Assert.That(
+            CharacterConditionEvaluator.MatchesCharacter(
+                condition,
+                character),
+            Is.True);
+
+        SetPrivateField(condition, "threshold", 100f);
+        SetPrivateField(
+            condition,
+            "metric",
+            CharacterNumericConditionMetric.HealthPerformancePercentage);
+
+        Assert.That(
+            CharacterConditionEvaluator.MatchesCharacter(
+                condition,
+                character),
+            Is.True);
+    }
+
+    [Test]
     public void SharedContext_PreservesLegacyScalingResult()
     {
         EffectContext legacy = EffectContext.ForPreview(

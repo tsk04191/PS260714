@@ -405,6 +405,9 @@ public sealed class StageSelectEditorWindow : EditorWindow
                 "completionDestination",
                 "Completion Destination");
             DrawProperty("initialRunCurrency", "Initial Run Currency");
+            DrawProperty(
+                "clearedBattleHealthCost",
+                "Cleared Battle Health Cost");
         }
         EditorGUILayout.EndFoldoutHeaderGroup();
     }

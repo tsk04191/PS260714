@@ -35,12 +35,14 @@ public sealed class CharacterProgressData
 {
     [SerializeField] private string characterId;
     [SerializeField] private bool isOwned;
+    [SerializeField, Range(0, 100)] private int trust;
     [SerializeField]
     private List<CharacterCumulativeUpgradeProgress> cumulativeUpgrades =
         new();
 
     public string CharacterId => characterId ?? string.Empty;
     public bool IsOwned => isOwned;
+    public int Trust => Mathf.Clamp(trust, 0, 100);
     public IReadOnlyList<CharacterCumulativeUpgradeProgress>
         CumulativeUpgrades
     {
@@ -61,6 +63,11 @@ public sealed class CharacterProgressData
     public void SetOwned(bool value)
     {
         isOwned = value;
+    }
+
+    public void SetTrust(int value)
+    {
+        trust = Mathf.Clamp(value, 0, 100);
     }
 
     public int GetCumulativeUpgradeLevel(string upgradeId)
@@ -105,6 +112,8 @@ public sealed class CharacterProgressData
         if (string.IsNullOrWhiteSpace(characterId))
             return false;
 
+        trust = Mathf.Clamp(trust, 0, 100);
+
         cumulativeUpgrades ??=
             new List<CharacterCumulativeUpgradeProgress>();
         List<CharacterCumulativeUpgradeProgress> normalized = new();
@@ -140,6 +149,7 @@ public sealed class CharacterProgressData
             return;
 
         isOwned |= other.IsOwned;
+        trust = Mathf.Max(Trust, other.Trust);
         foreach (CharacterCumulativeUpgradeProgress progress in
                  other.CumulativeUpgrades)
         {
@@ -157,6 +167,7 @@ public sealed class CharacterProgressData
     internal CharacterProgressData CreateSnapshot()
     {
         CharacterProgressData snapshot = new(CharacterId, IsOwned);
+        snapshot.SetTrust(Trust);
         foreach (CharacterCumulativeUpgradeProgress progress in
                  CumulativeUpgrades)
         {
@@ -431,6 +442,28 @@ public sealed class CharacterCollectionData
             return false;
 
         progress.SetOwned(isOwned);
+        if (save)
+            Save();
+        CharacterProgressChanged?.Invoke(definition);
+        return true;
+    }
+
+    public bool TrySetTrust(
+        CharacterSO definition,
+        int trust,
+        bool save = true)
+    {
+        if (_saveBlocked || definition == null)
+            return false;
+
+        CharacterProgressData progress = GetOrCreate(
+            definition,
+            definition.InitiallyOwned);
+        int nextTrust = Mathf.Clamp(trust, 0, 100);
+        if (progress == null || progress.Trust == nextTrust)
+            return false;
+
+        progress.SetTrust(nextTrust);
         if (save)
             Save();
         CharacterProgressChanged?.Invoke(definition);
@@ -784,6 +817,7 @@ public sealed class CharacterResolvedPassive
 public sealed class CharacterData
 {
     private const int DungeonUpgradeTypeCount = 6;
+    public const float DefaultHealthPerformanceCap = 100f;
 
     private readonly CharacterSO _definition;
     private readonly List<CharacterPassiveDefinition>
@@ -799,6 +833,7 @@ public sealed class CharacterData
         new(StringComparer.Ordinal);
     private readonly CharacterModifierCollection _modifierCollection = new();
     private int _cumulativeMaximumHealthBonus;
+    private float _cumulativeHealthPerformanceCapBonus;
     private float _cumulativeAttackPowerBonus;
     private float _cumulativeAttackCooldownBonus;
     private float _cumulativePassiveDamageBonus;
@@ -823,6 +858,7 @@ public sealed class CharacterData
     public CharacterRoleSO Role => _definition?.Role;
     public CharacterArchetypeSO Archetype => _definition?.Archetype;
     public bool IsOwned => _progress?.IsOwned ?? false;
+    public int Trust => _progress?.Trust ?? 0;
     public IReadOnlyList<CharacterCumulativeUpgradeProgress>
         CumulativeUpgrades => _progress?.CumulativeUpgrades ??
             Array.Empty<CharacterCumulativeUpgradeProgress>();
@@ -838,6 +874,12 @@ public sealed class CharacterData
     public Sprite SkillSdSprite { get; }
     public Sprite PassiveSdSprite { get; }
     public int MaximumHealth => ResolveMaximumHealth();
+    public float HealthPerformanceCap => Mathf.Max(
+        0f,
+        _modifierCollection.Resolve(
+            DefaultHealthPerformanceCap +
+            _cumulativeHealthPerformanceCapBonus,
+            CharacterModifierStat.HealthPerformanceCap));
     public float AttackPower => Mathf.Max(
         0f,
         _modifierCollection.Resolve(
@@ -1188,6 +1230,7 @@ public sealed class CharacterData
         _modifierCollection.ClearScope(
             CharacterModifierLifetimeScope.Permanent);
         double maximumHealth = 0d;
+        double healthPerformanceCap = 0d;
         double attackPower = 0d;
         double attackCooldown = 0d;
         double passiveDamage = 0d;
@@ -1242,6 +1285,10 @@ public sealed class CharacterData
                     case CharacterCumulativeUpgradeModifierType.MaximumHealth:
                         maximumHealth += value;
                         break;
+                    case CharacterCumulativeUpgradeModifierType
+                        .HealthPerformanceCap:
+                        healthPerformanceCap += value;
+                        break;
                     case CharacterCumulativeUpgradeModifierType.AttackCooldown:
                         attackCooldown += value;
                         break;
@@ -1264,6 +1311,8 @@ public sealed class CharacterData
 
         _cumulativeMaximumHealthBonus =
             RoundModifierToInt(maximumHealth);
+        _cumulativeHealthPerformanceCapBonus =
+            ClampModifierToFloat(healthPerformanceCap);
         _cumulativeAttackPowerBonus = ClampModifierToFloat(attackPower);
         _cumulativeAttackCooldownBonus =
             ClampModifierToFloat(attackCooldown);

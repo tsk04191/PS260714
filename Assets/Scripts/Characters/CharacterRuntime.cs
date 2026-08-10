@@ -370,6 +370,7 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
 
     private bool _initialized;
     private int _currentHealth;
+    private bool _healthPerformanceEnabled;
     private int _currentShield;
     private float _remainingCooldown;
     private readonly Dictionary<string, StatusEffectRuntimeState>
@@ -438,6 +439,20 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
         0,
         MaximumHealth);
     public int MaximumHealth => Mathf.Max(1, Data?.MaximumHealth ?? 1);
+    public bool IsAlive => CurrentHealth > 0;
+    public float HealthPerformanceCap => Mathf.Max(
+        0f,
+        Data?.HealthPerformanceCap ??
+        CharacterData.DefaultHealthPerformanceCap);
+    public float HealthPerformancePercentage => Mathf.Min(
+        CurrentHealth,
+        HealthPerformanceCap);
+    public float HealthPerformanceMultiplier =>
+        _healthPerformanceEnabled
+            ? HealthPerformancePercentage / 100f
+            : 1f;
+    public bool CanAct => IsAlive;
+    public bool CanParticipate => IsAlive;
     public int CurrentShield => Mathf.Max(0, _currentShield);
     public float DisabledTimeRemaining
     {
@@ -464,6 +479,7 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
         HasStatusControl(StatusEffectControlType.PausePassiveCooldowns);
     public event System.Action<BattleStatusChangedEvent> StatusChanged;
     public event System.Action<StatusEffectLifecycleEvent> StatusLifecycle;
+    public event System.Action<int, int> HealthChanged;
 
     public bool TryGetVfxAnchor(
         BattleVfxAnchorType anchorType,
@@ -545,19 +561,57 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
 
     public int Heal(int amount)
     {
+        return RestoreHealth(amount, false);
+    }
+
+    public int RestoreHealth(int amount, bool allowRevive)
+    {
         amount = Mathf.Max(0, amount);
-        if (amount <= 0 || _currentHealth <= 0 ||
+        if (amount <= 0 || (!allowRevive && _currentHealth <= 0) ||
             _currentHealth >= MaximumHealth)
         {
             return 0;
         }
 
         int previous = _currentHealth;
-        _currentHealth = Mathf.Min(
+        SetCurrentHealth(Mathf.Min(
             MaximumHealth,
-            _currentHealth + amount);
-        RefreshUi();
+            _currentHealth + amount));
         return _currentHealth - previous;
+    }
+
+    public int ApplyRunHealthLoss(int amount)
+    {
+        amount = Mathf.Max(0, amount);
+        if (amount <= 0 || _currentHealth <= 0)
+            return 0;
+
+        int previous = _currentHealth;
+        SetCurrentHealth(_currentHealth - amount);
+        return previous - _currentHealth;
+    }
+
+    private void SetCurrentHealth(int value)
+    {
+        int previousHealth = _currentHealth;
+        float previousAttackSpeed = _initialized
+            ? GetEffectiveAttackSpeed()
+            : 0f;
+        _currentHealth = Mathf.Clamp(value, 0, MaximumHealth);
+        if (_currentHealth == previousHealth)
+        {
+            RefreshUi();
+            return;
+        }
+
+        if (_initialized)
+        {
+            AdjustCooldownForAttackSpeedChange(
+                previousAttackSpeed,
+                GetEffectiveAttackSpeed());
+        }
+        RefreshUi();
+        HealthChanged?.Invoke(_currentHealth, MaximumHealth);
     }
 
     public int GainShield(int amount)
@@ -600,11 +654,11 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
         if (amount > 0)
         {
             int healthDamage = Mathf.Min(_currentHealth, amount);
-            _currentHealth -= healthDamage;
+            SetCurrentHealth(_currentHealth - healthDamage);
             appliedDamage += healthDamage;
         }
 
-        if (appliedDamage > 0)
+        if (appliedDamage > 0 && amount <= 0)
             RefreshUi();
         return appliedDamage;
     }
@@ -619,8 +673,7 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
         if (!CanSpendHealth(amount))
             return false;
 
-        _currentHealth -= amount;
-        RefreshUi();
+        SetCurrentHealth(_currentHealth - amount);
         return true;
     }
 
@@ -763,11 +816,7 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
 
     private void HandleCharacterStatsChanged()
     {
-        _currentHealth = Mathf.Clamp(
-            _currentHealth,
-            0,
-            MaximumHealth);
-        RefreshUi();
+        SetCurrentHealth(_currentHealth);
     }
 
     private static CharacterData CreateCharacterData(CharacterSO definition)
@@ -860,6 +909,24 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
 
     public void ResetRuntime()
     {
+        _healthPerformanceEnabled = false;
+        ResetBattleState(true);
+    }
+
+    public void PrepareForNextBattle()
+    {
+        _healthPerformanceEnabled = true;
+        ResetBattleState(false);
+    }
+
+    public void BeginDungeonRun()
+    {
+        _healthPerformanceEnabled = true;
+        RefreshUi();
+    }
+
+    private void ResetBattleState(bool restoreHealth)
+    {
         if (!_initialized && !Initialize())
             return;
 
@@ -868,7 +935,9 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
         _attackSpeedMultiplier = 1f;
         _powerBoostRemaining = 0f;
         _powerMultiplier = 1f;
-        _currentHealth = MaximumHealth;
+        _currentHealth = restoreHealth
+            ? MaximumHealth
+            : Mathf.Clamp(_currentHealth, 0, MaximumHealth);
         _currentShield = 0;
         IReadOnlyList<BattleStatusSnapshot> removedStatuses =
             GetActiveStatusEffects();
@@ -919,6 +988,11 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
             return;
 
         _board = board;
+        if (!CanAct)
+        {
+            RefreshUi();
+            return;
+        }
         if (ProcessPendingManualActions())
         {
             RefreshUi();
@@ -1774,6 +1848,7 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
     public bool CanActivateActiveSkill()
     {
         return (_initialized || Initialize()) &&
+               CanAct &&
                _activeSkillResource != null &&
                _board != null &&
                Data != null &&
@@ -1785,6 +1860,7 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
     public bool TryActivateActiveSkill()
     {
         if ((!_initialized && !Initialize()) ||
+            !CanAct ||
             _activeSkillResource == null || _board == null ||
             Data == null || !Data.HasCustomSkillDefinitions ||
             IsActiveSkillBlocked)
@@ -2945,6 +3021,9 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
         out int damageDealt)
     {
         damageDealt = 0;
+        if (!CanAct)
+            return false;
+
         CharacterStatusStackCostDefinition cost =
             definition?.HasSelfStatusCost == true
                 ? definition.SelfStatusCost
@@ -4354,7 +4433,10 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
             Data.AttackPower,
             StatusEffectStatType.AttackPower,
             StatusEffectOperationType.AttackPowerModifier);
-        return Mathf.Max(0f, modifiedPower * _powerMultiplier);
+        return Mathf.Max(
+            0f,
+            modifiedPower * _powerMultiplier *
+            HealthPerformanceMultiplier);
     }
 
     private float GetEffectivePowerMultiplier()
@@ -4377,7 +4459,10 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
             StatusEffectStatType.AttackPower,
             StatusEffectOperationType.AttackPowerModifier,
             localContributionMultipliers);
-        return Mathf.Max(0f, modifiedPower * _powerMultiplier);
+        return Mathf.Max(
+            0f,
+            modifiedPower * _powerMultiplier *
+            HealthPerformanceMultiplier);
     }
 
     private float GetEffectiveAttackSpeed()
@@ -4392,7 +4477,8 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
             StatusEffectOperationType.AttackSpeedModifier);
         return Mathf.Max(
             TimePrecision.Step,
-            modifiedSpeed * _attackSpeedMultiplier);
+            modifiedSpeed * _attackSpeedMultiplier *
+            HealthPerformanceMultiplier);
     }
 
     private float GetBaseAttackSpeed()

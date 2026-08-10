@@ -708,6 +708,7 @@ public class DungeonPage : MonoBehaviour, IPage
         CharacterRuntime startingSlot = playerCharacters[0];
         if (!startingSlot.ConfigureDefinition(definition))
             return false;
+        startingSlot.BeginDungeonRun();
 
         _startingTurret = definition;
         startingSlot.ConfigurePartySlot(0, partySlotColors[0]);
@@ -1093,6 +1094,7 @@ public class DungeonPage : MonoBehaviour, IPage
             if (slot == null || !slot.ConfigureDefinition(definition))
                 return false;
 
+            slot.BeginDungeonRun();
             slot.gameObject.SetActive(true);
             _ownedTurrets.Add(slot);
         }
@@ -1107,6 +1109,7 @@ public class DungeonPage : MonoBehaviour, IPage
             slot = _ownedTurrets[replacementSlotIndex];
             if (slot == null || !slot.ConfigureDefinition(definition))
                 return false;
+            slot.BeginDungeonRun();
         }
 
         RecordAcquiredCharacter(definition);
@@ -1246,8 +1249,14 @@ public class DungeonPage : MonoBehaviour, IPage
         List<IBattleCharacter> characters = new(MaximumPartySize);
         foreach (CharacterRuntime character in _ownedTurrets)
         {
-            if (character != null)
+            if (character != null && character.CanParticipate)
                 characters.Add(character);
+        }
+
+        if (characters.Count == 0)
+        {
+            HandleBattleEnded(EBattleResult.Defeat);
+            return false;
         }
 
         int battleIndex = Mathf.Clamp(
@@ -1306,7 +1315,8 @@ public class DungeonPage : MonoBehaviour, IPage
             setup.Enemies,
             setup.SpawnInterval,
             setup.TimeLimit,
-            setup.InitialEnemyCount);
+            setup.InitialEnemyCount,
+            true);
         if (started)
         {
             RequestDungeonBgm(
@@ -1949,6 +1959,7 @@ public class DungeonPage : MonoBehaviour, IPage
     private void HandleBattleCompleted()
     {
         battleTab?.Refresh();
+        ApplyClearedBattleHealthCost();
         if (_session.Definition != null &&
             _session.Definition.HasTutorial)
         {
@@ -1973,6 +1984,16 @@ public class DungeonPage : MonoBehaviour, IPage
                 flowController.TryAdvance();
             }
         }
+    }
+
+    private void ApplyClearedBattleHealthCost()
+    {
+        int healthCost = _session.Definition?.ClearedBattleHealthCost ?? 0;
+        if (healthCost <= 0)
+            return;
+
+        foreach (CharacterRuntime character in _ownedTurrets)
+            character?.ApplyRunHealthLoss(healthCost);
     }
 
     private void HandleBattleEnded(EBattleResult result)
@@ -2737,7 +2758,7 @@ public class DungeonPage : MonoBehaviour, IPage
             case EDungeonRoomConditionType.PartyHasInjuredMember:
                 foreach (CharacterRuntime character in _ownedTurrets)
                 {
-                    if (character != null && character.CurrentHealth > 0 &&
+                    if (character != null &&
                         character.CurrentHealth < character.MaximumHealth)
                     {
                         return true;
@@ -2964,7 +2985,7 @@ public class DungeonPage : MonoBehaviour, IPage
             int healAmount = percentage
                 ? Mathf.CeilToInt(character.MaximumHealth * amount / 100f)
                 : amount;
-            character.Heal(healAmount);
+            character.RestoreHealth(healAmount, true);
         }
     }
 

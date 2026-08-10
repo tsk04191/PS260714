@@ -1147,6 +1147,8 @@ public sealed class EnemyEditorWindow : EditorWindow
             (int)CharacterDamageAmountMode.Fixed);
         SetFloat(effect, "damageAmount", 1f);
         SetFloat(effect, "sourceResourceScale", 0f);
+        SetFloat(effect, "sourceCurrentHealthScale", 0f);
+        SetFloat(effect, "sourceMaxHealthScale", 0f);
         SetFloat(effect, "targetCurrentHealthScale", 0f);
         SetFloat(effect, "targetMaxHealthScale", 0f);
         SetObject(effect, "sourceStatusScalingEffect", null);

@@ -844,6 +844,14 @@ public sealed class StatusEffectEditorWindow : EditorWindow
             "제공자 자원 배율");
         DrawFloatProperty(
             effect,
+            "sourceCurrentHealthScale",
+            "제공자 현재 체력 배율");
+        DrawFloatProperty(
+            effect,
+            "sourceMaxHealthScale",
+            "제공자 최대 체력 배율");
+        DrawFloatProperty(
+            effect,
             "targetCurrentHealthScale",
             "대상 현재 체력 배율");
         DrawFloatProperty(
@@ -1491,6 +1499,8 @@ public sealed class StatusEffectEditorWindow : EditorWindow
                 : (int)CharacterDamageAmountMode.Ratio);
         SetFloatRelative(effect, "damageAmount", 1f);
         SetFloatRelative(effect, "sourceResourceScale", 0f);
+        SetFloatRelative(effect, "sourceCurrentHealthScale", 0f);
+        SetFloatRelative(effect, "sourceMaxHealthScale", 0f);
         SetFloatRelative(effect, "targetCurrentHealthScale", 0f);
         SetFloatRelative(effect, "targetMaxHealthScale", 0f);
         SetObjectRelative(effect, "sourceStatusScalingEffect", null);

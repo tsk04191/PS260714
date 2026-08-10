@@ -104,6 +104,10 @@ public sealed class CharacterEditorWindow : EditorWindow
     private const string DamageAmountPropertyName = "damageAmount";
     private const string SourceResourceScalePropertyName =
         "sourceResourceScale";
+    private const string SourceCurrentHealthScalePropertyName =
+        "sourceCurrentHealthScale";
+    private const string SourceMaxHealthScalePropertyName =
+        "sourceMaxHealthScale";
     private const string TargetCurrentHealthScalePropertyName =
         "targetCurrentHealthScale";
     private const string TargetMaxHealthScalePropertyName =
@@ -264,7 +268,8 @@ public sealed class CharacterEditorWindow : EditorWindow
         "패시브 피해량",
         "일반 공격 피해량",
         "스킬 피해량",
-        "스킬 비용 감소"
+        "스킬 비용 감소",
+        "체력 효율 상한"
     };
 
     private static readonly string[] ActionLinkageOptions =
@@ -309,8 +314,9 @@ public sealed class CharacterEditorWindow : EditorWindow
 
     private static readonly string[] NumericConditionMetricOptions =
     {
-        "체력",
-        "체력 비율 (%)",
+        "현재 체력",
+        "현재 체력 비율 (%)",
+        "최대 체력",
         "적 타일 스택",
         "보호막",
         "상태 스택"
@@ -320,6 +326,7 @@ public sealed class CharacterEditorWindow : EditorWindow
     {
         (int)CharacterNumericConditionMetric.Health,
         (int)CharacterNumericConditionMetric.HealthPercentage,
+        (int)CharacterNumericConditionMetric.MaximumHealth,
         (int)CharacterNumericConditionMetric.StackCount,
         (int)CharacterNumericConditionMetric.Shield,
         (int)CharacterNumericConditionMetric.StatusStackCount
@@ -327,8 +334,11 @@ public sealed class CharacterEditorWindow : EditorWindow
 
     private static readonly string[] AllyNumericConditionMetricOptions =
     {
-        "체력",
-        "체력 비율 (%)",
+        "현재 체력",
+        "현재 체력 비율 (%)",
+        "최대 체력",
+        "체력 효율 (%)",
+        "체력 효율 상한 (%)",
         "공격력",
         "속도",
         "보호막",
@@ -339,6 +349,9 @@ public sealed class CharacterEditorWindow : EditorWindow
     {
         (int)CharacterNumericConditionMetric.Health,
         (int)CharacterNumericConditionMetric.HealthPercentage,
+        (int)CharacterNumericConditionMetric.MaximumHealth,
+        (int)CharacterNumericConditionMetric.HealthPerformancePercentage,
+        (int)CharacterNumericConditionMetric.HealthPerformanceCap,
         (int)CharacterNumericConditionMetric.AttackPower,
         (int)CharacterNumericConditionMetric.AttackSpeed,
         (int)CharacterNumericConditionMetric.Shield,
@@ -409,7 +422,7 @@ public sealed class CharacterEditorWindow : EditorWindow
 
     private static readonly string[] AttackSubjectMetricOptions =
     {
-        "체력",
+        "현재 체력",
         "스택",
         "보호막"
     };
@@ -423,7 +436,7 @@ public sealed class CharacterEditorWindow : EditorWindow
 
     private static readonly string[] AllySubjectMetricOptions =
     {
-        "체력",
+        "현재 체력",
         "공격력",
         "속도",
         "보호막"
@@ -4511,6 +4524,14 @@ public sealed class CharacterEditorWindow : EditorWindow
             sourceResourceScale.floatValue = 0f;
         SetFloatValue(
             effect,
+            SourceCurrentHealthScalePropertyName,
+            0f);
+        SetFloatValue(
+            effect,
+            SourceMaxHealthScalePropertyName,
+            0f);
+        SetFloatValue(
+            effect,
             TargetCurrentHealthScalePropertyName,
             0f);
         SetFloatValue(
@@ -4718,6 +4739,7 @@ public sealed class CharacterEditorWindow : EditorWindow
         }
 
         DrawSourceResourceScale(definition);
+        DrawSourceHealthScales(definition);
         DrawStatusStackScale(
             definition,
             SourceStatusScalingEffectPropertyName,
@@ -4769,6 +4791,7 @@ public sealed class CharacterEditorWindow : EditorWindow
                 isFixed ? "고정 획득량" : "공격력 배율",
                 amount.floatValue));
         DrawSourceResourceScale(definition);
+        DrawSourceHealthScales(definition);
         DrawStatusStackScale(
             definition,
             SourceStatusScalingEffectPropertyName,
@@ -4843,6 +4866,7 @@ public sealed class CharacterEditorWindow : EditorWindow
                 isFixed ? "고정 회복량" : "공격력 배율",
                 amount.floatValue));
         DrawSourceResourceScale(definition);
+        DrawSourceHealthScales(definition);
         DrawStatusStackScale(
             definition,
             SourceStatusScalingEffectPropertyName,
@@ -4924,6 +4948,7 @@ public sealed class CharacterEditorWindow : EditorWindow
                 isFixed ? "고정 보호막" : "공격력 배율",
                 amount.floatValue));
         DrawSourceResourceScale(definition);
+        DrawSourceHealthScales(definition);
         DrawStatusStackScale(
             definition,
             SourceStatusScalingEffectPropertyName,
@@ -4993,6 +5018,30 @@ public sealed class CharacterEditorWindow : EditorWindow
                 "대상 최대 체력 배율",
                 "각 대상의 최대 체력 × 배율. 현재 체력 배율을 음수로 " +
                 "설정하면 잃은 체력 기반 식을 만들 수 있습니다."),
+            maximumHealthScale.floatValue);
+    }
+
+    private static void DrawSourceHealthScales(
+        SerializedProperty definition)
+    {
+        SerializedProperty currentHealthScale =
+            definition.FindPropertyRelative(
+                SourceCurrentHealthScalePropertyName);
+        SerializedProperty maximumHealthScale =
+            definition.FindPropertyRelative(
+                SourceMaxHealthScalePropertyName);
+        if (currentHealthScale == null || maximumHealthScale == null)
+            return;
+
+        currentHealthScale.floatValue = EditorGUILayout.FloatField(
+            new GUIContent(
+                "시전자 현재 체력 배율",
+                "효과 실행 직전 시전자의 현재 체력 × 배율입니다."),
+            currentHealthScale.floatValue);
+        maximumHealthScale.floatValue = EditorGUILayout.FloatField(
+            new GUIContent(
+                "시전자 최대 체력 배율",
+                "시전자의 최대 체력 × 배율입니다."),
             maximumHealthScale.floatValue);
     }
 

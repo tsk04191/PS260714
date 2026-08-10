@@ -1511,6 +1511,8 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
                         ? tile.TopEnemy.Health * 100f /
                           tile.TopEnemy.MaxHealth
                         : 0f,
+                CharacterNumericConditionMetric.MaximumHealth =>
+                    tile.TopEnemy.MaxHealth,
                 CharacterNumericConditionMetric.StackCount =>
                     tile.StackCount,
                 CharacterNumericConditionMetric.Shield =>

@@ -69,7 +69,10 @@ public enum CharacterNumericConditionMetric
     AttackPower = 3,
     AttackSpeed = 4,
     Shield = 5,
-    StatusStackCount = 6
+    StatusStackCount = 6,
+    MaximumHealth = 7,
+    HealthPerformancePercentage = 8,
+    HealthPerformanceCap = 9
 }
 
 public enum CharacterConditionType
@@ -702,7 +705,8 @@ public enum CharacterCumulativeUpgradeModifierType
     PassiveDamage = 3,
     AttackDamage = 4,
     SkillDamage = 5,
-    SkillCostReduction = 6
+    SkillCostReduction = 6,
+    HealthPerformanceCap = 7
 }
 
 public enum CharacterModifierTargetScope
@@ -723,6 +727,7 @@ public enum CharacterModifierStat
     StatusDuration = 5,
     StatusStacks = 6,
     SkillCost = 7,
+    HealthPerformanceCap = 8,
 }
 
 public enum CharacterModifierOperation
@@ -1172,6 +1177,12 @@ public static class CharacterConditionEvaluator
                     ? character.CurrentHealth * 100f /
                       character.MaximumHealth
                     : 0f,
+            CharacterNumericConditionMetric.MaximumHealth =>
+                character.MaximumHealth,
+            CharacterNumericConditionMetric.HealthPerformancePercentage =>
+                ResolveHealthPerformancePercentage(character),
+            CharacterNumericConditionMetric.HealthPerformanceCap =>
+                ResolveHealthPerformanceCap(character),
             CharacterNumericConditionMetric.AttackPower =>
                 character.CurrentAttackPower,
             CharacterNumericConditionMetric.AttackSpeed =>
@@ -1184,6 +1195,24 @@ public static class CharacterConditionEvaluator
             value,
             condition.Comparison,
             condition.Threshold);
+    }
+
+    public static float ResolveHealthPerformanceCap(
+        IBattleCharacter character)
+    {
+        return character is CharacterRuntime runtime
+            ? runtime.HealthPerformanceCap
+            : CharacterData.DefaultHealthPerformanceCap;
+    }
+
+    public static float ResolveHealthPerformancePercentage(
+        IBattleCharacter character)
+    {
+        if (character == null)
+            return 0f;
+        return Mathf.Min(
+            Mathf.Max(0, character.CurrentHealth),
+            ResolveHealthPerformanceCap(character));
     }
 
     internal static bool MatchesStatusCondition(
@@ -1772,6 +1801,10 @@ public sealed class CharacterEffectDefinition :
     [SerializeField, Min(0f)]
     private float sourceResourceScale;
     [SerializeField]
+    private float sourceCurrentHealthScale;
+    [SerializeField]
+    private float sourceMaxHealthScale;
+    [SerializeField]
     private float targetCurrentHealthScale;
     [SerializeField]
     private float targetMaxHealthScale;
@@ -1870,6 +1903,8 @@ public sealed class CharacterEffectDefinition :
     public CharacterDamageAmountMode AmountMode => damageAmountMode;
     public float Amount => damageAmount;
     public float SourceResourceScale => sourceResourceScale;
+    public float SourceCurrentHealthScale => sourceCurrentHealthScale;
+    public float SourceMaxHealthScale => sourceMaxHealthScale;
     public float TargetCurrentHealthScale => targetCurrentHealthScale;
     public float TargetMaxHealthScale => targetMaxHealthScale;
     public StatusEffectSO SourceStatusScalingEffect =>
@@ -1887,6 +1922,8 @@ public sealed class CharacterEffectDefinition :
     public ScalingValue AmountScaling =>
         ScalingValue.FromLegacy(damageAmountMode, damageAmount) +
         ScalingValue.SourceResource(sourceResourceScale) +
+        ScalingValue.SourceCurrentHealth(sourceCurrentHealthScale) +
+        ScalingValue.SourceMaximumHealth(sourceMaxHealthScale) +
         ScalingValue.TargetCurrentHealth(targetCurrentHealthScale) +
         ScalingValue.TargetMaximumHealth(targetMaxHealthScale) +
         ScalingValue.SourceStatusStacks(sourceStatusStacksScale) +
@@ -1944,6 +1981,16 @@ public sealed class CharacterEffectDefinition :
             float.IsInfinity(sourceResourceScale))
         {
             sourceResourceScale = 0f;
+        }
+        if (float.IsNaN(sourceCurrentHealthScale) ||
+            float.IsInfinity(sourceCurrentHealthScale))
+        {
+            sourceCurrentHealthScale = 0f;
+        }
+        if (float.IsNaN(sourceMaxHealthScale) ||
+            float.IsInfinity(sourceMaxHealthScale))
+        {
+            sourceMaxHealthScale = 0f;
         }
         if (float.IsNaN(targetCurrentHealthScale) ||
             float.IsInfinity(targetCurrentHealthScale))

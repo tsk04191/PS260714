@@ -116,6 +116,8 @@ public sealed class BattleManager : MonoBehaviour, IActiveSkillResource
         if (_manualTargetSelectionPending)
             return;
         _board.TickEnemyAbilities(deltaTime, _characters);
+        if (CompleteIfPartyDefeated())
+            return;
         if (_manualTargetSelectionPending)
             return;
         foreach (IBattleCharacter character in _characters)
@@ -126,6 +128,8 @@ public sealed class BattleManager : MonoBehaviour, IActiveSkillResource
         }
 
         TickEnemySpawnQueue(deltaTime);
+        if (CompleteIfPartyDefeated())
+            return;
         CheckForCompletion();
     }
 
@@ -152,7 +156,8 @@ public sealed class BattleManager : MonoBehaviour, IActiveSkillResource
         IReadOnlyList<EnemyRuntime> enemies,
         float spawnInterval,
         float timeLimit = 0f,
-        int initialEnemyCount = 0)
+        int initialEnemyCount = 0,
+        bool preserveCharacterHealth = false)
     {
         if (!IsInitialized || board == null || characters == null || enemies == null)
         {
@@ -181,7 +186,15 @@ public sealed class BattleManager : MonoBehaviour, IActiveSkillResource
             if (character == null || !character.Initialize())
                 continue;
 
-            character.ResetRuntime();
+            if (preserveCharacterHealth &&
+                character is CharacterRuntime persistentCharacter)
+            {
+                persistentCharacter.PrepareForNextBattle();
+            }
+            else
+            {
+                character.ResetRuntime();
+            }
             character.BindBattle(this, _board);
             _characters.Add(character);
         }
@@ -503,6 +516,21 @@ public sealed class BattleManager : MonoBehaviour, IActiveSkillResource
         }
 
         CompleteBattle(EBattleResult.Victory);
+    }
+
+    private bool CompleteIfPartyDefeated()
+    {
+        if (State != EBattleState.Running || _characters.Count == 0)
+            return false;
+
+        foreach (IBattleCharacter character in _characters)
+        {
+            if (character != null && character.CurrentHealth > 0)
+                return false;
+        }
+
+        CompleteBattle(EBattleResult.Defeat);
+        return true;
     }
 
     private void TickBattleTimer(float deltaTime)

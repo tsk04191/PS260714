@@ -15,6 +15,14 @@ public enum EMainSubPageType
     Storage
 }
 
+public enum OperatorRosterSortCriterion
+{
+    Name = 0,
+    Rarity = 1,
+    Trust = 2,
+    Role = 3
+}
+
 [DisallowMultipleComponent]
 public sealed class MainSubPage : RuntimeMenuPageBase
 {
@@ -40,6 +48,8 @@ public sealed class MainSubPage : RuntimeMenuPageBase
     private InventoryData _boundRecruitInventory;
     private string _rosterSearchQuery = string.Empty;
     private CharacterRoleSO _rosterRoleFilter;
+    private OperatorRosterSortCriterion _rosterSortCriterion =
+        OperatorRosterSortCriterion.Name;
     private bool _rosterDescending;
     private bool _rosterEventsBound;
     private bool _recruitLocaleEventBound;
@@ -219,7 +229,16 @@ public sealed class MainSubPage : RuntimeMenuPageBase
                 _rosterSearchQuery = (query ?? string.Empty).Trim();
                 RefreshRosterBrowser();
             },
-            CycleRosterRoleFilter,
+            criterion =>
+            {
+                _rosterSortCriterion = criterion;
+                RefreshRosterBrowser();
+            },
+            role =>
+            {
+                _rosterRoleFilter = role;
+                RefreshRosterBrowser();
+            },
             () =>
             {
                 _rosterDescending = !_rosterDescending;
@@ -492,21 +511,21 @@ public sealed class MainSubPage : RuntimeMenuPageBase
                 LocalizationKeys.UiRosterSearchPlaceholder),
             LocalizationService.Get(
                 LocalizationKeys.UiRosterSearch),
-            LocalizationService.Get(
-                _rosterDescending
-                    ? LocalizationKeys.UiRosterSortNameDescending
-                    : LocalizationKeys.UiRosterSortNameAscending),
+            _rosterDescending
+                ? (korean ? "내림차순 ↓" : "DESCENDING ↓")
+                : (korean ? "오름차순 ↑" : "ASCENDING ↑"),
+            _rosterSortCriterion,
             korean ? "이름" : "NAME",
-            korean ? "레벨" : "LEVEL",
             korean ? "희귀도" : "RARITY",
             korean ? "신뢰도" : "TRUST",
-            _rosterRoleFilter != null
-                ? _rosterRoleFilter.GetDisplayName()
-                : (korean ? "전체" : "ALL"),
-            korean
-                ? "직군 필터\n버튼을 눌러 순환"
-                : "ROLE FILTER\nCLICK TO CYCLE",
+            korean ? "직군" : "ROLE",
+            korean ? "접기 ◀" : "HIDE ◀",
+            korean ? "펼치기 ▶" : "SHOW ▶",
+            korean ? "전체" : "ALL",
             LocalizationService.Get(LocalizationKeys.UiRosterEmpty));
+        _rosterBrowser.SetRoleFilters(
+            CharacterRolePresentation.Roles,
+            _rosterRoleFilter);
         _rosterBrowser.SetItems(items);
     }
 
@@ -804,46 +823,33 @@ public sealed class MainSubPage : RuntimeMenuPageBase
                data?.Role == _rosterRoleFilter;
     }
 
-    private void CycleRosterRoleFilter()
-    {
-        IReadOnlyList<CharacterRoleSO> roles =
-            CharacterRolePresentation.Roles;
-        int currentIndex = -1;
-        for (int index = 0; index < roles.Count; index++)
-        {
-            if (roles[index] == _rosterRoleFilter)
-            {
-                currentIndex = index;
-                break;
-            }
-        }
-
-        _rosterRoleFilter = null;
-        for (int offset = 1; offset <= roles.Count; offset++)
-        {
-            int nextIndex = currentIndex + offset;
-            if (nextIndex >= roles.Count)
-                break;
-            if (roles[nextIndex] != null)
-            {
-                _rosterRoleFilter = roles[nextIndex];
-                break;
-            }
-        }
-
-        RefreshRosterBrowser();
-    }
-
     private int CompareRosterEntries(
         CharacterData left,
         CharacterData right)
     {
-        int comparison = string.Compare(
+        int comparison = _rosterSortCriterion switch
+        {
+            OperatorRosterSortCriterion.Rarity =>
+                left.Grade.CompareTo(right.Grade),
+            OperatorRosterSortCriterion.Trust =>
+                left.Trust.CompareTo(right.Trust),
+            OperatorRosterSortCriterion.Role => string.Compare(
+                CharacterRolePresentation.GetRoleName(left.Role),
+                CharacterRolePresentation.GetRoleName(right.Role),
+                StringComparison.OrdinalIgnoreCase),
+            _ => string.Compare(
+                CharacterLocalization.GetName(left),
+                CharacterLocalization.GetName(right),
+                StringComparison.OrdinalIgnoreCase)
+        };
+        if (_rosterDescending)
+            comparison = -comparison;
+        if (comparison != 0)
+            return comparison;
+        comparison = string.Compare(
             CharacterLocalization.GetName(left),
             CharacterLocalization.GetName(right),
             StringComparison.OrdinalIgnoreCase);
-        if (_rosterDescending)
-            comparison = -comparison;
         if (comparison != 0)
             return comparison;
         return string.Compare(
@@ -1086,28 +1092,57 @@ public sealed class OperatorRosterView
         }
     }
 
+    private sealed class RoleFilterView
+    {
+        public Button Button { get; }
+        public Image Background { get; }
+        public Graphic Content { get; }
+        public CharacterRoleSO Role { get; set; }
+
+        public RoleFilterView(
+            Button button,
+            Image background,
+            Graphic content)
+        {
+            Button = button;
+            Background = background;
+            Content = content;
+        }
+    }
+
     private readonly Transform _host;
     private readonly List<CardView> _cards = new();
+    private readonly Button[] _sortCriterionButtons = new Button[4];
+    private readonly TextMeshProUGUI[] _sortCriterionLabels =
+        new TextMeshProUGUI[4];
+    private readonly string[] _sortCriterionNames = new string[4];
+    private readonly List<RoleFilterView> _roleFilters = new();
     private RectTransform _root;
     private TMP_InputField _searchInput;
     private TextMeshProUGUI _searchPlaceholder;
     private TextMeshProUGUI _titleText;
     private TextMeshProUGUI _countText;
-    private TextMeshProUGUI _activeSortLabel;
-    private TextMeshProUGUI _levelSortLabel;
-    private TextMeshProUGUI _raritySortLabel;
-    private TextMeshProUGUI _trustSortLabel;
     private TextMeshProUGUI _sortButtonLabel;
     private TextMeshProUGUI _allFilterLabel;
-    private TextMeshProUGUI _pendingFilterText;
+    private TextMeshProUGUI _railToggleLabel;
     private TextMeshProUGUI _emptyText;
     private Button _searchButton;
     private Button _sortButton;
+    private Button _railToggleButton;
     private Button _allFilterButton;
+    private Image _railBackground;
     private Transform _cardContent;
     private GameObject _cardPrefab;
+    private OperatorRosterDesignerSettings _designerSettings;
+    private OperatorRosterSortCriterion _activeSortCriterion;
+    private CharacterRoleSO _activeRoleFilter;
+    private bool _sortMenuExpanded;
+    private bool _railExpanded = true;
+    private string _railExpandedLabel = string.Empty;
+    private string _railCollapsedLabel = string.Empty;
     private Action<string> _searchRequested;
-    private Action _filterRequested;
+    private Action<OperatorRosterSortCriterion> _sortCriterionRequested;
+    private Action<CharacterRoleSO> _roleFilterRequested;
     private Action _sortRequested;
     private Action<string> _itemSelected;
 
@@ -1134,12 +1169,14 @@ public sealed class OperatorRosterView
 
     public void SetCallbacks(
         Action<string> searchRequested,
-        Action filterRequested,
+        Action<OperatorRosterSortCriterion> sortCriterionRequested,
+        Action<CharacterRoleSO> roleFilterRequested,
         Action sortRequested,
         Action<string> itemSelected)
     {
         _searchRequested = searchRequested;
-        _filterRequested = filterRequested;
+        _sortCriterionRequested = sortCriterionRequested;
+        _roleFilterRequested = roleFilterRequested;
         _sortRequested = sortRequested;
         _itemSelected = itemSelected;
 
@@ -1148,9 +1185,29 @@ public sealed class OperatorRosterView
         _sortButton.onClick.RemoveAllListeners();
         _sortButton.onClick.AddListener(
             () => _sortRequested?.Invoke());
+        for (int index = 0;
+             index < _sortCriterionButtons.Length;
+             index++)
+        {
+            int criterionIndex = index;
+            Button button = _sortCriterionButtons[index];
+            button.onClick.RemoveAllListeners();
+            button.onClick.AddListener(
+                () => HandleSortCriterionClicked(
+                    (OperatorRosterSortCriterion)criterionIndex));
+        }
         _allFilterButton.onClick.RemoveAllListeners();
         _allFilterButton.onClick.AddListener(
-            () => _filterRequested?.Invoke());
+            () => SelectRoleFilter(null));
+        for (int index = 1; index < _roleFilters.Count; index++)
+        {
+            RoleFilterView filter = _roleFilters[index];
+            filter.Button.onClick.RemoveAllListeners();
+            filter.Button.onClick.AddListener(
+                () => SelectRoleFilter(filter.Role));
+        }
+        _railToggleButton.onClick.RemoveAllListeners();
+        _railToggleButton.onClick.AddListener(ToggleRoleFilterRail);
         _searchInput.onSubmit.RemoveAllListeners();
         _searchInput.onSubmit.AddListener(_ => SubmitSearch());
     }
@@ -1161,13 +1218,15 @@ public sealed class OperatorRosterView
         string searchText,
         string searchPlaceholder,
         string searchLabel,
-        string sortLabel,
-        string activeSortLabel,
-        string levelSortLabel,
+        string sortDirectionLabel,
+        OperatorRosterSortCriterion sortCriterion,
+        string nameSortLabel,
         string raritySortLabel,
         string trustSortLabel,
+        string roleSortLabel,
+        string railExpandedLabel,
+        string railCollapsedLabel,
         string allFilterLabel,
-        string pendingFilterLabel,
         string emptyLabel)
     {
         _titleText.text = title ?? string.Empty;
@@ -1175,14 +1234,48 @@ public sealed class OperatorRosterView
         _searchInput.SetTextWithoutNotify(searchText ?? string.Empty);
         _searchPlaceholder.text = searchPlaceholder ?? string.Empty;
         SetButtonLabel(_searchButton, searchLabel);
-        _sortButtonLabel.text = sortLabel ?? string.Empty;
-        _activeSortLabel.text = activeSortLabel ?? string.Empty;
-        _levelSortLabel.text = levelSortLabel ?? string.Empty;
-        _raritySortLabel.text = raritySortLabel ?? string.Empty;
-        _trustSortLabel.text = trustSortLabel ?? string.Empty;
+        _sortButtonLabel.text = sortDirectionLabel ?? string.Empty;
+        _activeSortCriterion = sortCriterion;
+        _sortCriterionNames[(int)OperatorRosterSortCriterion.Name] =
+            nameSortLabel ?? string.Empty;
+        _sortCriterionNames[(int)OperatorRosterSortCriterion.Rarity] =
+            raritySortLabel ?? string.Empty;
+        _sortCriterionNames[(int)OperatorRosterSortCriterion.Trust] =
+            trustSortLabel ?? string.Empty;
+        _sortCriterionNames[(int)OperatorRosterSortCriterion.Role] =
+            roleSortLabel ?? string.Empty;
+        _railExpandedLabel = railExpandedLabel ?? string.Empty;
+        _railCollapsedLabel = railCollapsedLabel ?? string.Empty;
         _allFilterLabel.text = allFilterLabel ?? string.Empty;
-        _pendingFilterText.text = pendingFilterLabel ?? string.Empty;
         _emptyText.text = emptyLabel ?? string.Empty;
+        RefreshSortMenu();
+        RefreshRoleFilterRail();
+    }
+
+    public void SetRoleFilters(
+        IReadOnlyList<CharacterRoleSO> roles,
+        CharacterRoleSO selectedRole)
+    {
+        _activeRoleFilter = selectedRole;
+        int roleCount = roles?.Count ?? 0;
+        for (int index = 1; index < _roleFilters.Count; index++)
+        {
+            RoleFilterView filter = _roleFilters[index];
+            int roleIndex = index - 1;
+            CharacterRoleSO role = roleIndex < roleCount
+                ? roles[roleIndex]
+                : null;
+            filter.Role = role;
+            filter.Button.gameObject.SetActive(
+                _railExpanded && role != null);
+            if (filter.Content is Image roleIcon)
+            {
+                roleIcon.sprite = role?.IconSprite;
+                roleIcon.enabled = role?.IconSprite != null;
+            }
+        }
+
+        RefreshRoleFilterSelection();
     }
 
     public void SetItems(
@@ -1240,6 +1333,105 @@ public sealed class OperatorRosterView
         _searchRequested?.Invoke(_searchInput.text);
     }
 
+    private void HandleSortCriterionClicked(
+        OperatorRosterSortCriterion criterion)
+    {
+        if (!_sortMenuExpanded && criterion == _activeSortCriterion)
+        {
+            _sortMenuExpanded = true;
+            RefreshSortMenu();
+            return;
+        }
+
+        _sortMenuExpanded = false;
+        if (criterion != _activeSortCriterion)
+        {
+            _activeSortCriterion = criterion;
+            _sortCriterionRequested?.Invoke(criterion);
+        }
+        RefreshSortMenu();
+    }
+
+    private void RefreshSortMenu()
+    {
+        for (int index = 0;
+             index < _sortCriterionButtons.Length;
+             index++)
+        {
+            bool selected = index == (int)_activeSortCriterion;
+            _sortCriterionButtons[index].gameObject.SetActive(
+                _sortMenuExpanded || selected);
+            _sortCriterionLabels[index].text =
+                _sortCriterionNames[index] +
+                (!_sortMenuExpanded && selected ? "  ▾" : string.Empty);
+            if (_designerSettings != null &&
+                _sortCriterionButtons[index].targetGraphic is Image
+                    background)
+            {
+                background.color = selected
+                    ? _designerSettings.SelectedFilterBackground
+                    : _designerSettings.UnselectedFilterBackground;
+                _sortCriterionLabels[index].color = selected
+                    ? _designerSettings.SelectedFilterContent
+                    : _designerSettings.UnselectedFilterContent;
+            }
+        }
+    }
+
+    private void SelectRoleFilter(CharacterRoleSO role)
+    {
+        if (_activeRoleFilter == role)
+            return;
+
+        _activeRoleFilter = role;
+        RefreshRoleFilterSelection();
+        _roleFilterRequested?.Invoke(role);
+    }
+
+    private void ToggleRoleFilterRail()
+    {
+        _railExpanded = !_railExpanded;
+        RefreshRoleFilterRail();
+    }
+
+    private void RefreshRoleFilterRail()
+    {
+        if (_railBackground != null)
+            _railBackground.enabled = _railExpanded;
+        _railToggleLabel.text = _railExpanded
+            ? _railExpandedLabel
+            : _railCollapsedLabel;
+
+        for (int index = 0; index < _roleFilters.Count; index++)
+        {
+            RoleFilterView filter = _roleFilters[index];
+            bool hasRole = index == 0 || filter.Role != null;
+            filter.Button.gameObject.SetActive(
+                _railExpanded && hasRole);
+        }
+        RefreshRoleFilterSelection();
+    }
+
+    private void RefreshRoleFilterSelection()
+    {
+        if (_designerSettings == null)
+            return;
+
+        for (int index = 0; index < _roleFilters.Count; index++)
+        {
+            RoleFilterView filter = _roleFilters[index];
+            bool selected = index == 0
+                ? _activeRoleFilter == null
+                : filter.Role == _activeRoleFilter;
+            filter.Background.color = selected
+                ? _designerSettings.SelectedFilterBackground
+                : _designerSettings.UnselectedFilterBackground;
+            filter.Content.color = selected
+                ? _designerSettings.SelectedFilterContent
+                : _designerSettings.UnselectedFilterContent;
+        }
+    }
+
     private void HideLegacyBrowser()
     {
         if (_host == null)
@@ -1261,9 +1453,11 @@ public sealed class OperatorRosterView
         Transform searchViewport = searchInput?.Find(
             "vptRosterSearch");
         Transform searchButton = header?.Find("btnRosterSearch");
+        Transform sortDropdown = header?.Find("grpRosterSortDropdown");
         Transform sortButton = header?.Find("btnRosterSortDirection");
         Transform rail = root?.Find("grpRosterFilterRail");
         Transform allFilter = rail?.Find("btnRosterFilterAll");
+        Transform railToggle = rail?.Find("btnRosterFilterToggle");
         Transform content = root?.Find(
             "scrRosterList/vptRosterList/grpRosterCardContent");
 
@@ -1277,32 +1471,48 @@ public sealed class OperatorRosterView
             ?.Find("txtRosterSearchPlaceholder")
             ?.GetComponent<TextMeshProUGUI>();
         _searchButton = searchButton?.GetComponent<Button>();
-        _activeSortLabel = header
-            ?.Find("btnRosterSortName/txtLabel")
-            ?.GetComponent<TextMeshProUGUI>();
-        _levelSortLabel = header
-            ?.Find("btnRosterSortLevel/txtLabel")
-            ?.GetComponent<TextMeshProUGUI>();
-        _raritySortLabel = header
-            ?.Find("btnRosterSortRarity/txtLabel")
-            ?.GetComponent<TextMeshProUGUI>();
-        _trustSortLabel = header
-            ?.Find("btnRosterSortTrust/txtLabel")
-            ?.GetComponent<TextMeshProUGUI>();
+        BindSortCriterion(
+            sortDropdown,
+            "btnRosterSortName",
+            OperatorRosterSortCriterion.Name);
+        BindSortCriterion(
+            sortDropdown,
+            "btnRosterSortRarity",
+            OperatorRosterSortCriterion.Rarity);
+        BindSortCriterion(
+            sortDropdown,
+            "btnRosterSortTrust",
+            OperatorRosterSortCriterion.Trust);
+        BindSortCriterion(
+            sortDropdown,
+            "btnRosterSortRole",
+            OperatorRosterSortCriterion.Role);
         _sortButton = sortButton?.GetComponent<Button>();
         _sortButtonLabel = sortButton?.Find("txtLabel")
             ?.GetComponent<TextMeshProUGUI>();
         _allFilterButton = allFilter?.GetComponent<Button>();
         _allFilterLabel = allFilter?.Find("txtLabel")
             ?.GetComponent<TextMeshProUGUI>();
-        _pendingFilterText = rail?.Find("txtRosterFilterPending")
-            ?.GetComponent<TextMeshProUGUI>();
+        _railToggleButton = railToggle?.GetComponent<Button>();
+        _railToggleLabel = railToggle?.GetComponent<TextMeshProUGUI>();
+        _railBackground = rail?.GetComponent<Image>();
         _emptyText = root?.Find("txtRosterEmpty")
             ?.GetComponent<TextMeshProUGUI>();
         _cardContent = content;
-        _cardPrefab = root
-            ?.GetComponent<OperatorRosterDesignerSettings>()
-            ?.CardPrefab;
+        _designerSettings = root
+            ?.GetComponent<OperatorRosterDesignerSettings>();
+        _cardPrefab = _designerSettings?.CardPrefab;
+
+        _roleFilters.Clear();
+        AddRoleFilter(allFilter, _allFilterLabel);
+        for (int index = 0; index < 5; index++)
+        {
+            Transform roleFilter = rail?.Find(
+                $"btnRosterFilterRole{index}");
+            AddRoleFilter(
+                roleFilter,
+                roleFilter?.GetComponent<Image>());
+        }
 
         return _root != null &&
                _titleText != null &&
@@ -1310,18 +1520,55 @@ public sealed class OperatorRosterView
                _searchInput != null &&
                _searchPlaceholder != null &&
                _searchButton != null &&
-               _activeSortLabel != null &&
-               _levelSortLabel != null &&
-               _raritySortLabel != null &&
-               _trustSortLabel != null &&
+               Array.TrueForAll(
+                   _sortCriterionButtons,
+                   button => button != null) &&
+               Array.TrueForAll(
+                   _sortCriterionLabels,
+                   label => label != null) &&
                _sortButton != null &&
                _sortButtonLabel != null &&
                _allFilterButton != null &&
                _allFilterLabel != null &&
-               _pendingFilterText != null &&
+               _railToggleButton != null &&
+               _railToggleLabel != null &&
+               _railBackground != null &&
+               _roleFilters.Count == 6 &&
                _emptyText != null &&
                _cardContent != null &&
                _cardPrefab != null;
+    }
+
+    private void BindSortCriterion(
+        Transform parent,
+        string objectName,
+        OperatorRosterSortCriterion criterion)
+    {
+        Transform item = parent?.Find(objectName);
+        int index = (int)criterion;
+        _sortCriterionButtons[index] = item?.GetComponent<Button>();
+        if (_sortCriterionButtons[index] != null)
+        {
+            _sortCriterionButtons[index].transition =
+                Selectable.Transition.None;
+        }
+        _sortCriterionLabels[index] = item?.Find("txtLabel")
+            ?.GetComponent<TextMeshProUGUI>();
+    }
+
+    private void AddRoleFilter(
+        Transform root,
+        Graphic content)
+    {
+        Button button = root?.GetComponent<Button>();
+        Image background = root?.GetComponent<Image>();
+        if (button == null || background == null || content == null)
+            return;
+        button.transition = Selectable.Transition.None;
+        _roleFilters.Add(new RoleFilterView(
+            button,
+            background,
+            content));
     }
 
     private CardView GetOrCreateCard(int index)

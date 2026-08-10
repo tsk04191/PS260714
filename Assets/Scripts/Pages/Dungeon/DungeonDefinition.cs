@@ -60,6 +60,10 @@ public sealed class DungeonDefinition : ScriptableObject
     [SerializeField] private EDungeonCompletionDestination completionDestination =
         EDungeonCompletionDestination.Main;
     [SerializeField, Min(0)] private int initialRunCurrency = 100;
+    [SerializeField, Min(0), Tooltip(
+        "Absolute health lost by each participating character after a " +
+        "cleared battle.")]
+    private int clearedBattleHealthCost = 10;
 
     [Header("Encounters")]
     [SerializeField] private BattleSO[] fixedBattles =
@@ -169,6 +173,8 @@ public sealed class DungeonDefinition : ScriptableObject
     public EDungeonCompletionDestination CompletionDestination =>
         completionDestination;
     public int InitialRunCurrency => Mathf.Max(0, initialRunCurrency);
+    public int ClearedBattleHealthCost =>
+        Mathf.Max(0, clearedBattleHealthCost);
     public DungeonFieldView FieldViewPrefab => fieldViewPrefab;
     public DungeonThemeDefinition Theme => theme;
     public DungeonBgmProfile BgmProfile => bgmProfile;
@@ -473,6 +479,9 @@ public sealed class DungeonDefinition : ScriptableObject
         fixedShops ??= Array.Empty<DungeonShopSO>();
         roomPattern ??= Array.Empty<EDungeonPhase>();
         initialRunCurrency = Mathf.Max(0, initialRunCurrency);
+        clearedBattleHealthCost = Mathf.Max(
+            0,
+            clearedBattleHealthCost);
         enemyPoolOverride ??= Array.Empty<EnemySO>();
         modifiers ??= Array.Empty<DungeonModifier>();
     }

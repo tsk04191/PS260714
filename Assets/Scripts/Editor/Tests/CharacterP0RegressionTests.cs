@@ -3480,6 +3480,54 @@ public sealed class CharacterP0RegressionTests
     }
 
     [Test]
+    public void DungeonBattlePreparation_PreservesHealthAndAppliesEfficiency()
+    {
+        CharacterSO definition = CreateHealCharacter(
+            CharacterTargetFaction.Ally,
+            CharacterAttackSubject.Self,
+            3f);
+        CharacterRuntime character = CreateCharacter(definition);
+        float baseAttackPower = character.Data.AttackPower;
+
+        Assert.That(character.TrySpendHealth(4), Is.True);
+        Assert.That(character.CurrentHealth, Is.EqualTo(6));
+        character.GainShield(5);
+
+        character.PrepareForNextBattle();
+
+        Assert.That(character.CurrentHealth, Is.EqualTo(6));
+        Assert.That(character.CurrentShield, Is.Zero);
+        Assert.That(character.HealthPerformancePercentage, Is.EqualTo(6f));
+        Assert.That(character.HealthPerformanceMultiplier, Is.EqualTo(0.06f));
+        Assert.That(
+            character.CurrentAttackPower,
+            Is.EqualTo(baseAttackPower * 0.06f).Within(0.001f));
+
+        character.ResetRuntime();
+        Assert.That(character.CurrentHealth, Is.EqualTo(10));
+        Assert.That(character.HealthPerformanceMultiplier, Is.EqualTo(1f));
+    }
+
+    [Test]
+    public void DungeonRunHealthLoss_CanExhaustAndRoomRecoveryCanRevive()
+    {
+        CharacterSO definition = CreateHealCharacter(
+            CharacterTargetFaction.Ally,
+            CharacterAttackSubject.Self,
+            3f);
+        CharacterRuntime character = CreateCharacter(definition);
+        character.BeginDungeonRun();
+
+        Assert.That(character.ApplyRunHealthLoss(10), Is.EqualTo(10));
+        Assert.That(character.CurrentHealth, Is.Zero);
+        Assert.That(character.CanParticipate, Is.False);
+        Assert.That(character.Heal(3), Is.Zero);
+        Assert.That(character.RestoreHealth(3, true), Is.EqualTo(3));
+        Assert.That(character.CurrentHealth, Is.EqualTo(3));
+        Assert.That(character.CanParticipate, Is.True);
+    }
+
+    [Test]
     public void EnemyHeal_UsesPerTargetMaximumHealthScaling()
     {
         CharacterSO definition = CreateHealCharacter(
@@ -4237,6 +4285,29 @@ public sealed class CharacterP0RegressionTests
     }
 
     [Test]
+    public void CumulativeUpgrade_CanUnlockHealthPerformanceAboveOneHundred()
+    {
+        CharacterSO definition = CreateCumulativeUpgradeCharacter();
+        ConfigureCumulativeUpgradeDefinition(
+            definition,
+            0,
+            "health_performance_cap",
+            5,
+            (CharacterCumulativeUpgradeModifierType.HealthPerformanceCap,
+                10f));
+        CharacterProgressData progress = new(
+            definition.CharacterId,
+            true);
+        progress.SetCumulativeUpgradeLevel(
+            "health_performance_cap",
+            2);
+
+        CharacterData data = definition.CreateData(progress);
+
+        Assert.That(data.HealthPerformanceCap, Is.EqualTo(120f));
+    }
+
+    [Test]
     public void CumulativeUpgrade_SetAndAddClampAndRecalculate()
     {
         CharacterSO definition = CreateCumulativeUpgradeCharacter();
@@ -4526,6 +4597,33 @@ public sealed class CharacterP0RegressionTests
         Assert.That(newLevel, Is.EqualTo(1));
         Assert.That(data.MaximumHealth, Is.EqualTo(13));
         Assert.That(progressChanged, Is.EqualTo(2));
+    }
+
+    [Test]
+    public void CollectionTrust_IsClampedAndPreservedBySaveSnapshot()
+    {
+        CharacterSO definition = CreateCumulativeUpgradeCharacter();
+        CharacterCollectionData source = new();
+        CharacterData runtime = source.CreateRuntimeData(definition);
+
+        Assert.That(
+            source.TrySetTrust(
+                definition,
+                135,
+                save: false),
+            Is.True);
+        Assert.That(runtime.Trust, Is.EqualTo(100));
+        Assert.That(
+            source.CreatePreviewData(definition).Trust,
+            Is.EqualTo(100));
+
+        CharacterCollectionData restored = new();
+        Assert.That(
+            restored.TryImportJson(source.ExportJson()),
+            Is.True);
+        Assert.That(
+            restored.CreatePreviewData(definition).Trust,
+            Is.EqualTo(100));
     }
 
     [Test]

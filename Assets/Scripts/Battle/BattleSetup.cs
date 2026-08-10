@@ -6,6 +6,7 @@ public enum EBattleResult
     Victory,
     Timeout,
     Aborted,
+    Defeat,
 }
 
 public readonly struct BattleEnemyGradeCounts

@@ -88,6 +88,8 @@ public readonly struct EffectContext
     public CharacterActionKind ActionKind { get; }
     public CharacterTargetFaction TargetFaction { get; }
     public float SourceAttackPower { get; }
+    public int SourceCurrentHealth => SourceTarget.CurrentHealth;
+    public int SourceMaximumHealth => SourceTarget.MaximumHealth;
     public int SourceResource { get; }
     public int SourceResourceMaximum { get; }
     public BattleStatusTarget Target { get; }
@@ -392,6 +394,10 @@ public readonly struct BattleEffectContext
     public CharacterTargetFaction TargetFaction =>
         _characterContext.TargetFaction;
     public float SourceAttackPower => _characterContext.SourceAttackPower;
+    public int SourceCurrentHealth =>
+        _characterContext.SourceCurrentHealth;
+    public int SourceMaximumHealth =>
+        _characterContext.SourceMaximumHealth;
     public int SourceResource => _characterContext.SourceResource;
     public int SourceResourceMaximum =>
         _characterContext.SourceResourceMaximum;

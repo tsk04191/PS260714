@@ -903,8 +903,21 @@ public static class CharacterLocalization
 
             string metric = condition.Metric switch
             {
+                CharacterNumericConditionMetric.Health =>
+                    UsesKoreanLocale ? "현재 체력" : "current health",
                 CharacterNumericConditionMetric.HealthPercentage =>
-                    UsesKoreanLocale ? "체력 비율" : "health percentage",
+                    UsesKoreanLocale
+                        ? "현재 체력 비율"
+                        : "current health percentage",
+                CharacterNumericConditionMetric.MaximumHealth =>
+                    UsesKoreanLocale ? "최대 체력" : "maximum health",
+                CharacterNumericConditionMetric
+                    .HealthPerformancePercentage =>
+                    UsesKoreanLocale ? "체력 효율" : "health performance",
+                CharacterNumericConditionMetric.HealthPerformanceCap =>
+                    UsesKoreanLocale
+                        ? "체력 효율 상한"
+                        : "health performance cap",
                 CharacterNumericConditionMetric.StackCount =>
                     UsesKoreanLocale ? "적 타일 스택" : "enemy tile stack",
                 CharacterNumericConditionMetric.AttackPower =>
@@ -915,7 +928,7 @@ public static class CharacterLocalization
                     UsesKoreanLocale ? "보호막" : "shield",
                 CharacterNumericConditionMetric.StatusStackCount =>
                     FormatStatusConditionMetric(condition),
-                _ => UsesKoreanLocale ? "체력" : "health"
+                _ => UsesKoreanLocale ? "수치" : "value"
             };
             if (condition.Target == CharacterConditionTarget.Source)
             {
@@ -940,8 +953,13 @@ public static class CharacterLocalization
                     UsesKoreanLocale ? "다름" : "not equal to",
                 _ => string.Empty
             };
-            string value = condition.Metric ==
-                           CharacterNumericConditionMetric.HealthPercentage
+            bool percentageMetric = condition.Metric ==
+                CharacterNumericConditionMetric.HealthPercentage ||
+                condition.Metric == CharacterNumericConditionMetric
+                    .HealthPerformancePercentage ||
+                condition.Metric == CharacterNumericConditionMetric
+                    .HealthPerformanceCap;
+            string value = percentageMetric
                 ? $"{condition.Threshold:0.##}%"
                 : $"{condition.Threshold:0.##}";
             builder.Append(UsesKoreanLocale
@@ -1024,7 +1042,7 @@ public static class CharacterLocalization
                 UsesKoreanLocale ? "속도" : "speed",
             CharacterAttackSubjectMetric.Shield =>
                 UsesKoreanLocale ? "보호막" : "shield",
-            _ => UsesKoreanLocale ? "체력" : "health"
+            _ => UsesKoreanLocale ? "현재 체력" : "current health"
         };
         return subject switch
         {
@@ -1561,6 +1579,14 @@ public static class CharacterLocalization
             builder,
             effect.SourceResourceScale,
             UsesKoreanLocale ? "현재 자원" : "Current Resource");
+        AppendScalingTerm(
+            builder,
+            effect.SourceCurrentHealthScale,
+            UsesKoreanLocale ? "시전자 현재 체력" : "Source Current HP");
+        AppendScalingTerm(
+            builder,
+            effect.SourceMaxHealthScale,
+            UsesKoreanLocale ? "시전자 최대 체력" : "Source Maximum HP");
         string sourceStatusName = GetStatusEffectName(
             effect.SourceStatusScalingEffect);
         AppendScalingTerm(

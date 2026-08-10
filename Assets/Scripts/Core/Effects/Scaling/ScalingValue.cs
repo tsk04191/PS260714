@@ -11,6 +11,10 @@ public struct ScalingValue
     [SerializeField]
     private float sourceResourceScale;
     [SerializeField]
+    private float sourceCurrentHealthScale;
+    [SerializeField]
+    private float sourceMaximumHealthScale;
+    [SerializeField]
     private float targetCurrentHealthScale;
     [SerializeField]
     private float targetMaximumHealthScale;
@@ -22,6 +26,8 @@ public struct ScalingValue
     public float FixedAmount => fixedAmount;
     public float SourceAttackPowerScale => sourceAttackPowerScale;
     public float SourceResourceScale => sourceResourceScale;
+    public float SourceCurrentHealthScale => sourceCurrentHealthScale;
+    public float SourceMaximumHealthScale => sourceMaximumHealthScale;
     public float TargetCurrentHealthScale => targetCurrentHealthScale;
     public float TargetMaximumHealthScale => targetMaximumHealthScale;
     public float SourceStatusStacksScale => sourceStatusStacksScale;
@@ -30,6 +36,8 @@ public struct ScalingValue
         IsFiniteValue(fixedAmount) &&
         IsFiniteValue(sourceAttackPowerScale) &&
         IsFiniteValue(sourceResourceScale) &&
+        IsFiniteValue(sourceCurrentHealthScale) &&
+        IsFiniteValue(sourceMaximumHealthScale) &&
         IsFiniteValue(targetCurrentHealthScale) &&
         IsFiniteValue(targetMaximumHealthScale) &&
         IsFiniteValue(sourceStatusStacksScale) &&
@@ -38,6 +46,8 @@ public struct ScalingValue
         fixedAmount > 0f ||
         sourceAttackPowerScale > 0f ||
         sourceResourceScale > 0f ||
+        sourceCurrentHealthScale > 0f ||
+        sourceMaximumHealthScale > 0f ||
         targetCurrentHealthScale > 0f ||
         targetMaximumHealthScale > 0f ||
         sourceStatusStacksScale > 0f ||
@@ -46,6 +56,8 @@ public struct ScalingValue
         fixedAmount != 0f ||
         sourceAttackPowerScale != 0f ||
         sourceResourceScale != 0f ||
+        sourceCurrentHealthScale != 0f ||
+        sourceMaximumHealthScale != 0f ||
         targetCurrentHealthScale != 0f ||
         targetMaximumHealthScale != 0f ||
         sourceStatusStacksScale != 0f ||
@@ -76,6 +88,8 @@ public struct ScalingValue
             0f,
             0f,
             0f,
+            0f,
+            0f,
             0f)
     {
     }
@@ -88,10 +102,35 @@ public struct ScalingValue
         float targetMaximumHealthScale,
         float sourceStatusStacksScale,
         float targetStatusStacksScale)
+        : this(
+            fixedAmount,
+            sourceAttackPowerScale,
+            sourceResourceScale,
+            0f,
+            0f,
+            targetCurrentHealthScale,
+            targetMaximumHealthScale,
+            sourceStatusStacksScale,
+            targetStatusStacksScale)
+    {
+    }
+
+    public ScalingValue(
+        float fixedAmount,
+        float sourceAttackPowerScale,
+        float sourceResourceScale,
+        float sourceCurrentHealthScale,
+        float sourceMaximumHealthScale,
+        float targetCurrentHealthScale,
+        float targetMaximumHealthScale,
+        float sourceStatusStacksScale,
+        float targetStatusStacksScale)
     {
         this.fixedAmount = fixedAmount;
         this.sourceAttackPowerScale = sourceAttackPowerScale;
         this.sourceResourceScale = sourceResourceScale;
+        this.sourceCurrentHealthScale = sourceCurrentHealthScale;
+        this.sourceMaximumHealthScale = sourceMaximumHealthScale;
         this.targetCurrentHealthScale = targetCurrentHealthScale;
         this.targetMaximumHealthScale = targetMaximumHealthScale;
         this.sourceStatusStacksScale = sourceStatusStacksScale;
@@ -113,6 +152,10 @@ public struct ScalingValue
                        sourceAttackPowerScale +
                        context.SourceResource *
                        sourceResourceScale +
+                       context.SourceCurrentHealth *
+                       sourceCurrentHealthScale +
+                       context.SourceMaximumHealth *
+                       sourceMaximumHealthScale +
                        context.TargetCurrentHealth *
                        targetCurrentHealthScale +
                        context.TargetMaximumHealth *
@@ -148,6 +191,34 @@ public struct ScalingValue
             0f,
             0f,
             scale,
+            0f,
+            0f,
+            0f);
+    }
+
+    public static ScalingValue SourceCurrentHealth(float scale)
+    {
+        return new ScalingValue(
+            0f,
+            0f,
+            0f,
+            scale,
+            0f,
+            0f,
+            0f,
+            0f,
+            0f);
+    }
+
+    public static ScalingValue SourceMaximumHealth(float scale)
+    {
+        return new ScalingValue(
+            0f,
+            0f,
+            0f,
+            0f,
+            scale,
+            0f,
             0f,
             0f,
             0f);
@@ -213,6 +284,10 @@ public struct ScalingValue
             right.sourceAttackPowerScale,
             left.sourceResourceScale +
             right.sourceResourceScale,
+            left.sourceCurrentHealthScale +
+            right.sourceCurrentHealthScale,
+            left.sourceMaximumHealthScale +
+            right.sourceMaximumHealthScale,
             left.targetCurrentHealthScale +
             right.targetCurrentHealthScale,
             left.targetMaximumHealthScale +

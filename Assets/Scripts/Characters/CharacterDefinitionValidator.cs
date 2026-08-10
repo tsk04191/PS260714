@@ -2430,6 +2430,8 @@ public static class CharacterDefinitionValidator
             effect.Amount >= 1f;
         bool hasUnsupportedScaling =
             effect.SourceResourceScale != 0f ||
+            effect.SourceCurrentHealthScale != 0f ||
+            effect.SourceMaxHealthScale != 0f ||
             effect.TargetCurrentHealthScale != 0f ||
             effect.TargetMaxHealthScale != 0f ||
             effect.SourceStatusStacksScale != 0f ||
@@ -2456,6 +2458,8 @@ public static class CharacterDefinitionValidator
             effect.Amount >= 1f;
         bool hasUnsupportedScaling =
             effect.SourceResourceScale != 0f ||
+            effect.SourceCurrentHealthScale != 0f ||
+            effect.SourceMaxHealthScale != 0f ||
             effect.TargetCurrentHealthScale != 0f ||
             effect.TargetMaxHealthScale != 0f ||
             effect.SourceStatusStacksScale != 0f ||
@@ -3284,11 +3288,17 @@ public static class CharacterDefinitionValidator
               metric == CharacterNumericConditionMetric.AttackSpeed ||
               metric == CharacterNumericConditionMetric.Health ||
               metric == CharacterNumericConditionMetric.HealthPercentage ||
+              metric == CharacterNumericConditionMetric.MaximumHealth ||
+              metric == CharacterNumericConditionMetric
+                  .HealthPerformancePercentage ||
+              metric == CharacterNumericConditionMetric
+                  .HealthPerformanceCap ||
               metric == CharacterNumericConditionMetric.Shield ||
               metric ==
               CharacterNumericConditionMetric.StatusStackCount
             : metric == CharacterNumericConditionMetric.Health ||
               metric == CharacterNumericConditionMetric.HealthPercentage ||
+              metric == CharacterNumericConditionMetric.MaximumHealth ||
               metric == CharacterNumericConditionMetric.StackCount ||
               metric == CharacterNumericConditionMetric.Shield ||
               metric ==

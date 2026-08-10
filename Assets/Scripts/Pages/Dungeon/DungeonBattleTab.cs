@@ -424,7 +424,8 @@ public sealed class DungeonBattleTab : MonoBehaviour
         bool isPaused = _battleManager != null && _battleManager.IsPaused;
         bool isDefeated = _battleManager != null &&
                           _battleManager.State == EBattleState.Completed &&
-                          _battleManager.Result == EBattleResult.Timeout;
+                          (_battleManager.Result == EBattleResult.Timeout ||
+                           _battleManager.Result == EBattleResult.Defeat);
 
         if (speedText != null)
             speedText.text = $"{gameSpeed:0.#}X";
