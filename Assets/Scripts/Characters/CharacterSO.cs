@@ -2728,6 +2728,8 @@ public sealed class CharacterSO : ScriptableObject,
     [SerializeField] private Sprite waitingSdSprite;
     [SerializeField] private Sprite attackSdSprite;
     [SerializeField] private Sprite damagedSdSprite;
+    [SerializeField] private Sprite defeatSdSprite;
+    [SerializeField] private Sprite sittingSdSprite;
     [SerializeField] private Sprite skillSdSprite;
     [SerializeField] private Sprite passiveSdSprite;
     [SerializeField] private string nameLocalizationKey;
@@ -2763,6 +2765,9 @@ public sealed class CharacterSO : ScriptableObject,
     private List<CharacterDungeonUpgradeDefinition>
         dungeonUpgradeDefinitions = new();
 
+    [Header("Rest Room Skill")]
+    [SerializeField] private CharacterRestSkillDefinition restSkill = new();
+
     [Header("Combat")]
     [SerializeField, Min(1)] private int maximumHealth = 100;
     [SerializeField, Min(1)] private int attackPower = 1;
@@ -2775,6 +2780,8 @@ public sealed class CharacterSO : ScriptableObject,
     public Sprite WaitingSdSprite => waitingSdSprite;
     public Sprite AttackSdSprite => attackSdSprite;
     public Sprite DamagedSdSprite => damagedSdSprite;
+    public Sprite DefeatSdSprite => defeatSdSprite;
+    public Sprite SittingSdSprite => sittingSdSprite;
     public Sprite SkillSdSprite => skillSdSprite;
     public Sprite PassiveSdSprite => passiveSdSprite;
     public string CharacterId => !string.IsNullOrWhiteSpace(characterId)
@@ -2803,6 +2810,7 @@ public sealed class CharacterSO : ScriptableObject,
         CumulativeUpgradeDefinitions => cumulativeUpgradeDefinitions;
     public IReadOnlyList<CharacterDungeonUpgradeDefinition>
         DungeonUpgradeDefinitions => dungeonUpgradeDefinitions;
+    public CharacterRestSkillDefinition RestSkill => restSkill;
     public int AttackPower => attackPower;
     public int MaximumHealth => maximumHealth;
     public float AttackCooldown => TimePrecision.Normalize(attackCooldown, 0.1f);
@@ -2868,6 +2876,9 @@ public sealed class CharacterSO : ScriptableObject,
         {
             definition?.Validate();
         }
+
+        restSkill ??= new CharacterRestSkillDefinition();
+        restSkill.Validate();
 
         maximumHealth = Mathf.Max(1, maximumHealth);
         attackPower = Mathf.Max(1, attackPower);

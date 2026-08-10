@@ -122,6 +122,21 @@ public class DungeonRoomChoiceDefinition
         descriptionLocalizationKey,
         fallbackDescription);
 
+    internal DungeonRoomChoiceDefinition ConfigureDefaults(
+        string id,
+        string title,
+        string description = "")
+    {
+        choiceId = string.IsNullOrWhiteSpace(id) ? "choice" : id.Trim();
+        fallbackTitle = string.IsNullOrWhiteSpace(title)
+            ? "CONTINUE"
+            : title.Trim();
+        fallbackDescription = (description ?? string.Empty).Trim();
+        conditions ??= Array.Empty<DungeonRoomConditionDefinition>();
+        effects ??= Array.Empty<DungeonRoomEffectDefinition>();
+        return this;
+    }
+
     public bool TryValidate(out string error)
     {
         if (string.IsNullOrWhiteSpace(choiceId))
@@ -652,20 +667,22 @@ public sealed class DungeonEventSO : DungeonRoomSO
     menuName = "Dungeon/Room/Rest")]
 public sealed partial class DungeonRestSO : DungeonRoomSO
 {
-    [SerializeField] private DungeonRoomChoiceDefinition[] choices =
+    [SerializeField, HideInInspector]
+    private DungeonRoomChoiceDefinition[] choices =
         Array.Empty<DungeonRoomChoiceDefinition>();
 
     public IReadOnlyList<DungeonRoomChoiceDefinition> Choices => choices;
 
     protected override bool TryValidateRoom(out string error)
     {
-        return DungeonEventSO.ValidateChoices(choices, "Rest", out error);
+        return TryValidateRest(choices, out error);
     }
 
     private void OnValidate()
     {
         ValidateBaseFields();
         choices ??= Array.Empty<DungeonRoomChoiceDefinition>();
+        EnsureRestSchema(choices);
     }
 }
 

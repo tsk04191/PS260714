@@ -350,6 +350,39 @@ public sealed class CharacterP0RegressionTests
     }
 
     [Test]
+    public void CharacterSdSprites_UseDefeatAtZeroAndSittingInRest()
+    {
+        CharacterSO definition = CreateBaseCharacterFixture(
+            "CharacterSdStateFixture");
+        Sprite defeat = CreateTestSprite(Color.red);
+        Sprite sitting = CreateTestSprite(Color.green);
+        SerializedObject definitionSerialized = new(definition);
+        definitionSerialized.FindProperty("defeatSdSprite")
+            .objectReferenceValue = defeat;
+        definitionSerialized.FindProperty("sittingSdSprite")
+            .objectReferenceValue = sitting;
+        definitionSerialized.ApplyModifiedPropertiesWithoutUndo();
+
+        CharacterRuntime character = CreateCharacter(definition);
+        Image sdImage = character.transform.Find("imgCharacterSd")
+            .GetComponent<Image>();
+
+        Assert.That(character.Data.DefeatSdSprite, Is.SameAs(defeat));
+        Assert.That(character.Data.SittingSdSprite, Is.SameAs(sitting));
+        Assert.That(character.ResolveRestSdSprite(), Is.SameAs(sitting));
+
+        Assert.That(
+            character.ApplyRunHealthLoss(character.MaximumHealth),
+            Is.EqualTo(character.MaximumHealth));
+        Assert.That(character.CurrentHealth, Is.Zero);
+        Assert.That(sdImage.sprite, Is.SameAs(defeat));
+        Assert.That(character.ResolveRestSdSprite(), Is.SameAs(defeat));
+
+        Assert.That(character.RestoreHealth(1, true), Is.EqualTo(1));
+        Assert.That(character.ResolveRestSdSprite(), Is.SameAs(sitting));
+    }
+
+    [Test]
     public void DungeonCharacterInfo_ShowsBuffValueAndTimedRadialOverlay()
     {
         Texture2D texture = new(4, 4, TextureFormat.RGBA32, false);

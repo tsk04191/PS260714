@@ -512,15 +512,15 @@ public sealed class MainSubPage : RuntimeMenuPageBase
             LocalizationService.Get(
                 LocalizationKeys.UiRosterSearch),
             _rosterDescending
-                ? (korean ? "내림차순 ↓" : "DESCENDING ↓")
-                : (korean ? "오름차순 ↑" : "ASCENDING ↑"),
+                    ? (korean ? "내림차순" : "DESCENDING")
+                    : (korean ? "오름차순" : "ASCENDING"),
             _rosterSortCriterion,
             korean ? "이름" : "NAME",
             korean ? "희귀도" : "RARITY",
             korean ? "신뢰도" : "TRUST",
             korean ? "직군" : "ROLE",
-            korean ? "접기 ◀" : "HIDE ◀",
-            korean ? "펼치기 ▶" : "SHOW ▶",
+                    korean ? "접기 <" : "HIDE <",
+                    korean ? "펼치기 >" : "SHOW >",
             korean ? "전체" : "ALL",
             LocalizationService.Get(LocalizationKeys.UiRosterEmpty));
         _rosterBrowser.SetRoleFilters(
@@ -1363,7 +1363,7 @@ public sealed class OperatorRosterView
                 _sortMenuExpanded || selected);
             _sortCriterionLabels[index].text =
                 _sortCriterionNames[index] +
-                (!_sortMenuExpanded && selected ? "  ▾" : string.Empty);
+                    (!_sortMenuExpanded && selected ? "  v" : string.Empty);
             if (_designerSettings != null &&
                 _sortCriterionButtons[index].targetGraphic is Image
                     background)

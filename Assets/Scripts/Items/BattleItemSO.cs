@@ -199,6 +199,14 @@ public sealed class BattleItemSO : ItemDefinitionSO
     [SerializeField, Min(0f)] private float cooldown;
     [SerializeField] private bool availableAsDungeonReward = true;
     [SerializeField] private bool availableAsStartingItem = true;
+    [Header("Rest Room")]
+    [SerializeField] private bool availableInRest;
+    [SerializeField, Min(0), Tooltip(
+        "이 아이템을 보유한 채 휴식방에 입장하면 추가되는 행동 횟수입니다.")]
+    private int additionalRestActions;
+    [SerializeField]
+    private DungeonRestTargetEffectDefinition[] restEffects =
+        Array.Empty<DungeonRestTargetEffectDefinition>();
     [Tooltip(
         "Controls the lifetime of Apply Status ability effects created by " +
         "this item. Until Battle End is cleared by the next battle reset.")]
@@ -253,6 +261,11 @@ public sealed class BattleItemSO : ItemDefinitionSO
     public float Cooldown => Mathf.Max(0f, cooldown);
     public bool AvailableAsDungeonReward => availableAsDungeonReward;
     public bool AvailableAsStartingItem => availableAsStartingItem;
+    public bool AvailableInRest => availableInRest &&
+                                   RestEffects.Count > 0;
+    public int AdditionalRestActions => Mathf.Max(0, additionalRestActions);
+    public IReadOnlyList<DungeonRestTargetEffectDefinition> RestEffects =>
+        restEffects ?? Array.Empty<DungeonRestTargetEffectDefinition>();
     public BattleItemStatusDurationMode AppliedStatusDurationMode =>
         appliedStatusDurationMode;
     public bool StatusEffectsLastUntilBattleEnd =>
@@ -505,6 +518,8 @@ public sealed class BattleItemSO : ItemDefinitionSO
         maximumRunUses = Mathf.Max(0, maximumRunUses);
         energyCost = Mathf.Max(0, energyCost);
         cooldown = Mathf.Max(0f, cooldown);
+        additionalRestActions = Mathf.Max(0, additionalRestActions);
+        restEffects ??= Array.Empty<DungeonRestTargetEffectDefinition>();
         if (!Enum.IsDefined(
                 typeof(BattleItemStatusDurationMode),
                 appliedStatusDurationMode))
@@ -624,6 +639,30 @@ public sealed class BattleItemRunState
         }
 
         CooldownRemaining = item.Cooldown;
+        return true;
+    }
+
+    public bool CanUseInRest(BattleItemSO item)
+    {
+        return Matches(item) && item.AvailableInRest && IsOwned &&
+               (item.HasUnlimitedUses || RemainingUses > 0);
+    }
+
+    public bool CompleteSuccessfulRestUse(BattleItemSO item)
+    {
+        if (!CanUseInRest(item))
+            return false;
+
+        if (!item.HasUnlimitedUses)
+        {
+            RemainingUses = Mathf.Max(0, RemainingUses - 1);
+            if (item.UsesLegacyUsagePolicy || item.IsDisposable)
+            {
+                IsOwned = RemainingUses > 0;
+                IsRemoved = item.IsDisposable && RemainingUses <= 0;
+            }
+        }
+
         return true;
     }
 

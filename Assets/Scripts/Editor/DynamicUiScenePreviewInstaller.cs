@@ -18,6 +18,8 @@ public static class DynamicUiScenePreviewInstaller
         "Assets/Prefabs/UI/Dungeon/EnemyCard.prefab";
     private const string OperatorRosterCardPath =
         "Assets/Resources/Presentation/OperatorRosterCard.prefab";
+    private const string RestCharacterSdPath =
+        "Assets/Resources/Presentation/DungeonRestCharacterSd.prefab";
     private const string TogglePath =
         "Assets/Prefabs/UI/Util/btnToggle.prefab";
 
@@ -288,10 +290,17 @@ public static class DynamicUiScenePreviewInstaller
         DungeonStartingItemSlotView startingItemPrefab = pageSerialized
             .FindProperty("startingItemSlotPrefab").objectReferenceValue
             as DungeonStartingItemSlotView;
+        Image restCharacterSdPrefab = AssetDatabase.LoadAssetAtPath<
+                GameObject>(RestCharacterSdPath)
+            ?.GetComponent<Image>();
         Require(characterPrefab, "Character info prefab");
         Require(rewardPrefab, "Dungeon reward card prefab");
         Require(choicePrefab, "Dungeon choice button prefab");
         Require(startingItemPrefab, "Dungeon starting item slot prefab");
+        Require(restCharacterSdPrefab, "Dungeon rest character SD prefab");
+        pageSerialized.FindProperty("restCharacterSdPrefab")
+            .objectReferenceValue = restCharacterSdPrefab;
+        pageSerialized.ApplyModifiedPropertiesWithoutUndo();
 
         InstallCharacterPreview(scene, page, pageSerialized, characterPrefab);
         InstallBattleItemPreviews(scene);
@@ -311,6 +320,29 @@ public static class DynamicUiScenePreviewInstaller
                 root,
                 choicePrefab,
                 "btnRoomChoice_Preview");
+        }
+
+        CharacterSO restSample = CharacterDefinitionCatalog.GetAll()
+            .FirstOrDefault(item => item != null &&
+                                    item.SittingSdSprite != null) ??
+            CharacterDefinitionCatalog.GetAll().FirstOrDefault();
+        foreach (Transform root in FindTransforms(
+                     scene,
+                     "grpRestCharacterSds"))
+        {
+            Image preview = EnsureSingleComponentPrefab(
+                root,
+                restCharacterSdPrefab,
+                "imgRestCharacterSd_Preview");
+            preview.sprite = restSample != null
+                ? restSample.SittingSdSprite != null
+                    ? restSample.SittingSdSprite
+                    : restSample.WaitingSdSprite
+                : null;
+            preview.color = preview.sprite != null
+                ? Color.white
+                : new Color(1f, 1f, 1f, 0.15f);
+            preview.enabled = true;
         }
 
         foreach (Transform root in FindTransforms(scene, "grpRewardCards"))

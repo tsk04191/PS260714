@@ -34,6 +34,36 @@ public sealed class ItemDefinitionTests
     private readonly Dictionary<string, (bool Exists, string Value)>
         _savedPlayerPrefs = new();
 
+    [Test]
+    public void BattleItem_RestUseConsumesAChargeWithoutCombatState()
+    {
+        BattleItemSO item = ScriptableObject.CreateInstance<BattleItemSO>();
+        try
+        {
+            SerializedObject serialized = new(item);
+            serialized.FindProperty("itemId").stringValue = "rest_test_item";
+            serialized.FindProperty("availableInRest").boolValue = true;
+            SerializedProperty effects = serialized.FindProperty(
+                "restEffects");
+            effects.arraySize = 1;
+            SerializedProperty effect = effects.GetArrayElementAtIndex(0);
+            effect.FindPropertyRelative("effectType").enumValueIndex =
+                (int)EDungeonRestTargetEffectType.HealPercent;
+            effect.FindPropertyRelative("amount").intValue = 25;
+            serialized.ApplyModifiedPropertiesWithoutUndo();
+
+            BattleItemRunState state = new(item);
+            Assert.That(state.Acquire(item), Is.True);
+            Assert.That(state.CanUseInRest(item), Is.True);
+            Assert.That(state.CompleteSuccessfulRestUse(item), Is.True);
+            Assert.That(state.CanUseInRest(item), Is.False);
+        }
+        finally
+        {
+            Object.DestroyImmediate(item);
+        }
+    }
+
     [SetUp]
     public void PreservePlayerPrefs()
     {

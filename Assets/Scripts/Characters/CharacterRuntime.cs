@@ -4900,6 +4900,7 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
             (Data.WaitingSdSprite != null ||
              Data.AttackSdSprite != null ||
              Data.DamagedSdSprite != null ||
+             Data.DefeatSdSprite != null ||
              Data.SkillSdSprite != null ||
              Data.PassiveSdSprite != null ||
              Data.IconSprite != null);
@@ -5323,7 +5324,9 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
         }
 
         Sprite sprite = null;
-        if (_skillSdTimeRemaining > 0f)
+        if (!IsAlive)
+            sprite = Data.ResolveDefeatSdSprite();
+        if (sprite == null && _skillSdTimeRemaining > 0f)
             sprite = Data.SkillSdSprite;
         if (sprite == null && _passiveSdTimeRemaining > 0f)
             sprite = Data.PassiveSdSprite;
@@ -5338,6 +5341,16 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
 
         sdImage.sprite = sprite;
         sdImage.enabled = sprite != null;
+    }
+
+    public Sprite ResolveRestSdSprite()
+    {
+        if (Data == null)
+            return null;
+
+        return IsAlive
+            ? Data.ResolveSittingSdSprite()
+            : Data.ResolveDefeatSdSprite();
     }
 
     private void RefreshUi()

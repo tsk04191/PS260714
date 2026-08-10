@@ -871,6 +871,8 @@ public sealed class CharacterData
     public Sprite WaitingSdSprite { get; }
     public Sprite AttackSdSprite { get; }
     public Sprite DamagedSdSprite { get; }
+    public Sprite DefeatSdSprite { get; }
+    public Sprite SittingSdSprite { get; }
     public Sprite SkillSdSprite { get; }
     public Sprite PassiveSdSprite { get; }
     public int MaximumHealth => ResolveMaximumHealth();
@@ -1059,6 +1061,26 @@ public sealed class CharacterData
             : IconSprite;
     }
 
+    public Sprite ResolveDefeatSdSprite()
+    {
+        if (DefeatSdSprite != null)
+            return DefeatSdSprite;
+        if (DamagedSdSprite != null)
+            return DamagedSdSprite;
+        return WaitingSdSprite != null
+            ? WaitingSdSprite
+            : IconSprite;
+    }
+
+    public Sprite ResolveSittingSdSprite()
+    {
+        return SittingSdSprite != null
+            ? SittingSdSprite
+            : WaitingSdSprite != null
+                ? WaitingSdSprite
+                : IconSprite;
+    }
+
     public CharacterData(
         CharacterSO original,
         CharacterProgressData progress = null)
@@ -1081,6 +1103,8 @@ public sealed class CharacterData
         WaitingSdSprite = original != null ? original.WaitingSdSprite : null;
         AttackSdSprite = original != null ? original.AttackSdSprite : null;
         DamagedSdSprite = original != null ? original.DamagedSdSprite : null;
+        DefeatSdSprite = original != null ? original.DefeatSdSprite : null;
+        SittingSdSprite = original != null ? original.SittingSdSprite : null;
         SkillSdSprite = original != null ? original.SkillSdSprite : null;
         PassiveSdSprite = original != null ? original.PassiveSdSprite : null;
         _baseMaximumHealth = original != null

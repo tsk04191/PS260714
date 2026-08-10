@@ -199,7 +199,8 @@ internal static class DungeonRoomEditorMenu
         PS260714EditorMenu.RestEditorPriority)]
     public static void OpenRestEditor()
     {
-        OpenFirst<DungeonRestSO>("Rest");
+        DungeonRestEditorWindow.Open(
+            Selection.activeObject as DungeonRestSO);
     }
 
     [MenuItem(

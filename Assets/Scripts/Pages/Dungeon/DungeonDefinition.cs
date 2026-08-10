@@ -20,6 +20,9 @@ public enum EDungeonStageSelectVisibility
     menuName = "Dungeon/Definition")]
 public sealed class DungeonDefinition : ScriptableObject
 {
+    public const int AutomaticClearedBattleHealthCost = -1;
+    public const float DefaultActiveSkillCostRecoveryDuration = 10f;
+
     [Header("Identity")]
     [SerializeField] private string dungeonId = "free_battle";
     [SerializeField, Min(1)] private int contentVersion = 1;
@@ -60,10 +63,16 @@ public sealed class DungeonDefinition : ScriptableObject
     [SerializeField] private EDungeonCompletionDestination completionDestination =
         EDungeonCompletionDestination.Main;
     [SerializeField, Min(0)] private int initialRunCurrency = 100;
-    [SerializeField, Min(0), Tooltip(
+    [SerializeField, Min(TimePrecision.Step), Tooltip(
+        "Seconds required to recover one active-skill cost during battle.")]
+    private float activeSkillCostRecoveryDuration =
+        DefaultActiveSkillCostRecoveryDuration;
+    [SerializeField, Min(AutomaticClearedBattleHealthCost), Tooltip(
         "Absolute health lost by each participating character after a " +
-        "cleared battle.")]
-    private int clearedBattleHealthCost = 10;
+        "cleared battle. -1 calculates the cost from the current battle " +
+        "difficulty scale divided by 10. Set 0 to disable the cost.")]
+    private int clearedBattleHealthCost =
+        AutomaticClearedBattleHealthCost;
 
     [Header("Encounters")]
     [SerializeField] private BattleSO[] fixedBattles =
@@ -173,8 +182,15 @@ public sealed class DungeonDefinition : ScriptableObject
     public EDungeonCompletionDestination CompletionDestination =>
         completionDestination;
     public int InitialRunCurrency => Mathf.Max(0, initialRunCurrency);
-    public int ClearedBattleHealthCost =>
-        Mathf.Max(0, clearedBattleHealthCost);
+    public float ActiveSkillCostRecoveryDuration =>
+        TimePrecision.Normalize(
+            activeSkillCostRecoveryDuration,
+            TimePrecision.Step);
+    public int ClearedBattleHealthCost => Mathf.Max(
+        AutomaticClearedBattleHealthCost,
+        clearedBattleHealthCost);
+    public bool HasClearedBattleHealthCostOverride =>
+        ClearedBattleHealthCost >= 0;
     public DungeonFieldView FieldViewPrefab => fieldViewPrefab;
     public DungeonThemeDefinition Theme => theme;
     public DungeonBgmProfile BgmProfile => bgmProfile;
@@ -182,6 +198,14 @@ public sealed class DungeonDefinition : ScriptableObject
     public bool HasTutorial => tutorial != null;
     public IReadOnlyList<DungeonModifier> Modifiers => modifiers;
     public IReadOnlyList<EnemySO> EnemyPoolOverride => enemyPoolOverride;
+
+    public int ResolveClearedBattleHealthCost(int difficultyScale)
+    {
+        if (HasClearedBattleHealthCostOverride)
+            return ClearedBattleHealthCost;
+
+        return Mathf.Clamp(difficultyScale, 0, 100) / 10;
+    }
 
     public bool TryGetFixedBattle(int battleIndex, out BattleSO battle)
     {
@@ -479,8 +503,18 @@ public sealed class DungeonDefinition : ScriptableObject
         fixedShops ??= Array.Empty<DungeonShopSO>();
         roomPattern ??= Array.Empty<EDungeonPhase>();
         initialRunCurrency = Mathf.Max(0, initialRunCurrency);
+        if (float.IsNaN(activeSkillCostRecoveryDuration) ||
+            float.IsInfinity(activeSkillCostRecoveryDuration) ||
+            activeSkillCostRecoveryDuration <= 0f)
+        {
+            activeSkillCostRecoveryDuration =
+                DefaultActiveSkillCostRecoveryDuration;
+        }
+        activeSkillCostRecoveryDuration = TimePrecision.Normalize(
+            activeSkillCostRecoveryDuration,
+            TimePrecision.Step);
         clearedBattleHealthCost = Mathf.Max(
-            0,
+            AutomaticClearedBattleHealthCost,
             clearedBattleHealthCost);
         enemyPoolOverride ??= Array.Empty<EnemySO>();
         modifiers ??= Array.Empty<DungeonModifier>();

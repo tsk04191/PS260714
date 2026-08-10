@@ -5,10 +5,46 @@ using UnityEditor;
 using UnityEditor.SceneManagement;
 using UnityEngine;
 using UnityEngine.SceneManagement;
+using UnityEngine.UI;
 
 public sealed class DynamicUiScenePreviewTests
 {
     private const string ScenePath = "Assets/Scenes/ClientScene.unity";
+
+    [Test]
+    public void RestEditorPreview_FitsFullSixteenByNineFrameWithoutCrop()
+    {
+        Rect fitted = DungeonRestEditorWindow.FitAspectRect(
+            new Rect(0f, 0f, 800f, 800f),
+            16f / 9f);
+        Assert.That(fitted.width, Is.EqualTo(800f).Within(0.01f));
+        Assert.That(fitted.height, Is.EqualTo(450f).Within(0.01f));
+        Assert.That(fitted.y, Is.EqualTo(175f).Within(0.01f));
+    }
+
+    [Test]
+    public void DungeonRest_DefaultsToOneActionAndThreeTargetableChoices()
+    {
+        DungeonRestSO rest = ScriptableObject.CreateInstance<DungeonRestSO>();
+        try
+        {
+            Assert.That(rest.TryValidate(out string error), Is.True, error);
+            Assert.That(rest.BaseActionCount, Is.EqualTo(1));
+            Assert.That(rest.Actions.Count, Is.EqualTo(3));
+            Assert.That(
+                rest.Actions.Select(action => action.ActionType),
+                Is.EqualTo(new[]
+                {
+                    EDungeonRestActionType.HealSelectedCharacter,
+                    EDungeonRestActionType.UpgradeSelectedCharacter,
+                    EDungeonRestActionType.UseRestItem,
+                }));
+        }
+        finally
+        {
+            Object.DestroyImmediate(rest);
+        }
+    }
 
     [Test]
     public void AttendanceCalendar_HasTwentyEightAuthoredPrefabCells()
@@ -86,6 +122,7 @@ public sealed class DynamicUiScenePreviewTests
             AssertCharacterInfoPreview(scene);
             AssertDungeonItemPreviews(scene);
             AssertDungeonChoicePreviews(scene);
+            AssertRestCharacterSdPreview(scene);
         }
         finally
         {
@@ -205,6 +242,41 @@ public sealed class DynamicUiScenePreviewTests
             startingItems[0].gameObject,
             "Assets/Resources/Presentation/" +
             "DungeonStartingItemSlot.prefab");
+    }
+
+    private static void AssertRestCharacterSdPreview(Scene scene)
+    {
+        Transform panel = FindTransforms(scene, "grpRestRoomPanel")
+            .Single();
+        RectTransform content = panel.Find("grpRoomContent")
+            as RectTransform;
+        Assert.That(content, Is.Not.Null);
+        Assert.That(content.anchorMin.x, Is.EqualTo(0.64f).Within(0.001f));
+        Assert.That(content.anchorMax.x, Is.EqualTo(0.98f).Within(0.001f));
+
+        Transform root = FindTransforms(scene, "grpRestCharacterSds")
+            .Single();
+        Image[] previews = DirectComponents<Image>(root).ToArray();
+        Assert.That(previews.Length, Is.EqualTo(1));
+        AssertPrefabPath(
+            previews[0].gameObject,
+            "Assets/Resources/Presentation/" +
+            "DungeonRestCharacterSd.prefab");
+        Assert.That(
+            previews[0].GetComponent<Button>(),
+            Is.Not.Null,
+            "Rest SD prefab must carry its authored target Button.");
+
+        DungeonPage page = FindOne<DungeonPage>(scene);
+        Image prefab = new SerializedObject(page)
+            .FindProperty("restCharacterSdPrefab").objectReferenceValue
+            as Image;
+        Assert.That(prefab, Is.Not.Null);
+        Assert.That(
+            AssetDatabase.GetAssetPath(prefab),
+            Is.EqualTo(
+                "Assets/Resources/Presentation/" +
+                "DungeonRestCharacterSd.prefab"));
     }
 
     private static void AssertPrefabPath(

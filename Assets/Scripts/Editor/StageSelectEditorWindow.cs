@@ -406,8 +406,11 @@ public sealed class StageSelectEditorWindow : EditorWindow
                 "Completion Destination");
             DrawProperty("initialRunCurrency", "Initial Run Currency");
             DrawProperty(
+                "activeSkillCostRecoveryDuration",
+                "Cost Recovery Interval (Seconds)");
+            DrawProperty(
                 "clearedBattleHealthCost",
-                "Cleared Battle Health Cost");
+                "Cleared Battle Health Cost Override (-1 = Auto)");
         }
         EditorGUILayout.EndFoldoutHeaderGroup();
     }

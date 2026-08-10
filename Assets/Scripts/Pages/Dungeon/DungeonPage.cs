@@ -97,6 +97,7 @@ public class DungeonPage : MonoBehaviour, IPage
     private DungeonDynamicChoiceButtonView choiceButtonPrefab;
     [SerializeField]
     private DungeonStartingItemSlotView startingItemSlotPrefab;
+    [SerializeField] private Image restCharacterSdPrefab;
 
     [Header("First Battle")]
     [SerializeField, HideInInspector] private BattleSO firstBattle;
@@ -155,7 +156,7 @@ public class DungeonPage : MonoBehaviour, IPage
         new(StringComparer.Ordinal);
     private int _maximumEnergy = BattleManager.DefaultMaximumEnergy;
     private float _energyRechargeDuration =
-        BattleManager.DefaultEnergyRechargeDuration;
+        DungeonDefinition.DefaultActiveSkillCostRecoveryDuration;
 
     public AudioSource Speaker { get; set; }
     public EDungeonPhase CurrentPhase => flowController != null
@@ -186,6 +187,7 @@ public class DungeonPage : MonoBehaviour, IPage
         _startingItemSelection.Items;
     internal Button PreparationNavigationButtonTemplate =>
         battleTab != null ? battleTab.PauseButtonTemplate : null;
+    internal Image RestCharacterSdPrefab => restCharacterSdPrefab;
     public IReadOnlyList<DungeonBattlePlan> BattlePlans => _battlePlans;
     public DungeonBoardView Board => board;
     public int MaximumEnergy => _maximumEnergy;
@@ -589,7 +591,7 @@ public class DungeonPage : MonoBehaviour, IPage
             _battleManager.EndBattle(board);
 
         ClearPlayerParty();
-        ResetRunResourcesAndItems();
+        ResetRunResourcesAndItems(definition);
         board.ClearAllStacks();
         _tutorialController?.StopTutorial();
         int runSeed = Environment.TickCount ^
@@ -1988,7 +1990,8 @@ public class DungeonPage : MonoBehaviour, IPage
 
     private void ApplyClearedBattleHealthCost()
     {
-        int healthCost = _session.Definition?.ClearedBattleHealthCost ?? 0;
+        int healthCost = _session.Definition?
+            .ResolveClearedBattleHealthCost(CurrentDifficultyScale) ?? 0;
         if (healthCost <= 0)
             return;
 
@@ -2144,7 +2147,8 @@ public class DungeonPage : MonoBehaviour, IPage
         BattleItemsChanged?.Invoke();
     }
 
-    private void ResetRunResourcesAndItems()
+    private void ResetRunResourcesAndItems(
+        DungeonDefinition definition = null)
     {
         foreach (CharacterRuntime turret in _ownedTurrets)
         {
@@ -2154,8 +2158,9 @@ public class DungeonPage : MonoBehaviour, IPage
                 CharacterModifierLifetimeScope.Dungeon);
         }
         _maximumEnergy = BattleManager.DefaultMaximumEnergy;
-        _energyRechargeDuration =
-            BattleManager.DefaultEnergyRechargeDuration;
+        _energyRechargeDuration = definition != null
+            ? definition.ActiveSkillCostRecoveryDuration
+            : DungeonDefinition.DefaultActiveSkillCostRecoveryDuration;
         _battleItems.Clear();
         _battleManager?.ConfigureActiveSkillResource(
             _maximumEnergy,
@@ -2745,6 +2750,333 @@ public class DungeonPage : MonoBehaviour, IPage
         return true;
     }
 
+    internal int GetMaximumRestActionCount(
+        DungeonRestSO room,
+        int roomIndex)
+    {
+        if (room == null)
+            return 0;
+
+        string initializedKey = GetRestActionInitializedStateKey(roomIndex);
+        if (_session.State.GetInt(initializedKey) != 0)
+        {
+            return Mathf.Max(
+                0,
+                _session.State.GetInt(
+                    GetRestActionMaximumStateKey(roomIndex)));
+        }
+
+        int maximum = room.BaseActionCount;
+        DungeonRuntimeContext context = GetRuntimeContext();
+        IReadOnlyList<DungeonModifier> modifiers =
+            _session.Definition?.Modifiers;
+        if (modifiers != null)
+        {
+            for (int index = 0; index < modifiers.Count; index++)
+            {
+                if (modifiers[index] is not
+                    IDungeonRestActionAllowanceProvider provider)
+                {
+                    continue;
+                }
+
+                try
+                {
+                    maximum += Mathf.Max(
+                        0,
+                        provider.GetAdditionalRestActionCount(
+                            context,
+                            room,
+                            roomIndex));
+                }
+                catch (Exception exception)
+                {
+                    Debug.LogException(exception, modifiers[index]);
+                }
+            }
+        }
+
+        for (int index = 0; index < _ownedTurrets.Count; index++)
+        {
+            CharacterRestSkillDefinition skill =
+                _ownedTurrets[index]?.Definition?.RestSkill;
+            if (skill != null && skill.Enabled)
+                maximum += skill.AdditionalRoomActions;
+        }
+
+        foreach (BattleItemRunState state in _battleItems.Values)
+        {
+            if (!state.IsOwned)
+                continue;
+            BattleItemSO item = BattleItemCatalog.Get(state.ItemId);
+            if (item != null)
+            {
+                maximum += item.AdditionalRestActions *
+                           Mathf.Max(1, state.OwnedCopies);
+            }
+        }
+
+        maximum = Mathf.Max(1, maximum);
+        _session.State.SetInt(
+            GetRestActionMaximumStateKey(roomIndex),
+            maximum);
+        _session.State.SetInt(initializedKey, 1);
+        return maximum;
+    }
+
+    internal void GetAvailableRestActions(
+        DungeonRestSO room,
+        int roomIndex,
+        List<DungeonRestActionDefinition> results)
+    {
+        if (results == null)
+            throw new ArgumentNullException(nameof(results));
+
+        results.Clear();
+        if (room == null)
+            return;
+        for (int index = 0; index < room.Actions.Count; index++)
+        {
+            if (room.Actions[index] != null)
+                results.Add(room.Actions[index]);
+        }
+
+        IReadOnlyList<DungeonModifier> modifiers =
+            _session.Definition?.Modifiers;
+        if (modifiers == null)
+            return;
+
+        DungeonRuntimeContext context = GetRuntimeContext();
+        for (int index = 0; index < modifiers.Count; index++)
+        {
+            if (modifiers[index] is not IDungeonRestActionProvider provider)
+                continue;
+
+            try
+            {
+                IReadOnlyList<DungeonRestActionDefinition> additions =
+                    provider.GetAdditionalRestActions(
+                        context,
+                        room,
+                        roomIndex);
+                if (additions == null)
+                    continue;
+                for (int actionIndex = 0;
+                     actionIndex < additions.Count;
+                     actionIndex++)
+                {
+                    if (additions[actionIndex] != null)
+                        results.Add(additions[actionIndex]);
+                }
+            }
+            catch (Exception exception)
+            {
+                Debug.LogException(exception, modifiers[index]);
+            }
+        }
+    }
+
+    internal int GetRemainingRestActionCount(
+        DungeonRestSO room,
+        int roomIndex)
+    {
+        return Mathf.Max(
+            0,
+            GetMaximumRestActionCount(room, roomIndex) -
+            _session.State.GetInt(GetRestActionUsedStateKey(roomIndex)));
+    }
+
+    internal bool CanUseDungeonRestAction(
+        DungeonRestSO room,
+        int roomIndex,
+        int actionIndex,
+        DungeonRestActionDefinition action)
+    {
+        if (room == null || action == null ||
+            CurrentPhase != EDungeonPhase.Rest ||
+            GetRemainingRestActionCount(room, roomIndex) <= 0 ||
+            !CanUseDungeonRoomChoice(
+                EDungeonPhase.Rest,
+                roomIndex,
+                actionIndex,
+                action.Choice))
+        {
+            return false;
+        }
+
+        if (action.ActionType != EDungeonRestActionType.UseRestItem)
+            return true;
+
+        foreach (BattleItemRunState state in _battleItems.Values)
+        {
+            BattleItemSO item = BattleItemCatalog.Get(state.ItemId);
+            if (state.CanUseInRest(item))
+                return true;
+        }
+
+        return false;
+    }
+
+    internal bool TryUseDungeonRestAction(
+        DungeonRestSO room,
+        int roomIndex,
+        int actionIndex,
+        DungeonRestActionDefinition action,
+        CharacterRuntime target)
+    {
+        if (!CanUseDungeonRestAction(
+                room,
+                roomIndex,
+                actionIndex,
+                action) ||
+            action.ActionType == EDungeonRestActionType.UseRestItem)
+        {
+            return false;
+        }
+
+        bool coreApplied;
+        switch (action.ActionType)
+        {
+            case EDungeonRestActionType.HealSelectedCharacter:
+                coreApplied = TryHealRestTarget(
+                    target,
+                    action.Amount,
+                    true,
+                    action.AllowRevive);
+                break;
+            case EDungeonRestActionType.UpgradeSelectedCharacter:
+                coreApplied = TryApplyRestUpgrade(target, roomIndex);
+                break;
+            case EDungeonRestActionType.LegacyImmediate:
+                coreApplied = true;
+                break;
+            default:
+                return false;
+        }
+
+        if (!coreApplied ||
+            !_session.TrySpendRunCurrency(action.Choice.RunCurrencyCost))
+        {
+            return false;
+        }
+
+        IReadOnlyList<DungeonRoomEffectDefinition> effects =
+            action.Choice.Effects;
+        for (int index = 0; index < effects.Count; index++)
+            ApplyDungeonRoomEffect(effects[index]);
+
+        _session.State.SetString(
+            $"room:{EDungeonPhase.Rest}:{roomIndex}:choice",
+            action.Choice.ChoiceId);
+        CompleteRestAction(room, roomIndex);
+        return true;
+    }
+
+    internal void GetUsableRestItems(List<BattleItemSO> results)
+    {
+        if (results == null)
+            throw new ArgumentNullException(nameof(results));
+
+        results.Clear();
+        foreach (BattleItemRunState state in _battleItems.Values)
+        {
+            BattleItemSO item = BattleItemCatalog.Get(state.ItemId);
+            if (state.CanUseInRest(item))
+                results.Add(item);
+        }
+
+        results.Sort((left, right) => string.Compare(
+            left != null ? left.GetLocalizedDisplayName() : string.Empty,
+            right != null ? right.GetLocalizedDisplayName() : string.Empty,
+            StringComparison.CurrentCulture));
+    }
+
+    internal bool TryUseRestItem(
+        DungeonRestSO room,
+        int roomIndex,
+        int actionIndex,
+        DungeonRestActionDefinition action,
+        BattleItemSO item,
+        CharacterRuntime target)
+    {
+        if (room == null || item == null || target == null ||
+            action?.ActionType != EDungeonRestActionType.UseRestItem ||
+            !CanUseDungeonRestAction(
+                room,
+                roomIndex,
+                actionIndex,
+                action) ||
+            !TryGetBattleItemState(item, out BattleItemRunState state) ||
+            !state.CanUseInRest(item) ||
+            !TryApplyRestTargetEffects(
+                item.RestEffects,
+                target,
+                roomIndex))
+        {
+            return false;
+        }
+
+        if (!_session.TrySpendRunCurrency(action.Choice.RunCurrencyCost))
+            return false;
+
+        IReadOnlyList<DungeonRoomEffectDefinition> choiceEffects =
+            action.Choice.Effects;
+        for (int index = 0; index < choiceEffects.Count; index++)
+            ApplyDungeonRoomEffect(choiceEffects[index]);
+
+        if (!state.CompleteSuccessfulRestUse(item))
+            return false;
+
+        BattleItemsChanged?.Invoke();
+        _session.State.SetString(
+            $"rest:{roomIndex}:item",
+            item.ItemId);
+        CompleteRestAction(room, roomIndex);
+        return true;
+    }
+
+    internal bool CanUseCharacterRestSkill(
+        DungeonRestSO room,
+        int roomIndex,
+        CharacterRuntime target)
+    {
+        CharacterRestSkillDefinition skill =
+            target?.Definition?.RestSkill;
+        return room != null && target != null && skill != null &&
+               skill.IsUsable && CurrentPhase == EDungeonPhase.Rest &&
+               GetRemainingRestActionCount(room, roomIndex) > 0 &&
+               _session.State.GetInt(GetRestSkillUseStateKey(
+                   roomIndex,
+                   target.Definition.CharacterId,
+                   skill.SkillId)) < skill.UsesPerRoom;
+    }
+
+    internal bool TryUseCharacterRestSkill(
+        DungeonRestSO room,
+        int roomIndex,
+        CharacterRuntime target)
+    {
+        if (!CanUseCharacterRestSkill(room, roomIndex, target))
+            return false;
+
+        CharacterRestSkillDefinition skill = target.Definition.RestSkill;
+        if (!TryApplyRestTargetEffects(skill.Effects, target, roomIndex))
+            return false;
+
+        string useKey = GetRestSkillUseStateKey(
+            roomIndex,
+            target.Definition.CharacterId,
+            skill.SkillId);
+        _session.State.SetInt(
+            useKey,
+            _session.State.GetInt(useKey) + 1);
+        _session.State.SetString(
+            $"rest:{roomIndex}:skill",
+            $"{target.Definition.CharacterId}:{skill.SkillId}");
+        CompleteRestAction(room, roomIndex);
+        return true;
+    }
+
     private bool EvaluateDungeonRoomCondition(
         DungeonRoomConditionDefinition condition)
     {
@@ -2976,6 +3308,148 @@ public class DungeonPage : MonoBehaviour, IPage
         }
     }
 
+    private bool TryApplyRestTargetEffects(
+        IReadOnlyList<DungeonRestTargetEffectDefinition> effects,
+        CharacterRuntime target,
+        int roomIndex)
+    {
+        if (effects == null || effects.Count == 0 || target == null)
+            return false;
+
+        bool applied = false;
+        for (int index = 0; index < effects.Count; index++)
+        {
+            DungeonRestTargetEffectDefinition effect = effects[index];
+            if (effect == null)
+                continue;
+
+            switch (effect.EffectType)
+            {
+                case EDungeonRestTargetEffectType.HealFlat:
+                    applied |= TryHealRestTarget(
+                        target,
+                        effect.Amount,
+                        false,
+                        effect.AllowRevive);
+                    break;
+                case EDungeonRestTargetEffectType.HealPercent:
+                    applied |= TryHealRestTarget(
+                        target,
+                        effect.Amount,
+                        true,
+                        effect.AllowRevive);
+                    break;
+                case EDungeonRestTargetEffectType.DungeonUpgrade:
+                    for (int count = 0; count < effect.Amount; count++)
+                        applied |= TryApplyRestUpgrade(target, roomIndex);
+                    break;
+                case EDungeonRestTargetEffectType.AddRoomAction:
+                    AddRestActionAllowance(roomIndex, effect.Amount);
+                    applied = true;
+                    break;
+            }
+        }
+
+        return applied;
+    }
+
+    private static bool TryHealRestTarget(
+        CharacterRuntime target,
+        int amount,
+        bool percentage,
+        bool allowRevive)
+    {
+        if (target == null || amount <= 0 ||
+            target.CurrentHealth >= target.MaximumHealth ||
+            (target.CurrentHealth <= 0 && !allowRevive))
+        {
+            return false;
+        }
+
+        int healAmount = percentage
+            ? Mathf.CeilToInt(target.MaximumHealth * amount / 100f)
+            : amount;
+        return target.RestoreHealth(healAmount, allowRevive) > 0;
+    }
+
+    private bool TryApplyRestUpgrade(
+        CharacterRuntime target,
+        int roomIndex)
+    {
+        CharacterData data = target?.Data;
+        if (data == null)
+            return false;
+
+        int used = _session.State.GetInt(
+            GetRestActionUsedStateKey(roomIndex));
+        int characterHash = StableHash(
+            target.Definition != null
+                ? target.Definition.CharacterId
+                : target.name);
+        System.Random random = new(
+            _session.RunSeed ^
+            unchecked(roomIndex * 486187739) ^
+            unchecked(used * 16777619) ^
+            characterHash);
+
+        for (int definitionIndex = 0;
+             definitionIndex < data.DungeonUpgradeDefinitions.Count;
+             definitionIndex++)
+        {
+            if (data.TryRollDungeonUpgrade(
+                    definitionIndex,
+                    random,
+                    out string upgradeId) &&
+                target.ApplyDungeonUpgrade(definitionIndex, upgradeId))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private void CompleteRestAction(
+        DungeonRestSO room,
+        int roomIndex)
+    {
+        string usedKey = GetRestActionUsedStateKey(roomIndex);
+        _session.State.SetInt(
+            usedKey,
+            _session.State.GetInt(usedKey) + 1);
+        if (GetRemainingRestActionCount(room, roomIndex) <= 0)
+            CompleteDungeonRoom();
+    }
+
+    private void AddRestActionAllowance(int roomIndex, int amount)
+    {
+        if (amount <= 0)
+            return;
+
+        string maximumKey = GetRestActionMaximumStateKey(roomIndex);
+        _session.State.SetInt(
+            maximumKey,
+            Mathf.Max(0, _session.State.GetInt(maximumKey)) + amount);
+        _session.State.SetInt(
+            GetRestActionInitializedStateKey(roomIndex),
+            1);
+    }
+
+    private static int StableHash(string value)
+    {
+        unchecked
+        {
+            int hash = (int)2166136261;
+            string source = value ?? string.Empty;
+            for (int index = 0; index < source.Length; index++)
+            {
+                hash ^= source[index];
+                hash *= 16777619;
+            }
+            return hash;
+        }
+    }
+
     private void HealParty(int amount, bool percentage)
     {
         foreach (CharacterRuntime character in _ownedTurrets)
@@ -3008,6 +3482,29 @@ public class DungeonPage : MonoBehaviour, IPage
         int productIndex)
     {
         return $"shop:{roomIndex}:product:{productIndex}:sold";
+    }
+
+    private static string GetRestActionInitializedStateKey(int roomIndex)
+    {
+        return $"rest:{roomIndex}:actions:initialized";
+    }
+
+    private static string GetRestActionMaximumStateKey(int roomIndex)
+    {
+        return $"rest:{roomIndex}:actions:maximum";
+    }
+
+    private static string GetRestActionUsedStateKey(int roomIndex)
+    {
+        return $"rest:{roomIndex}:actions:used";
+    }
+
+    private static string GetRestSkillUseStateKey(
+        int roomIndex,
+        string characterId,
+        string skillId)
+    {
+        return $"rest:{roomIndex}:skill:{characterId}:{skillId}:used";
     }
 
     private static string GetEventActiveChoicesStateKey(int roomIndex)
@@ -3258,7 +3755,6 @@ public sealed class DungeonEventTab
 
     private enum ERewardOptionType
     {
-        TurretUpgrade,
         NewTurret,
         EnergyUpgrade,
         BattleItem,
@@ -3305,23 +3801,6 @@ public sealed class DungeonEventTab
             TurretDefinition = turretDefinition;
             EnergyUpgradeType = energyUpgradeType;
             BattleItem = battleItem;
-        }
-
-        public static RewardOption CreateDungeonUpgrade(
-            int turretSlotIndex,
-            int definitionIndex,
-            string upgradeId,
-            CharacterDungeonUpgradeType legacyType = default)
-        {
-            return new RewardOption(
-                ERewardOptionType.TurretUpgrade,
-                turretSlotIndex,
-                definitionIndex,
-                legacyType,
-                upgradeId,
-                null,
-                default,
-                default);
         }
 
         public static RewardOption CreateNewTurret(CharacterSO definition)
@@ -3697,34 +4176,6 @@ public sealed class DungeonEventTab
         System.Random random = new(rewardSeed);
 
         List<RewardOption> candidates = new();
-        IReadOnlyList<CharacterRuntime> turrets = _page.OwnedTurrets;
-        for (int index = 0; index < turrets.Count; index++)
-        {
-            CharacterData data = turrets[index]?.Data;
-            if (data == null)
-                continue;
-
-            for (int definitionIndex = 0;
-                 definitionIndex < data.DungeonUpgradeDefinitions.Count;
-                 definitionIndex++)
-            {
-                if (data.TryRollDungeonUpgrade(
-                        definitionIndex,
-                        random,
-                        out string upgradeId))
-                {
-                    CharacterDungeonUpgradeEntry entry =
-                        data.DungeonUpgradeDefinitions[definitionIndex]
-                            ?.GetEntry(upgradeId);
-                    candidates.Add(RewardOption.CreateDungeonUpgrade(
-                        index,
-                        definitionIndex,
-                        upgradeId,
-                        entry?.Type ?? default));
-                }
-            }
-        }
-
         foreach (CharacterSO definition in
                  _page.GetAvailableCharacterRewardDefinitions())
         {
@@ -3892,43 +4343,12 @@ public sealed class DungeonEventTab
                 new Color(0.25f, 0.52f, 0.78f, 1f));
         }
 
-        IReadOnlyList<CharacterRuntime> turrets = _page.OwnedTurrets;
-        int slotIndex = option.TurretSlotIndex;
-        if (slotIndex < 0 || slotIndex >= turrets.Count ||
-            turrets[slotIndex]?.Data == null)
-        {
-            return new RewardCardContent(
-                LocalizationService.Get(
-                    LocalizationKeys.UiDungeonRewardCategoryTurretUpgrade),
-                LocalizationService.Get(
-                    LocalizationKeys.UiDungeonRewardUnknownUpgrade),
-                LocalizationService.Get(
-                    LocalizationKeys.UiDungeonRewardTurretUnavailable),
-                string.Empty,
-                new Color(0.3f, 0.68f, 0.4f, 1f));
-        }
-
-        CharacterData data = turrets[slotIndex].Data;
-        CharacterDungeonUpgradeEntry upgradeEntry =
-            option.DungeonUpgradeDefinitionIndex >= 0 &&
-            option.DungeonUpgradeDefinitionIndex <
-                data.DungeonUpgradeDefinitions.Count
-                ? data.DungeonUpgradeDefinitions[
-                    option.DungeonUpgradeDefinitionIndex]?.GetEntry(
-                    option.DungeonUpgradeId)
-                : null;
         return new RewardCardContent(
-            LocalizationService.Get(
-                LocalizationKeys.UiDungeonRewardCategoryTurretUpgradeSlot,
-                LocalizationService.Arg("slot", slotIndex + 1)),
-            CharacterLocalization.GetDungeonUpgradeTitle(upgradeEntry),
-            CharacterLocalization.GetName(data) + "\n" +
-            CharacterLocalization.GetDungeonUpgradeDescription(
-                data,
-                upgradeEntry),
-            LocalizationService.Get(
-                LocalizationKeys.UiDungeonRewardRunFooter),
-            new Color(0.3f, 0.68f, 0.4f, 1f));
+            "REWARD",
+            "INVALID REWARD",
+            string.Empty,
+            string.Empty,
+            Color.gray);
     }
 
     private static RewardCardContent GetStartingTurretCardContent(
@@ -3966,15 +4386,6 @@ public sealed class DungeonEventTab
 
     private void SelectRewardOption(RewardOption option)
     {
-        if (option.Type == ERewardOptionType.TurretUpgrade)
-        {
-            _page.TryApplyCharacterDungeonUpgrade(
-                option.TurretSlotIndex,
-                option.DungeonUpgradeDefinitionIndex,
-                option.DungeonUpgradeId);
-            return;
-        }
-
         if (option.Type == ERewardOptionType.EnergyUpgrade)
         {
             _page.TryApplyEnergyUpgrade(option.EnergyUpgradeType);
@@ -4399,13 +4810,23 @@ public sealed class DungeonRoomView
     private TextMeshProUGUI _description;
     private TextMeshProUGUI _currency;
     private RectTransform _buttonRoot;
+    private RectTransform _restCharacterSdRoot;
     private DungeonRoomSO _room;
     private int _roomIndex;
     private bool _localizationEventsBound;
     private readonly List<DungeonDynamicChoiceButtonView> _choiceButtons =
         new();
+    private readonly List<Image> _restCharacterSdViews = new();
+    private readonly List<BattleItemSO> _usableRestItems = new();
+    private readonly List<DungeonRestActionDefinition>
+        _availableRestActions = new();
     private readonly List<DungeonEventChoiceNodeDefinition>
         _activeEventChoices = new();
+    private bool _restCharacterSdPrefabErrorLogged;
+    private DungeonRestActionDefinition _pendingRestAction;
+    private int _pendingRestActionIndex = -1;
+    private BattleItemSO _pendingRestItem;
+    private CharacterRuntime _selectedRestCharacter;
 
     public void Initialize(
         GameObject root,
@@ -4432,6 +4853,7 @@ public sealed class DungeonRoomView
 
         _room = room;
         _roomIndex = Mathf.Max(0, roomIndex);
+        ResetRestSelection();
         _panel.gameObject.SetActive(true);
         Render();
     }
@@ -4454,9 +4876,15 @@ public sealed class DungeonRoomView
         _description = null;
         _currency = null;
         _buttonRoot = null;
+        _restCharacterSdRoot = null;
         _room = null;
         _activeEventChoices.Clear();
         _choiceButtons.Clear();
+        _restCharacterSdViews.Clear();
+        _usableRestItems.Clear();
+        _availableRestActions.Clear();
+        ResetRestSelection();
+        _restCharacterSdPrefabErrorLogged = false;
     }
 
     private void Render()
@@ -4485,6 +4913,7 @@ public sealed class DungeonRoomView
             : GetFallbackDescription();
         _currency.gameObject.SetActive(_phase == EDungeonPhase.Shop);
         _currency.text = $"런 재화  {_page.RunSession.RunCurrency}";
+        RenderRestCharacterSds();
 
         if (_phase == EDungeonPhase.Event &&
             _room is DungeonEventSO dungeonEvent &&
@@ -4505,10 +4934,11 @@ public sealed class DungeonRoomView
         {
             RenderChoices(legacyEvent.Choices, false);
         }
-        else if (_phase == EDungeonPhase.Rest && _room is DungeonRestSO dungeonRest &&
-                 dungeonRest.Choices.Count > 0)
+        else if (_phase == EDungeonPhase.Rest &&
+                 _room is DungeonRestSO dungeonRest &&
+                 dungeonRest.Actions.Count > 0)
         {
-            RenderChoices(dungeonRest.Choices, false);
+            RenderRestActions(dungeonRest);
         }
         else if (_phase == EDungeonPhase.Shop && _room is DungeonShopSO dungeonShop &&
                  dungeonShop.Products.Count > 0)
@@ -4599,6 +5029,198 @@ public sealed class DungeonRoomView
             CreateLeaveShopButton();
     }
 
+    private void RenderRestActions(DungeonRestSO rest)
+    {
+        int remaining = _page.GetRemainingRestActionCount(
+            rest,
+            _roomIndex);
+        int maximum = _page.GetMaximumRestActionCount(
+            rest,
+            _roomIndex);
+        string prompt = $"남은 행동 {remaining}/{maximum}";
+        if (_pendingRestItem != null)
+        {
+            prompt += "\n아이템을 사용할 대원을 선택하세요.";
+        }
+        else if (_pendingRestAction != null &&
+                 _pendingRestAction.RequiresTarget)
+        {
+            prompt += "\n행동을 적용할 대원을 선택하세요.";
+        }
+        else if (_pendingRestAction?.ActionType ==
+                 EDungeonRestActionType.UseRestItem)
+        {
+            prompt += "\n사용할 아이템을 선택하세요.";
+        }
+        else if (_selectedRestCharacter != null)
+        {
+            prompt += $"\n{GetRestCharacterName(_selectedRestCharacter)} 선택됨";
+        }
+        _description.text = string.IsNullOrWhiteSpace(_description.text)
+            ? prompt
+            : $"{_description.text}\n\n{prompt}";
+
+        _page.GetAvailableRestActions(
+            rest,
+            _roomIndex,
+            _availableRestActions);
+        for (int index = 0; index < _availableRestActions.Count; index++)
+        {
+            int actionIndex = index;
+            DungeonRestActionDefinition action =
+                _availableRestActions[index];
+            bool interactable = _page.CanUseDungeonRestAction(
+                rest,
+                _roomIndex,
+                actionIndex,
+                action);
+            string label = GetChoiceLabel(action?.Choice, false);
+            if (ReferenceEquals(_pendingRestAction, action))
+                label = $"> {label}";
+            CreateButton(label, interactable, () =>
+            {
+                HandleRestActionClicked(rest, actionIndex, action);
+            });
+        }
+
+        if (_pendingRestAction?.ActionType ==
+            EDungeonRestActionType.UseRestItem)
+        {
+            RenderRestItems(rest);
+        }
+
+        CharacterRestSkillDefinition skill =
+            _selectedRestCharacter?.Definition?.RestSkill;
+        if (skill != null && skill.IsUsable)
+        {
+            bool interactable = _page.CanUseCharacterRestSkill(
+                rest,
+                _roomIndex,
+                _selectedRestCharacter);
+            string label = $"{skill.Title}\n{skill.Description}";
+            CreateButton(label, interactable, () =>
+            {
+                if (!_page.TryUseCharacterRestSkill(
+                        rest,
+                        _roomIndex,
+                        _selectedRestCharacter))
+                {
+                    return;
+                }
+
+                HandleCompletedRestAction();
+            });
+        }
+    }
+
+    private void HandleRestActionClicked(
+        DungeonRestSO rest,
+        int actionIndex,
+        DungeonRestActionDefinition action)
+    {
+        if (action == null)
+            return;
+
+        if (action.ActionType == EDungeonRestActionType.LegacyImmediate)
+        {
+            if (_page.TryUseDungeonRestAction(
+                    rest,
+                    _roomIndex,
+                    actionIndex,
+                    action,
+                    null))
+            {
+                HandleCompletedRestAction();
+            }
+            return;
+        }
+
+        _pendingRestAction = action;
+        _pendingRestActionIndex = actionIndex;
+        _pendingRestItem = null;
+        Render();
+    }
+
+    private void RenderRestItems(DungeonRestSO rest)
+    {
+        _page.GetUsableRestItems(_usableRestItems);
+        for (int index = 0; index < _usableRestItems.Count; index++)
+        {
+            BattleItemSO item = _usableRestItems[index];
+            string label = $"{item.GetLocalizedDisplayName()}" +
+                           $"  x{_page.GetBattleItemCount(item)}\n" +
+                           item.GetLocalizedDescription();
+            if (ReferenceEquals(_pendingRestItem, item))
+                label = $"> {label}";
+            CreateButton(label, true, () =>
+            {
+                _pendingRestItem = item;
+                Render();
+            });
+        }
+    }
+
+    private void HandleRestCharacterClicked(CharacterRuntime character)
+    {
+        if (_room is not DungeonRestSO rest || character == null)
+            return;
+
+        if (_pendingRestItem != null)
+        {
+            if (_page.TryUseRestItem(
+                    rest,
+                    _roomIndex,
+                    _pendingRestActionIndex,
+                    _pendingRestAction,
+                    _pendingRestItem,
+                    character))
+            {
+                HandleCompletedRestAction();
+            }
+            return;
+        }
+
+        if (_pendingRestAction != null &&
+            _pendingRestAction.RequiresTarget)
+        {
+            if (_page.TryUseDungeonRestAction(
+                    rest,
+                    _roomIndex,
+                    _pendingRestActionIndex,
+                    _pendingRestAction,
+                    character))
+            {
+                HandleCompletedRestAction();
+            }
+            return;
+        }
+
+        _selectedRestCharacter = character;
+        Render();
+    }
+
+    private void HandleCompletedRestAction()
+    {
+        ResetRestSelection();
+        if (_page.CurrentPhase == EDungeonPhase.Rest)
+            Render();
+    }
+
+    private void ResetRestSelection()
+    {
+        _pendingRestAction = null;
+        _pendingRestActionIndex = -1;
+        _pendingRestItem = null;
+        _selectedRestCharacter = null;
+    }
+
+    private static string GetRestCharacterName(CharacterRuntime character)
+    {
+        return character?.Data?.CharacterName ??
+               character?.Definition?.CharacterName ??
+               "CHARACTER";
+    }
+
     private void RenderFallbackChoices()
     {
         Debug.LogError(
@@ -4662,6 +5284,111 @@ public sealed class DungeonRoomView
         };
     }
 
+    private void RenderRestCharacterSds()
+    {
+        DeactivateRestCharacterSds();
+        if (_phase != EDungeonPhase.Rest ||
+            _restCharacterSdRoot == null || _page == null)
+        {
+            return;
+        }
+
+        IReadOnlyList<CharacterRuntime> characters = _page.OwnedTurrets;
+        for (int index = 0; index < characters.Count; index++)
+        {
+            CharacterRuntime character = characters[index];
+            Sprite sprite = character != null
+                ? character.ResolveRestSdSprite()
+                : null;
+            if (sprite == null)
+                continue;
+
+            Image view = AcquireRestCharacterSdView();
+            if (view == null)
+                return;
+
+            view.name = $"imgRestCharacterSd_{index + 1}";
+            view.sprite = sprite;
+            view.color = ReferenceEquals(
+                character,
+                _selectedRestCharacter)
+                ? new Color(1f, 0.9f, 0.55f, 1f)
+                : Color.white;
+            view.preserveAspect = true;
+            view.raycastTarget = true;
+            view.enabled = true;
+            Button button = view.GetComponent<Button>();
+            if (button == null)
+            {
+                if (!_restCharacterSdPrefabErrorLogged)
+                {
+                    Debug.LogError(
+                        "Dungeon rest character SD prefab requires an " +
+                        "authored Button component.",
+                        view);
+                    _restCharacterSdPrefabErrorLogged = true;
+                }
+                continue;
+            }
+
+            button.targetGraphic = view;
+            button.interactable = true;
+            button.onClick.RemoveAllListeners();
+            button.onClick.AddListener(() =>
+                HandleRestCharacterClicked(character));
+        }
+    }
+
+    private Image AcquireRestCharacterSdView()
+    {
+        for (int index = 0; index < _restCharacterSdViews.Count; index++)
+        {
+            Image view = _restCharacterSdViews[index];
+            if (view == null || view.gameObject.activeSelf)
+                continue;
+
+            view.gameObject.SetActive(true);
+            return view;
+        }
+
+        Image prefab = _page.RestCharacterSdPrefab;
+        if (prefab == null)
+        {
+            if (!_restCharacterSdPrefabErrorLogged)
+            {
+                Debug.LogError(
+                    "Dungeon rest character SD prefab is not assigned on " +
+                    "DungeonPage.");
+                _restCharacterSdPrefabErrorLogged = true;
+            }
+            return null;
+        }
+
+        Image instance = UnityEngine.Object.Instantiate(
+            prefab,
+            _restCharacterSdRoot,
+            false);
+        _restCharacterSdViews.Add(instance);
+        return instance;
+    }
+
+    private void DeactivateRestCharacterSds()
+    {
+        for (int index = 0; index < _restCharacterSdViews.Count; index++)
+        {
+            Image view = _restCharacterSdViews[index];
+            if (view == null)
+                continue;
+
+            Button button = view.GetComponent<Button>();
+            if (button != null)
+                button.onClick.RemoveAllListeners();
+            view.sprite = null;
+            view.enabled = false;
+            view.gameObject.SetActive(false);
+        }
+    }
+
     private void BuildRuntimeUi()
     {
         _panel = _root.transform.Find($"grp{_phase}RoomPanel")
@@ -4679,9 +5406,14 @@ public sealed class DungeonRoomView
             ?.GetComponent<TextMeshProUGUI>();
         _buttonRoot = content?.Find("grpRoomChoices")
             as RectTransform;
+        _restCharacterSdRoot = _phase == EDungeonPhase.Rest
+            ? _panel?.Find("grpRestCharacterSds") as RectTransform
+            : null;
         if (_panel == null || _banner == null || _bannerAspect == null ||
             _title == null || _description == null || _currency == null ||
-            _buttonRoot == null)
+            _buttonRoot == null ||
+            (_phase == EDungeonPhase.Rest &&
+             _restCharacterSdRoot == null))
         {
             Debug.LogError(
                 $"Dungeon {_phase} fixed room UI is incomplete. " +
@@ -4690,6 +5422,25 @@ public sealed class DungeonRoomView
         }
 
         CollectAuthoredButtons();
+        CollectAuthoredRestCharacterSds();
+    }
+
+    private void CollectAuthoredRestCharacterSds()
+    {
+        if (_restCharacterSdRoot == null)
+            return;
+
+        for (int index = 0; index < _restCharacterSdRoot.childCount;
+             index++)
+        {
+            Image view = _restCharacterSdRoot.GetChild(index)
+                .GetComponent<Image>();
+            if (view == null || _restCharacterSdViews.Contains(view))
+                continue;
+
+            view.gameObject.SetActive(false);
+            _restCharacterSdViews.Add(view);
+        }
     }
 
     private void CreateButton(

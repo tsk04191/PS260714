@@ -475,6 +475,22 @@ public sealed class ItemEditorWindow : EditorWindow
                     "Starting Item");
                 EditorGUILayout.Space(4f);
                 EditorGUILayout.LabelField(
+                    "Rest Room",
+                    EditorStyles.boldLabel);
+                DrawProperty("availableInRest", "Usable In Rest");
+                DrawProperty(
+                    "additionalRestActions",
+                    "Additional Rest Actions");
+                SerializedProperty restEffects = Find("restEffects");
+                if (restEffects != null)
+                {
+                    EditorGUILayout.PropertyField(
+                        restEffects,
+                        new GUIContent("Rest Effects"),
+                        true);
+                }
+                EditorGUILayout.Space(4f);
+                EditorGUILayout.LabelField(
                     "Ability",
                     EditorStyles.boldLabel);
                 EditorGUILayout.HelpBox(
@@ -544,13 +560,15 @@ public sealed class ItemEditorWindow : EditorWindow
                                      abilityEffects.arraySize > 0;
             bool hasLegacyEffects = legacyEffects != null &&
                                     legacyEffects.arraySize > 0;
-            if (!hasUnifiedEffects && !hasLegacyEffects)
+            bool hasBattleEffects = hasUnifiedEffects || hasLegacyEffects;
+            if (!hasBattleEffects && !battleItem.AvailableInRest)
             {
                 EditorGUILayout.HelpBox(
-                    "Battle items require at least one ability effect.",
+                    "Items require a battle ability or at least one Rest " +
+                    "effect.",
                     MessageType.Error);
             }
-            else if (!battleItem.HasUsableTargetArea)
+            else if (hasBattleEffects && !battleItem.HasUsableTargetArea)
             {
                 EditorGUILayout.HelpBox(
                     "Enemy items require at least one selected target area " +
@@ -558,7 +576,7 @@ public sealed class ItemEditorWindow : EditorWindow
                     "cell.",
                     MessageType.Error);
             }
-            else if (!battleItem.HasCompatibleEffects)
+            else if (hasBattleEffects && !battleItem.HasCompatibleEffects)
             {
                 EditorGUILayout.HelpBox(
                     "One or more ability effects are incompatible with the " +

@@ -602,6 +602,7 @@ public sealed class CharacterEditorWindow : EditorWindow
     private bool _validationExpanded = true;
     private bool _cumulativeUpgradeExpanded;
     private bool _dungeonUpgradeExpanded;
+    private bool _restSkillExpanded;
 
     private ActionEditorContext CurrentActionEditorContext
     {
@@ -853,6 +854,7 @@ public sealed class CharacterEditorWindow : EditorWindow
         DrawSkillSettingsFoldout();
         DrawCumulativeUpgradeSettingsFoldout();
         DrawDungeonUpgradeSettingsFoldout();
+        DrawRestSkillSettingsFoldout();
 
         EditorGUILayout.EndScrollView();
         EditorGUILayout.EndVertical();
@@ -1002,6 +1004,18 @@ public sealed class CharacterEditorWindow : EditorWindow
         DrawSpriteProfile(
             "피격 SD",
             "damagedSdSprite",
+            new Vector2Int(1024, 1024),
+            new Vector2(150f, 150f));
+        EditorGUILayout.Space(8f);
+        DrawSpriteProfile(
+            "패배 SD",
+            "defeatSdSprite",
+            new Vector2Int(1024, 1024),
+            new Vector2(150f, 150f));
+        EditorGUILayout.Space(8f);
+        DrawSpriteProfile(
+            "휴식 SD",
+            "sittingSdSprite",
             new Vector2Int(1024, 1024),
             new Vector2(150f, 150f));
         EditorGUILayout.Space(8f);
@@ -6050,6 +6064,80 @@ public sealed class CharacterEditorWindow : EditorWindow
             if (!exists)
                 return candidate;
         }
+    }
+
+    private void DrawRestSkillSettingsFoldout()
+    {
+        EditorGUILayout.BeginVertical(EditorStyles.helpBox);
+        _restSkillExpanded = EditorGUILayout.Foldout(
+            _restSkillExpanded,
+            "6. 휴식방 능력",
+            true,
+            EditorStyles.foldoutHeader);
+        if (_restSkillExpanded)
+        {
+            using (new EditorGUI.DisabledScope(
+                       EditorApplication.isPlayingOrWillChangePlaymode))
+            {
+                _serializedCharacter.UpdateIfRequiredOrScript();
+                SerializedProperty skill =
+                    _serializedCharacter.FindProperty("restSkill");
+                if (skill == null)
+                {
+                    EditorGUILayout.HelpBox(
+                        "Rest skill property was not found.",
+                        MessageType.Error);
+                }
+                else
+                {
+                    EditorGUI.BeginChangeCheck();
+                    EditorGUILayout.PropertyField(
+                        skill.FindPropertyRelative("enabled"),
+                        new GUIContent("사용"));
+                    EditorGUILayout.PropertyField(
+                        skill.FindPropertyRelative("skillId"),
+                        new GUIContent("능력 ID"));
+                    PS260714LocalizationKeyField.Draw(
+                        skill.FindPropertyRelative(
+                            "titleLocalizationKey"),
+                        "이름 Localization Key");
+                    PS260714LocalizationKeyField.Draw(
+                        skill.FindPropertyRelative(
+                            "descriptionLocalizationKey"),
+                        "설명 Localization Key");
+                    EditorGUILayout.PropertyField(
+                        skill.FindPropertyRelative("fallbackTitle"),
+                        new GUIContent("기본 이름"));
+                    EditorGUILayout.PropertyField(
+                        skill.FindPropertyRelative(
+                            "fallbackDescription"),
+                        new GUIContent("기본 설명"));
+                    EditorGUILayout.PropertyField(
+                        skill.FindPropertyRelative("icon"),
+                        new GUIContent("아이콘"));
+                    EditorGUILayout.PropertyField(
+                        skill.FindPropertyRelative("usesPerRoom"),
+                        new GUIContent("방당 사용 횟수"));
+                    EditorGUILayout.PropertyField(
+                        skill.FindPropertyRelative(
+                            "additionalRoomActions"),
+                        new GUIContent("추가 휴식 행동"));
+                    EditorGUILayout.PropertyField(
+                        skill.FindPropertyRelative("effects"),
+                        new GUIContent("효과"),
+                        true);
+                    PS260714LocalizationKeyField.DrawLoadError();
+                    if (EditorGUI.EndChangeCheck() &&
+                        _serializedCharacter.ApplyModifiedProperties())
+                    {
+                        EditorUtility.SetDirty(_selectedCharacter);
+                    }
+                }
+            }
+        }
+
+        EditorGUILayout.EndVertical();
+        EditorGUILayout.Space(4f);
     }
 
     private void DrawDungeonUpgradeSettingsFoldout()

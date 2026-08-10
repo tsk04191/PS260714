@@ -2563,6 +2563,96 @@ public sealed class DungeonDefinitionRegressionTests
     }
 
     [Test]
+    public void DungeonCostRecoveryInterval_DefaultsToTenSecondsAndIsEditable()
+    {
+        DungeonDefinition definition =
+            ScriptableObject.CreateInstance<DungeonDefinition>();
+        try
+        {
+            Assert.That(
+                definition.ActiveSkillCostRecoveryDuration,
+                Is.EqualTo(10f).Within(0.001f));
+
+            SerializedObject serialized = new(definition);
+            serialized.FindProperty("activeSkillCostRecoveryDuration")
+                .floatValue = 7.5f;
+            serialized.ApplyModifiedPropertiesWithoutUndo();
+
+            Assert.That(
+                definition.ActiveSkillCostRecoveryDuration,
+                Is.EqualTo(7.5f).Within(0.001f));
+        }
+        finally
+        {
+            UnityEngine.Object.DestroyImmediate(definition);
+        }
+    }
+
+    [Test]
+    public void DungeonBattleHealthCost_DefaultsToDifficultyScaleDividedByTen()
+    {
+        DungeonDefinition definition =
+            ScriptableObject.CreateInstance<DungeonDefinition>();
+        try
+        {
+            Assert.That(
+                definition.HasClearedBattleHealthCostOverride,
+                Is.False);
+            Assert.That(
+                definition.ResolveClearedBattleHealthCost(0),
+                Is.Zero);
+            Assert.That(
+                definition.ResolveClearedBattleHealthCost(9),
+                Is.Zero);
+            Assert.That(
+                definition.ResolveClearedBattleHealthCost(10),
+                Is.EqualTo(1));
+            Assert.That(
+                definition.ResolveClearedBattleHealthCost(55),
+                Is.EqualTo(5));
+            Assert.That(
+                definition.ResolveClearedBattleHealthCost(100),
+                Is.EqualTo(10));
+        }
+        finally
+        {
+            UnityEngine.Object.DestroyImmediate(definition);
+        }
+    }
+
+    [Test]
+    public void DungeonBattleHealthCost_AuthoredOverrideTakesPriority()
+    {
+        DungeonDefinition definition =
+            ScriptableObject.CreateInstance<DungeonDefinition>();
+        try
+        {
+            SerializedObject serialized = new(definition);
+            serialized.FindProperty("clearedBattleHealthCost").intValue = 4;
+            serialized.ApplyModifiedPropertiesWithoutUndo();
+
+            Assert.That(
+                definition.HasClearedBattleHealthCostOverride,
+                Is.True);
+            Assert.That(
+                definition.ResolveClearedBattleHealthCost(100),
+                Is.EqualTo(4));
+
+            serialized.Update();
+            serialized.FindProperty("clearedBattleHealthCost").intValue = 0;
+            serialized.ApplyModifiedPropertiesWithoutUndo();
+
+            Assert.That(
+                definition.ResolveClearedBattleHealthCost(100),
+                Is.Zero);
+        }
+        finally
+        {
+            UnityEngine.Object.DestroyImmediate(definition);
+        }
+    }
+
+    [Test]
     public void DungeonEvent_ValidatesAuthoredChoiceAndEffect()
     {
         DungeonEventSO dungeonEvent =
