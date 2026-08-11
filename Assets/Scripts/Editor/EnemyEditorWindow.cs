@@ -811,6 +811,19 @@ public sealed class EnemyEditorWindow : EditorWindow
                     "includeDiagonals",
                     "Include Diagonals");
             }
+            SerializedProperty areaDefinition =
+                target.FindPropertyRelative("areaDefinition");
+            using (new EditorGUI.DisabledScope(true))
+            {
+                BattleAbilityEditorGUI.DrawAreaDefinition(
+                    areaDefinition,
+                    null,
+                    null);
+            }
+            EditorGUILayout.HelpBox(
+                "Enemy abilities use automatic target selection, so their " +
+                "shared area definition remains Target.",
+                MessageType.Info);
         }
     }
 
@@ -866,95 +879,15 @@ public sealed class EnemyEditorWindow : EditorWindow
                     continue;
 
                 DrawRelative(operation, "enabled", "Enabled");
-                DrawRelative(operation, "type", "Type");
-                EnemyAbilityOperationType type =
-                    (EnemyAbilityOperationType)operation
-                        .FindPropertyRelative("type").enumValueIndex;
-                switch (type)
-                {
-                    case EnemyAbilityOperationType.ExecuteEffects:
-                        BattleAbilityEditorGUI.DrawEffectList(
-                            operation.FindPropertyRelative("effects"),
-                            owner);
-                        break;
-                    case EnemyAbilityOperationType.ModifySpawnInterval:
-                        DrawRelative(
-                            operation,
-                            "multiplier",
-                            "Multiplier");
-                        break;
-                    case EnemyAbilityOperationType.ModifyIncomingDamage:
-                        DrawRelative(
-                            operation,
-                            "amount",
-                            "Resulting Damage");
-                        break;
-                    case EnemyAbilityOperationType.ExpandSpawnGroup:
-                        DrawRelative(
-                            operation,
-                            "count",
-                            "Additional Enemies");
-                        break;
-                    case EnemyAbilityOperationType.GrantArmor:
-                        DrawRelative(
-                            operation,
-                            "amount",
-                            "Fixed Armor");
-                        DrawRelative(
-                            operation,
-                            "multiplier",
-                            "Max Health Multiplier");
-                        break;
-                    case EnemyAbilityOperationType.RedirectDamage:
-                        DrawRelative(operation, "range", "Range");
-                        DrawRelative(
-                            operation,
-                            "includeDiagonals",
-                            "Include Diagonals");
-                        break;
-                    case EnemyAbilityOperationType.ModifyTargetPriority:
-                        DrawRelative(
-                            operation,
-                            "targetPriorityMode",
-                            "Priority Mode");
-                        EnemyTargetPriorityMode priorityMode =
-                            (EnemyTargetPriorityMode)operation
-                                .FindPropertyRelative(
-                                    "targetPriorityMode")
-                                .enumValueIndex;
-                        if (priorityMode ==
-                            EnemyTargetPriorityMode.Adjust)
-                        {
-                            DrawRelative(
-                                operation,
-                                "targetPriorityAdjustment",
-                                "Priority Adjustment");
-                            EditorGUILayout.HelpBox(
-                                "Higher values are selected before the " +
-                                "configured subject rule. Positive values " +
-                                "can be used for taunt; negative values " +
-                                "lower the target priority.",
-                                MessageType.Info);
-                        }
-                        else if (priorityMode ==
-                                 EnemyTargetPriorityMode.ForceFocus)
-                        {
-                            EditorGUILayout.HelpBox(
-                                "Forces this enemy ahead of every adjusted " +
-                                "priority target. If several enemies force " +
-                                "focus, the configured subject rule breaks " +
-                                "the tie.",
-                                MessageType.Info);
-                        }
-                        else
-                        {
-                            EditorGUILayout.HelpBox(
-                                "Excludes this enemy while another valid " +
-                                "target is available.",
-                                MessageType.Info);
-                        }
-                        break;
-                }
+                SerializedProperty operationType =
+                    operation.FindPropertyRelative("type");
+                operationType.enumValueIndex =
+                    (int)EnemyAbilityOperationType.ExecuteEffects;
+                using (new EditorGUI.DisabledScope(true))
+                    DrawRelative(operation, "type", "Type");
+                BattleAbilityEditorGUI.DrawEffectList(
+                    operation.FindPropertyRelative("effects"),
+                    owner);
             }
         }
 
@@ -1142,20 +1075,8 @@ public sealed class EnemyEditorWindow : EditorWindow
         if (operations == null)
             return;
 
-        EnemyAbilityOperationType operationType = trigger switch
-        {
-            EnemyAbilityTrigger.OnSpawn =>
-                EnemyAbilityOperationType.GrantArmor,
-            EnemyAbilityTrigger.BeforeSelfDamage =>
-                EnemyAbilityOperationType.ModifyIncomingDamage,
-            EnemyAbilityTrigger.BeforeAllyDamage =>
-                EnemyAbilityOperationType.RedirectDamage,
-            EnemyAbilityTrigger.OnSpawnQueueEvaluation =>
-                EnemyAbilityOperationType.ModifySpawnInterval,
-            EnemyAbilityTrigger.OnTargetPriorityEvaluation =>
-                EnemyAbilityOperationType.ModifyTargetPriority,
-            _ => EnemyAbilityOperationType.ExecuteEffects
-        };
+        const EnemyAbilityOperationType operationType =
+            EnemyAbilityOperationType.ExecuteEffects;
 
         int index = operations.arraySize;
         operations.InsertArrayElementAtIndex(index);
@@ -1177,8 +1098,7 @@ public sealed class EnemyEditorWindow : EditorWindow
         SerializedProperty effects =
             operation.FindPropertyRelative("effects");
         effects.ClearArray();
-        if (operationType == EnemyAbilityOperationType.ExecuteEffects)
-            BattleAbilityEditorGUI.AddDefaultEffect(effects);
+        BattleAbilityEditorGUI.AddDefaultEffect(effects);
     }
 
     private static void AddEffect(SerializedProperty effects)

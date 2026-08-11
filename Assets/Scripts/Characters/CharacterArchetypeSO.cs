@@ -42,7 +42,9 @@ public sealed class CharacterArchetypeSO : ScriptableObject,
         foreach (CharacterRolePassiveDefinition passive in
                  PassiveDefinitions)
         {
-            if (passive != null)
+            if (passive?.Ability?.HasExplicitEffects == true &&
+                passive.Ability.HasSection(
+                    CharacterPassiveSectionType.Ability))
                 yield return passive;
         }
     }

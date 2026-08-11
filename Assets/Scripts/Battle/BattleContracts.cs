@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using UnityEngine;
+using UnityEngine.Serialization;
 
 public interface IActiveSkillResource
 {
@@ -985,6 +986,8 @@ public static class BattleEffectExecutor
                 CharacterActionKind.Skill,
             BattleEffectOriginKind.BattleItem =>
                 CharacterActionKind.Skill,
+            BattleEffectOriginKind.BattleCard =>
+                CharacterActionKind.Skill,
             _ => default,
         };
     }
@@ -1065,14 +1068,6 @@ public static class BattleEffectExecutor
                 selector.SubjectCount,
                 selector.ConditionMatchMode,
                 conditions);
-        if (enemies != null && enemies.Count > 0 &&
-            selector.AreaOffsets != null &&
-            selector.AreaOffsets.Count > 0)
-        {
-            enemies = context.Board.ExpandCharacterAreaTargets(
-                enemies,
-                selector.AreaOffsets);
-        }
         resolved = context.RetargetTo(
             CharacterTargetFaction.Enemy,
             enemies,
@@ -1338,6 +1333,8 @@ public sealed class BattleManualTargetSelectionRequest
     public IBattleCharacter Source { get; }
     public CharacterTargetFaction Faction { get; }
     public int TargetCount { get; }
+    public CharacterAttackSubject PrioritySubject { get; }
+    public CharacterAttackSubjectMetric PriorityMetric { get; }
     public IReadOnlyList<EnemyRuntime> EnemyCandidates { get; }
     public IReadOnlyList<IBattleCharacter> AllyCandidates { get; }
     public bool AllowCancel { get; }
@@ -1352,11 +1349,19 @@ public sealed class BattleManualTargetSelectionRequest
         IReadOnlyList<IBattleCharacter> allyCandidates,
         bool allowCancel,
         Action<BattleManualTargetSelectionResult> complete,
-        BattleAreaDefinition areaDefinition = null)
+        BattleAreaDefinition areaDefinition = null,
+        CharacterAttackSubject prioritySubject =
+            CharacterAttackSubject.Manual,
+        CharacterAttackSubjectMetric priorityMetric =
+            CharacterAttackSubjectMetric.Health)
     {
         Source = source;
         Faction = faction;
-        TargetCount = Mathf.Max(1, targetCount);
+        TargetCount = areaDefinition?.UsesWorldArea == true
+            ? Mathf.Max(0, targetCount)
+            : Mathf.Max(1, targetCount);
+        PrioritySubject = prioritySubject;
+        PriorityMetric = priorityMetric;
         EnemyCandidates =
             enemyCandidates ?? Array.Empty<EnemyRuntime>();
         AllyCandidates =
@@ -1370,7 +1375,9 @@ public sealed class BattleManualTargetSelectionRequest
         Faction == CharacterTargetFaction.Ally
             ? AllyCandidates.Count
             : EnemyCandidates.Count;
-    public int RequiredCount => Mathf.Min(TargetCount, CandidateCount);
+    public int RequiredCount => UsesWorldArea && TargetCount == 0
+        ? CandidateCount
+        : Mathf.Min(TargetCount, CandidateCount);
 
     public void Complete(BattleManualTargetSelectionResult result)
     {
@@ -1393,16 +1400,14 @@ public interface IBattleManualTargetSelectionService
 
 public enum CharacterAreaShapeType
 {
-    LegacyTileOffsets = 0,
-    Circle = 1,
-    Semicircle = 2,
-    Cone = 3
+    Target = 0,
+    CircleSector = 1
 }
 
 public enum CharacterAreaOriginMode
 {
     Caster = 0,
-    Cursor = 1
+    DesignatedPoint = 1
 }
 
 [Serializable]
@@ -1410,29 +1415,39 @@ public class BattleAreaDefinition
 {
     [SerializeField]
     private CharacterAreaShapeType shapeType =
-        CharacterAreaShapeType.LegacyTileOffsets;
+        CharacterAreaShapeType.Target;
     [SerializeField]
     private CharacterAreaOriginMode originMode =
-        CharacterAreaOriginMode.Cursor;
+        CharacterAreaOriginMode.DesignatedPoint;
     [SerializeField, Min(0.1f)]
     private float radius = 1.5f;
-    [SerializeField, Range(1f, 179f)]
-    private float coneAngle = 60f;
+    [FormerlySerializedAs("coneAngle")]
+    [SerializeField, Range(0f, 360f)]
+    private float angle = 360f;
     [SerializeField, Min(0.1f)]
     private float maxCastDistance = 4.25f;
 
     public CharacterAreaShapeType ShapeType => shapeType;
     public CharacterAreaOriginMode OriginMode => originMode;
     public float Radius => Mathf.Max(0.1f, radius);
-    public float ConeAngle => Mathf.Clamp(coneAngle, 1f, 179f);
+    public float Angle => Mathf.Clamp(angle, 0f, 360f);
     public float MaxCastDistance => Mathf.Max(0.1f, maxCastDistance);
     public bool UsesWorldArea =>
-        shapeType != CharacterAreaShapeType.LegacyTileOffsets;
+        shapeType == CharacterAreaShapeType.CircleSector;
+    public bool IsValid =>
+        Enum.IsDefined(typeof(CharacterAreaShapeType), shapeType) &&
+        Enum.IsDefined(typeof(CharacterAreaOriginMode), originMode) &&
+        !float.IsNaN(radius) && !float.IsInfinity(radius) &&
+        radius >= 0.1f &&
+        !float.IsNaN(angle) && !float.IsInfinity(angle) &&
+        angle >= 0f && angle <= 360f &&
+        !float.IsNaN(maxCastDistance) &&
+        !float.IsInfinity(maxCastDistance) && maxCastDistance >= 0.1f;
 
     public void Validate()
     {
         radius = Mathf.Max(0.1f, radius);
-        coneAngle = Mathf.Clamp(coneAngle, 1f, 179f);
+        angle = Mathf.Clamp(angle, 0f, 360f);
         maxCastDistance = Mathf.Max(0.1f, maxCastDistance);
     }
 }
@@ -1454,34 +1469,26 @@ public static class BattleAreaGeometry
         Vector2 point,
         Vector2 origin,
         Vector2 direction,
-        CharacterAreaShapeType shapeType,
         float radius,
-        float coneAngle)
+        float angle)
     {
         Vector2 offset = point - origin;
         float appliedRadius = Mathf.Max(0.1f, radius);
         if (offset.sqrMagnitude > appliedRadius * appliedRadius)
             return false;
 
-        if (shapeType == CharacterAreaShapeType.Circle)
+        float appliedAngle = Mathf.Clamp(angle, 0f, 360f);
+        if (appliedAngle >= 359.999f)
             return true;
 
         Vector2 forward = direction.sqrMagnitude > DirectionEpsilon
             ? direction.normalized
             : Vector2.up;
-        if (shapeType == CharacterAreaShapeType.Semicircle)
-            return Vector2.Dot(forward, offset) >= 0f;
+        if (offset.sqrMagnitude <= DirectionEpsilon)
+            return true;
 
-        if (shapeType == CharacterAreaShapeType.Cone)
-        {
-            if (offset.sqrMagnitude <= DirectionEpsilon)
-                return true;
-
-            float halfAngle = Mathf.Clamp(coneAngle, 1f, 179f) * 0.5f;
-            return Vector2.Angle(forward, offset) <= halfAngle;
-        }
-
-        return false;
+        float halfAngle = appliedAngle * 0.5f;
+        return Vector2.Angle(forward, offset) <= halfAngle + 0.001f;
     }
 
     public static Vector2 ClampToRadius(

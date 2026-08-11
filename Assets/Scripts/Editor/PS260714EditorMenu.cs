@@ -15,6 +15,7 @@ internal static class PS260714EditorMenu
     public const int CommonSettingsPriority = 100;
     public const int CharacterEditorPriority = 101;
     public const int ItemEditorPriority = 102;
+    public const int BattleCardEditorPriority = 105;
     public const int EnemyEditorPriority = 103;
     public const int StatusEffectEditorPriority = 104;
     public const int DungeonEditorPriority = 0;
@@ -27,13 +28,13 @@ internal static class PS260714EditorMenu
     public const int LocalizationEditorPriority = 108;
     public const int ValidateLocalizationPriority = 109;
     public const int GenerateLocalizationPriority = 110;
+    public const int CharacterStandingFramingEditorPriority = 111;
     public const int StageSelectEditorPriority = DungeonEditorPriority;
     public const int RecruitEditorPriority = 112;
     public const int ValidateDesignerUiPriority = 113;
     public const int InstallDynamicUiPreviewsPriority = 114;
     public const int MigrateBattleItemUsagePriority = 115;
     public const int MigrateCharacterModifierIdsPriority = 116;
-
     public const string CharacterEditor =
         Root + "Character Editor";
     public const string CommonSettings =
@@ -45,6 +46,8 @@ internal static class PS260714EditorMenu
     public const string StageSelectEditor = DungeonEditor;
     public const string ItemEditor =
         Root + "Item Editor";
+    public const string BattleCardEditor =
+        Root + "Battle Card Editor";
     public const string EnemyEditor =
         Root + "Enemy Editor";
     public const string StatusEffectEditor =
@@ -82,6 +85,7 @@ internal static class PS260714AssetEditorRegistry
     internal static bool CanOpen(UnityEngine.Object asset)
     {
         return asset is CharacterSO or
+            BattleCardSO or
             EnemySO or
             ItemDefinitionSO or
             StatusEffectSO or
@@ -97,6 +101,9 @@ internal static class PS260714AssetEditorRegistry
     {
         switch (asset)
         {
+            case BattleCardSO card:
+                BattleCardEditorWindow.Open(card);
+                return true;
             case CharacterSO character:
                 CharacterEditorWindow.Open(character);
                 return true;

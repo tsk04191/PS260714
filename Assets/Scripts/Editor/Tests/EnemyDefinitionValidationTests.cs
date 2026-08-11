@@ -40,6 +40,15 @@ public sealed class EnemyDefinitionValidationTests
         Assert.That(definitions, Has.Count.EqualTo(8));
         EnemyDefinitionValidationResult result =
             EnemyDefinitionValidator.ValidateAll(definitions);
+        foreach (EnemySO definition in definitions)
+        {
+            Assert.That(
+                AbilityDefinitionValidator.TryValidateProvider(
+                    definition,
+                    out string providerError),
+                Is.True,
+                $"{definition.name}: {providerError}");
+        }
 
         Assert.That(
             result.ErrorCount,
@@ -82,7 +91,7 @@ public sealed class EnemyDefinitionValidationTests
     }
 
     [Test]
-    public void NonSquareBoardSprite_IsRejected()
+    public void NonSquareBoardSprite_IsAccepted()
     {
         EnemySO definition = CreateEnemy("non_square_board_sprite");
         Texture2D texture = new(128, 64);
@@ -101,9 +110,9 @@ public sealed class EnemyDefinitionValidationTests
             EnemyDefinitionValidator.Validate(definition);
 
         Assert.That(
-            HasCode(result, "enemy.board_sprite_not_square"),
-            Is.True);
-        Assert.That(result.ErrorCount, Is.EqualTo(1));
+            HasCode(result, "enemy.board_sprite_missing"),
+            Is.False);
+        Assert.That(result.ErrorCount, Is.Zero);
     }
 
     [Test]
@@ -127,9 +136,6 @@ public sealed class EnemyDefinitionValidationTests
 
         Assert.That(
             HasCode(result, "enemy.board_sprite_missing"),
-            Is.False);
-        Assert.That(
-            HasCode(result, "enemy.board_sprite_not_square"),
             Is.False);
         Assert.That(result.ErrorCount, Is.Zero);
     }
@@ -302,7 +308,7 @@ public sealed class EnemyDefinitionValidationTests
     }
 
     [Test]
-    public void OperationAndTriggerMismatch_IsRejected()
+    public void NonSharedOperation_IsRejected()
     {
         EnemySO definition = CreateEnemy("invalid_operation_enemy");
         SerializedObject serialized = new(definition);
@@ -319,7 +325,7 @@ public sealed class EnemyDefinitionValidationTests
             EnemyDefinitionValidator.Validate(definition);
 
         Assert.That(
-            HasCode(result, "ability.operation_trigger_mismatch"),
+            HasCode(result, "ability.operation_schema_mismatch"),
             Is.True,
             BuildFailureMessage(result));
     }
@@ -424,24 +430,13 @@ public sealed class EnemyDefinitionValidationTests
         Assert.That(condition.Expected, Is.True);
     }
 
-    [TestCase(
-        EnemyAbilityTrigger.OnSpawn,
-        EnemyAbilityOperationType.GrantArmor)]
-    [TestCase(
-        EnemyAbilityTrigger.BeforeSelfDamage,
-        EnemyAbilityOperationType.ModifyIncomingDamage)]
-    [TestCase(
-        EnemyAbilityTrigger.BeforeAllyDamage,
-        EnemyAbilityOperationType.RedirectDamage)]
-    [TestCase(
-        EnemyAbilityTrigger.OnSpawnQueueEvaluation,
-        EnemyAbilityOperationType.ModifySpawnInterval)]
-    [TestCase(
-        EnemyAbilityTrigger.OnTargetPriorityEvaluation,
-        EnemyAbilityOperationType.ModifyTargetPriority)]
-    public void EnemyEditor_AddOperation_UsesTriggerCompatibleDefault(
-        EnemyAbilityTrigger trigger,
-        EnemyAbilityOperationType expectedType)
+    [TestCase(EnemyAbilityTrigger.OnSpawn)]
+    [TestCase(EnemyAbilityTrigger.BeforeSelfDamage)]
+    [TestCase(EnemyAbilityTrigger.BeforeAllyDamage)]
+    [TestCase(EnemyAbilityTrigger.OnSpawnQueueEvaluation)]
+    [TestCase(EnemyAbilityTrigger.OnTargetPriorityEvaluation)]
+    public void EnemyEditor_AddOperation_AlwaysUsesSharedEffects(
+        EnemyAbilityTrigger trigger)
     {
         EnemySO definition = CreateEnemy(
             $"editor_operation_{(int)trigger}");
@@ -462,7 +457,7 @@ public sealed class EnemyDefinitionValidationTests
             Has.Count.EqualTo(1));
         Assert.That(
             definition.Abilities[0].Operations[0].Type,
-            Is.EqualTo(expectedType));
+            Is.EqualTo(EnemyAbilityOperationType.ExecuteEffects));
     }
 
     [Test]
@@ -488,29 +483,10 @@ public sealed class EnemyDefinitionValidationTests
     }
 
     [Test]
-    public void HeavyAbilityAsset_DefinesThreeNonFixedGuardedHits()
+    public void HeavyIncompatibleAbilityWasDeleted()
     {
         EnemySO definition = CreateAssetClone("Heavy");
-
-        EnemyAbilityDefinition ability =
-            FindAbility(definition, EnemyAbilityIds.GuardedHits);
-        Assert.That(ability.Trigger,
-            Is.EqualTo(EnemyAbilityTrigger.BeforeSelfDamage));
-        Assert.That(ability.InitialCharges, Is.EqualTo(3));
-        Assert.That(ability.ConditionMatchMode,
-            Is.EqualTo(CharacterConditionMatchMode.Any));
-        Assert.That(ability.Conditions, Has.Count.EqualTo(2));
-        Assert.That(
-            ability.Conditions[0].IncomingDamageType,
-            Is.EqualTo(CharacterAttackDamageType.Physical));
-        Assert.That(
-            ability.Conditions[1].IncomingDamageType,
-            Is.EqualTo(CharacterAttackDamageType.Magical));
-        Assert.That(
-            ability.Operations[0].Type,
-            Is.EqualTo(
-                EnemyAbilityOperationType.ModifyIncomingDamage));
-        Assert.That(ability.Operations[0].Amount, Is.EqualTo(1));
+        Assert.That(definition.Abilities, Is.Empty);
     }
 
     [Test]
@@ -550,43 +526,20 @@ public sealed class EnemyDefinitionValidationTests
     }
 
     [Test]
-    public void ShieldBearerAbilityAsset_SeparatesArmorAndRedirect()
+    public void ShieldBearerIncompatibleAbilitiesWereDeleted()
     {
         EnemySO definition = CreateAssetClone("ShieldBearer");
-
-        EnemyAbilityDefinition armor =
-            FindAbility(definition, EnemyAbilityIds.InitialArmor);
-        Assert.That(armor.Trigger,
-            Is.EqualTo(EnemyAbilityTrigger.OnSpawn));
-        Assert.That(
-            armor.Operations[0].Type,
-            Is.EqualTo(EnemyAbilityOperationType.GrantArmor));
-        Assert.That(
-            armor.Operations[0].Multiplier,
-            Is.EqualTo(1f));
-
-        EnemyAbilityDefinition redirect = FindAbility(
-            definition,
-            EnemyAbilityIds.RedirectAdjacentDamage);
-        Assert.That(redirect.Trigger,
-            Is.EqualTo(EnemyAbilityTrigger.BeforeAllyDamage));
-        Assert.That(
-            redirect.Operations[0].Type,
-            Is.EqualTo(EnemyAbilityOperationType.RedirectDamage));
-        Assert.That(redirect.Operations[0].Range, Is.EqualTo(1));
-        Assert.That(
-            redirect.Operations[0].IncludeDiagonals,
-            Is.True);
+        Assert.That(definition.Abilities, Is.Empty);
     }
 
     [TestCase(EEnemyType.Basic, 0)]
     [TestCase(EEnemyType.Assault, 0)]
-    [TestCase(EEnemyType.Heavy, 1)]
+    [TestCase(EEnemyType.Heavy, 0)]
     [TestCase(EEnemyType.Medic, 1)]
     [TestCase(EEnemyType.Mechanic, 1)]
-    [TestCase(EEnemyType.Pointman, 1)]
-    [TestCase(EEnemyType.ShieldBearer, 2)]
-    [TestCase(EEnemyType.Infiltrator, 1)]
+    [TestCase(EEnemyType.Pointman, 0)]
+    [TestCase(EEnemyType.ShieldBearer, 0)]
+    [TestCase(EEnemyType.Infiltrator, 0)]
     public void RuntimeDefault_UsesValidAbilityPreset(
         EEnemyType enemyType,
         int expectedAbilityCount)
@@ -607,22 +560,6 @@ public sealed class EnemyDefinitionValidationTests
     [Test]
     public void EnemyCodexAbilityDescription_UsesModularAbilityValues()
     {
-        EnemySO heavy = CreateAssetClone("Heavy");
-        SerializedObject heavySerialized = new(heavy);
-        heavySerialized.FindProperty("abilities")
-            .GetArrayElementAtIndex(0)
-            .FindPropertyRelative("initialCharges").intValue = 7;
-        heavySerialized.ApplyModifiedPropertiesWithoutUndo();
-        EnemyAbilityDefinition guardedHits =
-            FindAbility(heavy, EnemyAbilityIds.GuardedHits);
-        Assert.That(
-            EnemyLocalization.GetAbility(heavy),
-            Is.EqualTo(LocalizationService.Get(
-                LocalizationKeys.CodexEnemyAbilityHeavy,
-                LocalizationService.Arg(
-                    "hits",
-                    guardedHits.InitialCharges))));
-
         EnemySO medic = CreateAssetClone("Medic");
         SerializedObject medicSerialized = new(medic);
         SerializedProperty medicAbility = medicSerialized
@@ -677,68 +614,19 @@ public sealed class EnemyDefinitionValidationTests
                 LocalizationService.Arg(
                     "duration",
                     stun.StatusDuration))));
-
-        EnemySO pointman = CreateAssetClone("Pointman");
-        SerializedObject pointmanSerialized = new(pointman);
-        pointmanSerialized.FindProperty("abilities")
-            .GetArrayElementAtIndex(0)
-            .FindPropertyRelative("operations")
-            .GetArrayElementAtIndex(0)
-            .FindPropertyRelative("count").intValue = 4;
-        pointmanSerialized.ApplyModifiedPropertiesWithoutUndo();
-        EnemyAbilityDefinition expand = FindAbility(
-            pointman,
-            EnemyAbilityIds.ExpandSpawnGroup);
-        Assert.That(
-            EnemyLocalization.GetAbility(pointman),
-            Is.EqualTo(LocalizationService.Get(
-                LocalizationKeys.CodexEnemyAbilityPointman,
-                LocalizationService.Arg(
-                    "count",
-                    expand.Operations[0].Count))));
-
-        EnemySO shield = CreateAssetClone("ShieldBearer");
-        SerializedObject shieldSerialized = new(shield);
-        shieldSerialized.FindProperty("abilities")
-            .GetArrayElementAtIndex(0)
-            .FindPropertyRelative("operations")
-            .GetArrayElementAtIndex(0)
-            .FindPropertyRelative("multiplier").floatValue = 0.5f;
-        shieldSerialized.ApplyModifiedPropertiesWithoutUndo();
-        EnemyAbilityDefinition armor =
-            FindAbility(shield, EnemyAbilityIds.InitialArmor);
-        Assert.That(
-            EnemyLocalization.GetAbility(shield),
-            Is.EqualTo(LocalizationService.Get(
-                LocalizationKeys.CodexEnemyAbilityShieldBearer,
-                LocalizationService.Arg(
-                    "armor",
-                    armor.Operations[0].Multiplier * 100f))));
     }
 
     [Test]
-    public void EnemyCodexPriority_UsesEnabledModularAbility()
+    public void DeletedPriorityAbility_IsNotReportedByCodex()
     {
         EnemySO infiltrator = CreateAssetClone("Infiltrator");
         EnemySO basic = CreateAssetClone("Basic");
 
         Assert.That(
             EnemyLocalization.HasTargetPriorityExclusion(infiltrator),
-            Is.True);
+            Is.False);
         Assert.That(
             EnemyLocalization.HasTargetPriorityExclusion(basic),
-            Is.False);
-
-        SerializedObject serialized = new(infiltrator);
-        serialized.FindProperty("abilities")
-            .GetArrayElementAtIndex(0)
-            .FindPropertyRelative("operations")
-            .GetArrayElementAtIndex(0)
-            .FindPropertyRelative("enabled").boolValue = false;
-        serialized.ApplyModifiedPropertiesWithoutUndo();
-
-        Assert.That(
-            EnemyLocalization.HasTargetPriorityExclusion(infiltrator),
             Is.False);
     }
 
@@ -936,7 +824,7 @@ public sealed class EnemyDefinitionValidationTests
 public sealed class AbilityDefinitionContractTests
 {
     [Test]
-    public void CharacterSkill_ProjectsLegacyStorageThroughCommonContract()
+    public void CharacterSkill_UsesCurrentCommonContract()
     {
         CharacterSkillDefinition skill = new();
         SetField(skill, "actionId", "skill.contract_test");
@@ -958,8 +846,14 @@ public sealed class AbilityDefinitionContractTests
             });
 
         CharacterAreaDefinition area = new();
-        SetField(area, "shapeType", CharacterAreaShapeType.Circle);
-        SetField(area, "originMode", CharacterAreaOriginMode.Cursor);
+        SetField(
+            area,
+            "shapeType",
+            CharacterAreaShapeType.CircleSector);
+        SetField(
+            area,
+            "originMode",
+            CharacterAreaOriginMode.DesignatedPoint);
         SetField(skill, "areaDefinition", area);
         skill.Validate();
 
@@ -976,6 +870,94 @@ public sealed class AbilityDefinitionContractTests
         Assert.That(ability.Targeting.UsesWorldArea, Is.True);
         Assert.That(
             AbilityDefinitionValidator.TryValidate(ability, out string error),
+            Is.True,
+            error);
+    }
+
+    [Test]
+    public void CharacterAttackAndPassive_UseSkillTargetAreaEffectContract()
+    {
+        CharacterAttackDefinition attack = new();
+        SetField(attack, "actionId", "attack.contract_test");
+        SetField(
+            attack,
+            "sections",
+            new List<CharacterAttackSectionType>
+            {
+                CharacterAttackSectionType.Subject,
+                CharacterAttackSectionType.Ability,
+            });
+        SetField(attack, "subject", CharacterAttackSubject.Manual);
+        SetField(
+            attack,
+            "effects",
+            new List<CharacterEffectDefinition> { new() });
+        SetField(attack, "areaDefinition", CreateWorldArea());
+        attack.Validate();
+
+        CharacterPassiveDefinition passive = new();
+        SetField(passive, "actionId", "passive.contract_test");
+        SetField(
+            passive,
+            "sections",
+            new List<CharacterPassiveSectionType>
+            {
+                CharacterPassiveSectionType.Subject,
+                CharacterPassiveSectionType.Ability,
+            });
+        SetField(passive, "subject", CharacterAttackSubject.Manual);
+        SetField(
+            passive,
+            "effects",
+            new List<CharacterEffectDefinition> { new() });
+        SetField(passive, "areaDefinition", CreateWorldArea());
+        passive.Validate();
+
+        Assert.That(
+            AbilityDefinitionValidator.TryValidate(
+                attack,
+                out string attackError),
+            Is.True,
+            attackError);
+        Assert.That(
+            AbilityDefinitionValidator.TryValidate(
+                passive,
+                out string passiveError),
+            Is.True,
+            passiveError);
+        Assert.That(attack.Targeting.UsesWorldArea, Is.True);
+        Assert.That(passive.Targeting.UsesWorldArea, Is.True);
+    }
+
+    [Test]
+    public void CircularArea_AllowsAutomaticPriorityAndZeroForAllTargets()
+    {
+        CharacterSkillDefinition skill = new();
+        SetField(skill, "actionId", "skill.area_all_test");
+        SetField(
+            skill,
+            "sections",
+            new List<CharacterSkillSectionType>
+            {
+                CharacterSkillSectionType.Subject,
+                CharacterSkillSectionType.Ability,
+            });
+        SetField(skill, "subject", CharacterAttackSubject.Random);
+        SetField(skill, "subjectCount", 0);
+        SetField(skill, "areaDefinition", CreateWorldArea());
+        SetField(
+            skill,
+            "effects",
+            new List<CharacterEffectDefinition> { new() });
+        skill.Validate();
+
+        Assert.That(skill.SubjectCount, Is.Zero);
+        Assert.That(skill.Targeting.UsesWorldArea, Is.True);
+        Assert.That(
+            skill.Targeting.SelectionMode,
+            Is.EqualTo(BattleAbilitySelectionMode.Random));
+        Assert.That(
+            AbilityDefinitionValidator.TryValidate(skill, out string error),
             Is.True,
             error);
     }
@@ -1034,7 +1016,7 @@ public sealed class AbilityDefinitionContractTests
     }
 
     [Test]
-    public void RunActionsRemainSeparatedAndEnemyCoreAttackUsesLegacyAdapter()
+    public void RunActionsAndEnemyCoreStatsStayOutsideAbilityProviders()
     {
         IRunAbilityDefinition runAction = new DungeonRoomChoiceDefinition();
         Assert.That(
@@ -1049,27 +1031,15 @@ public sealed class AbilityDefinitionContractTests
         try
         {
             enemy.RegenerateEnemyId();
-            IBattleAbilityDefinition coreAttack = enemy.CoreAttackAbility;
             List<IBattleAbilityDefinition> discovered = new(
                 enemy.EnumerateBattleAbilities());
-            Assert.That(discovered, Has.Count.EqualTo(1));
-            Assert.That(
-                discovered[0].AbilityId,
-                Is.EqualTo(coreAttack.AbilityId));
+            Assert.That(discovered, Is.Empty);
             Assert.That(
                 AbilityDefinitionValidator.TryValidateProvider(
                     enemy,
                     out string providerError),
                 Is.True,
                 providerError);
-            Assert.That(coreAttack.AbilitySchemaVersion, Is.EqualTo(0));
-            Assert.That(coreAttack.UsesLegacyEffectStorage, Is.True);
-            Assert.That(
-                AbilityDefinitionValidator.TryValidate(
-                    coreAttack,
-                    out string battleError),
-                Is.True,
-                battleError);
         }
         finally
         {
@@ -1088,6 +1058,20 @@ public sealed class AbilityDefinitionContractTests
             AbilityDefinitionValidator.TryValidate(ability, out string error),
             Is.True,
             error);
+    }
+
+    private static BattleAreaDefinition CreateWorldArea()
+    {
+        BattleAreaDefinition area = new();
+        SetField(
+            area,
+            "shapeType",
+            CharacterAreaShapeType.CircleSector);
+        SetField(
+            area,
+            "originMode",
+            CharacterAreaOriginMode.DesignatedPoint);
+        return area;
     }
 
     private static void SetField(

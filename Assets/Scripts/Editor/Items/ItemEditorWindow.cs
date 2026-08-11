@@ -412,8 +412,14 @@ public sealed class ItemEditorWindow : EditorWindow
             using (new EditorGUILayout.VerticalScope(EditorStyles.helpBox))
             {
                 EditorGUILayout.LabelField(
-                    "Battle Item Settings",
+                    "Legacy Battle Item Settings",
                     EditorStyles.boldLabel);
+                EditorGUILayout.HelpBox(
+                    "Battle items are retained for inventory and rest-room " +
+                    "compatibility. Author combat abilities directly in " +
+                    "the Battle Card Editor. Battle items are not converted " +
+                    "into cards.",
+                    MessageType.Warning);
                 DrawProperty("targetType", "Target");
                 SerializedProperty targetType = Find("targetType");
                 if (targetType != null &&
@@ -426,18 +432,28 @@ public sealed class ItemEditorWindow : EditorWindow
                         "Enemy Target Area",
                         EditorStyles.miniBoldLabel);
                     EditorGUILayout.HelpBox(
-                        "The clicked enemy is the center anchor. Select the " +
-                        "board cells that receive this item's effects; the " +
-                        "center can be included or excluded in the area " +
-                        "popup.",
+                        "Legacy battle items target the clicked enemy only. " +
+                        "Tile-offset areas are no longer authored.",
                         MessageType.Info);
                     if (enemyTargeting != null)
                     {
-                        CharacterEditorWindow.DrawTargetAreaEditor(
-                            enemyTargeting,
-                            _selected,
-                            CharacterTargetFaction.Enemy,
-                            "includeCenterTarget");
+                        SerializedProperty area =
+                            enemyTargeting.FindPropertyRelative(
+                                "areaDefinition");
+                        SerializedProperty shape =
+                            area?.FindPropertyRelative("shapeType");
+                        if (shape != null)
+                        {
+                            shape.enumValueIndex =
+                                (int)CharacterAreaShapeType.Target;
+                        }
+                        using (new EditorGUI.DisabledScope(true))
+                        {
+                            BattleAbilityEditorGUI.DrawAreaDefinition(
+                                area,
+                                null,
+                                _selected);
+                        }
                     }
                     else
                     {

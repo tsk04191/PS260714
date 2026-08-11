@@ -855,6 +855,7 @@ public abstract class DungeonItemHandViewBase : MonoBehaviour
         ConfigureRoot();
         CollectAuthoredCards();
         _page.BattleItemsChanged += RebuildCards;
+        _page.BattleCardsChanged += RebuildCards;
         _battleManager.ActiveSkillResourceChanged += HandleEnergyChanged;
         _battleManager.StateChanged += HandleBattleStateChanged;
         LocalizationService.LocaleChanged += HandleLocalizationChanged;
@@ -876,6 +877,7 @@ public abstract class DungeonItemHandViewBase : MonoBehaviour
         if (_page != null)
         {
             _page.BattleItemsChanged -= RebuildCards;
+            _page.BattleCardsChanged -= RebuildCards;
             if (_page.Board != null)
             {
                 _page.Board.BindItemTargetHandler(null);
@@ -954,29 +956,52 @@ public abstract class DungeonItemHandViewBase : MonoBehaviour
         }
 
         int visibleIndex = 0;
-        foreach (BattleItemSO item in BattleItemCatalog.GetAll())
+        if (_page.UsesBattleCards)
         {
-            int itemCardCount = GetVisibleCardCount(item);
-            if (itemCardCount <= 0)
-                continue;
-
-            for (int copyIndex = 0; copyIndex < itemCardCount; copyIndex++)
+            foreach (BattleCardInstance instance in _page.BattleCardDeck.Hand)
             {
                 DungeonItemCardView card = GetOrCreateCard(
                     visibleIndex,
                     resolvedCardPrefab);
                 card.SetLayoutOrder(visibleIndex);
                 card.name =
-                    $"crdBattleItem_{item.ItemId.Replace('.', '_')}_" +
-                    $"{copyIndex + 1}";
+                    $"crdBattleCard_{instance.Definition.CardId.Replace('.', '_')}_" +
+                    $"{instance.InstanceId}";
                 card.gameObject.SetActive(true);
-
-                if (!card.Initialize(item, HandleCardClicked))
+                if (!card.Initialize(instance, HandleBattleCardClicked))
                 {
                     card.gameObject.SetActive(false);
                     continue;
                 }
                 visibleIndex++;
+            }
+        }
+        else
+        {
+            foreach (BattleItemSO item in BattleItemCatalog.GetAll())
+            {
+                int itemCardCount = GetVisibleCardCount(item);
+                if (itemCardCount <= 0)
+                    continue;
+
+                for (int copyIndex = 0; copyIndex < itemCardCount; copyIndex++)
+                {
+                    DungeonItemCardView card = GetOrCreateCard(
+                        visibleIndex,
+                        resolvedCardPrefab);
+                    card.SetLayoutOrder(visibleIndex);
+                    card.name =
+                        $"crdBattleItem_{item.ItemId.Replace('.', '_')}_" +
+                        $"{copyIndex + 1}";
+                    card.gameObject.SetActive(true);
+
+                    if (!card.Initialize(item, HandleCardClicked))
+                    {
+                        card.gameObject.SetActive(false);
+                        continue;
+                    }
+                    visibleIndex++;
+                }
             }
         }
 
@@ -1087,16 +1112,29 @@ public abstract class DungeonItemHandViewBase : MonoBehaviour
             if (card == null)
                 continue;
 
-            BattleItemSO item = card.Item;
-            if (item == null)
-                continue;
-            float cooldown = _page.GetBattleItemCooldown(item);
-            card.Refresh(
-                _page.GetBattleItemCount(item),
-                _battleManager.ActiveSkillResource,
-                _battleManager.State == EBattleState.Running,
-                cooldown,
-                _selectedItem == item);
+            if (_page.UsesBattleCards)
+            {
+                if (card.CardInstance == null)
+                    continue;
+                card.RefreshBattleCard(
+                    _battleManager.ActiveSkillResource,
+                    _battleManager.State == EBattleState.Running,
+                    _page.BattleCardDeck.Phase,
+                    _page.BattleCardDeck.CooldownRemaining);
+            }
+            else
+            {
+                BattleItemSO item = card.Item;
+                if (item == null)
+                    continue;
+                float cooldown = _page.GetBattleItemCooldown(item);
+                card.Refresh(
+                    _page.GetBattleItemCount(item),
+                    _battleManager.ActiveSkillResource,
+                    _battleManager.State == EBattleState.Running,
+                    cooldown,
+                    _selectedItem == item);
+            }
         }
 
         RefreshInstruction();
@@ -1120,6 +1158,14 @@ public abstract class DungeonItemHandViewBase : MonoBehaviour
         _selectedItem = _selectedItem == item
             ? null
             : item;
+        RefreshCards();
+    }
+
+    private void HandleBattleCardClicked(BattleCardInstance instance)
+    {
+        if (_page == null || _battleManager == null || instance == null)
+            return;
+        _page.TryBeginBattleCardUse(instance);
         RefreshCards();
     }
 
@@ -1233,15 +1279,38 @@ public abstract class DungeonItemHandViewBase : MonoBehaviour
                 StringComparison.OrdinalIgnoreCase) == true;
             if (request?.UsesWorldArea == true)
             {
+                bool designated = request.AreaDefinition.OriginMode ==
+                    CharacterAreaOriginMode.DesignatedPoint;
                 _instructionText.text = korean
-                    ? "마우스로 범위를 조준한 뒤 좌클릭하세요. (우클릭 취소)"
-                    : "Aim with the mouse and left-click to cast. " +
-                      "(Right-click to cancel)";
+                    ? designated
+                        ? "중심점을 누른 뒤 드래그해 방향을 정하세요. (우클릭 취소)"
+                        : "캐릭터에서 마우스 방향으로 조준한 뒤 클릭하세요. (우클릭 취소)"
+                    : designated
+                        ? "Click the origin, then drag to set direction. " +
+                          "(Right-click to cancel)"
+                        : "Aim from the caster and click to cast. " +
+                          "(Right-click to cancel)";
                 return;
             }
             _instructionText.text = korean
                 ? $"대상을 선택하세요 ({selected}/{required})"
                 : $"Select target(s) ({selected}/{required})";
+            return;
+        }
+
+        if (_page?.UsesBattleCards == true)
+        {
+            BattleCardDeckRuntime deck = _page.BattleCardDeck;
+            bool korean = LocalizationService.CurrentLocale?.StartsWith(
+                "ko",
+                StringComparison.OrdinalIgnoreCase) == true;
+            _instructionText.text = deck.CooldownRemaining > 0f
+                ? korean
+                    ? $"자동 드로우까지 {deck.CooldownRemaining:0.0}초"
+                    : $"Redrawing in {deck.CooldownRemaining:0.0}s"
+                : korean
+                    ? "카드 한 장을 선택하세요"
+                    : "Choose one card";
             return;
         }
 
@@ -1298,6 +1367,8 @@ public class DungeonItemCardView : MonoBehaviour,
 
     private BattleItemSO _item;
     private System.Action<BattleItemSO> _clicked;
+    private BattleCardInstance _cardInstance;
+    private System.Action<BattleCardInstance> _cardClicked;
     private bool _hovered;
     private int _layoutOrder;
     private Vector2 _layoutPosition;
@@ -1306,6 +1377,7 @@ public class DungeonItemCardView : MonoBehaviour,
     private PopupLayerPlacement _popupLayerPlacement;
 
     public BattleItemSO Item => _item;
+    public BattleCardInstance CardInstance => _cardInstance;
     public int LayoutOrder => _layoutOrder;
 
     public void SetLayoutOrder(int order)
@@ -1350,6 +1422,8 @@ public class DungeonItemCardView : MonoBehaviour,
 
         _item = item;
         _clicked = clicked;
+        _cardInstance = null;
+        _cardClicked = null;
         background.color = WithPanelAlpha(availableColor);
         illustration.sprite = item.Illustration;
         illustration.enabled = item.Illustration != null;
@@ -1360,6 +1434,38 @@ public class DungeonItemCardView : MonoBehaviour,
         costText.text = item.EnergyCost.ToString();
         statusOverlay.color = Color.clear;
         RefreshDetailText(string.Empty);
+        popup.SetActive(false);
+        return true;
+    }
+
+    public bool Initialize(
+        BattleCardInstance cardInstance,
+        System.Action<BattleCardInstance> clicked)
+    {
+        BattleCardSO card = cardInstance?.Definition;
+        if (card == null || !HasRequiredPrefabReferences())
+        {
+            Debug.LogError(
+                "DungeonItemCardView battle-card references are " +
+                "incomplete.",
+                this);
+            return false;
+        }
+
+        _item = null;
+        _clicked = null;
+        _cardInstance = cardInstance;
+        _cardClicked = clicked;
+        background.color = WithPanelAlpha(availableColor);
+        illustration.sprite = card.Illustration;
+        illustration.enabled = card.Illustration != null;
+        icon.sprite = card.Icon;
+        icon.enabled = card.Icon != null;
+        nameText.text = card.GetLocalizedDisplayName();
+        stateText.text = string.Empty;
+        costText.text = card.EnergyCost.ToString();
+        statusOverlay.color = Color.clear;
+        RefreshBattleCardDetail(string.Empty);
         popup.SetActive(false);
         return true;
     }
@@ -1414,6 +1520,32 @@ public class DungeonItemCardView : MonoBehaviour,
         RefreshDetailText(state);
     }
 
+    public void RefreshBattleCard(
+        int energy,
+        bool battleRunning,
+        BattleCardDeckPhase phase,
+        float redrawCooldown)
+    {
+        BattleCardSO card = _cardInstance?.Definition;
+        if (card == null)
+            return;
+        bool available = battleRunning &&
+                         phase == BattleCardDeckPhase.Ready &&
+                         energy >= card.EnergyCost;
+        background.color = WithPanelAlpha(
+            available ? availableColor : disabledColor);
+        statusOverlay.color = available
+            ? Color.clear
+            : disabledOverlayColor;
+        string state = redrawCooldown > 0f
+            ? $"{TimePrecision.FloorToTenth(redrawCooldown):0.0}s"
+            : string.Empty;
+        nameText.text = card.GetLocalizedDisplayName();
+        stateText.text = state;
+        costText.text = card.EnergyCost.ToString();
+        RefreshBattleCardDetail(state);
+    }
+
     private static Color WithPanelAlpha(Color color)
     {
         color.a = Mathf.Min(
@@ -1435,6 +1567,27 @@ public class DungeonItemCardView : MonoBehaviour,
         detailText.text =
             $"{header}\n{_item.GetLocalizedDescription()}\n" +
             $"{footer}{effectScope}" +
+            (string.IsNullOrWhiteSpace(state) ? string.Empty : $"\n{state}");
+    }
+
+    private void RefreshBattleCardDetail(string state)
+    {
+        BattleCardSO card = _cardInstance?.Definition;
+        if (card == null)
+            return;
+        string affiliation = card.Affiliation switch
+        {
+            BattleCardAffiliation.CharacterExclusive => "Character",
+            BattleCardAffiliation.CharacterDependent => "Synergy",
+            _ => "Neutral",
+        };
+        string recycle = card.RecyclePolicy == BattleCardRecyclePolicy.Exhaust
+            ? "Exhaust"
+            : "Discard";
+        detailText.text =
+            $"{card.GetLocalizedDisplayName()} · COST {card.EnergyCost}\n" +
+            $"{card.GetLocalizedDescription()}\n" +
+            $"{affiliation} · {recycle}" +
             (string.IsNullOrWhiteSpace(state) ? string.Empty : $"\n{state}");
     }
 
@@ -1567,7 +1720,10 @@ public class DungeonItemCardView : MonoBehaviour,
         if (eventData != null &&
             eventData.button == PointerEventData.InputButton.Left)
         {
-            _clicked?.Invoke(_item);
+            if (_cardInstance != null)
+                _cardClicked?.Invoke(_cardInstance);
+            else
+                _clicked?.Invoke(_item);
         }
     }
 
@@ -1577,6 +1733,10 @@ public class DungeonItemCardView : MonoBehaviour,
         HidePopup();
         transform.localScale = Vector3.one;
         _layoutPoseInitialized = false;
+        _item = null;
+        _clicked = null;
+        _cardInstance = null;
+        _cardClicked = null;
     }
 
     private void HidePopup()

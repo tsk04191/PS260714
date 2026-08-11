@@ -196,11 +196,15 @@ public static class CharacterLocalization
         return UsesKoreanLocale
             ? $"공격력 {data.AttackPower:0.##}  |  " +
               $"공격 간격 {data.AttackCooldown:0.##}초  |  " +
+              $"판단 {data.Judgment}  |  " +
+              $"지식 {data.Knowledge}  |  " +
               $"패시브 {data.ConfiguredPassiveDefinitionCount} / " +
               $"공격 {data.AttackDefinitions.Count} / " +
               $"기술 {data.SkillDefinitions.Count}"
             : $"ATK {data.AttackPower:0.##}  |  " +
               $"INTERVAL {data.AttackCooldown:0.##}s  |  " +
+              $"JUDGMENT {data.Judgment}  |  " +
+              $"KNOWLEDGE {data.Knowledge}  |  " +
               $"PASSIVE {data.ConfiguredPassiveDefinitionCount} / " +
               $"ATTACK {data.AttackDefinitions.Count} / " +
               $"SKILL {data.SkillDefinitions.Count}";
@@ -584,7 +588,7 @@ public static class CharacterLocalization
                     definition.NumericConditions) +
                 FormatPassiveStatusCost(definition) +
                 subjectDescription +
-                FormatArea(definition.AreaOffsets) + " → " +
+                FormatArea(definition.AreaDefinition) + " → " +
                 abilityDescription);
         }
 
@@ -644,7 +648,7 @@ public static class CharacterLocalization
                     definition.SubjectMetric,
                     definition.SubjectCount) +
                 FormatTargetRetention(definition.TargetRetentionMode) +
-                FormatArea(definition.AreaOffsets) + " → " +
+                FormatArea(definition.AreaDefinition) + " → " +
                 abilityDescription);
         }
 
@@ -731,7 +735,7 @@ public static class CharacterLocalization
                     definition.ConditionMatchMode,
                     definition.NumericConditions) +
                 subjectDescription +
-                FormatArea(definition.AreaOffsets) + " → " +
+                FormatArea(definition.AreaDefinition) + " → " +
                 abilityDescription);
         }
 
@@ -980,6 +984,15 @@ public static class CharacterLocalization
         CharacterAttackSubjectMetric metric,
         int count)
     {
+        if (count == 0)
+        {
+            string areaFaction = faction == CharacterTargetFaction.Ally
+                ? (UsesKoreanLocale ? "아군" : "ally")
+                : (UsesKoreanLocale ? "적" : "enemy");
+            return UsesKoreanLocale
+                ? $"범위 안의 {areaFaction} 전체"
+                : $"All {areaFaction} targets in the area";
+        }
         count = Mathf.Max(1, count);
         if (subject == CharacterAttackSubject.None)
         {
@@ -1464,7 +1477,7 @@ public static class CharacterLocalization
                 selector.ConditionMatchMode,
                 selector.NumericConditions)
             .TrimEnd(' ', ',');
-        string details = subject + FormatArea(selector.AreaOffsets);
+        string details = subject + FormatArea(selector.AreaDefinition);
         if (!string.IsNullOrWhiteSpace(conditions))
             details += $", {conditions}";
 
@@ -1776,22 +1789,16 @@ public static class CharacterLocalization
         return definition.name;
     }
 
-    private static string FormatArea(
-        IReadOnlyList<CharacterTargetAreaOffset> offsets)
+    private static string FormatArea(BattleAreaDefinition definition)
     {
-        if (offsets == null || offsets.Count == 0)
+        if (definition?.UsesWorldArea != true)
             return string.Empty;
 
-        int cellCount = 1;
-        foreach (CharacterTargetAreaOffset offset in offsets)
-        {
-            if (offset != null && !offset.IsCenter)
-                cellCount++;
-        }
-
         return UsesKoreanLocale
-            ? $" / 범위 {cellCount}칸"
-            : $" / Area {cellCount} cells";
+            ? $" / 원형 범위 반지름 {definition.Radius:0.##}, " +
+              $"각도 {definition.Angle:0.##}°"
+            : $" / Circular area radius {definition.Radius:0.##}, " +
+              $"angle {definition.Angle:0.##}°";
     }
 
     private static void AppendCodexLine(StringBuilder builder, string line)

@@ -95,6 +95,19 @@ public sealed class BattleArenaSetup
             : this;
     }
 
+    public BattleArenaSetup WithCoreMaximumHealth(int maximumHealth)
+    {
+        return UsesBattleCore
+            ? new BattleArenaSetup(
+                Mode,
+                maximumHealth,
+                LaneCount,
+                WallRadiusNormalized,
+                SpawnRadiusNormalized,
+                WorldRadius)
+            : this;
+    }
+
     public static float NormalizeWorldRadius(float worldRadius)
     {
         if (float.IsNaN(worldRadius) || float.IsInfinity(worldRadius))

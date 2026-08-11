@@ -1150,7 +1150,12 @@ public sealed class StatusEffectSO : ScriptableObject,
     public int AbilitySchemaVersion => HasTriggerBlocks ? 1 : 0;
     public BattleEffectOriginKind OriginKind =>
         BattleEffectOriginKind.StatusEffect;
-    public BattleAbilityTargeting Targeting => default;
+    public BattleAbilityTargeting Targeting => new(
+        BattleAbilityTargetRelation.Any,
+        BattleAbilitySelectionMode.Inherit,
+        BattleAbilityTargetMetric.None,
+        1,
+        areaDefinition: new BattleAreaDefinition());
     public IEnumerable<IBattleEffectDefinition> BattleEffects =>
         EnumerateBattleEffects();
     public bool UsesLegacyEffectStorage =>
@@ -1165,7 +1170,8 @@ public sealed class StatusEffectSO : ScriptableObject,
 
     public IEnumerable<IBattleAbilityDefinition> EnumerateBattleAbilities()
     {
-        yield return this;
+        if (HasTriggerBlocks)
+            yield return this;
     }
 
     private IEnumerable<IBattleEffectDefinition> EnumerateBattleEffects()

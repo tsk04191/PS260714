@@ -41,7 +41,7 @@ public interface IBattleEffectTargetSelector
     int SubjectCount { get; }
     CharacterConditionMatchMode ConditionMatchMode { get; }
     IReadOnlyList<CharacterNumericCondition> NumericConditions { get; }
-    IReadOnlyList<CharacterTargetAreaOffset> AreaOffsets { get; }
+    BattleAreaDefinition AreaDefinition { get; }
     bool HasNumericConditions { get; }
 }
 
@@ -118,15 +118,11 @@ public enum BattleAbilityTargetMetric
 }
 
 /// <summary>
-/// Neutral, read-only targeting view used by every ability owner. Existing
-/// serialized fields remain the source of truth during the compatibility
-/// migration; adapters expose them through this contract.
+/// Neutral, read-only targeting view used by every ability owner. The
+/// CharacterSkillDefinition targeting model is the canonical battle schema.
 /// </summary>
 public readonly struct BattleAbilityTargeting
 {
-    private readonly IReadOnlyList<CharacterTargetAreaOffset>
-        _legacyAreaOffsets;
-
     public BattleAbilityTargetRelation Relation { get; }
     public BattleAbilitySelectionMode SelectionMode { get; }
     public BattleAbilityTargetMetric Metric { get; }
@@ -134,14 +130,10 @@ public readonly struct BattleAbilityTargeting
     public int Range { get; }
     public bool IncludeDiagonals { get; }
     public BattleAreaDefinition AreaDefinition { get; }
-    public IReadOnlyList<CharacterTargetAreaOffset> LegacyAreaOffsets =>
-        _legacyAreaOffsets ?? Array.Empty<CharacterTargetAreaOffset>();
     public bool HasTarget =>
         Relation != BattleAbilityTargetRelation.None &&
         SelectionMode != BattleAbilitySelectionMode.None;
     public bool UsesWorldArea => AreaDefinition?.UsesWorldArea == true;
-    public bool UsesLegacyTileArea =>
-        !UsesWorldArea && LegacyAreaOffsets.Count > 0;
     public bool IsValid =>
         Enum.IsDefined(typeof(BattleAbilityTargetRelation), Relation) &&
         Enum.IsDefined(typeof(BattleAbilitySelectionMode), SelectionMode) &&
@@ -159,8 +151,7 @@ public readonly struct BattleAbilityTargeting
         int targetCount = 1,
         int range = 0,
         bool includeDiagonals = false,
-        BattleAreaDefinition areaDefinition = null,
-        IReadOnlyList<CharacterTargetAreaOffset> legacyAreaOffsets = null)
+        BattleAreaDefinition areaDefinition = null)
     {
         Relation = relation;
         SelectionMode = selectionMode;
@@ -169,8 +160,6 @@ public readonly struct BattleAbilityTargeting
         Range = Mathf.Max(0, range);
         IncludeDiagonals = includeDiagonals;
         AreaDefinition = areaDefinition;
-        _legacyAreaOffsets = legacyAreaOffsets ??
-            Array.Empty<CharacterTargetAreaOffset>();
     }
 
     public static BattleAbilityTargeting FromCharacter(
@@ -178,8 +167,7 @@ public readonly struct BattleAbilityTargeting
         CharacterAttackSubject subject,
         CharacterAttackSubjectMetric metric,
         int targetCount,
-        BattleAreaDefinition areaDefinition = null,
-        IReadOnlyList<CharacterTargetAreaOffset> legacyAreaOffsets = null)
+        BattleAreaDefinition areaDefinition = null)
     {
         return new BattleAbilityTargeting(
             faction == CharacterTargetFaction.Ally
@@ -192,8 +180,7 @@ public readonly struct BattleAbilityTargeting
                 ? Mathf.CeilToInt(areaDefinition.MaxCastDistance)
                 : 0,
             false,
-            areaDefinition,
-            legacyAreaOffsets);
+            areaDefinition);
     }
 
     public static BattleAbilityTargeting FromEnemy(
@@ -248,7 +235,8 @@ public readonly struct BattleAbilityTargeting
             metric,
             target.TargetCount,
             target.Range,
-            target.IncludeDiagonals);
+            target.IncludeDiagonals,
+            target.AreaDefinition);
     }
 
     private static BattleAbilitySelectionMode ToSelectionMode(
@@ -398,10 +386,36 @@ public static class AbilityDefinitionValidator
                         "a battle ability with a non-battle domain.";
                 return false;
             }
+            if (battleDefinition.AbilitySchemaVersion != 1)
+            {
+                error = $"Ability '{definition.AbilityId}' does not use " +
+                        "the current battle ability schema.";
+                return false;
+            }
+            if (battleDefinition.UsesLegacyEffectStorage)
+            {
+                error = $"Ability '{definition.AbilityId}' still uses " +
+                        "legacy effect storage.";
+                return false;
+            }
             if (!battleDefinition.Targeting.IsValid)
             {
                 error = $"Ability '{definition.AbilityId}' has invalid " +
                         "targeting data.";
+                return false;
+            }
+            if (battleDefinition.Targeting.AreaDefinition == null ||
+                !battleDefinition.Targeting.AreaDefinition.IsValid)
+            {
+                error = $"Ability '{definition.AbilityId}' has an invalid " +
+                        "area definition.";
+                return false;
+            }
+            if (!battleDefinition.Targeting.UsesWorldArea &&
+                battleDefinition.Targeting.TargetCount == 0)
+            {
+                error = $"Ability '{definition.AbilityId}' uses zero " +
+                        "targets outside a circular area.";
                 return false;
             }
             if (!battleDefinition.HasExecutableContent)
@@ -413,19 +427,65 @@ public static class AbilityDefinitionValidator
 
             IEnumerable<IBattleEffectDefinition> effects =
                 battleDefinition.BattleEffects;
-            if (effects != null)
+            if (effects == null)
             {
-                int index = 0;
-                foreach (IBattleEffectDefinition effect in effects)
+                error = $"Ability '{definition.AbilityId}' returned a " +
+                        "null effect sequence.";
+                return false;
+            }
+
+            int effectCount = 0;
+            foreach (IBattleEffectDefinition effect in effects)
+            {
+                if (effect == null)
                 {
-                    if (effect == null)
+                    error = $"Ability '{definition.AbilityId}' effect " +
+                            $"{effectCount + 1} is null.";
+                    return false;
+                }
+                if (!Enum.IsDefined(
+                        typeof(BattleEffectType),
+                        effect.BattleEffectType) ||
+                    !Enum.IsDefined(
+                        typeof(BattleEffectTargetMode),
+                        effect.BattleTargetMode) ||
+                    !Enum.IsDefined(
+                        typeof(BattleEffectPreconditionFailurePolicy),
+                        effect.BattlePreconditionFailurePolicy) ||
+                    !Enum.IsDefined(
+                        typeof(BattleEffectFailurePolicy),
+                        effect.BattleFailurePolicy) ||
+                    !effect.AmountScaling.IsFinite)
+                {
+                    error = $"Ability '{definition.AbilityId}' effect " +
+                            $"{effectCount + 1} has invalid shared data.";
+                    return false;
+                }
+                if (effect.BattleTargetMode ==
+                        BattleEffectTargetMode.FreshSelection)
+                {
+                    IBattleEffectTargetSelector selector =
+                        effect.BattleTargetSelector;
+                    if (selector == null ||
+                        selector.Subject == CharacterAttackSubject.None ||
+                        selector.Subject == CharacterAttackSubject.Manual ||
+                        selector.SubjectCount < 1 ||
+                        selector.AreaDefinition == null ||
+                        selector.AreaDefinition.UsesWorldArea)
                     {
                         error = $"Ability '{definition.AbilityId}' effect " +
-                                $"{index + 1} is null.";
+                                $"{effectCount + 1} has an unsupported " +
+                                "fresh target selector.";
                         return false;
                     }
-                    index++;
                 }
+                effectCount++;
+            }
+            if (effectCount == 0)
+            {
+                error = $"Ability '{definition.AbilityId}' has no shared " +
+                        "battle effects.";
+                return false;
             }
         }
         else if (definition.ExecutionDomain ==
@@ -749,7 +809,8 @@ public enum BattleEffectOriginKind
     StatusEffect = 3,
     EnemyAbility = 4,
     BattleLifecycle = 5,
-    BattleItem = 6
+    BattleItem = 6,
+    BattleCard = 7
 }
 
 public readonly struct BattleEffectContext
@@ -885,6 +946,35 @@ public readonly struct BattleEffectContext
             0,
             1,
             statusEffectsLastUntilBattleEnd);
+    }
+
+    public static BattleEffectContext ForBattleCard(
+        IBattleCharacter source,
+        IBattleBoard board,
+        IActiveSkillResource resource,
+        CharacterTargetFaction targetFaction,
+        IReadOnlyList<EnemyRuntime> enemyTargets,
+        IReadOnlyList<IBattleCharacter> allyTargets,
+        float sourceAttackPower = 0f)
+    {
+        BattleStatusTarget sourceTarget =
+            BattleStatusTarget.FromAlly(source);
+        EffectContext context = new(
+            sourceTarget,
+            board,
+            resource,
+            CharacterActionKind.Skill,
+            targetFaction,
+            enemyTargets,
+            allyTargets,
+            sourceAttackPower);
+        return new BattleEffectContext(
+            context,
+            BattleEffectOriginKind.BattleCard,
+            sourceTarget,
+            0,
+            0,
+            1);
     }
 
     public static BattleEffectContext ForPreview(

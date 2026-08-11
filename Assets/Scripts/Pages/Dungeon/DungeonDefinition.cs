@@ -24,6 +24,8 @@ public sealed class DungeonDefinition : ScriptableObject
     public const float DefaultActiveSkillCostRecoveryDuration = 10f;
     public const float DefaultBattleArenaRadius =
         BattleArenaSetup.DefaultWorldRadius;
+    public const int DefaultBattleShieldMaximumHealth =
+        BattleArenaSetup.DefaultCoreMaximumHealth;
 
     [Header("Identity")]
     [SerializeField] private string dungeonId = "free_battle";
@@ -59,6 +61,11 @@ public sealed class DungeonDefinition : ScriptableObject
     private bool selectStartingItems = true;
     [SerializeField] private DungeonStartingItemRule startingItemRule = new();
     [SerializeField, Tooltip(
+        "Uses the draw/hand/discard battle-card loop instead of exposing " +
+        "every owned battle item in the combat hand.")]
+    private bool useBattleCards = true;
+    [SerializeField] private BattleCardDeckRules battleCardDeckRules = new();
+    [SerializeField, Tooltip(
         "Uses the tutorial encounter setup for the first battle. " +
         "This requires a Tutorial definition.")]
     private bool useIntroBattleBalance;
@@ -77,6 +84,11 @@ public sealed class DungeonDefinition : ScriptableObject
         AutomaticClearedBattleHealthCost;
 
     [Header("Battle Arena")]
+    [SerializeField, Min(1), Tooltip(
+        "Maximum health of the projected shield defended during dungeon " +
+        "battles.")]
+    private int battleShieldMaximumHealth =
+        DefaultBattleShieldMaximumHealth;
     [SerializeField, Min(BattleArenaSetup.MinimumWorldRadius), Tooltip(
         "World-space radius shared by the circular wall, movement bounds, " +
         "enemy approach, and shield health ring.")]
@@ -184,6 +196,9 @@ public sealed class DungeonDefinition : ScriptableObject
     public bool SelectStartingItems => selectStartingItems;
     public DungeonStartingItemRule StartingItemRule =>
         startingItemRule ??= new DungeonStartingItemRule();
+    public bool UseBattleCards => useBattleCards;
+    public BattleCardDeckRules BattleCardDeckRules =>
+        battleCardDeckRules ??= new BattleCardDeckRules();
     public bool UseIntroBattleBalance => useIntroBattleBalance;
     public bool UsesTutorialBattleSetup =>
         HasTutorial && useIntroBattleBalance;
@@ -201,6 +216,8 @@ public sealed class DungeonDefinition : ScriptableObject
         ClearedBattleHealthCost >= 0;
     public float BattleArenaRadius =>
         BattleArenaSetup.NormalizeWorldRadius(battleArenaRadius);
+    public int BattleShieldMaximumHealth =>
+        Mathf.Max(1, battleShieldMaximumHealth);
     public DungeonFieldView FieldViewPrefab => fieldViewPrefab;
     public DungeonThemeDefinition Theme => theme;
     public DungeonBgmProfile BgmProfile => bgmProfile;
@@ -507,6 +524,8 @@ public sealed class DungeonDefinition : ScriptableObject
             minimumBattleCount,
             maximumBattleCount);
         startingItemRule ??= new DungeonStartingItemRule();
+        battleCardDeckRules ??= new BattleCardDeckRules();
+        battleCardDeckRules.Validate();
         fixedBattles ??= Array.Empty<BattleSO>();
         fixedEvents ??= Array.Empty<DungeonEventSO>();
         fixedRests ??= Array.Empty<DungeonRestSO>();
@@ -528,6 +547,9 @@ public sealed class DungeonDefinition : ScriptableObject
             clearedBattleHealthCost);
         battleArenaRadius = BattleArenaSetup.NormalizeWorldRadius(
             battleArenaRadius);
+        battleShieldMaximumHealth = Mathf.Max(
+            1,
+            battleShieldMaximumHealth);
         enemyPoolOverride ??= Array.Empty<EnemySO>();
         modifiers ??= Array.Empty<DungeonModifier>();
     }

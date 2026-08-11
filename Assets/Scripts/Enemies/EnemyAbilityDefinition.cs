@@ -114,6 +114,8 @@ public sealed class EnemyAbilityTargetDefinition
     private int range = 1;
     [SerializeField]
     private bool includeDiagonals;
+    [SerializeField]
+    private BattleAreaDefinition areaDefinition = new();
 
     public EnemyAbilityTargetFaction Faction => faction;
     public EnemyAbilityTargetSubject Subject => subject;
@@ -121,6 +123,8 @@ public sealed class EnemyAbilityTargetDefinition
     public int TargetCount => targetCount;
     public int Range => range;
     public bool IncludeDiagonals => includeDiagonals;
+    public BattleAreaDefinition AreaDefinition =>
+        areaDefinition ??= new BattleAreaDefinition();
     public bool HasTarget =>
         faction != EnemyAbilityTargetFaction.None &&
         subject != EnemyAbilityTargetSubject.None;
@@ -142,6 +146,7 @@ public sealed class EnemyAbilityTargetDefinition
             targetCount = Mathf.Max(1, count),
             range = Mathf.Max(1, targetRange),
             includeDiagonals = diagonals,
+            areaDefinition = new BattleAreaDefinition(),
         };
     }
 
@@ -152,6 +157,8 @@ public sealed class EnemyAbilityTargetDefinition
             range,
             1,
             DungeonBoardView.MaximumGridSize - 1);
+        areaDefinition ??= new BattleAreaDefinition();
+        areaDefinition.Validate();
     }
 }
 
@@ -429,7 +436,26 @@ public sealed class EnemyAbilityDefinition : IBattleAbilityDefinition
     public IEnumerable<IBattleEffectDefinition> BattleEffects =>
         EnumerateBattleEffects();
     public bool UsesLegacyEffectStorage => false;
-    public bool HasExecutableContent => Operations.Count > 0;
+    public bool HasExecutableContent => HasUnifiedEffects;
+    public bool HasUnifiedEffects
+    {
+        get
+        {
+            bool hasEffects = false;
+            foreach (EnemyAbilityOperationDefinition operation in Operations)
+            {
+                if (operation == null ||
+                    operation.Type !=
+                        EnemyAbilityOperationType.ExecuteEffects ||
+                    operation.Effects.Count == 0)
+                {
+                    return false;
+                }
+                hasEffects = true;
+            }
+            return hasEffects;
+        }
+    }
 
     private IEnumerable<IBattleEffectDefinition> EnumerateBattleEffects()
     {

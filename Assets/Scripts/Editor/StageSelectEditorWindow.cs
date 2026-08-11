@@ -401,6 +401,21 @@ public sealed class StageSelectEditorWindow : EditorWindow
                 "startingItemRule",
                 "Starting Item Rule");
             DrawProperty(
+                "useBattleCards",
+                "Use Battle Card Deck");
+            DrawProperty(
+                "battleCardDeckRules",
+                "Battle Card Deck Rules",
+                true);
+            EditorGUILayout.HelpBox(
+                "Cards drawn per turn = Base Draw Count + the total " +
+                "Judgment of all characters able to participate in the " +
+                "battle. Effective automatic draw cooldown = Base Draw " +
+                "Cooldown / (1 + participating party Knowledge). The " +
+                "timer starts full when battle begins and refreshes the " +
+                "entire hand whenever it expires.",
+                MessageType.Info);
+            DrawProperty(
                 "useIntroBattleBalance",
                 "Use Intro Battle Balance");
             DrawProperty(
@@ -445,11 +460,15 @@ public sealed class StageSelectEditorWindow : EditorWindow
             "Battle Arena");
         if (_battleArenaExpanded)
         {
+            DrawProperty(
+                "battleShieldMaximumHealth",
+                "Shield Maximum Health");
             DrawProperty("battleArenaRadius", "Circular Arena Radius");
             EditorGUILayout.HelpBox(
-                "This world-space radius controls the authored arena ring, " +
-                "enemy approach radius, ally movement boundary, and the " +
-                "projected shield health UI.",
+                "Shield Maximum Health controls the defended projected " +
+                "shield in every battle. The world-space radius controls " +
+                "the authored arena ring, enemy approach radius, ally " +
+                "movement boundary, and the projected shield health UI.",
                 MessageType.Info);
         }
         EditorGUILayout.EndFoldoutHeaderGroup();

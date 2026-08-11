@@ -153,6 +153,8 @@ public class DungeonPage : MonoBehaviour, IPage
     private readonly List<EnemySO> _fallbackEnemyPool = new();
     private readonly Dictionary<string, BattleItemRunState> _battleItems =
         new(StringComparer.Ordinal);
+    private readonly BattleCardDeckRuntime _battleCardDeck = new();
+    private readonly List<BattleCardSO> _acquiredBattleCards = new();
     private int _maximumEnergy = BattleManager.DefaultMaximumEnergy;
     private float _energyRechargeDuration =
         DungeonDefinition.DefaultActiveSkillCostRecoveryDuration;
@@ -179,6 +181,11 @@ public class DungeonPage : MonoBehaviour, IPage
     public DungeonRunSession RunSession => _session;
     public DungeonDefinition CurrentDungeon => _session.Definition;
     public IReadOnlyList<CharacterRuntime> OwnedTurrets => _ownedTurrets;
+    public bool UsesBattleCards =>
+        _session.Definition?.UseBattleCards == true;
+    public BattleCardDeckRuntime BattleCardDeck => _battleCardDeck;
+    public IReadOnlyList<BattleCardSO> AcquiredBattleCards =>
+        _acquiredBattleCards;
     public IReadOnlyList<CharacterSO> AvailableTurrets => _availableTurrets;
     public IReadOnlyList<CharacterSO> StartingCharacterChoices =>
         _startingCharacterChoices;
@@ -242,6 +249,11 @@ public class DungeonPage : MonoBehaviour, IPage
 
     public event Action<EDungeonRunResult> RunEnded;
     public event Action BattleItemsChanged;
+    public event Action BattleCardsChanged
+    {
+        add => _battleCardDeck.Changed += value;
+        remove => _battleCardDeck.Changed -= value;
+    }
 
     private void Awake()
     {
@@ -271,6 +283,8 @@ public class DungeonPage : MonoBehaviour, IPage
             _battleManager.State == EBattleState.Running)
         {
             TickBattleItemCooldowns(Time.deltaTime);
+            if (UsesBattleCards)
+                _battleCardDeck.Tick(Time.deltaTime);
         }
 
         if (!_session.IsActive || _session.Definition == null ||
@@ -721,6 +735,7 @@ public class DungeonPage : MonoBehaviour, IPage
         _startingCharacterSelectionPending = false;
 
         if (_session.Definition != null &&
+            !_session.Definition.UseBattleCards &&
             _session.Definition.SelectStartingItems)
         {
             return PrepareStartingItemSelection();
@@ -842,6 +857,7 @@ public class DungeonPage : MonoBehaviour, IPage
     private bool BeginPreparedDungeonFlow()
     {
         if (_session.Definition?.SelectStartingItems == true &&
+            _session.Definition.UseBattleCards == false &&
             (_session.PhaseSequence == null ||
              _session.PhaseSequence.Count == 0 ||
              _session.PhaseSequence[0] != EDungeonPhase.Battle))
@@ -1012,6 +1028,35 @@ public class DungeonPage : MonoBehaviour, IPage
             return false;
 
         BattleItemsChanged?.Invoke();
+        return true;
+    }
+
+    public bool CanAcquireBattleCard(BattleCardSO card)
+    {
+        return UsesBattleCards && card != null &&
+               card.AvailableAsDungeonReward &&
+               card.IsEligible(GetCurrentPartyDefinitions());
+    }
+
+    public int GetAcquiredBattleCardCount(BattleCardSO card)
+    {
+        if (card == null)
+            return 0;
+        int count = 0;
+        foreach (BattleCardSO acquired in _acquiredBattleCards)
+        {
+            if (ReferenceEquals(acquired, card))
+                count++;
+        }
+        return count;
+    }
+
+    public bool TryAcquireBattleCard(BattleCardSO card)
+    {
+        if (!_battleRewardPending || !CanAcquireBattleCard(card))
+            return false;
+        _acquiredBattleCards.Add(card);
+        CompleteBattleReward();
         return true;
     }
 
@@ -1309,7 +1354,9 @@ public class DungeonPage : MonoBehaviour, IPage
         if (_session.Definition != null)
         {
             arena = arena.WithWorldRadius(
-                _session.Definition.BattleArenaRadius);
+                    _session.Definition.BattleArenaRadius)
+                .WithCoreMaximumHealth(
+                    _session.Definition.BattleShieldMaximumHealth);
         }
         board.ConfigureArena(arena, setup.Environment);
         board.Initialize(setup.FieldSize, setup.MaximumStackSize);
@@ -1317,6 +1364,7 @@ public class DungeonPage : MonoBehaviour, IPage
         _battleManager.ConfigureActiveSkillResource(
             _maximumEnergy,
             _energyRechargeDuration);
+        PrepareBattleCardDeck(plan.RandomSeed);
         bool started = _battleManager.StartBattle(
             board,
             characters,
@@ -1662,11 +1710,8 @@ public class DungeonPage : MonoBehaviour, IPage
             }
 
             int selectedTargets = Mathf.Max(1, definition.SubjectCount);
-            int areaTargets = definition.AreaOffsets != null
-                ? 1 + definition.AreaOffsets.Count
-                : 1;
             estimatedDamage += data.CalculateAttackDamage(definition) *
-                               selectedTargets * areaTargets;
+                               selectedTargets;
         }
 
         return Mathf.Max(1f, estimatedDamage);
@@ -2107,6 +2152,292 @@ public class DungeonPage : MonoBehaviour, IPage
                _battleManager.CanSpend(item.EnergyCost);
     }
 
+    public bool TryBeginBattleCardUse(BattleCardInstance instance)
+    {
+        if (!UsesBattleCards || instance?.Definition == null ||
+            !_session.IsActive ||
+            _session.Activity != EDungeonRunActivity.Battle ||
+            _battleManager == null ||
+            _battleManager.State != EBattleState.Running ||
+            _battleManager.IsManualTargetSelectionPending ||
+            !_battleCardDeck.CanPlay(instance) ||
+            !_battleManager.CanSpend(instance.Definition.EnergyCost))
+        {
+            return false;
+        }
+
+        BattleCardSO card = instance.Definition;
+        CharacterRuntime source = ResolveBattleCardSource(card);
+        if (source == null || !source.IsAlive || board == null)
+            return false;
+
+        CharacterTargetFaction faction = card.TargetFaction;
+        IReadOnlyList<CharacterNumericCondition> noConditions =
+            Array.Empty<CharacterNumericCondition>();
+        if (card.Subject == CharacterAttackSubject.Manual ||
+            card.AreaDefinition?.UsesWorldArea == true)
+        {
+            if (board is not IBattleManualTargetSelectionService service)
+                return false;
+
+            bool usesArea = card.AreaDefinition?.UsesWorldArea == true;
+            CharacterAttackSubject candidateSubject = usesArea &&
+                card.Subject != CharacterAttackSubject.Manual &&
+                card.Subject != CharacterAttackSubject.None
+                    ? card.Subject
+                    : CharacterAttackSubject.All;
+            int candidateTargetCount = usesArea ? int.MaxValue : 1;
+            IReadOnlyList<EnemyRuntime> enemyCandidates =
+                faction == CharacterTargetFaction.Enemy
+                    ? board.SelectCharacterTargets(
+                        source,
+                        candidateSubject,
+                        card.SubjectMetric,
+                        candidateTargetCount,
+                        CharacterConditionMatchMode.All,
+                        noConditions)
+                    : Array.Empty<EnemyRuntime>();
+            IReadOnlyList<IBattleCharacter> allyCandidates =
+                faction == CharacterTargetFaction.Ally
+                    ? board.SelectAlliedCharacters(
+                        source,
+                        candidateSubject,
+                        card.SubjectMetric,
+                        candidateTargetCount,
+                        CharacterConditionMatchMode.All,
+                        noConditions)
+                    : Array.Empty<IBattleCharacter>();
+            int candidateCount = faction == CharacterTargetFaction.Ally
+                ? allyCandidates.Count
+                : enemyCandidates.Count;
+            if (candidateCount == 0)
+                return false;
+
+            BattleManualTargetSelectionRequest request = new(
+                source,
+                faction,
+                card.TargetCount,
+                enemyCandidates,
+                allyCandidates,
+                true,
+                result => HandleBattleCardTargetSelection(
+                    instance,
+                    source,
+                    result),
+                card.AreaDefinition,
+                card.Subject,
+                card.SubjectMetric);
+            return service.TryBeginManualTargetSelection(request);
+        }
+
+        IReadOnlyList<EnemyRuntime> enemyTargets =
+            faction == CharacterTargetFaction.Enemy
+                ? board.SelectCharacterTargets(
+                    source,
+                    card.Subject,
+                    card.SubjectMetric,
+                    card.TargetCount,
+                    CharacterConditionMatchMode.All,
+                    noConditions)
+                : Array.Empty<EnemyRuntime>();
+        IReadOnlyList<IBattleCharacter> allyTargets =
+            faction == CharacterTargetFaction.Ally
+                ? board.SelectAlliedCharacters(
+                    source,
+                    card.Subject,
+                    card.SubjectMetric,
+                    card.TargetCount,
+                    CharacterConditionMatchMode.All,
+                    noConditions)
+                : Array.Empty<IBattleCharacter>();
+        return ExecuteBattleCard(
+            instance,
+            source,
+            enemyTargets,
+            allyTargets);
+    }
+
+    public bool TryMulliganBattleCards()
+    {
+        return UsesBattleCards &&
+               _battleManager != null &&
+               _battleManager.State == EBattleState.Running &&
+               !_battleManager.IsManualTargetSelectionPending &&
+               _battleCardDeck.TryMulligan();
+    }
+
+    private void HandleBattleCardTargetSelection(
+        BattleCardInstance instance,
+        CharacterRuntime source,
+        BattleManualTargetSelectionResult result)
+    {
+        if (result.Cancelled || !result.HasTargets)
+            return;
+        ExecuteBattleCard(
+            instance,
+            source,
+            result.EnemyTargets,
+            result.AllyTargets);
+    }
+
+    private bool ExecuteBattleCard(
+        BattleCardInstance instance,
+        CharacterRuntime source,
+        IReadOnlyList<EnemyRuntime> enemyTargets,
+        IReadOnlyList<IBattleCharacter> allyTargets)
+    {
+        BattleCardSO card = instance?.Definition;
+        if (card == null || source == null || !source.IsAlive ||
+            !_battleCardDeck.CanPlay(instance) ||
+            _battleManager == null || board == null ||
+            !_battleManager.TrySpend(card.EnergyCost))
+        {
+            return false;
+        }
+
+        BattleEffectContext context = BattleEffectContext.ForBattleCard(
+            source,
+            board,
+            _battleManager,
+            card.TargetFaction,
+            enemyTargets,
+            allyTargets,
+            source.CurrentAttackPower);
+        BattleEffectResult result = BattleEffectExecutor.ExecuteAbility(
+            context,
+            card,
+            source.Data);
+        if (!result.Succeeded)
+        {
+            _battleManager.TryGain(card.EnergyCost);
+            return false;
+        }
+
+        return _battleCardDeck.CompleteSuccessfulPlay(instance);
+    }
+
+    private CharacterRuntime ResolveBattleCardSource(BattleCardSO card)
+    {
+        if (card == null)
+            return null;
+
+        if (card.Affiliation == BattleCardAffiliation.CharacterExclusive ||
+            card.SourcePolicy == BattleCardSourcePolicy.FixedCharacter)
+        {
+            return FindLivingCharacter(card.OwnerCharacter);
+        }
+
+        if (card.SourcePolicy ==
+            BattleCardSourcePolicy.FirstRequiredCharacter)
+        {
+            foreach (CharacterSO required in card.RequiredCharacters)
+            {
+                CharacterRuntime resolved = FindLivingCharacter(required);
+                if (resolved != null)
+                    return resolved;
+            }
+        }
+
+        foreach (CharacterRuntime character in _ownedTurrets)
+        {
+            if (character != null && character.IsAlive)
+                return character;
+        }
+        return null;
+    }
+
+    private CharacterRuntime FindLivingCharacter(CharacterSO definition)
+    {
+        if (definition == null)
+            return null;
+        foreach (CharacterRuntime character in _ownedTurrets)
+        {
+            if (character != null && character.IsAlive &&
+                ReferenceEquals(character.Definition, definition))
+            {
+                return character;
+            }
+        }
+        return null;
+    }
+
+    private void PrepareBattleCardDeck(int battleSeed)
+    {
+        if (!UsesBattleCards)
+        {
+            _battleCardDeck.Clear();
+            return;
+        }
+
+        IReadOnlyList<CharacterSO> party = GetCurrentPartyDefinitions();
+        List<BattleCardSO> resolvedDeck = new();
+        _session.Definition.BattleCardDeckRules.BuildDeck(
+            party,
+            resolvedDeck);
+        foreach (BattleCardSO acquired in _acquiredBattleCards)
+        {
+            if (acquired != null && acquired.IsEligible(party))
+                resolvedDeck.Add(acquired);
+        }
+        BattleCardDeckRules deckRules =
+            _session.Definition.BattleCardDeckRules;
+        int partyKnowledge = ResolveParticipatingPartyKnowledge();
+        _battleCardDeck.ConfigureResolvedDeck(
+            deckRules,
+            resolvedDeck,
+            battleSeed ^ unchecked((int)0xCA4D51A7),
+            deckRules.ResolveCardsDrawnPerTurn(
+                ResolveParticipatingPartyJudgment()),
+            deckRules.ResolveRedrawCooldown(partyKnowledge),
+            deckRules.ResolveMulliganCooldown(partyKnowledge));
+        if (!_battleCardDeck.BeginBattle())
+        {
+            Debug.LogError(
+                "Battle card deck has no eligible cards. Configure the " +
+                "dungeon deck or create eligible BattleCardSO assets.",
+                this);
+        }
+    }
+
+    private IReadOnlyList<CharacterSO> GetCurrentPartyDefinitions()
+    {
+        List<CharacterSO> party = new(_ownedTurrets.Count);
+        foreach (CharacterRuntime character in _ownedTurrets)
+        {
+            if (character?.Definition != null)
+                party.Add(character.Definition);
+        }
+        return party;
+    }
+
+    private int ResolveParticipatingPartyJudgment()
+    {
+        int total = 0;
+        foreach (CharacterRuntime character in _ownedTurrets)
+        {
+            if (character == null || !character.CanParticipate)
+                continue;
+
+            long next = (long)total + (character.Data?.Judgment ?? 0);
+            total = next >= int.MaxValue ? int.MaxValue : (int)next;
+        }
+        return total;
+    }
+
+    private int ResolveParticipatingPartyKnowledge()
+    {
+        int total = 0;
+        foreach (CharacterRuntime character in _ownedTurrets)
+        {
+            if (character == null || !character.CanParticipate)
+                continue;
+
+            long next = (long)total + (character.Data?.Knowledge ?? 0);
+            total = next >= int.MaxValue ? int.MaxValue : (int)next;
+        }
+        return total;
+    }
+
     private bool CompleteBattleItemUse(BattleItemSO item)
     {
         if (!TryGetBattleItemState(item, out BattleItemRunState state) ||
@@ -2180,6 +2511,8 @@ public class DungeonPage : MonoBehaviour, IPage
             ? definition.ActiveSkillCostRecoveryDuration
             : DungeonDefinition.DefaultActiveSkillCostRecoveryDuration;
         _battleItems.Clear();
+        _acquiredBattleCards.Clear();
+        _battleCardDeck.Clear();
         _battleManager?.ConfigureActiveSkillResource(
             _maximumEnergy,
             _energyRechargeDuration);
@@ -3750,6 +4083,7 @@ public sealed class DungeonEventTab
         NewTurret,
         EnergyUpgrade,
         BattleItem,
+        BattleCard,
     }
 
     private enum EViewMode
@@ -3774,6 +4108,7 @@ public sealed class DungeonEventTab
         public CharacterSO TurretDefinition { get; }
         public EDungeonEnergyUpgradeType EnergyUpgradeType { get; }
         public BattleItemSO BattleItem { get; }
+        public BattleCardSO BattleCard { get; }
 
         private RewardOption(
             ERewardOptionType type,
@@ -3783,7 +4118,8 @@ public sealed class DungeonEventTab
             string dungeonUpgradeId,
             CharacterSO turretDefinition,
             EDungeonEnergyUpgradeType energyUpgradeType,
-            BattleItemSO battleItem)
+            BattleItemSO battleItem,
+            BattleCardSO battleCard = null)
         {
             Type = type;
             TurretSlotIndex = turretSlotIndex;
@@ -3793,6 +4129,7 @@ public sealed class DungeonEventTab
             TurretDefinition = turretDefinition;
             EnergyUpgradeType = energyUpgradeType;
             BattleItem = battleItem;
+            BattleCard = battleCard;
         }
 
         public static RewardOption CreateNewTurret(CharacterSO definition)
@@ -3833,6 +4170,20 @@ public sealed class DungeonEventTab
                 null,
                 default,
                 item);
+        }
+
+        public static RewardOption CreateBattleCard(BattleCardSO card)
+        {
+            return new RewardOption(
+                ERewardOptionType.BattleCard,
+                -1,
+                -1,
+                default,
+                string.Empty,
+                null,
+                default,
+                null,
+                card);
         }
     }
 
@@ -4183,10 +4534,21 @@ public sealed class DungeonEventTab
                 EDungeonEnergyUpgradeType.RechargeSpeed));
         }
 
-        foreach (BattleItemSO item in BattleItemCatalog.GetAll())
+        if (_page.UsesBattleCards)
         {
-            if (item != null && _page.CanAcquireBattleItem(item))
-                candidates.Add(RewardOption.CreateBattleItem(item));
+            foreach (BattleCardSO card in BattleCardCatalog.GetAll())
+            {
+                if (_page.CanAcquireBattleCard(card))
+                    candidates.Add(RewardOption.CreateBattleCard(card));
+            }
+        }
+        else
+        {
+            foreach (BattleItemSO item in BattleItemCatalog.GetAll())
+            {
+                if (item != null && _page.CanAcquireBattleItem(item))
+                    candidates.Add(RewardOption.CreateBattleItem(item));
+            }
         }
 
         _currentRewardOptions.Clear();
@@ -4302,6 +4664,25 @@ public sealed class DungeonEventTab
                 new Color(0.8f, 0.35f, 0.22f, 1f));
         }
 
+        if (option.Type == ERewardOptionType.BattleCard)
+        {
+            BattleCardSO card = option.BattleCard;
+            int acquiredCopies = _page.GetAcquiredBattleCardCount(card);
+            return new RewardCardContent(
+                "CARD",
+                card != null
+                    ? card.GetLocalizedDisplayName()
+                    : string.Empty,
+                card != null
+                    ? card.GetLocalizedDescription()
+                    : string.Empty,
+                card != null
+                    ? $"Cost {card.EnergyCost} / Run copies " +
+                      $"{acquiredCopies + 1}"
+                    : string.Empty,
+                new Color(0.75f, 0.22f, 0.28f, 1f));
+        }
+
         if (option.Type == ERewardOptionType.NewTurret)
         {
             CharacterData newTurretData =
@@ -4387,6 +4768,12 @@ public sealed class DungeonEventTab
         if (option.Type == ERewardOptionType.BattleItem)
         {
             _page.TryAcquireBattleItem(option.BattleItem);
+            return;
+        }
+
+        if (option.Type == ERewardOptionType.BattleCard)
+        {
+            _page.TryAcquireBattleCard(option.BattleCard);
             return;
         }
 

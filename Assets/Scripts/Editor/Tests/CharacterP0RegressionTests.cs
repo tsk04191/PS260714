@@ -63,46 +63,50 @@ public sealed class CharacterP0RegressionTests
                 new Vector2(1.5f, 0f),
                 Vector2.zero,
                 Vector2.up,
-                CharacterAreaShapeType.Circle,
                 1.5f,
-                60f),
+                360f),
             Is.True);
         Assert.That(
             BattleAreaGeometry.Contains(
                 new Vector2(1.51f, 0f),
                 Vector2.zero,
                 Vector2.up,
-                CharacterAreaShapeType.Circle,
                 1.5f,
-                60f),
+                360f),
             Is.False);
+        Assert.That(
+            BattleAreaGeometry.Contains(
+                Vector2.down,
+                Vector2.zero,
+                Vector2.up,
+                1.5f,
+                360f),
+            Is.True);
     }
 
     [Test]
-    public void BattleAreaGeometry_SemicircleExcludesRearHalf()
+    public void BattleAreaGeometry_180DegreeSectorExcludesRearHalf()
     {
         Assert.That(
             BattleAreaGeometry.Contains(
                 Vector2.up,
                 Vector2.zero,
                 Vector2.up,
-                CharacterAreaShapeType.Semicircle,
                 2f,
-                60f),
+                180f),
             Is.True);
         Assert.That(
             BattleAreaGeometry.Contains(
                 Vector2.down,
                 Vector2.zero,
                 Vector2.up,
-                CharacterAreaShapeType.Semicircle,
                 2f,
-                60f),
+                180f),
             Is.False);
     }
 
     [Test]
-    public void BattleAreaGeometry_ConeUsesConfiguredFullAngle()
+    public void BattleAreaGeometry_SectorUsesConfiguredFullAngle()
     {
         Vector2 inside = Quaternion.Euler(0f, 0f, -29f) * Vector2.up;
         Vector2 outside = Quaternion.Euler(0f, 0f, -31f) * Vector2.up;
@@ -112,7 +116,6 @@ public sealed class CharacterP0RegressionTests
                 inside,
                 Vector2.zero,
                 Vector2.up,
-                CharacterAreaShapeType.Cone,
                 2f,
                 60f),
             Is.True);
@@ -121,10 +124,52 @@ public sealed class CharacterP0RegressionTests
                 outside,
                 Vector2.zero,
                 Vector2.up,
-                CharacterAreaShapeType.Cone,
                 2f,
                 60f),
             Is.False);
+    }
+
+    [Test]
+    public void BattleAreaGeometry_ZeroDegreeSectorUsesAimRay()
+    {
+        Assert.That(
+            BattleAreaGeometry.Contains(
+                Vector2.up,
+                Vector2.zero,
+                Vector2.up,
+                2f,
+                0f),
+            Is.True);
+        Assert.That(
+            BattleAreaGeometry.Contains(
+                new Vector2(0.01f, 1f),
+                Vector2.zero,
+                Vector2.up,
+                2f,
+                0f),
+            Is.False);
+    }
+
+    [Test]
+    public void ManualAreaRequest_ZeroTargetCountMeansAllCandidates()
+    {
+        BattleAreaDefinition area = new();
+        SetPrivateField(
+            area,
+            "shapeType",
+            CharacterAreaShapeType.CircleSector);
+        BattleManualTargetSelectionRequest request = new(
+            null,
+            CharacterTargetFaction.Enemy,
+            0,
+            new EnemyRuntime[] { null, null, null },
+            null,
+            true,
+            _ => { },
+            area);
+
+        Assert.That(request.TargetCount, Is.Zero);
+        Assert.That(request.RequiredCount, Is.EqualTo(3));
     }
 
     [Test]
@@ -458,13 +503,18 @@ public sealed class CharacterP0RegressionTests
             Is.Not.Null);
         Assert.That(
             ((RectTransform)prefab.transform).sizeDelta,
-            Is.EqualTo(new Vector2(460f, 144f)));
+            Is.EqualTo(new Vector2(270f, 144f)));
 
         SerializedObject serialized = new(
             prefab.GetComponent<CharacterRuntime>());
         string[] designerReferences =
         {
-            "sdImage",
+            "nameText",
+            "standingPortraitView",
+            "standingImage",
+            "healthFill",
+            "healthText",
+            "selectionHighlight",
             "passiveIconFrame",
             "passiveIconImage",
             "activeSkillIconFrame",
@@ -498,9 +548,6 @@ public sealed class CharacterP0RegressionTests
         definitionSerialized.ApplyModifiedPropertiesWithoutUndo();
 
         CharacterRuntime character = CreateCharacter(definition);
-        Image sdImage = character.transform.Find("imgCharacterSd")
-            .GetComponent<Image>();
-
         Assert.That(character.Data.DefeatSdSprite, Is.SameAs(defeat));
         Assert.That(character.Data.SittingSdSprite, Is.SameAs(sitting));
         Assert.That(character.ResolveRestSdSprite(), Is.SameAs(sitting));
@@ -509,7 +556,7 @@ public sealed class CharacterP0RegressionTests
             character.ApplyRunHealthLoss(character.MaximumHealth),
             Is.EqualTo(character.MaximumHealth));
         Assert.That(character.CurrentHealth, Is.Zero);
-        Assert.That(sdImage.sprite, Is.SameAs(defeat));
+        Assert.That(character.ResolveCurrentBattleSdSprite(), Is.SameAs(defeat));
         Assert.That(character.ResolveRestSdSprite(), Is.SameAs(defeat));
 
         Assert.That(character.RestoreHealth(1, true), Is.EqualTo(1));
@@ -598,72 +645,6 @@ public sealed class CharacterP0RegressionTests
     }
 
     [Test]
-    public void DungeonCharacterInfo_UsesOverflowSdAndFullWidthCooldown()
-    {
-        CharacterRuntime character = CreateCharacter(
-            CreateBaseCharacterFixture("CharacterInfoLayoutFixture"));
-
-        RectTransform sdRect = character.transform
-            .Find("imgCharacterSd") as RectTransform;
-        RectTransform cooldownTrack = character.transform
-            .Find("grpCooldown") as RectTransform;
-        RectTransform passiveIcon = character.transform
-            .Find("grpPassiveAbilityIcon") as RectTransform;
-        RectTransform activeIcon = character.transform
-            .Find("grpActiveAbilityIcon") as RectTransform;
-        RectTransform roleIcon = character.transform
-            .Find("grpRoleIcon") as RectTransform;
-        RectTransform archetypeIcon = character.transform
-            .Find("grpArchetypeIcon") as RectTransform;
-        GameObject nameObject =
-            character.transform.Find("txtName").gameObject;
-        GameObject attackObject =
-            character.transform.Find("txtAttack").gameObject;
-        GameObject cooldownTextObject =
-            character.transform.Find("txtCooldown").gameObject;
-
-        Assert.That(sdRect, Is.Not.Null);
-        Assert.That(sdRect.sizeDelta, Is.EqualTo(new Vector2(225f, 225f)));
-        Assert.That(
-            sdRect.anchoredPosition,
-            Is.EqualTo(new Vector2(0f, 18f)));
-        Assert.That(cooldownTrack, Is.Not.Null);
-        Assert.That(cooldownTrack.anchorMin, Is.EqualTo(Vector2.zero));
-        Assert.That(
-            cooldownTrack.anchorMax,
-            Is.EqualTo(new Vector2(1f, 0f)));
-        Assert.That(cooldownTrack.offsetMin.x, Is.EqualTo(6f));
-        Assert.That(cooldownTrack.offsetMax.x, Is.EqualTo(-6f));
-
-        Assert.That(passiveIcon, Is.Not.Null);
-        Assert.That(activeIcon, Is.Not.Null);
-        Assert.That(
-            roleIcon == null || !roleIcon.gameObject.activeSelf,
-            Is.True);
-        Assert.That(
-            archetypeIcon == null || !archetypeIcon.gameObject.activeSelf,
-            Is.True);
-        Assert.That(
-            passiveIcon.anchoredPosition,
-            Is.EqualTo(new Vector2(-114f, 0f)));
-        Assert.That(
-            activeIcon.anchoredPosition,
-            Is.EqualTo(new Vector2(-8f, 0f)));
-        Assert.That(
-            passiveIcon.anchoredPosition.y,
-            Is.EqualTo(activeIcon.anchoredPosition.y));
-        Assert.That(
-            passiveIcon.anchoredPosition.x,
-            Is.LessThan(activeIcon.anchoredPosition.x));
-        Assert.That(
-            sdRect.GetComponent<Image>().raycastTarget,
-            Is.True);
-        Assert.That(nameObject.activeSelf, Is.False);
-        Assert.That(attackObject.activeSelf, Is.False);
-        Assert.That(cooldownTextObject.activeSelf, Is.False);
-    }
-
-    [Test]
     public void DungeonCharacterInfo_AbilityIconsTooltipAndAvailabilityRefresh()
     {
         CharacterRuntime character = CreateCharacter(
@@ -724,10 +705,10 @@ public sealed class CharacterP0RegressionTests
             passiveFrame.gameObject,
             pointerEvent,
             ExecuteEvents.pointerExitHandler);
-        Transform sdImage =
-            character.transform.Find("imgCharacterSd");
+        Transform standingImage =
+            character.transform.Find("grpStandingViewport/imgCharacterStanding");
         ExecuteEvents.Execute(
-            sdImage.gameObject,
+            standingImage.gameObject,
             pointerEvent,
             ExecuteEvents.pointerEnterHandler);
         Assert.That(tooltip.gameObject.activeSelf, Is.True);
@@ -3065,7 +3046,7 @@ public sealed class CharacterP0RegressionTests
     }
 
     [Test]
-    public void FreshSelectionAreaAndConditions_ArePreparedWithSelector()
+    public void FreshSelectionConditions_DoNotExpandLegacyTiles()
     {
         CharacterSO definition = CreateFreshSelectionCharacter();
         SerializedObject serialized = new(definition);
@@ -3091,13 +3072,6 @@ public sealed class CharacterP0RegressionTests
         condition.FindPropertyRelative("comparison").enumValueIndex =
             (int)CharacterNumericComparison.GreaterThanOrEqual;
         condition.FindPropertyRelative("threshold").floatValue = 0f;
-        SerializedProperty offsets = selector.FindPropertyRelative(
-            "areaOffsets");
-        offsets.arraySize = 1;
-        offsets.GetArrayElementAtIndex(0)
-            .FindPropertyRelative("rowOffset").intValue = 0;
-        offsets.GetArrayElementAtIndex(0)
-            .FindPropertyRelative("columnOffset").intValue = 1;
         serialized.ApplyModifiedPropertiesWithoutUndo();
 
         CharacterDefinitionValidationResult validation =
@@ -3131,15 +3105,15 @@ public sealed class CharacterP0RegressionTests
         Assert.That(
             board.SelectionNumericConditionCounts,
             Is.EqualTo(new[] { 1 }));
-        Assert.That(board.AreaExpansionCallCount, Is.EqualTo(1));
+        Assert.That(board.AreaExpansionCallCount, Is.Zero);
         Assert.That(board.DamageTargetSnapshots, Has.Count.EqualTo(1));
         Assert.That(
             board.DamageTargetSnapshots[0],
-            Is.EqualTo(new[] { center, cross }));
+            Is.EqualTo(new[] { center }));
         Assert.That(
             board.DamageShowAttackRangeSnapshots,
-            Is.EqualTo(new[] { false }));
-        Assert.That(character.TotalDamageDealt, Is.EqualTo(6));
+            Is.EqualTo(new[] { true }));
+        Assert.That(character.TotalDamageDealt, Is.EqualTo(3));
     }
 
     [Test]

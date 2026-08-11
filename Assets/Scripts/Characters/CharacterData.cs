@@ -827,6 +827,8 @@ public sealed class CharacterData
     private CharacterProgressData _progress;
     private readonly int _baseMaximumHealth;
     private readonly float _baseAttackPower;
+    private readonly int _baseJudgment;
+    private readonly int _baseKnowledge;
     private readonly float _baseAttackCooldown;
     private readonly Dictionary<int, int> _dungeonUpgradeCounts = new();
     private readonly Dictionary<string, int> _dungeonUpgradeCountsById =
@@ -895,6 +897,8 @@ public sealed class CharacterData
             _cumulativeAttackPowerBonus +
             _dungeonAttackPowerBonus,
             CharacterModifierStat.AttackPower));
+    public int Judgment => Mathf.Max(0, _baseJudgment);
+    public int Knowledge => Mathf.Max(0, _baseKnowledge);
     public float AttackCooldown => TimePrecision.Normalize(
         Mathf.Max(
             TimePrecision.Step,
@@ -1133,6 +1137,8 @@ public sealed class CharacterData
             ? original.MaximumHealth
             : 1;
         _baseAttackPower = original != null ? original.AttackPower : 1f;
+        _baseJudgment = original != null ? original.Judgment : 0;
+        _baseKnowledge = original != null ? original.Knowledge : 0;
         _baseAttackCooldown = original != null
             ? original.AttackCooldown
             : 1f;

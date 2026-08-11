@@ -657,7 +657,7 @@ public sealed class ItemDefinitionTests
     }
 
     [Test]
-    public void EnemyBattleItemTargetArea_CanExcludeCenterTarget()
+    public void EnemyBattleItemTargetArea_UsesSingleTarget()
     {
         BattleItemSO item = ScriptableObject.CreateInstance<BattleItemSO>();
         try
@@ -665,20 +665,9 @@ public sealed class ItemDefinitionTests
             SerializedObject serialized = new(item);
             serialized.FindProperty("targetType").enumValueIndex =
                 (int)BattleItemTargetType.Enemy;
-            SerializedProperty targeting =
-                serialized.FindProperty("enemyTargeting");
-            targeting.FindPropertyRelative("includeCenterTarget")
-                .boolValue = false;
-            SerializedProperty offsets =
-                targeting.FindPropertyRelative("areaOffsets");
-            offsets.arraySize = 1;
-            SerializedProperty offset = offsets.GetArrayElementAtIndex(0);
-            offset.FindPropertyRelative("rowOffset").intValue = 0;
-            offset.FindPropertyRelative("columnOffset").intValue = 1;
             serialized.ApplyModifiedPropertiesWithoutUndo();
 
-            Assert.That(item.EnemyTargeting.IncludeCenterTarget, Is.False);
-            Assert.That(item.EnemyTargeting.AreaOffsets, Has.Count.EqualTo(1));
+            Assert.That(item.EnemyTargeting.IncludeCenterTarget, Is.True);
             Assert.That(item.HasUsableTargetArea, Is.True);
         }
         finally

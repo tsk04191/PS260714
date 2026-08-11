@@ -2194,13 +2194,7 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
             return false;
         }
 
-        targets = subject == CharacterAttackSubject.Manual &&
-                  definition.AreaDefinition.UsesWorldArea
-            ? selectedTargets
-            : ExpandCustomAbilityArea(
-                _board,
-                selectedTargets,
-                definition.AreaOffsets);
+        targets = selectedTargets;
         if (definition.HasExplicitEffects)
         {
             effects = PrepareExplicitEffects(
@@ -2226,8 +2220,7 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
         CharacterActionConditionData actionCondition,
         AbilityTargetSelection inheritedTargets)
     {
-        if (subject == CharacterAttackSubject.Manual &&
-            definition.AreaDefinition.UsesWorldArea)
+        if (definition.AreaDefinition.UsesWorldArea)
         {
             IReadOnlyList<CharacterNumericCondition> conditions =
                 actionCondition.HasNumericConditions
@@ -2237,6 +2230,8 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
                 _board,
                 definition.TargetFaction,
                 definition.SubjectCount,
+                subject,
+                definition.SubjectMetric,
                 actionCondition.MatchMode,
                 conditions,
                 definition.AreaDefinition);
@@ -2254,7 +2249,8 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
                 actionCondition.HasNumericConditions,
                 actionCondition.MatchMode,
                 actionCondition.NumericConditions,
-                inheritedTargets);
+                inheritedTargets,
+                definition.AreaDefinition);
         }
 
         AbilityTargetSelection validInheritedTargets =
@@ -2285,7 +2281,8 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
             actionCondition.HasNumericConditions,
             actionCondition.MatchMode,
             actionCondition.NumericConditions,
-            default);
+            default,
+            fallbackAttack.AreaDefinition);
     }
 
     private static bool UsesActionTargets(
@@ -2453,10 +2450,6 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
 
                 if (definition.HasExplicitEffects)
                 {
-                    targets = ExpandCustomAbilityArea(
-                        board,
-                        targets,
-                        definition.AreaOffsets);
                     IReadOnlyList<PreparedEffectExecution> effects =
                         PrepareExplicitEffects(
                             board,
@@ -2482,10 +2475,6 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
                     int abilityDamage = Data.CalculateAttackDamage(
                         definition,
                         GetEffectivePowerMultiplier());
-                    targets = ExpandCustomAbilityArea(
-                        board,
-                        targets,
-                        definition.AreaOffsets);
                     bool succeeded = ExecuteCustomAbilityOnTargets(
                         board,
                         targets,
@@ -2582,7 +2571,8 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
                 actionCondition.HasNumericConditions,
                 actionCondition.MatchMode,
                 actionCondition.NumericConditions,
-                inheritedTargets);
+                inheritedTargets,
+                definition.AreaDefinition);
         }
 
         IReadOnlyList<CharacterNumericCondition> conditions =
@@ -2623,7 +2613,8 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
                 actionCondition.HasNumericConditions,
                 actionCondition.MatchMode,
                 actionCondition.NumericConditions,
-                inheritedTargets);
+                inheritedTargets,
+                definition.AreaDefinition);
         if (selectedTargets.Count == 1)
         {
             _retainedAttackTargets[definitionIndex] =
@@ -3162,7 +3153,8 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
                 actionCondition.HasNumericConditions,
                 actionCondition.MatchMode,
                 actionCondition.NumericConditions,
-                inheritedTargets);
+                inheritedTargets,
+                definition.AreaDefinition);
             if (_manualTargetRequestPending)
                 return false;
 
@@ -3175,10 +3167,6 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
                 return false;
             }
 
-            targets = ExpandCustomAbilityArea(
-                board,
-                targets,
-                definition.AreaOffsets);
             IReadOnlyList<PreparedEffectExecution> effects =
                 PrepareExplicitEffects(
                     board,
@@ -3227,7 +3215,6 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
                     definition.ActionId),
                 definition.StatusRemovalSelection,
                 definition.StatusRemovalAmount,
-                definition.AreaOffsets,
                 inheritedTargets,
                 out AbilityTargetSelection targets,
                 out int legacyDamageDealt);
@@ -3262,7 +3249,6 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
         float statusStacks,
         CharacterStatusRemovalSelection statusRemovalSelection,
         CharacterStatusRemovalAmount statusRemovalAmount,
-        IReadOnlyList<CharacterTargetAreaOffset> areaOffsets,
         AbilityTargetSelection inheritedTargets,
         out AbilityTargetSelection targets,
         out int damageDealt)
@@ -3293,8 +3279,6 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
             return false;
         }
 
-        targets = ExpandCustomAbilityArea(board, targets, areaOffsets);
-
         return ExecuteCustomAbilityOnTargets(
             board,
             targets,
@@ -3308,26 +3292,6 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
             out damageDealt);
     }
 
-    private static AbilityTargetSelection ExpandCustomAbilityArea(
-        IBattleBoard board,
-        AbilityTargetSelection targets,
-        IReadOnlyList<CharacterTargetAreaOffset> areaOffsets)
-    {
-        if (board == null ||
-            targets.Faction != CharacterTargetFaction.Enemy ||
-            targets.Count == 0 || areaOffsets == null ||
-            areaOffsets.Count == 0)
-        {
-            return targets;
-        }
-
-        return AbilityTargetSelection.Enemies(
-            board.ExpandCharacterAreaTargets(
-                targets.EnemyTargets,
-                areaOffsets),
-            true);
-    }
-
     private AbilityTargetSelection SelectCustomAbilityTargets(
         IBattleBoard board,
         CharacterTargetFaction targetFaction,
@@ -3337,20 +3301,25 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
         bool hasNumericConditions,
         CharacterConditionMatchMode conditionMatchMode,
         IReadOnlyList<CharacterNumericCondition> numericConditions,
-        AbilityTargetSelection inheritedTargets)
+        AbilityTargetSelection inheritedTargets,
+        BattleAreaDefinition areaDefinition = null)
     {
         IReadOnlyList<CharacterNumericCondition> conditions =
             hasNumericConditions
                 ? numericConditions
                 : System.Array.Empty<CharacterNumericCondition>();
-        if (subject == CharacterAttackSubject.Manual)
+        if (areaDefinition?.UsesWorldArea == true ||
+            subject == CharacterAttackSubject.Manual)
         {
             return ResolveManualAbilityTargets(
                 board,
                 targetFaction,
                 targetCount,
+                subject,
+                metric,
                 conditionMatchMode,
-                conditions);
+                conditions,
+                areaDefinition);
         }
         if (subject == CharacterAttackSubject.None)
         {
@@ -3400,6 +3369,8 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
         IBattleBoard board,
         CharacterTargetFaction targetFaction,
         int targetCount,
+        CharacterAttackSubject prioritySubject,
+        CharacterAttackSubjectMetric priorityMetric,
         CharacterConditionMatchMode conditionMatchMode,
         IReadOnlyList<CharacterNumericCondition> conditions,
         BattleAreaDefinition areaDefinition = null)
@@ -3432,17 +3403,23 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
             System.Array.Empty<IBattleCharacter>();
         IReadOnlyList<EnemyRuntime> enemyCandidates =
             System.Array.Empty<EnemyRuntime>();
-        // The All selector ignores its count. Use the smallest valid value
-        // so board implementations never interpret an unbounded sentinel as
-        // collection capacity while gathering manual-selection candidates.
-        const int allCandidateTargetCount = 1;
+        bool usesArea = areaDefinition?.UsesWorldArea == true;
+        CharacterAttackSubject candidateSubject = usesArea &&
+            prioritySubject != CharacterAttackSubject.Manual &&
+            prioritySubject != CharacterAttackSubject.None
+                ? prioritySubject
+                : CharacterAttackSubject.All;
+        CharacterAttackSubjectMetric candidateMetric = usesArea
+            ? priorityMetric
+            : CharacterAttackSubjectMetric.Health;
+        int candidateTargetCount = usesArea ? int.MaxValue : 1;
         if (targetFaction == CharacterTargetFaction.Ally)
         {
             allyCandidates = board.SelectAlliedCharacters(
                 this,
-                CharacterAttackSubject.All,
-                CharacterAttackSubjectMetric.Health,
-                allCandidateTargetCount,
+                candidateSubject,
+                candidateMetric,
+                candidateTargetCount,
                 conditionMatchMode,
                 conditions);
         }
@@ -3450,9 +3427,9 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
         {
             enemyCandidates = board.SelectCharacterTargets(
                 this,
-                CharacterAttackSubject.All,
-                CharacterAttackSubjectMetric.Health,
-                allCandidateTargetCount,
+                candidateSubject,
+                candidateMetric,
+                candidateTargetCount,
                 conditionMatchMode,
                 conditions);
         }
@@ -3467,14 +3444,14 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
         BattleManualTargetSelectionRequest request = new(
             this,
             targetFaction,
-            areaDefinition?.UsesWorldArea == true
-                ? 1
-                : Mathf.Max(1, targetCount),
+            usesArea ? Mathf.Max(0, targetCount) : Mathf.Max(1, targetCount),
             enemyCandidates,
             allyCandidates,
             true,
             HandleManualTargetSelectionCompleted,
-            areaDefinition);
+            areaDefinition,
+            prioritySubject,
+            priorityMetric);
         if (!service.TryBeginManualTargetSelection(request))
             return default;
 
@@ -3546,11 +3523,9 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
                             selector.HasNumericConditions,
                             selector.ConditionMatchMode,
                             selector.NumericConditions,
-                            default);
-                    effectTargets = ExpandCustomAbilityArea(
-                        board,
-                        selected,
-                        selector.AreaOffsets);
+                            default,
+                            selector.AreaDefinition);
+                    effectTargets = selected;
                 }
             }
 
@@ -4914,6 +4889,12 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
 
     private void EnsureSdInfoView()
     {
+        CharacterInfoHoverView standingInteraction =
+            standingImage != null
+                ? standingImage.GetComponent<CharacterInfoHoverView>()
+                : null;
+        standingInteraction?.Configure(this);
+
         if (_useWorldSdPresentation)
         {
             if (sdImage != null)

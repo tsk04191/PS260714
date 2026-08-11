@@ -1463,6 +1463,8 @@ public sealed class CharacterEffectTargetSelector :
     private List<CharacterNumericCondition> numericConditions = new();
     [SerializeField]
     private List<CharacterTargetAreaOffset> areaOffsets = new();
+    [SerializeField]
+    private BattleAreaDefinition areaDefinition = new();
 
     public CharacterTargetFaction TargetFaction => targetFaction;
     public CharacterAttackSubject Subject => subject;
@@ -1478,6 +1480,8 @@ public sealed class CharacterEffectTargetSelector :
         areaOffsets != null
             ? areaOffsets
             : Array.Empty<CharacterTargetAreaOffset>();
+    public BattleAreaDefinition AreaDefinition =>
+        areaDefinition ??= new BattleAreaDefinition();
     public bool HasNumericConditions => NumericConditions.Count > 0;
 
     public void Validate()
@@ -1487,9 +1491,9 @@ public sealed class CharacterEffectTargetSelector :
         foreach (CharacterNumericCondition condition in numericConditions)
             condition?.Validate();
         areaOffsets ??= new List<CharacterTargetAreaOffset>();
-        CharacterTargetAreaOffset.ValidateList(
-            areaOffsets,
-            DungeonBoardView.MaximumGridSize / 2);
+        areaOffsets.Clear();
+        areaDefinition ??= new BattleAreaDefinition();
+        areaDefinition.Validate();
     }
 }
 
@@ -2053,7 +2057,7 @@ public sealed class CharacterSkillDefinition :
     private CharacterTargetFaction targetFaction;
     [SerializeField]
     private CharacterAttackSubject subject;
-    [SerializeField, Min(1)]
+    [SerializeField, Min(0)]
     private int subjectCount = 1;
     [SerializeField]
     private CharacterAttackSubjectMetric subjectMetric;
@@ -2156,8 +2160,7 @@ public sealed class CharacterSkillDefinition :
             subject,
             subjectMetric,
             subjectCount,
-            AreaDefinition,
-            areaOffsets);
+            AreaDefinition);
     public IEnumerable<IBattleEffectDefinition> BattleEffects =>
         (IEnumerable<IBattleEffectDefinition>)effects ??
         Array.Empty<IBattleEffectDefinition>();
@@ -2185,7 +2188,9 @@ public sealed class CharacterSkillDefinition :
         foreach (CharacterNumericCondition condition in numericConditions)
             condition?.Validate();
         cost = Mathf.Max(1, cost);
-        subjectCount = Mathf.Max(1, subjectCount);
+        subjectCount = AreaDefinition.UsesWorldArea
+            ? Mathf.Max(0, subjectCount)
+            : Mathf.Max(1, subjectCount);
         damageAmount = Mathf.Max(0f, damageAmount);
         statusDuration = TimePrecision.Normalize(statusDuration, 0.1f);
         statusStacks = Mathf.Max(0.1f, statusStacks);
@@ -2197,9 +2202,7 @@ public sealed class CharacterSkillDefinition :
             ref statusRemovalCount,
             ref statusRemovalRatio);
         areaOffsets ??= new List<CharacterTargetAreaOffset>();
-        CharacterTargetAreaOffset.ValidateList(
-            areaOffsets,
-            DungeonBoardView.MaximumGridSize / 2);
+        areaOffsets.Clear();
         areaDefinition ??= new BattleAreaDefinition();
         areaDefinition.Validate();
         effects ??= new List<CharacterEffectDefinition>();
@@ -2281,7 +2284,7 @@ public sealed class CharacterPassiveDefinition :
     private CharacterTargetFaction targetFaction;
     [SerializeField]
     private CharacterAttackSubject subject;
-    [SerializeField, Min(1)]
+    [SerializeField, Min(0)]
     private int subjectCount = 1;
     [SerializeField]
     private CharacterAttackSubjectMetric subjectMetric;
@@ -2313,6 +2316,8 @@ public sealed class CharacterPassiveDefinition :
     private float statusRemovalRatio = 0.5f;
     [SerializeField]
     private List<CharacterTargetAreaOffset> areaOffsets = new();
+    [SerializeField]
+    private BattleAreaDefinition areaDefinition = new();
     [SerializeField]
     private CharacterStatusStackCostDefinition selfStatusCost = new();
     [SerializeField]
@@ -2397,6 +2402,8 @@ public sealed class CharacterPassiveDefinition :
             statusRemovalRatio);
     public IReadOnlyList<CharacterTargetAreaOffset> AreaOffsets =>
         areaOffsets;
+    public BattleAreaDefinition AreaDefinition =>
+        areaDefinition ??= new BattleAreaDefinition();
     public CharacterStatusStackCostDefinition SelfStatusCost =>
         selfStatusCost;
     public bool HasSelfStatusCost =>
@@ -2430,8 +2437,7 @@ public sealed class CharacterPassiveDefinition :
             subject,
             subjectMetric,
             subjectCount,
-            null,
-            areaOffsets);
+            AreaDefinition);
     public IEnumerable<IBattleEffectDefinition> BattleEffects =>
         (IEnumerable<IBattleEffectDefinition>)effects ??
         Array.Empty<IBattleEffectDefinition>();
@@ -2496,7 +2502,9 @@ public sealed class CharacterPassiveDefinition :
                 CharacterPassiveAttackTargetRelation.Any;
         }
         cooldown = TimePrecision.Normalize(cooldown, TimePrecision.Step);
-        subjectCount = Mathf.Max(1, subjectCount);
+        subjectCount = AreaDefinition.UsesWorldArea
+            ? Mathf.Max(0, subjectCount)
+            : Mathf.Max(1, subjectCount);
         damageAmount = Mathf.Max(0f, damageAmount);
         statusDuration = TimePrecision.Normalize(statusDuration, 0.1f);
         statusStacks = Mathf.Max(0.1f, statusStacks);
@@ -2510,9 +2518,9 @@ public sealed class CharacterPassiveDefinition :
         selfStatusCost ??= new CharacterStatusStackCostDefinition();
         selfStatusCost.Validate();
         areaOffsets ??= new List<CharacterTargetAreaOffset>();
-        CharacterTargetAreaOffset.ValidateList(
-            areaOffsets,
-            DungeonBoardView.MaximumGridSize / 2);
+        areaOffsets.Clear();
+        areaDefinition ??= new BattleAreaDefinition();
+        areaDefinition.Validate();
         effects ??= new List<CharacterEffectDefinition>();
         foreach (CharacterEffectDefinition effect in effects)
             effect?.Validate();
@@ -2587,7 +2595,7 @@ public sealed class CharacterAttackDefinition :
     private CharacterAttackSubject subject;
     [SerializeField]
     private CharacterAttackTargetRetentionMode targetRetentionMode;
-    [SerializeField, Min(1)]
+    [SerializeField, Min(0)]
     private int subjectCount = 1;
     [SerializeField]
     private CharacterAttackSubjectMetric subjectMetric;
@@ -2620,6 +2628,8 @@ public sealed class CharacterAttackDefinition :
     private float statusRemovalRatio = 0.5f;
     [SerializeField]
     private List<CharacterTargetAreaOffset> areaOffsets = new();
+    [SerializeField]
+    private BattleAreaDefinition areaDefinition = new();
     [SerializeField]
     private List<CharacterEffectDefinition> effects = new();
 
@@ -2673,6 +2683,8 @@ public sealed class CharacterAttackDefinition :
             statusRemovalRatio);
     public IReadOnlyList<CharacterTargetAreaOffset> AreaOffsets =>
         areaOffsets;
+    public BattleAreaDefinition AreaDefinition =>
+        areaDefinition ??= new BattleAreaDefinition();
     public IReadOnlyList<CharacterEffectDefinition> Effects => effects;
     public bool HasExplicitEffects => effects != null && effects.Count > 0;
     public string AbilityId => ActionId;
@@ -2687,8 +2699,7 @@ public sealed class CharacterAttackDefinition :
             subject,
             subjectMetric,
             subjectCount,
-            null,
-            areaOffsets);
+            AreaDefinition);
     public IEnumerable<IBattleEffectDefinition> BattleEffects =>
         (IEnumerable<IBattleEffectDefinition>)effects ??
         Array.Empty<IBattleEffectDefinition>();
@@ -2736,7 +2747,9 @@ public sealed class CharacterAttackDefinition :
             targetRetentionMode =
                 CharacterAttackTargetRetentionMode.ReselectEachAttack;
         }
-        subjectCount = Mathf.Max(1, subjectCount);
+        subjectCount = AreaDefinition.UsesWorldArea
+            ? Mathf.Max(0, subjectCount)
+            : Mathf.Max(1, subjectCount);
         damageAmount = Mathf.Max(0f, damageAmount);
         statusDuration = TimePrecision.Normalize(statusDuration, 0.1f);
         statusStacks = Mathf.Max(0.1f, statusStacks);
@@ -2748,9 +2761,9 @@ public sealed class CharacterAttackDefinition :
             ref statusRemovalCount,
             ref statusRemovalRatio);
         areaOffsets ??= new List<CharacterTargetAreaOffset>();
-        CharacterTargetAreaOffset.ValidateList(
-            areaOffsets,
-            DungeonBoardView.MaximumGridSize / 2);
+        areaOffsets.Clear();
+        areaDefinition ??= new BattleAreaDefinition();
+        areaDefinition.Validate();
         effects ??= new List<CharacterEffectDefinition>();
         foreach (CharacterEffectDefinition effect in effects)
             effect?.Validate();
@@ -2882,6 +2895,13 @@ public sealed class CharacterSO : ScriptableObject,
     [Header("Combat")]
     [SerializeField, Min(1)] private int maximumHealth = 100;
     [SerializeField, Min(1)] private int attackPower = 1;
+    [SerializeField, Min(0), Tooltip(
+        "Adds this many cards to every dungeon battle-card draw cycle.")]
+    private int judgment;
+    [SerializeField, Min(0), Tooltip(
+        "Accelerates the dungeon battle-card draw cooldown. Participating " +
+        "party Knowledge is added together.")]
+    private int knowledge;
     [SerializeField, Min(0.1f)] private float attackCooldown = 1f;
     [SerializeField, Min(0f)] private float attackRecoveryDuration = 0.5f;
     [SerializeField, Min(0f)] private float activeSkillRecoveryDuration;
@@ -2936,6 +2956,8 @@ public sealed class CharacterSO : ScriptableObject,
     public CharacterRestSkillDefinition RestSkill => restSkill;
     public int AttackPower => attackPower;
     public int MaximumHealth => maximumHealth;
+    public int Judgment => Mathf.Max(0, judgment);
+    public int Knowledge => Mathf.Max(0, knowledge);
     public float AttackCooldown => TimePrecision.Normalize(attackCooldown, 0.1f);
     public float AttackRecoveryDuration =>
         TimePrecision.Normalize(attackRecoveryDuration);
@@ -2949,7 +2971,9 @@ public sealed class CharacterSO : ScriptableObject,
             foreach (CharacterAttackDefinition definition in
                      attackDefinitions)
             {
-                if (definition != null)
+                if (definition?.HasExplicitEffects == true &&
+                    definition.HasSection(
+                        CharacterAttackSectionType.Ability))
                     yield return definition;
             }
         }
@@ -2958,7 +2982,9 @@ public sealed class CharacterSO : ScriptableObject,
             foreach (CharacterSkillDefinition definition in
                      skillDefinitions)
             {
-                if (definition != null)
+                if (definition?.HasExplicitEffects == true &&
+                    definition.HasSection(
+                        CharacterSkillSectionType.Ability))
                     yield return definition;
             }
         }
@@ -2967,7 +2993,9 @@ public sealed class CharacterSO : ScriptableObject,
             foreach (CharacterPassiveDefinition definition in
                      passiveDefinitions)
             {
-                if (definition != null)
+                if (definition?.HasExplicitEffects == true &&
+                    definition.HasSection(
+                        CharacterPassiveSectionType.Ability))
                     yield return definition;
             }
         }
@@ -3060,6 +3088,8 @@ public sealed class CharacterSO : ScriptableObject,
 
         maximumHealth = Mathf.Max(1, maximumHealth);
         attackPower = Mathf.Max(1, attackPower);
+        judgment = Mathf.Max(0, judgment);
+        knowledge = Mathf.Max(0, knowledge);
         attackCooldown = TimePrecision.Normalize(attackCooldown, 0.1f);
         attackRecoveryDuration = TimePrecision.Normalize(
             Mathf.Max(0f, attackRecoveryDuration));

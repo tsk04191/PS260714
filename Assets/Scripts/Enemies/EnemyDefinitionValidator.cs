@@ -175,22 +175,8 @@ public static class EnemyDefinitionValidator
                 result,
                 "enemy.board_sprite_missing",
                 "boardSprite",
-                "A square enemy-specific Board Sprite is required for " +
+                "An enemy-specific Board Sprite is required for " +
                 "dungeon world rendering.");
-            return;
-        }
-
-        float width = definition.BoardSprite.rect.width;
-        float height = definition.BoardSprite.rect.height;
-        if (width <= 0f || height <= 0f ||
-            Math.Abs(width - height) > 0.5f)
-        {
-            AddError(
-                result,
-                "enemy.board_sprite_not_square",
-                "boardSprite",
-                $"Board Sprite must use a 1:1 rect. Current rect is " +
-                $"{width:0.#} x {height:0.#}.");
         }
     }
 
@@ -527,6 +513,30 @@ public static class EnemyDefinitionValidator
                 "Target faction and subject must either both be configured " +
                 "or both be None.");
         }
+        if (target.AreaDefinition == null)
+        {
+            AddError(
+                result,
+                "ability.area_definition_null",
+                $"{abilityPath}.target.areaDefinition",
+                "Enemy abilities require an area definition.");
+        }
+        else if (!target.AreaDefinition.IsValid)
+        {
+            AddError(
+                result,
+                "ability.area_definition_invalid",
+                $"{abilityPath}.target.areaDefinition",
+                "Enemy ability area definition is invalid.");
+        }
+        else if (target.AreaDefinition.UsesWorldArea)
+        {
+            AddError(
+                result,
+                "ability.world_area_unsupported",
+                $"{abilityPath}.target.areaDefinition",
+                "Enemy abilities currently support Target range only.");
+        }
     }
 
     private static void ValidateConditions(
@@ -781,6 +791,17 @@ public static class EnemyDefinitionValidator
                     "ability.operation_type_invalid",
                     $"{path}.type",
                     $"Operation type '{operation.Type}' is unsupported.");
+                continue;
+            }
+
+            if (operation.Type != EnemyAbilityOperationType.ExecuteEffects)
+            {
+                AddError(
+                    result,
+                    "ability.operation_schema_mismatch",
+                    $"{path}.type",
+                    "Enemy abilities may contain only shared " +
+                    "ExecuteEffects operations.");
                 continue;
             }
 

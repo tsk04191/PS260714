@@ -18,13 +18,7 @@ public static class BattleItemUseExecutor
             return false;
         }
 
-        IReadOnlyList<EnemyRuntime> targets =
-            board.ExpandCharacterAreaTargets(
-                new[] { enemy },
-                item.EnemyTargeting.AreaOffsets,
-                item.EnemyTargeting.IncludeCenterTarget);
-        if (targets.Count == 0)
-            return false;
+        IReadOnlyList<EnemyRuntime> targets = new[] { enemy };
 
         if (item.UsesUnifiedAbilityEffects)
         {

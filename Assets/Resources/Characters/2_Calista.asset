@@ -416,6 +416,8 @@ MonoBehaviour:
       modifierModules: []
   maximumHealth: 100
   attackPower: 3
+  judgment: 0
+  knowledge: 0
   attackCooldown: 2.5
   attackRecoveryDuration: 0.5
   activeSkillRecoveryDuration: 0

@@ -231,16 +231,22 @@ public sealed class CharacterDefinitionValidationTests
             (int)CharacterTargetFaction.Ally;
         attack.FindPropertyRelative("subject").enumValueIndex =
             (int)CharacterAttackSubject.Self;
-        attack.FindPropertyRelative("damageType").enumValueIndex =
+        SerializedProperty effects =
+            attack.FindPropertyRelative("effects");
+        effects.arraySize = 1;
+        SerializedProperty effect = effects.GetArrayElementAtIndex(0);
+        effect.FindPropertyRelative("type").enumValueIndex =
+            (int)CharacterEffectType.Damage;
+        effect.FindPropertyRelative("damageType").enumValueIndex =
             (int)CharacterAttackDamageType.Physical;
-        attack.FindPropertyRelative("damageAmount").floatValue = 1f;
+        effect.FindPropertyRelative("damageAmount").floatValue = 1f;
         serialized.ApplyModifiedPropertiesWithoutUndo();
 
         CharacterDefinitionValidationResult result =
             CharacterDefinitionValidator.Validate(definition);
 
         Assert.That(
-            HasDiagnostic(result, "ability.ally_damage_unsupported"),
+            HasDiagnostic(result, "effect.ally_damage_unsupported"),
             Is.True);
     }
 
@@ -265,9 +271,13 @@ public sealed class CharacterDefinitionValidationTests
             (int)CharacterTargetFaction.Ally;
         skill.FindPropertyRelative("subject").enumValueIndex =
             (int)CharacterAttackSubject.Self;
-        skill.FindPropertyRelative("damageType").enumValueIndex =
-            (int)CharacterAttackDamageType.StatusEffect;
-        skill.FindPropertyRelative("statusEffect").objectReferenceValue =
+        SerializedProperty effects =
+            skill.FindPropertyRelative("effects");
+        effects.arraySize = 1;
+        SerializedProperty effect = effects.GetArrayElementAtIndex(0);
+        effect.FindPropertyRelative("type").enumValueIndex =
+            (int)CharacterEffectType.ApplyStatus;
+        effect.FindPropertyRelative("statusEffect").objectReferenceValue =
             fire;
         serialized.ApplyModifiedPropertiesWithoutUndo();
 
@@ -275,7 +285,7 @@ public sealed class CharacterDefinitionValidationTests
             CharacterDefinitionValidator.Validate(definition);
 
         Assert.That(
-            HasDiagnostic(result, "ability.status_faction_mismatch"),
+            HasDiagnostic(result, "effect.status_faction_mismatch"),
             Is.True);
     }
 
@@ -432,15 +442,19 @@ public sealed class CharacterDefinitionValidationTests
             (int)CharacterTargetFaction.Enemy;
         attack.FindPropertyRelative("subject").enumValueIndex =
             (int)CharacterAttackSubject.Random;
-        attack.FindPropertyRelative("damageType").enumValueIndex =
-            (int)CharacterAttackDamageType.StatusEffect;
+        SerializedProperty effects =
+            attack.FindPropertyRelative("effects");
+        effects.arraySize = 1;
+        effects.GetArrayElementAtIndex(0)
+            .FindPropertyRelative("type").enumValueIndex =
+            (int)CharacterEffectType.ApplyStatus;
         serialized.ApplyModifiedPropertiesWithoutUndo();
 
         CharacterDefinitionValidationResult result =
             CharacterDefinitionValidator.Validate(definition);
 
         Assert.That(
-            HasDiagnostic(result, "ability.status_required"),
+            HasDiagnostic(result, "effect.status_required"),
             Is.True);
     }
 
@@ -461,9 +475,13 @@ public sealed class CharacterDefinitionValidationTests
             (int)CharacterTargetFaction.Ally;
         attack.FindPropertyRelative("subject").enumValueIndex =
             (int)CharacterAttackSubject.Self;
-        attack.FindPropertyRelative("damageType").enumValueIndex =
-            (int)CharacterAttackDamageType.StatusRemoval;
-        attack.FindPropertyRelative("statusRemovalTarget").enumValueIndex =
+        SerializedProperty effects =
+            attack.FindPropertyRelative("effects");
+        effects.arraySize = 1;
+        SerializedProperty effect = effects.GetArrayElementAtIndex(0);
+        effect.FindPropertyRelative("type").enumValueIndex =
+            (int)CharacterEffectType.RemoveStatus;
+        effect.FindPropertyRelative("statusRemovalTarget").enumValueIndex =
             (int)CharacterStatusRemovalTarget.Single;
         serialized.ApplyModifiedPropertiesWithoutUndo();
 
@@ -471,7 +489,7 @@ public sealed class CharacterDefinitionValidationTests
             CharacterDefinitionValidator.Validate(definition);
 
         Assert.That(
-            HasDiagnostic(result, "ability.removal_status_required"),
+            HasDiagnostic(result, "effect.removal_status_required"),
             Is.True);
     }
 
@@ -492,26 +510,32 @@ public sealed class CharacterDefinitionValidationTests
             (int)CharacterTargetFaction.Ally;
         attack.FindPropertyRelative("subject").enumValueIndex =
             (int)CharacterAttackSubject.Self;
-        attack.FindPropertyRelative("damageType").enumValueIndex =
-            (int)CharacterAttackDamageType.StatusRemoval;
-        attack.FindPropertyRelative("statusRemovalTarget").enumValueIndex =
+        SerializedProperty effects =
+            attack.FindPropertyRelative("effects");
+        effects.arraySize = 1;
+        SerializedProperty effect = effects.GetArrayElementAtIndex(0);
+        effect.FindPropertyRelative("type").enumValueIndex =
+            (int)CharacterEffectType.RemoveStatus;
+        effect.FindPropertyRelative("statusRemovalTarget").enumValueIndex =
             (int)CharacterStatusRemovalTarget.All;
-        attack.FindPropertyRelative(
+        effect.FindPropertyRelative(
             "statusRemovalAmountMode").enumValueIndex =
             (int)CharacterStatusRemovalAmountMode.CurrentStacksRatio;
         serialized.ApplyModifiedPropertiesWithoutUndo();
 
-        FieldInfo ratioField = typeof(CharacterAttackDefinition).GetField(
+        CharacterEffectDefinition runtimeEffect =
+            definition.AttackDefinitions[0].Effects[0];
+        FieldInfo ratioField = typeof(CharacterEffectDefinition).GetField(
             "statusRemovalRatio",
             BindingFlags.Instance | BindingFlags.NonPublic);
         Assert.That(ratioField, Is.Not.Null);
-        ratioField.SetValue(definition.AttackDefinitions[0], 0f);
+        ratioField.SetValue(runtimeEffect, 0f);
 
         CharacterDefinitionValidationResult result =
             CharacterDefinitionValidator.Validate(definition);
 
         Assert.That(
-            HasDiagnostic(result, "ability.removal_ratio_invalid"),
+            HasDiagnostic(result, "effect.removal_ratio_invalid"),
             Is.True);
     }
 
@@ -532,34 +556,38 @@ public sealed class CharacterDefinitionValidationTests
             (int)CharacterTargetFaction.Ally;
         attack.FindPropertyRelative("subject").enumValueIndex =
             (int)CharacterAttackSubject.Self;
-        attack.FindPropertyRelative("damageType").enumValueIndex =
-            (int)CharacterAttackDamageType.StatusRemoval;
-        attack.FindPropertyRelative("statusRemovalTarget").enumValueIndex =
+        SerializedProperty effects =
+            attack.FindPropertyRelative("effects");
+        effects.arraySize = 1;
+        SerializedProperty effect = effects.GetArrayElementAtIndex(0);
+        effect.FindPropertyRelative("type").enumValueIndex =
+            (int)CharacterEffectType.RemoveStatus;
+        effect.FindPropertyRelative("statusRemovalTarget").enumValueIndex =
             (int)CharacterStatusRemovalTarget.Buff;
         serialized.ApplyModifiedPropertiesWithoutUndo();
 
-        CharacterAttackDefinition runtimeAttack =
-            definition.AttackDefinitions[0];
+        CharacterEffectDefinition runtimeEffect =
+            definition.AttackDefinitions[0].Effects[0];
         FieldInfo pickModeField =
-            typeof(CharacterAttackDefinition).GetField(
+            typeof(CharacterEffectDefinition).GetField(
                 "statusRemovalPickMode",
                 BindingFlags.Instance | BindingFlags.NonPublic);
         FieldInfo pickCountField =
-            typeof(CharacterAttackDefinition).GetField(
+            typeof(CharacterEffectDefinition).GetField(
                 "statusRemovalPickCount",
                 BindingFlags.Instance | BindingFlags.NonPublic);
         Assert.That(pickModeField, Is.Not.Null);
         Assert.That(pickCountField, Is.Not.Null);
         pickModeField.SetValue(
-            runtimeAttack,
+            runtimeEffect,
             CharacterStatusRemovalPickMode.RandomCount);
-        pickCountField.SetValue(runtimeAttack, 0);
+        pickCountField.SetValue(runtimeEffect, 0);
 
         CharacterDefinitionValidationResult result =
             CharacterDefinitionValidator.Validate(definition);
 
         Assert.That(
-            HasDiagnostic(result, "ability.removal_pick_count_invalid"),
+            HasDiagnostic(result, "effect.removal_pick_count_invalid"),
             Is.True);
     }
 
@@ -718,7 +746,7 @@ public sealed class CharacterDefinitionValidationTests
     }
 
     [Test]
-    public void Validate_LegacyAbility_ReturnsWarningButRemainsValid()
+    public void Validate_LegacyAbility_ReturnsUnsupportedSchemaError()
     {
         CharacterSO definition = CreateDefinition();
         SerializedObject serialized = new(definition);
@@ -742,13 +770,12 @@ public sealed class CharacterDefinitionValidationTests
         CharacterDefinitionValidationResult result =
             CharacterDefinitionValidator.Validate(definition);
 
-        Assert.That(result.IsValid, Is.True);
-        Assert.That(result.ErrorCount, Is.Zero);
+        Assert.That(result.IsValid, Is.False);
         Assert.That(
             HasDiagnostic(
                 result,
-                "ability.legacy_fallback",
-                CharacterDefinitionDiagnosticSeverity.Warning),
+                "attack.legacy_ability_unsupported",
+                CharacterDefinitionDiagnosticSeverity.Error),
             Is.True);
     }
 
@@ -854,6 +881,16 @@ public sealed class CharacterDefinitionValidationTests
                     .Append(" :: ")
                     .AppendLine(diagnostic.ToString());
             }
+            if (!AbilityDefinitionValidator.TryValidateProvider(
+                    definitions[index],
+                    out string abilityError))
+            {
+                errorCount++;
+                message.Append("- ")
+                    .Append(paths[index])
+                    .Append(" :: common ability contract: ")
+                    .AppendLine(abilityError);
+            }
         }
 
         Assert.That(
@@ -916,6 +953,16 @@ public sealed class CharacterDefinitionValidationTests
                     .Append(paths[index])
                     .Append(" :: ")
                     .AppendLine(diagnostic.ToString());
+            }
+            if (!AbilityDefinitionValidator.TryValidateProvider(
+                    definitions[index],
+                    out string abilityError))
+            {
+                errorCount++;
+                message.Append("- ")
+                    .Append(paths[index])
+                    .Append(" :: common ability contract: ")
+                    .AppendLine(abilityError);
             }
         }
 

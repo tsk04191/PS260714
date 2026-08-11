@@ -60,45 +60,24 @@ public enum BattleItemEffectType
 [Serializable]
 public sealed class BattleItemEnemyTargeting
 {
-    [Tooltip(
-        "When enabled, the enemy clicked as the range anchor also receives " +
-        "the item effects.")]
     [SerializeField]
-    private bool includeCenterTarget = true;
-    [Tooltip(
-        "Board cells affected relative to the clicked enemy. The center " +
-        "cell is controlled separately by Include Center Target.")]
-    [SerializeField]
-    private List<CharacterTargetAreaOffset> areaOffsets = new();
+    private BattleAreaDefinition areaDefinition = new();
 
-    public bool IncludeCenterTarget => includeCenterTarget;
-    public IReadOnlyList<CharacterTargetAreaOffset> AreaOffsets =>
-        areaOffsets != null
-            ? areaOffsets
-            : Array.Empty<CharacterTargetAreaOffset>();
+    public bool IncludeCenterTarget => true;
+    public BattleAreaDefinition AreaDefinition =>
+        areaDefinition ??= new BattleAreaDefinition();
     public bool HasAnyTargetCell
     {
         get
         {
-            if (includeCenterTarget)
-                return true;
-
-            foreach (CharacterTargetAreaOffset offset in AreaOffsets)
-            {
-                if (offset != null && !offset.IsCenter)
-                    return true;
-            }
-
-            return false;
+            return true;
         }
     }
 
     public void Validate()
     {
-        areaOffsets ??= new List<CharacterTargetAreaOffset>();
-        CharacterTargetAreaOffset.ValidateList(
-            areaOffsets,
-            DungeonBoardView.MaximumGridSize / 2);
+        areaDefinition ??= new BattleAreaDefinition();
+        areaDefinition.Validate();
     }
 }
 
@@ -293,10 +272,7 @@ public sealed class BattleItemSO : ItemDefinitionSO,
         1,
         0,
         false,
-        null,
-        targetType == BattleItemTargetType.Enemy
-            ? EnemyTargeting.AreaOffsets
-            : null);
+        EnemyTargeting.AreaDefinition);
     public IEnumerable<IBattleEffectDefinition> BattleEffects =>
         (IEnumerable<IBattleEffectDefinition>)abilityEffects ??
         Array.Empty<IBattleEffectDefinition>();
@@ -307,7 +283,8 @@ public sealed class BattleItemSO : ItemDefinitionSO,
 
     public IEnumerable<IBattleAbilityDefinition> EnumerateBattleAbilities()
     {
-        yield return this;
+        if (UsesUnifiedAbilityEffects)
+            yield return this;
     }
     public bool HasCompatibleEffects
     {
@@ -315,6 +292,11 @@ public sealed class BattleItemSO : ItemDefinitionSO,
         {
             if (!HasUsableTargetArea)
                 return false;
+            if (targetType == BattleItemTargetType.Enemy &&
+                EnemyTargeting.AreaDefinition.UsesWorldArea)
+            {
+                return false;
+            }
 
             if (UsesUnifiedAbilityEffects)
             {

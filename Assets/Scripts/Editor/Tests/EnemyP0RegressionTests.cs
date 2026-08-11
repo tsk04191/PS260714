@@ -68,7 +68,7 @@ public sealed class EnemyP0RegressionTests
     }
 
     [Test]
-    public void BattleItemEnemyArea_ExcludesCenterAndDamagesSelectedCell()
+    public void BattleItemEnemyArea_UsesClickedTargetOnly()
     {
         EnemyRuntime center = LoadEnemy("Basic").CreateRuntime(20);
         EnemyRuntime adjacent = LoadEnemy("Basic").CreateRuntime(20);
@@ -82,16 +82,6 @@ public sealed class EnemyP0RegressionTests
         SerializedObject serialized = new(item);
         serialized.FindProperty("targetType").enumValueIndex =
             (int)BattleItemTargetType.Enemy;
-        SerializedProperty targeting =
-            serialized.FindProperty("enemyTargeting");
-        targeting.FindPropertyRelative("includeCenterTarget").boolValue =
-            false;
-        SerializedProperty offsets =
-            targeting.FindPropertyRelative("areaOffsets");
-        offsets.arraySize = 1;
-        SerializedProperty offset = offsets.GetArrayElementAtIndex(0);
-        offset.FindPropertyRelative("rowOffset").intValue = 0;
-        offset.FindPropertyRelative("columnOffset").intValue = 1;
         SerializedProperty effects = serialized.FindProperty("effects");
         effects.arraySize = 1;
         SerializedProperty effect = effects.GetArrayElementAtIndex(0);
@@ -108,8 +98,8 @@ public sealed class EnemyP0RegressionTests
             center);
 
         Assert.That(applied, Is.True);
-        Assert.That(center.Health, Is.EqualTo(centerHealth));
-        Assert.That(adjacent.Health, Is.EqualTo(adjacentHealth - 5));
+        Assert.That(center.Health, Is.EqualTo(centerHealth - 5));
+        Assert.That(adjacent.Health, Is.EqualTo(adjacentHealth));
     }
 
     [Test]
@@ -246,52 +236,6 @@ public sealed class EnemyP0RegressionTests
     }
 
     [Test]
-    public void Heavy_FirstThreePhysicalHitsDealOneDamage()
-    {
-        EnemyRuntime heavy = LoadEnemy("Heavy").CreateRuntime();
-        DungeonBoardView board = CreateBoard((1, 1, heavy));
-
-        Assert.That(board.TryDamageEnemy(heavy, 10), Is.EqualTo(1));
-        Assert.That(board.TryDamageEnemy(heavy, 10), Is.EqualTo(1));
-        Assert.That(board.TryDamageEnemy(heavy, 10), Is.EqualTo(1));
-        Assert.That(
-            GetAbilityRemainingCharges(
-                heavy,
-                EnemyAbilityIds.GuardedHits),
-            Is.Zero);
-        Assert.That(board.TryDamageEnemy(heavy, 10), Is.EqualTo(10));
-        Assert.That(heavy.Health, Is.EqualTo(7));
-    }
-
-    [Test]
-    public void Heavy_FixedDamageDoesNotConsumeGuardedHits()
-    {
-        EnemyRuntime heavy = LoadEnemy("Heavy").CreateRuntime();
-        DungeonBoardView board = CreateBoard((1, 1, heavy));
-
-        Assert.That(
-            board.TryDamageCharacterTargets(
-                null,
-                new[] { heavy },
-                5,
-                CharacterAttackDamageType.Fixed,
-                false),
-            Is.EqualTo(5));
-        Assert.That(
-            GetAbilityRemainingCharges(
-                heavy,
-                EnemyAbilityIds.GuardedHits),
-            Is.EqualTo(3));
-
-        Assert.That(board.TryDamageEnemy(heavy, 10), Is.EqualTo(1));
-        Assert.That(
-            GetAbilityRemainingCharges(
-                heavy,
-                EnemyAbilityIds.GuardedHits),
-            Is.EqualTo(2));
-    }
-
-    [Test]
     public void Medic_HealsEveryOrthogonalNeighborButNotDiagonal()
     {
         EnemyRuntime medic = LoadEnemy("Medic").CreateRuntime();
@@ -387,68 +331,6 @@ public sealed class EnemyP0RegressionTests
     }
 
     [Test]
-    public void Pointman_SpawnsWithTheNextTwoQueuedEnemies()
-    {
-        BattleManager manager = CreateBattleManager();
-        RecordingBattleBoard board = new();
-        SetPrivateField(manager, "_board", board);
-        SetPrivateField(manager, "_spawnInterval", 1f);
-
-        EnemyRuntime pointman = LoadEnemy("Pointman").CreateRuntime();
-        EnemyRuntime firstCompanion = LoadEnemy("Basic").CreateRuntime();
-        EnemyRuntime secondCompanion = LoadEnemy("Basic").CreateRuntime();
-        EnemyRuntime remaining = LoadEnemy("Basic").CreateRuntime();
-        List<EnemyRuntime> queue =
-            GetPrivateList<EnemyRuntime>(manager, "_spawnQueue");
-        queue.Add(pointman);
-        queue.Add(firstCompanion);
-        queue.Add(secondCompanion);
-        queue.Add(remaining);
-
-        Assert.That(InvokeTrySpawn(manager), Is.True);
-
-        Assert.That(board.AddGroupCallCount, Is.EqualTo(1));
-        Assert.That(
-            board.LastSpawnGroup,
-            Is.EqualTo(new[]
-            {
-                pointman,
-                firstCompanion,
-                secondCompanion,
-            }));
-        Assert.That(manager.PendingEnemyCount, Is.EqualTo(1));
-        Assert.That(manager.SpawnQueue[0], Is.SameAs(remaining));
-        Assert.That(manager.SpawnedEnemyCount, Is.EqualTo(3));
-    }
-
-    [Test]
-    public void Pointman_FailedGroupSpawnKeepsTheQueueIntact()
-    {
-        BattleManager manager = CreateBattleManager();
-        RecordingBattleBoard board = new()
-        {
-            AllowSpawn = false,
-        };
-        SetPrivateField(manager, "_board", board);
-
-        EnemyRuntime pointman = LoadEnemy("Pointman").CreateRuntime();
-        EnemyRuntime firstCompanion = LoadEnemy("Basic").CreateRuntime();
-        EnemyRuntime secondCompanion = LoadEnemy("Basic").CreateRuntime();
-        List<EnemyRuntime> queue =
-            GetPrivateList<EnemyRuntime>(manager, "_spawnQueue");
-        queue.Add(pointman);
-        queue.Add(firstCompanion);
-        queue.Add(secondCompanion);
-
-        Assert.That(InvokeTrySpawn(manager), Is.False);
-
-        Assert.That(manager.PendingEnemyCount, Is.EqualTo(3));
-        Assert.That(manager.SpawnQueue[0], Is.SameAs(pointman));
-        Assert.That(manager.SpawnedEnemyCount, Is.Zero);
-        Assert.That(manager.IsBoardFull, Is.True);
-    }
-
-    [Test]
     public void SpawnQueue_SkipsBlockedEnemyAndSpawnsNextEligibleEnemy()
     {
         BattleManager manager = CreateBattleManager();
@@ -535,70 +417,6 @@ public sealed class EnemyP0RegressionTests
             Is.False);
         Assert.That(board.LivingEnemyCount, Is.Zero);
         Assert.That(board.GetStackCount(0, 0), Is.Zero);
-    }
-
-    [Test]
-    public void ShieldBearer_GainsFullHealthArmorAndRedirectsDiagonalDamage()
-    {
-        EnemyRuntime target = LoadEnemy("Basic").CreateRuntime();
-        EnemyRuntime shieldBearer =
-            LoadEnemy("ShieldBearer").CreateRuntime();
-        DungeonBoardView board = CreateBoard(
-            (1, 1, target),
-            (0, 0, shieldBearer));
-
-        Assert.That(shieldBearer.Armor, Is.Zero);
-        InvokeSpawnAbilities(board, 0, 0, shieldBearer);
-        Assert.That(
-            shieldBearer.Armor,
-            Is.EqualTo(shieldBearer.MaxHealth));
-        Assert.That(board.TryDamageEnemy(target, 5), Is.EqualTo(5));
-        Assert.That(target.Health, Is.EqualTo(target.MaxHealth));
-        Assert.That(
-            shieldBearer.Armor,
-            Is.EqualTo(shieldBearer.MaxHealth - 5));
-        Assert.That(
-            shieldBearer.Health,
-            Is.EqualTo(shieldBearer.MaxHealth));
-    }
-
-    [Test]
-    public void Infiltrator_IsExcludedOnlyWhileAnotherTargetExists()
-    {
-        FakeBattleCharacter source = new(1);
-        EnemyRuntime basic = LoadEnemy("Basic").CreateRuntime();
-        EnemyRuntime infiltrator =
-            LoadEnemy("Infiltrator").CreateRuntime();
-        DungeonBoardView mixedBoard = CreateBoard(
-            (1, 1, basic),
-            (1, 2, infiltrator));
-
-        IReadOnlyList<EnemyRuntime> mixedTargets =
-            mixedBoard.SelectCharacterTargets(
-                source,
-                CharacterAttackSubject.All,
-                CharacterAttackSubjectMetric.Health,
-                10,
-                CharacterConditionMatchMode.All,
-                Array.Empty<CharacterNumericCondition>());
-
-        Assert.That(mixedTargets, Is.EqualTo(new[] { basic }));
-
-        EnemyRuntime loneInfiltrator =
-            LoadEnemy("Infiltrator").CreateRuntime();
-        DungeonBoardView loneBoard = CreateBoard(
-            (1, 1, loneInfiltrator));
-
-        IReadOnlyList<EnemyRuntime> loneTargets =
-            loneBoard.SelectCharacterTargets(
-                source,
-                CharacterAttackSubject.All,
-                CharacterAttackSubjectMetric.Health,
-                10,
-                CharacterConditionMatchMode.All,
-                Array.Empty<CharacterNumericCondition>());
-
-        Assert.That(loneTargets, Is.EqualTo(new[] { loneInfiltrator }));
     }
 
     [Test]
@@ -752,54 +570,6 @@ public sealed class EnemyP0RegressionTests
     }
 
     [Test]
-    public void HeavyAbilityAsset_PreservesGuardedDamageBehavior()
-    {
-        EnemyRuntime heavy =
-            CreateAbilityAssetClone("Heavy").CreateRuntime();
-        DungeonBoardView board = CreateBoard((1, 1, heavy));
-
-        Assert.That(board.TryDamageEnemy(heavy, 10), Is.EqualTo(1));
-        Assert.That(
-            board.TryDamageCharacterTargets(
-                null,
-                new[] { heavy },
-                10,
-                CharacterAttackDamageType.Magical,
-                false),
-            Is.EqualTo(1));
-        Assert.That(
-            board.TryDamageCharacterTargets(
-                null,
-                new[] { heavy },
-                5,
-                CharacterAttackDamageType.Fixed,
-                false),
-            Is.EqualTo(5));
-        Assert.That(
-            GetAbilityRemainingCharges(
-                heavy,
-                EnemyAbilityIds.GuardedHits),
-            Is.EqualTo(1));
-        Assert.That(board.TryDamageEnemy(heavy, 10), Is.EqualTo(1));
-        Assert.That(board.TryDamageEnemy(heavy, 10), Is.EqualTo(10));
-    }
-
-    [Test]
-    public void RuntimeDefaultHeavy_UsesTheSameModularGuardPath()
-    {
-        EnemyRuntime heavy =
-            CreateRuntimeDefault(EEnemyType.Heavy).CreateRuntime();
-        DungeonBoardView board = CreateBoard((1, 1, heavy));
-
-        Assert.That(board.TryDamageEnemy(heavy, 10), Is.EqualTo(1));
-        Assert.That(
-            GetAbilityRemainingCharges(
-                heavy,
-                EnemyAbilityIds.GuardedHits),
-            Is.EqualTo(2));
-    }
-
-    [Test]
     public void MechanicAbilityAsset_RetriesUntilDamageTargetExists()
     {
         EnemyRuntime mechanic =
@@ -825,27 +595,6 @@ public sealed class EnemyP0RegressionTests
         Assert.That(
             mechanic.AbilityCooldownRemaining,
             Is.EqualTo(10f));
-    }
-
-    [Test]
-    public void ShieldBearerAbilityAsset_GrantsArmorOnceAndRedirects()
-    {
-        EnemyRuntime shield =
-            CreateAbilityAssetClone("ShieldBearer").CreateRuntime();
-        EnemyRuntime ally = LoadEnemy("Basic").CreateRuntime();
-        DungeonBoardView board = CreateBoard(
-            (1, 1, shield),
-            (1, 2, ally));
-
-        Assert.That(shield.Armor, Is.Zero);
-        InvokeSpawnAbilities(board, 1, 1, shield);
-        Assert.That(shield.Armor, Is.EqualTo(shield.MaxHealth));
-
-        Assert.That(board.TryDamageEnemy(ally, 5), Is.EqualTo(5));
-        Assert.That(ally.Health, Is.EqualTo(ally.MaxHealth));
-        Assert.That(
-            shield.Armor,
-            Is.EqualTo(shield.MaxHealth - 5));
     }
 
     [Test]
@@ -3001,6 +2750,31 @@ public sealed class DungeonDefinitionRegressionTests
         Assert.That(
             setup.SpawnRadiusNormalized,
             Is.EqualTo(0.45f).Within(0.0001f));
+    }
+
+    [Test]
+    public void DungeonShieldMaximumHealth_OverridesCircularArenaCoreHealth()
+    {
+        DungeonDefinition definition =
+            ScriptableObject.CreateInstance<DungeonDefinition>();
+        try
+        {
+            SerializedObject serialized = new(definition);
+            serialized.FindProperty("battleShieldMaximumHealth").intValue =
+                240;
+            serialized.ApplyModifiedPropertiesWithoutUndo();
+
+            BattleArenaSetup arena = BattleArenaSetup.CreateCircular()
+                .WithCoreMaximumHealth(
+                    definition.BattleShieldMaximumHealth);
+
+            Assert.That(definition.BattleShieldMaximumHealth, Is.EqualTo(240));
+            Assert.That(arena.CoreMaximumHealth, Is.EqualTo(240));
+        }
+        finally
+        {
+            UnityEngine.Object.DestroyImmediate(definition);
+        }
     }
 
     [Test]

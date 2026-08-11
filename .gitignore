@@ -500,6 +500,9 @@ $RECYCLE.BIN/
 !/Assets/LocalizationSource.meta
 !/Assets/Resources/
 /Assets/Resources/*
+!/Assets/Resources/Cards/
+!/Assets/Resources/Cards/**
+!/Assets/Resources/Cards.meta
 !/Assets/Resources/Presentation/
 /Assets/Resources/Presentation/*
 !/Assets/Resources/Presentation/BattleItemCard.prefab

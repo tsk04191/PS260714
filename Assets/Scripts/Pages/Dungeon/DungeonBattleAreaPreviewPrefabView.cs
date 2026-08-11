@@ -34,18 +34,7 @@ public sealed class DungeonBattleAreaPreviewPrefabView : MonoBehaviour
             return;
         }
 
-        float sectorAngle = definition.ShapeType switch
-        {
-            CharacterAreaShapeType.Circle => 360f,
-            CharacterAreaShapeType.Semicircle => 180f,
-            CharacterAreaShapeType.Cone => definition.ConeAngle,
-            _ => 0f,
-        };
-        if (sectorAngle <= 0f)
-        {
-            Hide();
-            return;
-        }
+        float sectorAngle = definition.Angle;
 
         EnsureMesh();
         int segments = Mathf.Max(
@@ -126,6 +115,19 @@ public sealed class DungeonBattleAreaPreviewPrefabView : MonoBehaviour
         float sectorAngle)
     {
         bool circle = sectorAngle >= 359.9f;
+        if (sectorAngle <= 0.001f)
+        {
+            outline.SetPolyline(
+                new[]
+                {
+                    Vector3.zero,
+                    new Vector3(0f, 0.012f, vertices[1].z),
+                },
+                outlineWidth,
+                outlineColor,
+                false);
+            return;
+        }
         List<Vector3> points = new(segments + (circle ? 0 : 3));
         if (!circle)
             points.Add(Vector3.zero);

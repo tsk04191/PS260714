@@ -380,7 +380,7 @@ public sealed class StatusEffectEditorTests
         Assert.That(
             prioritiesByPath,
             Does.Not.ContainKey("PS260714/UI/Apply Main Lobby Layout"));
-        Assert.That(prioritiesByPath.Count, Is.EqualTo(20));
+        Assert.That(prioritiesByPath.Count, Is.EqualTo(22));
 
         HashSet<int> uniquePriorities = new();
         foreach (KeyValuePair<string, int> menu in prioritiesByPath)
@@ -404,11 +404,13 @@ public sealed class StatusEffectEditorTests
                 PS260714EditorMenu.ItemEditorPriority,
                 PS260714EditorMenu.EnemyEditorPriority,
                 PS260714EditorMenu.StatusEffectEditorPriority,
+                PS260714EditorMenu.BattleCardEditorPriority,
                 PS260714EditorMenu.BattleVfxEditorPriority,
                 PS260714EditorMenu.ValidateBattleVfxPriority,
                 PS260714EditorMenu.LocalizationEditorPriority,
                 PS260714EditorMenu.ValidateLocalizationPriority,
                 PS260714EditorMenu.GenerateLocalizationPriority,
+                PS260714EditorMenu.CharacterStandingFramingEditorPriority,
                 PS260714EditorMenu.RecruitEditorPriority,
                 PS260714EditorMenu.ValidateDesignerUiPriority,
                 PS260714EditorMenu.InstallDynamicUiPreviewsPriority,
@@ -418,8 +420,8 @@ public sealed class StatusEffectEditorTests
             Is.EqualTo(new[]
             {
                 0, 1, 2, 3, 4,
-                100, 101, 102, 103, 104, 106, 107, 108,
-                109, 110, 112, 113, 114, 115, 116,
+                100, 101, 102, 103, 104, 105, 106, 107, 108,
+                109, 110, 111, 112, 113, 114, 115, 116,
             }));
     }
 

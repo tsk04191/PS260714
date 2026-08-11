@@ -13,7 +13,10 @@ public sealed class CharacterStandingFramingEditorWindow : EditorWindow
     private SerializedObject serializedCharacter;
     private bool isDragging;
 
-    [MenuItem(MenuPath)]
+    [MenuItem(
+        MenuPath,
+        false,
+        PS260714EditorMenu.CharacterStandingFramingEditorPriority)]
     private static void OpenFromMenu()
     {
         CharacterSO selected = Selection.activeObject as CharacterSO;

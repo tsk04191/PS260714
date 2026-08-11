@@ -614,6 +614,8 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
     private bool _draggingWorldAlly;
     private Vector2 _manualAreaOrigin;
     private Vector2 _manualAreaDirection = Vector2.up;
+    private bool _manualAreaAnchorSet;
+    private bool _manualAreaPointerDown;
     private EnemyRuntime _forcedPriorityTarget;
     private float _forcedPriorityRemaining;
     private int _maximumStackSize = 8;
@@ -1001,6 +1003,8 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
         _manualTargetRequest = null;
         _manualEnemyTargets.Clear();
         _manualAllyTargets.Clear();
+        _manualAreaAnchorSet = false;
+        _manualAreaPointerDown = false;
         _areaPreview?.Hide();
         RefreshManualTargetHighlights();
         ManualTargetSelectionProgressChanged?.Invoke();
@@ -1086,7 +1090,7 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
                  _worldEnemyActors)
         {
             entry.Value?.SetSelected(
-                request?.UsesWorldArea == true &&
+                request != null &&
                 _manualEnemyTargets.Contains(entry.Key));
         }
 
@@ -1095,7 +1099,7 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
         {
             entry.Value?.SetSelected(
                 ReferenceEquals(entry.Key, _selectedWorldAlly) ||
-                (request?.UsesWorldArea == true &&
+                (request != null &&
                  _manualAllyTargets.Contains(entry.Key)));
         }
     }
@@ -4937,11 +4941,15 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
 
         if (_manualTargetRequest?.UsesWorldArea == true)
         {
-            UpdateManualAreaAim(eventData.position);
             if (eventData.button == PointerEventData.InputButton.Right &&
                 _manualTargetRequest.AllowCancel)
             {
                 CancelManualTargetSelection();
+            }
+            else if (eventData.button ==
+                     PointerEventData.InputButton.Left)
+            {
+                BeginManualAreaAim(eventData.position);
             }
             return;
         }
@@ -5024,7 +5032,16 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
 
         if (_manualTargetRequest?.UsesWorldArea == true)
         {
-            UpdateManualAreaAim(eventData.position);
+            if (_manualAreaPointerDown ||
+                _manualTargetRequest.AreaDefinition.OriginMode ==
+                    CharacterAreaOriginMode.Caster)
+            {
+                UpdateManualAreaAim(eventData.position);
+            }
+            else
+            {
+                PreviewManualAreaAnchor(eventData.position);
+            }
             return;
         }
 
@@ -5046,6 +5063,7 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
             if (eventData.button == PointerEventData.InputButton.Left)
             {
                 UpdateManualAreaAim(eventData.position);
+                _manualAreaPointerDown = false;
                 if (_manualEnemyTargets.Count > 0 ||
                     _manualAllyTargets.Count > 0)
                 {
@@ -5126,6 +5144,63 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
         Vector2 source = GetWorldAllyPosition(request.Source);
         _manualAreaDirection = Vector2.up;
         _manualAreaOrigin = source;
+        _manualAreaAnchorSet =
+            request.AreaDefinition.OriginMode ==
+            CharacterAreaOriginMode.Caster;
+        _manualAreaPointerDown = false;
+        RefreshManualAreaTargets();
+    }
+
+    private void BeginManualAreaAim(Vector2 screenPosition)
+    {
+        BattleManualTargetSelectionRequest request = _manualTargetRequest;
+        BattleAreaDefinition definition = request?.AreaDefinition;
+        if (definition == null || !definition.UsesWorldArea)
+            return;
+
+        _manualAreaPointerDown = true;
+        if (definition.OriginMode == CharacterAreaOriginMode.Caster)
+        {
+            _manualAreaAnchorSet = true;
+            UpdateManualAreaAim(screenPosition);
+            return;
+        }
+
+        if (!TryScreenToWorldGround(screenPosition, out Vector2 cursor))
+            return;
+
+        Vector2 source = GetWorldAllyPosition(request.Source);
+        _manualAreaOrigin = ResolveManualAreaOrigin(
+            cursor,
+            source,
+            definition);
+        Vector2 initialDirection = _manualAreaOrigin - source;
+        if (initialDirection.sqrMagnitude > 0.0001f)
+            _manualAreaDirection = initialDirection.normalized;
+        _manualAreaAnchorSet = true;
+        RefreshManualAreaTargets();
+    }
+
+    private void PreviewManualAreaAnchor(Vector2 screenPosition)
+    {
+        BattleManualTargetSelectionRequest request = _manualTargetRequest;
+        BattleAreaDefinition definition = request?.AreaDefinition;
+        if (definition == null || !definition.UsesWorldArea ||
+            definition.OriginMode !=
+                CharacterAreaOriginMode.DesignatedPoint ||
+            !TryScreenToWorldGround(screenPosition, out Vector2 cursor))
+        {
+            return;
+        }
+
+        Vector2 source = GetWorldAllyPosition(request.Source);
+        _manualAreaOrigin = ResolveManualAreaOrigin(
+            cursor,
+            source,
+            definition);
+        Vector2 previewDirection = _manualAreaOrigin - source;
+        if (previewDirection.sqrMagnitude > 0.0001f)
+            _manualAreaDirection = previewDirection.normalized;
         RefreshManualAreaTargets();
     }
 
@@ -5140,27 +5215,36 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
         }
 
         Vector2 source = GetWorldAllyPosition(request.Source);
-        Vector2 aim = cursor - source;
-        if (aim.sqrMagnitude > 0.0001f)
-            _manualAreaDirection = aim.normalized;
-
         if (definition.OriginMode == CharacterAreaOriginMode.Caster)
         {
             _manualAreaOrigin = source;
+            Vector2 aim = cursor - source;
+            if (aim.sqrMagnitude > 0.0001f)
+                _manualAreaDirection = aim.normalized;
         }
-        else
+        else if (_manualAreaAnchorSet)
         {
-            _manualAreaOrigin = BattleAreaGeometry.ClampToRadius(
-                cursor,
-                source,
-                definition.MaxCastDistance);
-            _manualAreaOrigin = BattleAreaGeometry.ClampToRadius(
-                _manualAreaOrigin,
-                Vector2.zero,
-                GetWorldWallRadius());
+            Vector2 dragDirection = cursor - _manualAreaOrigin;
+            if (dragDirection.sqrMagnitude > 0.0001f)
+                _manualAreaDirection = dragDirection.normalized;
         }
 
         RefreshManualAreaTargets();
+    }
+
+    private Vector2 ResolveManualAreaOrigin(
+        Vector2 cursor,
+        Vector2 source,
+        BattleAreaDefinition definition)
+    {
+        Vector2 resolved = BattleAreaGeometry.ClampToRadius(
+            cursor,
+            source,
+            definition.MaxCastDistance);
+        return BattleAreaGeometry.ClampToRadius(
+            resolved,
+            Vector2.zero,
+            GetWorldWallRadius());
     }
 
     private void RefreshManualAreaTargets()
@@ -5172,6 +5256,7 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
 
         _manualEnemyTargets.Clear();
         _manualAllyTargets.Clear();
+        int targetLimit = request.TargetCount;
         if (request.Faction == CharacterTargetFaction.Enemy)
         {
             foreach (EnemyRuntime enemy in request.EnemyCandidates)
@@ -5185,11 +5270,15 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
                         ToGround(view.WorldPosition),
                         _manualAreaOrigin,
                         _manualAreaDirection,
-                        definition.ShapeType,
                         definition.Radius,
-                        definition.ConeAngle))
+                        definition.Angle))
                 {
                     _manualEnemyTargets.Add(enemy);
+                    if (targetLimit > 0 &&
+                        _manualEnemyTargets.Count >= targetLimit)
+                    {
+                        break;
+                    }
                 }
             }
         }
@@ -5202,11 +5291,15 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
                         GetWorldAllyPosition(ally),
                         _manualAreaOrigin,
                         _manualAreaDirection,
-                        definition.ShapeType,
                         definition.Radius,
-                        definition.ConeAngle))
+                        definition.Angle))
                 {
                     _manualAllyTargets.Add(ally);
+                    if (targetLimit > 0 &&
+                        _manualAllyTargets.Count >= targetLimit)
+                    {
+                        break;
+                    }
                 }
             }
         }

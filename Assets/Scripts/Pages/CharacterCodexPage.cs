@@ -189,8 +189,8 @@ public sealed class CharacterCodexPage : RuntimeMenuPageBase
                 korean ? "공격력" : "ATTACK",
                 data.AttackPower.ToString("0.##")),
             new(
-                korean ? "기본 공격 피해" : "ATTACK DMG",
-                data.AttackDamage.ToString("N0")),
+                korean ? "판단 / 지식" : "JUDGMENT / KNOWLEDGE",
+                $"{data.Judgment:N0} / {data.Knowledge:N0}"),
             new(
                 korean ? "공격 주기" : "INTERVAL",
                 $"{data.AttackCooldown:0.##}s"),

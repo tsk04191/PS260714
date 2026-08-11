@@ -8,52 +8,6 @@ public enum EnemyStackingPolicy
     Exclusive = 1,
 }
 
-/// <summary>
-/// Compatibility projection for the fixed core-attack fields. New enemy
-/// attacks can move to authored EnemyAbilityDefinition data without forcing
-/// existing enemy assets to migrate immediately.
-/// </summary>
-public sealed class EnemyCoreAttackAbilityDefinition :
-    IBattleAbilityDefinition
-{
-    private readonly EnemySO _owner;
-    private readonly CharacterEffectDefinition _damageEffect;
-
-    public EnemyCoreAttackAbilityDefinition(EnemySO owner)
-    {
-        _owner = owner;
-        _damageEffect = owner != null
-            ? CharacterEffectDefinition.CreateFixedRuntimeEffect(
-                CharacterEffectType.Damage,
-                owner.CoreAttackDamage)
-            : null;
-    }
-
-    public string AbilityId => _owner == null
-        ? string.Empty
-        : $"{_owner.EnemyId}.core_attack";
-    public AbilityExecutionDomain ExecutionDomain =>
-        AbilityExecutionDomain.Battle;
-    public int AbilitySchemaVersion => 0;
-    public BattleEffectOriginKind OriginKind =>
-        BattleEffectOriginKind.EnemyAbility;
-    public BattleAbilityTargeting Targeting => new(
-        BattleAbilityTargetRelation.Hostile,
-        BattleAbilitySelectionMode.Random,
-        BattleAbilityTargetMetric.None,
-        1);
-    public IEnumerable<IBattleEffectDefinition> BattleEffects
-    {
-        get
-        {
-            if (_damageEffect != null)
-                yield return _damageEffect;
-        }
-    }
-    public bool UsesLegacyEffectStorage => true;
-    public bool HasExecutableContent => _owner != null;
-}
-
 [CreateAssetMenu(fileName = "Enemy", menuName = "Dungeon/Enemy")]
 public sealed class EnemySO : ScriptableObject,
     IBattlePresentationUnitDefinition,
@@ -73,7 +27,7 @@ public sealed class EnemySO : ScriptableObject,
 
     [Header("Presentation")]
     [SerializeField] private Sprite iconSprite;
-    [Tooltip("Enemy-specific 1:1 Sprite used by the dungeon world actor.")]
+    [Tooltip("Enemy-specific Sprite used by the dungeon world actor.")]
     [SerializeField] private Sprite boardSprite;
     [SerializeField] private int sortOrder;
 
@@ -156,15 +110,11 @@ public sealed class EnemySO : ScriptableObject,
         abilities != null
             ? abilities
             : Array.Empty<EnemyAbilityDefinition>();
-    public IBattleAbilityDefinition CoreAttackAbility =>
-        new EnemyCoreAttackAbilityDefinition(this);
-
     public IEnumerable<IBattleAbilityDefinition> EnumerateBattleAbilities()
     {
-        yield return CoreAttackAbility;
         foreach (EnemyAbilityDefinition ability in Abilities)
         {
-            if (ability != null)
+            if (ability?.HasUnifiedEffects == true)
                 yield return ability;
         }
     }
@@ -289,47 +239,9 @@ public sealed class EnemySO : ScriptableObject,
         EEnemyType enemyType)
     {
         List<EnemyAbilityDefinition> result = new();
-        EnemyAbilityTargetDefinition self =
-            EnemyAbilityTargetDefinition.CreateRuntimePreset(
-                EnemyAbilityTargetFaction.Self,
-                EnemyAbilityTargetSubject.Self,
-                EnemyAbilityTargetMetric.Health);
-        EnemyAbilityTargetDefinition noTarget =
-            EnemyAbilityTargetDefinition.CreateRuntimePreset(
-                EnemyAbilityTargetFaction.None,
-                EnemyAbilityTargetSubject.None);
 
         switch (enemyType)
         {
-            case EEnemyType.Heavy:
-            {
-                EnemyAbilityConditionDefinition physical =
-                    EnemyAbilityConditionDefinition
-                        .CreateIncomingDamagePreset(
-                            CharacterAttackDamageType.Physical);
-                EnemyAbilityConditionDefinition magical =
-                    EnemyAbilityConditionDefinition
-                        .CreateIncomingDamagePreset(
-                            CharacterAttackDamageType.Magical);
-                EnemyAbilityOperationDefinition operation =
-                    EnemyAbilityOperationDefinition.CreateRuntimePreset(
-                        EnemyAbilityOperationType.ModifyIncomingDamage,
-                        fixedAmount: 1);
-                result.Add(EnemyAbilityDefinition.CreateRuntimePreset(
-                    EnemyAbilityIds.GuardedHits,
-                    "Guarded Hits",
-                    "Reduce a limited number of physical or magical " +
-                    "hits to 1.",
-                    EnemyAbilityTrigger.BeforeSelfDamage,
-                    self,
-                    new[] { operation },
-                    charges: 3,
-                    matchMode: CharacterConditionMatchMode.Any,
-                    conditionDefinitions:
-                    new[] { physical, magical }));
-                break;
-            }
-
             case EEnemyType.Medic:
             {
                 CharacterEffectDefinition heal =
@@ -393,72 +305,6 @@ public sealed class EnemySO : ScriptableObject,
                 break;
             }
 
-            case EEnemyType.Pointman:
-            {
-                EnemyAbilityOperationDefinition operation =
-                    EnemyAbilityOperationDefinition.CreateRuntimePreset(
-                        EnemyAbilityOperationType.ExpandSpawnGroup,
-                        additionalCount: 2);
-                result.Add(EnemyAbilityDefinition.CreateRuntimePreset(
-                    EnemyAbilityIds.ExpandSpawnGroup,
-                    "Coordinated Entry",
-                    "Spawn additional queued enemies in the same group.",
-                    EnemyAbilityTrigger.OnSpawnQueueEvaluation,
-                    noTarget,
-                    new[] { operation },
-                    charges: 1));
-                break;
-            }
-
-            case EEnemyType.ShieldBearer:
-            {
-                EnemyAbilityOperationDefinition armor =
-                    EnemyAbilityOperationDefinition.CreateRuntimePreset(
-                        EnemyAbilityOperationType.GrantArmor,
-                        valueMultiplier: 1f);
-                result.Add(EnemyAbilityDefinition.CreateRuntimePreset(
-                    EnemyAbilityIds.InitialArmor,
-                    "Initial Armor",
-                    "Gain armor based on maximum health when spawned.",
-                    EnemyAbilityTrigger.OnSpawn,
-                    self,
-                    new[] { armor },
-                    charges: 1));
-
-                EnemyAbilityOperationDefinition redirect =
-                    EnemyAbilityOperationDefinition.CreateRuntimePreset(
-                        EnemyAbilityOperationType.RedirectDamage,
-                        operationRange: 1,
-                        diagonals: true);
-                result.Add(EnemyAbilityDefinition.CreateRuntimePreset(
-                    EnemyAbilityIds.RedirectAdjacentDamage,
-                    "Shield Formation",
-                    "Take damage for adjacent allies, including diagonals.",
-                    EnemyAbilityTrigger.BeforeAllyDamage,
-                    noTarget,
-                    new[] { redirect }));
-                break;
-            }
-
-            case EEnemyType.Infiltrator:
-            {
-                EnemyAbilityConditionDefinition alternate =
-                    EnemyAbilityConditionDefinition
-                        .CreateAlternateTargetPreset();
-                EnemyAbilityOperationDefinition operation =
-                    EnemyAbilityOperationDefinition.CreateRuntimePreset(
-                        EnemyAbilityOperationType.ModifyTargetPriority);
-                result.Add(EnemyAbilityDefinition.CreateRuntimePreset(
-                    EnemyAbilityIds.TargetPriorityExclusion,
-                    "Concealment",
-                    "Avoid target selection while another target is " +
-                    "available.",
-                    EnemyAbilityTrigger.OnTargetPriorityEvaluation,
-                    noTarget,
-                    new[] { operation },
-                    conditionDefinitions: new[] { alternate }));
-                break;
-            }
         }
 
         return result;

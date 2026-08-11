@@ -793,10 +793,25 @@ public sealed class StatusEffectEditorWindow : EditorWindow
                     selector.FindPropertyRelative("subjectCount"),
                     new GUIContent("대상 수"));
                 CharacterEditorWindow.DrawNumericConditions(selector);
-                EditorGUILayout.PropertyField(
-                    selector.FindPropertyRelative("areaOffsets"),
-                    new GUIContent("범위 좌표"),
-                    true);
+                SerializedProperty area =
+                    selector.FindPropertyRelative("areaDefinition");
+                SerializedProperty shape =
+                    area?.FindPropertyRelative("shapeType");
+                if (shape != null)
+                {
+                    shape.enumValueIndex =
+                        (int)CharacterAreaShapeType.Target;
+                }
+                using (new EditorGUI.DisabledScope(true))
+                {
+                    BattleAbilityEditorGUI.DrawAreaDefinition(
+                        area,
+                        selector.FindPropertyRelative("subject"),
+                        null);
+                }
+                EditorGUILayout.HelpBox(
+                    "효과 단계의 별도 대상 선택은 타겟 범위만 지원합니다.",
+                    MessageType.Info);
             }
         }
 
@@ -1485,6 +1500,12 @@ public sealed class StatusEffectEditorWindow : EditorWindow
             SetIntRelative(selector, "subjectCount", 1);
             selector.FindPropertyRelative("numericConditions")?.ClearArray();
             selector.FindPropertyRelative("areaOffsets")?.ClearArray();
+            SerializedProperty area =
+                selector.FindPropertyRelative("areaDefinition");
+            SetEnumRelative(
+                area,
+                "shapeType",
+                (int)CharacterAreaShapeType.Target);
         }
 
         SetEnumRelative(

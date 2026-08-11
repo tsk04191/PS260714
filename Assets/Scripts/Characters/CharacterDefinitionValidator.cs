@@ -386,15 +386,16 @@ public static class CharacterDefinitionValidator
 
             if (hasSubject)
             {
-                if (definition.Subject ==
-                        CharacterAttackSubject.Manual &&
+                if ((definition.Subject ==
+                         CharacterAttackSubject.Manual ||
+                     definition.AreaDefinition.UsesWorldArea) &&
                     definitions.Count > 1)
                 {
                     AddError(
                         result,
                         "attack.manual_sequence_unsupported",
                         $"{path}.subject",
-                        "Manual target selection currently requires a " +
+                        "Spatial or manual target selection requires a " +
                         "single basic attack definition.");
                 }
                 if (index == 0 &&
@@ -441,30 +442,23 @@ public static class CharacterDefinitionValidator
                         definition.Effects,
                         path,
                         result);
-                    ValidateAreaOffsets(
+                    ValidateBattleArea(
                         abilityTargetFaction,
+                        definition.Subject,
+                        definition.SubjectCount,
+                        definition.AreaDefinition,
                         definition.AreaOffsets,
                         path,
                         result);
                 }
                 else
                 {
-                    ValidateAbility(
-                        abilityTargetFaction,
-                        definition.DamageType,
-                        definition.DamageAmountMode,
-                        definition.DamageAmount,
-                        definition.AppliedStatusEffect,
-                        definition.StatusRemovalEffect,
-                        definition.StatusRemovalTarget,
-                        definition.StatusRemovalPickMode,
-                        definition.StatusRemovalPickCount,
-                        definition.StatusRemovalAmountMode,
-                        definition.StatusRemovalCount,
-                        definition.StatusRemovalRatio,
-                        definition.AreaOffsets,
-                        path,
-                        result);
+                    AddError(
+                        result,
+                        "attack.legacy_ability_unsupported",
+                        $"{path}.effects",
+                        "Basic attack abilities require the shared effect " +
+                        "list used by character skills.");
                 }
             }
 
@@ -664,30 +658,23 @@ public static class CharacterDefinitionValidator
                         definition.Effects,
                         path,
                         result);
-                    ValidateAreaOffsets(
+                    ValidateBattleArea(
                         abilityTargetFaction,
+                        effectiveSubject,
+                        definition.SubjectCount,
+                        definition.AreaDefinition,
                         definition.AreaOffsets,
                         path,
                         result);
                 }
                 else
                 {
-                    ValidateAbility(
-                        abilityTargetFaction,
-                        definition.DamageType,
-                        definition.DamageAmountMode,
-                        definition.DamageAmount,
-                        definition.AppliedStatusEffect,
-                        definition.StatusRemovalEffect,
-                        definition.StatusRemovalTarget,
-                        definition.StatusRemovalPickMode,
-                        definition.StatusRemovalPickCount,
-                        definition.StatusRemovalAmountMode,
-                        definition.StatusRemovalCount,
-                        definition.StatusRemovalRatio,
-                        definition.AreaOffsets,
-                        path,
-                        result);
+                    AddError(
+                        result,
+                        "passive.legacy_ability_unsupported",
+                        $"{path}.effects",
+                        "Passive abilities require the shared effect list " +
+                        "used by character skills.");
                 }
             }
 
@@ -1126,30 +1113,22 @@ public static class CharacterDefinitionValidator
                         definition.Effects,
                         path,
                         result);
-                    ValidateAreaOffsets(
+                    ValidateBattleArea(
                         abilityTargetFaction,
+                        effectiveSubject,
+                        definition.SubjectCount,
+                        definition.AreaDefinition,
                         definition.AreaOffsets,
                         path,
                         result);
                 }
                 else
                 {
-                    ValidateAbility(
-                        abilityTargetFaction,
-                        definition.DamageType,
-                        definition.DamageAmountMode,
-                        definition.DamageAmount,
-                        definition.AppliedStatusEffect,
-                        definition.StatusRemovalEffect,
-                        definition.StatusRemovalTarget,
-                        definition.StatusRemovalPickMode,
-                        definition.StatusRemovalPickCount,
-                        definition.StatusRemovalAmountMode,
-                        definition.StatusRemovalCount,
-                        definition.StatusRemovalRatio,
-                        definition.AreaOffsets,
-                        path,
-                        result);
+                    AddError(
+                        result,
+                        "skill.legacy_ability_unsupported",
+                        $"{path}.effects",
+                        "Skills require the shared battle effect list.");
                 }
 
                 if (executionPolicy ==
@@ -2575,8 +2554,11 @@ public static class CharacterDefinitionValidator
                 selector.TargetFaction,
                 selectorPath,
                 result);
-            ValidateAreaOffsets(
+            ValidateBattleArea(
                 selector.TargetFaction,
+                selector.Subject,
+                selector.SubjectCount,
+                selector.AreaDefinition,
                 selector.AreaOffsets,
                 selectorPath,
                 result);
@@ -2922,175 +2904,6 @@ public static class CharacterDefinitionValidator
         }
     }
 
-    private static void ValidateAbility(
-        CharacterTargetFaction? targetFaction,
-        CharacterAttackDamageType damageType,
-        CharacterDamageAmountMode damageAmountMode,
-        float damageAmount,
-        StatusEffectSO appliedStatus,
-        StatusEffectSO removalStatus,
-        CharacterStatusRemovalTarget removalTarget,
-        CharacterStatusRemovalPickMode removalPickMode,
-        int removalPickCount,
-        CharacterStatusRemovalAmountMode removalAmountMode,
-        int removalCount,
-        float removalRatio,
-        IReadOnlyList<CharacterTargetAreaOffset> areaOffsets,
-        string actionPath,
-        CharacterDefinitionValidationResult result)
-    {
-        AddWarning(
-            result,
-            "ability.legacy_fallback",
-            $"{actionPath}.effects",
-            "Legacy single-effect fields remain supported for " +
-            "compatibility. Convert this ability to an explicit effect " +
-            "list.");
-
-        switch (damageType)
-        {
-            case CharacterAttackDamageType.Physical:
-            case CharacterAttackDamageType.Magical:
-            case CharacterAttackDamageType.Fixed:
-                if (!Enum.IsDefined(
-                        typeof(CharacterDamageAmountMode),
-                        damageAmountMode))
-                {
-                    AddError(
-                        result,
-                        "ability.damage_scaling_mode_invalid",
-                        $"{actionPath}.damageAmountMode",
-                        $"Unsupported damage scaling mode " +
-                        $"'{damageAmountMode}'.");
-                }
-                if (targetFaction == CharacterTargetFaction.Ally)
-                {
-                    AddError(
-                        result,
-                        "ability.ally_damage_unsupported",
-                        $"{actionPath}.targetFaction",
-                        "The runtime has no ally receiver for direct damage.");
-                }
-                else if (!targetFaction.HasValue)
-                {
-                    AddWarning(
-                        result,
-                        "ability.inherited_faction_dependent",
-                        $"{actionPath}.targetFaction",
-                        "Subject.None can execute direct damage only when its " +
-                        "inherited targets are enemies.");
-                }
-                if (!IsFinite(damageAmount) || damageAmount <= 0f)
-                {
-                    AddError(
-                        result,
-                        "ability.damage_invalid",
-                        $"{actionPath}.damageAmount",
-                        "Direct damage amount must be a finite value greater " +
-                        "than zero.");
-                }
-                break;
-
-            case CharacterAttackDamageType.StatusEffect:
-                if (appliedStatus == null)
-                {
-                    AddError(
-                        result,
-                        "ability.status_required",
-                        $"{actionPath}.statusEffect",
-                        "StatusEffect ability requires an explicit " +
-                        "StatusEffectSO.");
-                }
-                else if (targetFaction.HasValue &&
-                         !CanTargetFaction(
-                             appliedStatus,
-                             targetFaction.Value))
-                {
-                    AddError(
-                        result,
-                        "ability.status_faction_mismatch",
-                        $"{actionPath}.statusEffect",
-                        $"Status '{appliedStatus.name}' cannot target " +
-                        $"{targetFaction}.");
-                }
-                break;
-
-            case CharacterAttackDamageType.StatusRemoval:
-                ValidateStatusRemovalPick(
-                    removalPickMode,
-                    removalPickCount,
-                    actionPath,
-                    "ability",
-                    result);
-                ValidateStatusRemovalAmount(
-                    removalAmountMode,
-                    removalCount,
-                    removalRatio,
-                    actionPath,
-                    "ability",
-                    result);
-                if (!Enum.IsDefined(
-                        typeof(CharacterStatusRemovalTarget),
-                        removalTarget))
-                {
-                    AddError(
-                        result,
-                        "ability.removal_target_invalid",
-                        $"{actionPath}.statusRemovalTarget",
-                        $"Unsupported status removal target " +
-                        $"'{removalTarget}'.");
-                    break;
-                }
-                if (removalTarget == CharacterStatusRemovalTarget.Single)
-                {
-                    if (removalStatus == null)
-                    {
-                        AddError(
-                        result,
-                        "ability.removal_status_required",
-                        $"{actionPath}.statusRemovalEffect",
-                        "Single status removal requires an explicit " +
-                        "StatusEffectSO.");
-                    }
-                    else if (!removalStatus.Removable)
-                    {
-                        AddError(
-                            result,
-                            "ability.removal_status_not_removable",
-                            $"{actionPath}.statusRemovalEffect",
-                            $"Status '{removalStatus.name}' is not removable.");
-                    }
-                    else if (targetFaction.HasValue &&
-                             !CanTargetFaction(
-                                 removalStatus,
-                                 targetFaction.Value))
-                    {
-                        AddError(
-                            result,
-                            "ability.removal_status_faction_mismatch",
-                            $"{actionPath}.statusRemovalEffect",
-                            $"Status '{removalStatus.name}' cannot exist on " +
-                            $"{targetFaction} targets.");
-                    }
-                }
-                break;
-
-            default:
-                AddError(
-                    result,
-                    "ability.type_unknown",
-                    $"{actionPath}.damageType",
-                    $"Unsupported ability type '{damageType}'.");
-                break;
-        }
-
-        ValidateAreaOffsets(
-            targetFaction,
-            areaOffsets,
-            actionPath,
-            result);
-    }
-
     private static void ValidateStatusRemovalPick(
         CharacterStatusRemovalPickMode mode,
         int count,
@@ -3221,6 +3034,68 @@ public static class CharacterDefinitionValidator
                     $"Area offset ({coordinate.x}, {coordinate.y}) is " +
                     "duplicated.");
             }
+        }
+    }
+
+    private static void ValidateBattleArea(
+        CharacterTargetFaction? targetFaction,
+        CharacterAttackSubject subject,
+        int targetCount,
+        BattleAreaDefinition areaDefinition,
+        IReadOnlyList<CharacterTargetAreaOffset> areaOffsets,
+        string actionPath,
+        CharacterDefinitionValidationResult result)
+    {
+        if (areaDefinition == null)
+        {
+            AddError(
+                result,
+                "ability.area_definition_null",
+                $"{actionPath}.areaDefinition",
+                "Battle abilities require an area definition.");
+            return;
+        }
+
+        if (!areaDefinition.IsValid)
+        {
+            AddError(
+                result,
+                "ability.area_definition_invalid",
+                $"{actionPath}.areaDefinition",
+                "Area type, origin, radius, angle, or cast distance is " +
+                "invalid.");
+            return;
+        }
+
+        if (areaOffsets != null && areaOffsets.Count > 0)
+        {
+            AddError(
+                result,
+                "ability.tile_area_unsupported",
+                $"{actionPath}.areaOffsets",
+                "Tile-offset attack areas are no longer supported.");
+        }
+
+        if (!areaDefinition.UsesWorldArea)
+        {
+            if (targetCount < 1)
+            {
+                AddError(
+                    result,
+                    "ability.target_count_invalid",
+                    $"{actionPath}.subjectCount",
+                    "Target areas require at least one target.");
+            }
+            return;
+        }
+
+        if (targetCount < 0)
+        {
+            AddError(
+                result,
+                "ability.area_target_count_invalid",
+                $"{actionPath}.subjectCount",
+                "Circular area target count must be zero or greater.");
         }
     }
 
