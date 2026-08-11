@@ -84,7 +84,8 @@ public sealed class StatusEffectEditorTests
             "자원 소비",
             "체력 회복",
             "체력 소비",
-            "보호막 부여");
+            "보호막 부여",
+            "카드 드로우");
         AssertOptions(
             "EffectTargetModeOptions",
             "상태 보유자",
@@ -380,7 +381,7 @@ public sealed class StatusEffectEditorTests
         Assert.That(
             prioritiesByPath,
             Does.Not.ContainKey("PS260714/UI/Apply Main Lobby Layout"));
-        Assert.That(prioritiesByPath.Count, Is.EqualTo(22));
+        Assert.That(prioritiesByPath.Count, Is.EqualTo(21));
 
         HashSet<int> uniquePriorities = new();
         foreach (KeyValuePair<string, int> menu in prioritiesByPath)
@@ -410,7 +411,6 @@ public sealed class StatusEffectEditorTests
                 PS260714EditorMenu.LocalizationEditorPriority,
                 PS260714EditorMenu.ValidateLocalizationPriority,
                 PS260714EditorMenu.GenerateLocalizationPriority,
-                PS260714EditorMenu.CharacterStandingFramingEditorPriority,
                 PS260714EditorMenu.RecruitEditorPriority,
                 PS260714EditorMenu.ValidateDesignerUiPriority,
                 PS260714EditorMenu.InstallDynamicUiPreviewsPriority,
@@ -421,7 +421,7 @@ public sealed class StatusEffectEditorTests
             {
                 0, 1, 2, 3, 4,
                 100, 101, 102, 103, 104, 105, 106, 107, 108,
-                109, 110, 111, 112, 113, 114, 115, 116,
+                109, 110, 112, 113, 114, 115, 116,
             }));
     }
 

@@ -211,7 +211,8 @@ public enum CharacterEffectType
     SpendResource = 4,
     Heal = 5,
     SpendHealth = 6,
-    Shield = 7
+    Shield = 7,
+    CardDraw = 8
 }
 
 public enum CharacterEffectTargetMode
@@ -1896,11 +1897,7 @@ public sealed class CharacterEffectDefinition :
     public IBattleEffectTargetSelector BattleTargetSelector =>
         targetSelector;
     public bool RequiresActionTargets =>
-        type != CharacterEffectType.GainResource &&
-        type != CharacterEffectType.SpendResource &&
-        type != CharacterEffectType.SpendHealth &&
-        targetMode != CharacterEffectTargetMode.Source &&
-        targetMode != CharacterEffectTargetMode.FreshSelection;
+        BattleEffectRules.RequiresActionTargets(this);
     public CharacterAttackDamageType DamageType => damageType;
     public CharacterDamageAmountMode DamageAmountMode => damageAmountMode;
     public float DamageAmount => damageAmount;

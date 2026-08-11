@@ -184,6 +184,30 @@ public sealed class CharacterP0RegressionTests
     }
 
     [Test]
+    public void CharacterDesignatedArea_UsesRangeLimitedPointerInsteadOfCasterOrigin()
+    {
+        BattleAreaDefinition area = new();
+        SetPrivateField(
+            area,
+            "originMode",
+            CharacterAreaOriginMode.DesignatedPoint);
+        SetPrivateField(area, "maxCastDistance", 2f);
+
+        Vector2 source = new(5f, 1f);
+        Vector2 resolved = BattleAreaGeometry.ResolveManualOrigin(
+            new Vector2(9f, 1f),
+            source,
+            area,
+            100f,
+            BattleManualAreaPlacementMode.AbilityConstrained);
+
+        Assert.That(area.OriginMode,
+            Is.EqualTo(CharacterAreaOriginMode.DesignatedPoint));
+        Assert.That(resolved, Is.EqualTo(new Vector2(7f, 1f)));
+        Assert.That(resolved, Is.Not.EqualTo(source));
+    }
+
+    [Test]
     public void BattleArenaRingMeshBuilder_CreatesClosedAnnularPrism()
     {
         Mesh mesh = new();

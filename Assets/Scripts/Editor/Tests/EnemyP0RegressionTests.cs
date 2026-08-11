@@ -236,6 +236,53 @@ public sealed class EnemyP0RegressionTests
     }
 
     [Test]
+    public void SpawnInterval_IsRandomizedAroundAuthoredInterval()
+    {
+        Assert.That(
+            BattleManager.ResolveRandomizedSpawnInterval(4f, 0f),
+            Is.EqualTo(3f));
+        Assert.That(
+            BattleManager.ResolveRandomizedSpawnInterval(4f, 0.5f),
+            Is.EqualTo(4f));
+        Assert.That(
+            BattleManager.ResolveRandomizedSpawnInterval(4f, 1f),
+            Is.EqualTo(5f));
+    }
+
+    [Test]
+    public void SpawnLine_UsesLongestHorizontalViewportEdge()
+    {
+        Vector2[] corners =
+        {
+            new(-3f, -2f),
+            new(-5f, 4f),
+            new(3f, -2f),
+            new(5f, 4f),
+        };
+
+        float radius = DungeonWorldSpawnGeometry.ResolveSpawnLineRadius(
+            corners,
+            0.5f);
+
+        Assert.That(
+            radius,
+            Is.EqualTo(Mathf.Sqrt(41f) + 0.5f).Within(0.0001f));
+    }
+
+    [Test]
+    public void SpawnDirection_UsesRandomPointOnCircularLine()
+    {
+        Vector2 first =
+            DungeonWorldSpawnGeometry.DirectionFromUnitSample(0f);
+        Vector2 second =
+            DungeonWorldSpawnGeometry.DirectionFromUnitSample(0.25f);
+
+        Assert.That(first, Is.EqualTo(Vector2.right));
+        Assert.That(second.x, Is.EqualTo(0f).Within(0.0001f));
+        Assert.That(second.y, Is.EqualTo(1f).Within(0.0001f));
+    }
+
+    [Test]
     public void Medic_HealsEveryOrthogonalNeighborButNotDiagonal()
     {
         EnemyRuntime medic = LoadEnemy("Medic").CreateRuntime();

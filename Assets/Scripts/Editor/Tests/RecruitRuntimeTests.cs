@@ -12,6 +12,56 @@ public sealed class RecruitRuntimeTests
         "Characters.Collection.v1";
 
     [Test]
+    public void MissingLocalization_UsesSingleBannerFallback()
+    {
+        RecruitBannerPageDefinition banner = new();
+        string missingKey = $"test.missing.{System.Guid.NewGuid():N}";
+        SetPrivateField(banner, "titleLocalizationKey", missingKey + ".title");
+        SetPrivateField(
+            banner,
+            "descriptionLocalizationKey",
+            missingKey + ".description");
+        SetPrivateField(banner, "periodLocalizationKey", missingKey + ".period");
+        SetPrivateField(banner, "fallbackTitle", "BANNER_IDENTIFIER");
+        SetPrivateField(
+            banner,
+            "fallbackDescription",
+            "BANNER_DESCRIPTION_IDENTIFIER");
+        SetPrivateField(banner, "fallbackPeriod", "PERIOD_IDENTIFIER");
+
+        RecruitBannerPageModel korean = banner.CreateModel(true);
+        RecruitBannerPageModel english = banner.CreateModel(false);
+
+        Assert.That(korean.Title, Is.EqualTo("BANNER_IDENTIFIER"));
+        Assert.That(english.Title, Is.EqualTo(korean.Title));
+        Assert.That(
+            english.Description,
+            Is.EqualTo("BANNER_DESCRIPTION_IDENTIFIER"));
+        Assert.That(english.Description, Is.EqualTo(korean.Description));
+        Assert.That(english.Period, Is.EqualTo("PERIOD_IDENTIFIER"));
+        Assert.That(english.Period, Is.EqualTo(korean.Period));
+
+        string[] removedFields =
+        {
+            "koreanTitle",
+            "englishTitle",
+            "koreanDescription",
+            "englishDescription",
+            "koreanPeriod",
+            "englishPeriod",
+        };
+        foreach (string fieldName in removedFields)
+        {
+            Assert.That(
+                typeof(RecruitBannerPageDefinition).GetField(
+                    fieldName,
+                    BindingFlags.Instance | BindingFlags.NonPublic),
+                Is.Null,
+                fieldName);
+        }
+    }
+
+    [Test]
     public void PaymentRoute_PrefersOwnedAndAffordableResource()
     {
         RecruitTicketItemSO ticket =

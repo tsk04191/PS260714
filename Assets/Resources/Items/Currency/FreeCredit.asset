@@ -18,11 +18,9 @@ MonoBehaviour:
   sortOrder: 30
   nameLocalizationKey: item.client.free_credit.name
   descriptionLocalizationKey: item.client.free_credit.description
-  koreanName: "\uBB34\uB8CC \uD06C\uB808\uB527"
-  englishName: FREE CREDIT
-  koreanDescription: "\uAC8C\uC784 \uBCF4\uC0C1\uC73C\uB85C \uD68D\uB4DD\uD558\uB294
+  fallbackName: "\uBB34\uB8CC \uD06C\uB808\uB527"
+  fallbackDescription: "\uAC8C\uC784 \uBCF4\uC0C1\uC73C\uB85C \uD68D\uB4DD\uD558\uB294
     \uBB34\uB8CC \uD504\uB9AC\uBBF8\uC5C4 \uC7AC\uD654\uC785\uB2C8\uB2E4."
-  englishDescription: Free premium currency earned as gameplay rewards.
   icon: {fileID: 21300000, guid: 111d2d2d8332adb4da478e14bb5a538e, type: 3}
   illustration: {fileID: 0}
   maximumStack: 0

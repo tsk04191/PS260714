@@ -242,8 +242,8 @@ public sealed class ItemEditorWindow : EditorWindow
                         "nameLocalizationKey",
                         "이름 키");
                     DrawProperty(
-                        "koreanName",
-                        "한글 이름 (Fallback)");
+                        "fallbackName",
+                        "이름 (Fallback)");
                     DrawCategoryProperty();
                 }
             }
@@ -253,8 +253,8 @@ public sealed class ItemEditorWindow : EditorWindow
                 "descriptionLocalizationKey",
                 "설명 키");
             DrawProperty(
-                "koreanDescription",
-                "한글 설명 (Fallback)");
+                "fallbackDescription",
+                "설명 (Fallback)");
         }
 
         EditorGUILayout.Space(6f);
@@ -364,12 +364,6 @@ public sealed class ItemEditorWindow : EditorWindow
             }
 
             DrawProperty("itemId", "아이템 ID");
-            DrawProperty(
-                "englishName",
-                "영문 이름 (Fallback)");
-            DrawProperty(
-                "englishDescription",
-                "영문 설명 (Fallback)");
             DrawProperty("rarity", "희귀도");
             DrawProperty("sortOrder", "정렬 순서");
             DrawProperty("hiddenInStorage", "창고에서 숨김");
@@ -765,7 +759,7 @@ public sealed class ItemEditorWindow : EditorWindow
             CreateUniqueItemId(category);
         serialized.FindProperty("category").enumValueIndex =
             (int)category;
-        serialized.FindProperty("koreanName").stringValue =
+        serialized.FindProperty("fallbackName").stringValue =
             displayName;
         serialized.FindProperty("maximumStack").longValue = 0L;
         serialized.FindProperty("initialAmount").longValue = 0L;
@@ -835,10 +829,10 @@ public sealed class ItemEditorWindow : EditorWindow
             SerializedObject serialized = new(duplicate);
             serialized.FindProperty("itemId").stringValue =
                 CreateUniqueItemId(duplicate.Category);
-            SerializedProperty koreanName =
-                serialized.FindProperty("koreanName");
-            if (koreanName != null)
-                koreanName.stringValue += " 복사본";
+            SerializedProperty fallbackName =
+                serialized.FindProperty("fallbackName");
+            if (fallbackName != null)
+                fallbackName.stringValue += " 복사본";
             serialized.ApplyModifiedPropertiesWithoutUndo();
             EditorUtility.SetDirty(duplicate);
         }

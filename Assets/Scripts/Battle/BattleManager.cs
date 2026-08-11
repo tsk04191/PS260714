@@ -16,6 +16,8 @@ public enum EBattleState
 public sealed class BattleManager : MonoBehaviour, IActiveSkillResource
 {
     private const float DefaultGameSpeed = 1f;
+    public const float MinimumSpawnIntervalRandomMultiplier = 0.75f;
+    public const float MaximumSpawnIntervalRandomMultiplier = 1.25f;
     public const int DefaultMaximumEnergy = 3;
     public const float DefaultEnergyRechargeDuration = 5f;
 
@@ -35,6 +37,7 @@ public sealed class BattleManager : MonoBehaviour, IActiveSkillResource
     private int _maximumEnemyCount;
     private int _spawnedEnemyCount;
     private float _spawnInterval;
+    private float _scheduledSpawnInterval;
     private float _spawnTimeRemaining;
     private float _battleDuration;
     private float _battleTimeRemaining;
@@ -65,7 +68,9 @@ public sealed class BattleManager : MonoBehaviour, IActiveSkillResource
         _manualTargetSelectionPending;
     public bool IsBoardFull => _boardFull;
     public float GameSpeed => GameSpeedScales[_gameSpeedIndex];
-    public float SpawnInterval => GetNextSpawnInterval();
+    public float SpawnInterval => _scheduledSpawnInterval > 0f
+        ? _scheduledSpawnInterval
+        : GetNextSpawnInterval();
     public float SpawnTimeRemaining =>
         TimePrecision.FloorToTenth(_spawnTimeRemaining);
     public float BattleDuration => _battleDuration;
@@ -618,6 +623,7 @@ public sealed class BattleManager : MonoBehaviour, IActiveSkillResource
         _maximumEnemyCount = 0;
         _spawnedEnemyCount = 0;
         _spawnInterval = 0f;
+        _scheduledSpawnInterval = 0f;
         _spawnTimeRemaining = 0f;
         _battleDuration = 0f;
         _battleTimeRemaining = 0f;
@@ -756,9 +762,28 @@ public sealed class BattleManager : MonoBehaviour, IActiveSkillResource
 
     private void ResetSpawnTimerForNextEnemy()
     {
-        _spawnTimeRemaining = _spawnQueue.Count > 0
-            ? GetNextSpawnInterval()
+        _scheduledSpawnInterval = _spawnQueue.Count > 0
+            ? ResolveRandomizedSpawnInterval(
+                GetNextSpawnInterval(),
+                UnityEngine.Random.value)
             : 0f;
+        _spawnTimeRemaining = _scheduledSpawnInterval;
+    }
+
+    public static float ResolveRandomizedSpawnInterval(
+        float baseInterval,
+        float randomSample)
+    {
+        if (baseInterval <= 0f)
+            return 0f;
+
+        float multiplier = Mathf.Lerp(
+            MinimumSpawnIntervalRandomMultiplier,
+            MaximumSpawnIntervalRandomMultiplier,
+            Mathf.Clamp01(randomSample));
+        return TimePrecision.Normalize(
+            baseInterval * multiplier,
+            0.1f);
     }
 
     private float GetNextSpawnInterval()

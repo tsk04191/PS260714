@@ -1415,6 +1415,9 @@ public static class CharacterLocalization
                 case CharacterEffectType.SpendHealth:
                     builder.Append(FormatHealthSpend(effect));
                     break;
+                case CharacterEffectType.CardDraw:
+                    builder.Append(FormatCardDraw(effect));
+                    break;
                 default:
                     bool hasRuntimeScaling =
                         effect.SourceResourceScale != 0f ||
@@ -1577,6 +1580,15 @@ public static class CharacterLocalization
         return UsesKoreanLocale
             ? $"보호막 부여: {formula}"
             : $"Grant Shield: {formula}";
+    }
+
+    private static string FormatCardDraw(
+        CharacterEffectDefinition effect)
+    {
+        float amount = Mathf.Max(0f, effect?.Amount ?? 0f);
+        return UsesKoreanLocale
+            ? $"카드 드로우: {amount:0}장"
+            : $"Draw Cards: {amount:0}";
     }
 
     private static string AppendScalingTerms(

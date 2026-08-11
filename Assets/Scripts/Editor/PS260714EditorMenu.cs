@@ -28,7 +28,6 @@ internal static class PS260714EditorMenu
     public const int LocalizationEditorPriority = 108;
     public const int ValidateLocalizationPriority = 109;
     public const int GenerateLocalizationPriority = 110;
-    public const int CharacterStandingFramingEditorPriority = 111;
     public const int StageSelectEditorPriority = DungeonEditorPriority;
     public const int RecruitEditorPriority = 112;
     public const int ValidateDesignerUiPriority = 113;

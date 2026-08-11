@@ -19,6 +19,7 @@ public sealed class BattleCardEditorWindow : EditorWindow
     private string renameText = string.Empty;
     private bool renaming;
     private bool focusRename;
+    private bool _clearEditingFocusRequested;
 
     [MenuItem(
         MenuPath,
@@ -53,6 +54,7 @@ public sealed class BattleCardEditorWindow : EditorWindow
         minSize = new Vector2(860f, 600f);
         EditorApplication.projectChanged += HandleProjectChanged;
         Selection.selectionChanged += HandleSelectionChanged;
+        RefreshLocalizationKeys();
         RefreshCards(selected);
     }
 
@@ -64,6 +66,7 @@ public sealed class BattleCardEditorWindow : EditorWindow
 
     private void HandleProjectChanged()
     {
+        RefreshLocalizationKeys();
         RefreshCards(selected);
     }
 
@@ -76,6 +79,7 @@ public sealed class BattleCardEditorWindow : EditorWindow
 
     private void OnGUI()
     {
+        ApplyPendingEditingFocusClear();
         DrawToolbar();
         if (renaming)
             DrawRenameRow();
@@ -97,7 +101,11 @@ public sealed class BattleCardEditorWindow : EditorWindow
             BeginRename,
             DeleteSelected,
             () => PS260714AssetEditorList.Ping(selected),
-            () => RefreshCards(selected));
+            () =>
+            {
+                RefreshLocalizationKeys();
+                RefreshCards(selected);
+            });
     }
 
     private void DrawRenameRow()
@@ -167,19 +175,7 @@ public sealed class BattleCardEditorWindow : EditorWindow
 
             EditorGUI.BeginChangeCheck();
             DrawValidation();
-            DrawSection(
-                "Identity & Presentation",
-                "cardId",
-                "rarity",
-                "sortOrder",
-                "nameLocalizationKey",
-                "descriptionLocalizationKey",
-                "koreanName",
-                "englishName",
-                "koreanDescription",
-                "englishDescription",
-                "icon",
-                "illustration");
+            DrawIdentityAndPresentation();
             DrawAffiliation();
             DrawSection(
                 "Draw & Play Rules",
@@ -237,6 +233,57 @@ public sealed class BattleCardEditorWindow : EditorWindow
         }
     }
 
+    private void DrawIdentityAndPresentation()
+    {
+        using (new EditorGUILayout.VerticalScope(EditorStyles.helpBox))
+        {
+            EditorGUILayout.LabelField(
+                "Identity & Presentation",
+                EditorStyles.boldLabel);
+            DrawProperty("cardId", "Card ID");
+            DrawProperty("rarity", "Rarity");
+            DrawProperty("sortOrder", "Sort Order");
+
+            EditorGUILayout.Space(4f);
+            DrawLocalizationControls();
+            DrawLocalizationKey(
+                "nameLocalizationKey",
+                "Name Localization Key");
+            DrawProperty("fallbackName", "Name (Fallback)");
+            DrawLocalizationKey(
+                "descriptionLocalizationKey",
+                "Description Localization Key");
+            DrawProperty(
+                "fallbackDescription",
+                "Description (Fallback)");
+
+            EditorGUILayout.Space(4f);
+            DrawProperty("icon", "Icon");
+            DrawProperty("illustration", "Illustration");
+        }
+    }
+
+    private void DrawLocalizationControls()
+    {
+        using (new EditorGUILayout.HorizontalScope())
+        {
+            EditorGUILayout.LabelField(
+                "Localization",
+                EditorStyles.miniBoldLabel);
+            if (GUILayout.Button("Refresh Keys", GUILayout.Width(88f)))
+                RefreshLocalizationKeys();
+        }
+
+        PS260714LocalizationKeyField.DrawLoadError();
+    }
+
+    private void DrawLocalizationKey(
+        string propertyName,
+        string label)
+    {
+        PS260714LocalizationKeyField.Draw(Find(propertyName), label);
+    }
+
     private void DrawAbility()
     {
         using (new EditorGUILayout.VerticalScope(EditorStyles.helpBox))
@@ -283,9 +330,16 @@ public sealed class BattleCardEditorWindow : EditorWindow
             {
                 EditorGUILayout.HelpBox(
                     $"Card ID '{id}' is duplicated.",
-                    MessageType.Error);
+                MessageType.Error);
             }
         }
+
+        DrawRequiredLocalizationKeyValidation(
+            "nameLocalizationKey",
+            "Name");
+        DrawRequiredLocalizationKeyValidation(
+            "descriptionLocalizationKey",
+            "Description");
 
         BattleCardAffiliation affiliation =
             (BattleCardAffiliation)(Find("affiliation")?.enumValueIndex ?? 0);
@@ -318,6 +372,20 @@ public sealed class BattleCardEditorWindow : EditorWindow
                 "A battle card requires at least one shared effect.",
                 MessageType.Error);
         }
+    }
+
+    private void DrawRequiredLocalizationKeyValidation(
+        string propertyName,
+        string label)
+    {
+        string key = Find(propertyName)?.stringValue?.Trim() ?? string.Empty;
+        if (!string.IsNullOrEmpty(key))
+            return;
+
+        EditorGUILayout.HelpBox(
+            $"{label} Localization Key is required. " +
+            "Select a key from strings.csv.",
+            MessageType.Error);
     }
 
     private void DrawSection(string title, params string[] properties)
@@ -361,7 +429,7 @@ public sealed class BattleCardEditorWindow : EditorWindow
         SerializedObject data = new(card);
         data.FindProperty("cardId").stringValue =
             CreateUniqueCardId("card.new", cards);
-        data.FindProperty("koreanName").stringValue = "New Battle Card";
+        data.FindProperty("fallbackName").stringValue = "New Battle Card";
         SerializedProperty effects = data.FindProperty("abilityEffects");
         BattleAbilityEditorGUI.AddDefaultEffect(effects);
         data.ApplyModifiedPropertiesWithoutUndo();
@@ -479,10 +547,38 @@ public sealed class BattleCardEditorWindow : EditorWindow
 
     private void Select(BattleCardSO card)
     {
+        if (!ReferenceEquals(selected, card))
+            RequestEditingFocusClear();
+
         selected = card;
         serialized = card != null ? new SerializedObject(card) : null;
         detailScroll = Vector2.zero;
         CancelRename();
+    }
+
+    private void RequestEditingFocusClear()
+    {
+        _clearEditingFocusRequested = true;
+        GUIUtility.keyboardControl = 0;
+        EditorGUIUtility.editingTextField = false;
+        if (Event.current != null)
+            ApplyPendingEditingFocusClear();
+    }
+
+    private void ApplyPendingEditingFocusClear()
+    {
+        if (!_clearEditingFocusRequested)
+            return;
+
+        GUI.FocusControl(null);
+        GUIUtility.keyboardControl = 0;
+        EditorGUIUtility.editingTextField = false;
+        _clearEditingFocusRequested = false;
+    }
+
+    private static void RefreshLocalizationKeys()
+    {
+        PS260714LocalizationKeyField.Refresh();
     }
 
     private bool MatchesSearch(BattleCardSO card)

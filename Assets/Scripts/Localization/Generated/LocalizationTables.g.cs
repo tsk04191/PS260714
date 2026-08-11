@@ -9,7 +9,7 @@ namespace PS260714.Localization
 {
     public static class GeneratedLocalizationTables
     {
-        public const string SourceHash = "9b744c915e7b07bd36977589b4301dfcd97eea2ccc4973010ead217afa1b355b";
+        public const string SourceHash = "4d47f1d3d7d593a095a2d9f81f46a555a39b809177ab0ee26af92681cb13315c";
         public const string ReferenceLocale = "en-US";
 
         private static readonly LocalizationLocaleInfo[] LocaleData =
@@ -369,14 +369,26 @@ namespace PS260714.Localization
                 { "roll.sub.exploration.description", new LocalizationEntry("\uD0D0\uD5D8 \uB3D9\uC544\uB9AC", "body") },
                 { "roll.sub.exploration.passive.stage_attack.name", new LocalizationEntry("\uD0D0\uD5D8\uC758 \uC131\uACFC", "title") },
                 { "roll.sub.exploration.passive.stage_attack.description", new LocalizationEntry("\uC644\uB8CC\uD55C \uB358\uC804 \uC2A4\uD14C\uC774\uC9C0\uB9C8\uB2E4 \uACF5\uACA9\uB825\uC744 1 \uD68D\uB4DD\uD569\uB2C8\uB2E4. \uC774\uBCA4\uD2B8, \uD734\uC2DD, \uC0C1\uC810 \uC2A4\uD14C\uC774\uC9C0\uB97C \uD3EC\uD568\uD569\uB2C8\uB2E4.", "body") },
-                { "item.battle.power_drink.name", new LocalizationEntry("\uD30C\uC6CC \uC74C\uB8CC", "title") },
-                { "item.battle.power_drink.description", new LocalizationEntry("[icon=power] \uD30C\uC6CC 1 \uD68D\uB4DD", "tooltip") },
-                { "item.battle.speed_drink.name", new LocalizationEntry("\uC2A4\uD53C\uB4DC \uC74C\uB8CC", "title") },
-                { "item.battle.speed_drink.description", new LocalizationEntry("[icon=speed] \uC2A4\uD53C\uB4DC 1 \uD68D\uB4DD", "tooltip") },
-                { "item.battle.boom.name", new LocalizationEntry("\uD3ED\uD0C4", "title") },
-                { "item.battle.boom.description", new LocalizationEntry("[icon=damage] \uD53C\uD574\uB7C9\uC744 3X3 \uBC94\uC704\uB85C \uBD80\uC5EC", "tooltip") },
-                { "item.battle.blood_dagger.name", new LocalizationEntry("\uCD9C\uD608 \uB2E8\uAC80", "title") },
-                { "item.battle.blood_dagger.description", new LocalizationEntry("[icon=damage] \uD53C\uD574\uB7C9\uACFC [icon=blood] \uB97C 5\uCD08 \uBD80\uC5EC", "tooltip") },
+                { "card.public.common.attack0.name", new LocalizationEntry("\uACF5\uACA9 0", "title") },
+                { "card.public.common.attack0.description", new LocalizationEntry("{damage:0.#} \uC758 \uD53C\uD574\uB97C {count}\uC5D0\uAC8C \uC900\uB2E4.", "tooltip") },
+                { "card.public.common.attack1.name", new LocalizationEntry("\uACF5\uACA9 1", "title") },
+                { "card.public.common.attack1.description", new LocalizationEntry("{damage:0.#} \uC758 \uD53C\uD574\uB97C {radius:0.##} \uC758 \uC6D0\uBC94\uC704\uC5D0 \uC900\uB2E4.", "tooltip") },
+                { "card.public.common.attack2.name", new LocalizationEntry("\uACF5\uACA9 2", "title") },
+                { "card.public.common.attack2.description", new LocalizationEntry("{damage:0.#} \uC758 \uD53C\uD574\uB97C \uBB34\uC791\uC704 \uC801 {count}\uC5D0\uAC8C \uC900\uB2E4.", "tooltip") },
+                { "card.public.common.attack3.name", new LocalizationEntry("\uACF5\uACA9 3", "title") },
+                { "card.public.common.attack3.description", new LocalizationEntry("{damage:0.#} \uC758 \uD53C\uD574\uB97C {count}\uC5D0\uAC8C \uC900\uB2E4.", "tooltip") },
+                { "card.public.common.attack4.name", new LocalizationEntry("\uACF5\uACA9 4", "title") },
+                { "card.public.common.attack4.description", new LocalizationEntry("{damage:0.#} \uC758 \uD53C\uD574\uB97C {radius:0.##} \uC758 \uC6D0\uBC94\uC704\uC5D0 \uC900\uB2E4.", "tooltip") },
+                { "card.public.common.repair.name", new LocalizationEntry("\uC218\uB9AC", "title") },
+                { "card.public.common.repair.description", new LocalizationEntry("\uBCF4\uD638\uB9C9\uC744 {armor:0.#} \uD68C\uBCF5\uD569\uB2C8\uB2E4.", "tooltip") },
+                { "card.public.common.draw.name", new LocalizationEntry("\uBF51\uAE30", "title") },
+                { "card.public.common.draw.description", new LocalizationEntry("\uCE74\uB4DC\uB97C {drawCount:0}\uC7A5 \uBF51\uC2B5\uB2C8\uB2E4.", "tooltip") },
+                { "card.public.common.buff0.name", new LocalizationEntry("\uBC84\uD504 0", "title") },
+                { "card.public.common.buff0.description", new LocalizationEntry("\uC120\uD0DD\uD55C \uC544\uAD70\uC5D0\uAC8C [icon=power] {stacks:0.#}\uC2A4\uD0DD\uC744 {seconds:0.0}\uCD08 \uB3D9\uC548 \uBD80\uC5EC\uD569\uB2C8\uB2E4.", "tooltip") },
+                { "card.public.common.buff1.name", new LocalizationEntry("\uBC84\uD504 1", "title") },
+                { "card.public.common.buff1.description", new LocalizationEntry("\uC120\uD0DD\uD55C \uC544\uAD70\uC5D0\uAC8C [icon=speed] {stacks:0.#}\uC2A4\uD0DD\uC744 {seconds:0.0}\uCD08 \uB3D9\uC548 \uBD80\uC5EC\uD569\uB2C8\uB2E4.", "tooltip") },
+                { "card.public.common.buff2.name", new LocalizationEntry("\uBC84\uD504 2", "title") },
+                { "card.public.common.buff2.description", new LocalizationEntry("\uBAA8\uB4E0 \uC544\uAD70\uC5D0\uAC8C [icon=power] {stacks:0.#}\uC2A4\uD0DD\uC744 {seconds:0.0}\uCD08 \uB3D9\uC548 \uBD80\uC5EC\uD569\uB2C8\uB2E4.", "tooltip") },
             };
 
         private static readonly Dictionary<string, LocalizationEntry>
@@ -727,14 +739,26 @@ namespace PS260714.Localization
                 { "roll.sub.exploration.description", new LocalizationEntry("Exploration Club", "body") },
                 { "roll.sub.exploration.passive.stage_attack.name", new LocalizationEntry("Exploration Results", "title") },
                 { "roll.sub.exploration.passive.stage_attack.description", new LocalizationEntry("Gain 1 Attack Power for each completed dungeon stage, including event, rest, and shop stages.", "body") },
-                { "item.battle.power_drink.name", new LocalizationEntry("Power Drink", "title") },
-                { "item.battle.power_drink.description", new LocalizationEntry("Gain [icon=power] Power 1 status", "tooltip") },
-                { "item.battle.speed_drink.name", new LocalizationEntry("Speed Drink", "title") },
-                { "item.battle.speed_drink.description", new LocalizationEntry("Gain [icon=speed]  Speed 1 status", "tooltip") },
-                { "item.battle.boom.name", new LocalizationEntry("Boom", "title") },
-                { "item.battle.boom.description", new LocalizationEntry("Give [icon=damage] damage to 3X3", "tooltip") },
-                { "item.battle.blood_dagger.name", new LocalizationEntry("Bloody dagger", "title") },
-                { "item.battle.blood_dagger.description", new LocalizationEntry("Give [icon=damage] damange and [icon=blood] 5 sec", "tooltip") },
+                { "card.public.common.attack0.name", new LocalizationEntry("Attack 0", "title") },
+                { "card.public.common.attack0.description", new LocalizationEntry("Give {damage:0.#} damage to {count}.", "tooltip") },
+                { "card.public.common.attack1.name", new LocalizationEntry("Attack 1", "title") },
+                { "card.public.common.attack1.description", new LocalizationEntry("Give {damage:0.#} damage to {radius:0.##} radius circle", "tooltip") },
+                { "card.public.common.attack2.name", new LocalizationEntry("Attack 2", "title") },
+                { "card.public.common.attack2.description", new LocalizationEntry("Give {damage:0.#} damage to {count} random enemy.", "tooltip") },
+                { "card.public.common.attack3.name", new LocalizationEntry("Attack 3", "title") },
+                { "card.public.common.attack3.description", new LocalizationEntry("Give {damage:0.#} damage to {count}.", "tooltip") },
+                { "card.public.common.attack4.name", new LocalizationEntry("Attack 4", "title") },
+                { "card.public.common.attack4.description", new LocalizationEntry("Give {damage:0.#} damage to {radius:0.##} radius circle", "tooltip") },
+                { "card.public.common.repair.name", new LocalizationEntry("Repair", "title") },
+                { "card.public.common.repair.description", new LocalizationEntry("Restore {armor:0.#} shield.", "tooltip") },
+                { "card.public.common.draw.name", new LocalizationEntry("Draw", "title") },
+                { "card.public.common.draw.description", new LocalizationEntry("Draw {drawCount:0} cards.", "tooltip") },
+                { "card.public.common.buff0.name", new LocalizationEntry("Buff 0", "title") },
+                { "card.public.common.buff0.description", new LocalizationEntry("Grant the selected ally {stacks:0.#} stack(s) of [icon=power] for {seconds:0.0} seconds.", "tooltip") },
+                { "card.public.common.buff1.name", new LocalizationEntry("Buff 1", "title") },
+                { "card.public.common.buff1.description", new LocalizationEntry("Grant the selected ally {stacks:0.#} stack(s) of [icon=speed] for {seconds:0.0} seconds.", "tooltip") },
+                { "card.public.common.buff2.name", new LocalizationEntry("Buff 2", "title") },
+                { "card.public.common.buff2.description", new LocalizationEntry("Grant all allies {stacks:0.#} stack(s) of [icon=power] for {seconds:0.0} seconds.", "tooltip") },
             };
 
         private static readonly IReadOnlyDictionary<string, LocalizationEntry>

@@ -484,6 +484,7 @@ $RECYCLE.BIN/
 /*
 !/.gitignore
 !/README.md
+!/AGENTS.md
 !/GAME_STRUCTURE.md
 !/Assets/
 /Assets/*

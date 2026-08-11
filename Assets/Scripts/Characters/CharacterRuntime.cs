@@ -2220,6 +2220,9 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
         CharacterActionConditionData actionCondition,
         AbilityTargetSelection inheritedTargets)
     {
+        if (!BattleAbilityRules.RequiresActionTargets(definition))
+            return default;
+
         if (definition.AreaDefinition.UsesWorldArea)
         {
             IReadOnlyList<CharacterNumericCondition> conditions =
@@ -2288,16 +2291,8 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
     private static bool UsesActionTargets(
         CharacterSkillDefinition definition)
     {
-        if (definition == null || !definition.HasExplicitEffects)
-            return true;
-
-        foreach (CharacterEffectDefinition effect in definition.Effects)
-        {
-            if (effect?.RequiresActionTargets == true)
-                return true;
-        }
-
-        return false;
+        return definition == null || !definition.HasExplicitEffects ||
+               BattleAbilityRules.RequiresActionTargets(definition);
     }
 
     private CharacterAttackDefinition GetLinkedSkillFallbackAttack()
@@ -2554,6 +2549,13 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
         CharacterActionConditionData actionCondition,
         AbilityTargetSelection inheritedTargets)
     {
+        if (definition.HasExplicitEffects &&
+            !BattleAbilityRules.RequiresActionTargets(definition))
+        {
+            _retainedAttackTargets.Remove(definitionIndex);
+            return default;
+        }
+
         bool retainsTarget = definition.TargetRetentionMode ==
             CharacterAttackTargetRetentionMode.LockUntilInvalid &&
             CharacterAttackDefinition.SupportsTargetRetention(
@@ -3144,17 +3146,20 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
         BattleEffectResult effectResult;
         if (definition.HasExplicitEffects)
         {
-            AbilityTargetSelection targets = SelectCustomAbilityTargets(
-                board,
-                definition.TargetFaction,
-                subject,
-                definition.SubjectMetric,
-                definition.SubjectCount,
-                actionCondition.HasNumericConditions,
-                actionCondition.MatchMode,
-                actionCondition.NumericConditions,
-                inheritedTargets,
-                definition.AreaDefinition);
+            AbilityTargetSelection targets =
+                BattleAbilityRules.RequiresActionTargets(definition)
+                    ? SelectCustomAbilityTargets(
+                        board,
+                        definition.TargetFaction,
+                        subject,
+                        definition.SubjectMetric,
+                        definition.SubjectCount,
+                        actionCondition.HasNumericConditions,
+                        actionCondition.MatchMode,
+                        actionCondition.NumericConditions,
+                        inheritedTargets,
+                        definition.AreaDefinition)
+                    : default;
             if (_manualTargetRequestPending)
                 return false;
 
@@ -3502,9 +3507,8 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
             }
 
             AbilityTargetSelection effectTargets = default;
-            if (effect.Type != CharacterEffectType.GainResource &&
-                effect.Type != CharacterEffectType.SpendResource &&
-                effect.Type != CharacterEffectType.SpendHealth &&
+            if (BattleEffectRules.RequiresTargets(
+                    effect.BattleEffectType) &&
                 effect.TargetMode ==
                 CharacterEffectTargetMode.FreshSelection)
             {
@@ -3827,9 +3831,8 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
         effectContext = default;
         if (effect == null)
             return false;
-        if (effect.Type == CharacterEffectType.GainResource ||
-            effect.Type == CharacterEffectType.SpendResource ||
-            effect.Type == CharacterEffectType.SpendHealth)
+        if (!BattleEffectRules.RequiresTargets(
+                effect.BattleEffectType))
         {
             effectContext = actionContext;
             return true;
@@ -4189,9 +4192,8 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
     {
         if (effect == null)
             return false;
-        if (effect.Type == CharacterEffectType.GainResource ||
-            effect.Type == CharacterEffectType.SpendResource ||
-            effect.Type == CharacterEffectType.SpendHealth ||
+        if (!BattleEffectRules.RequiresTargets(
+                effect.BattleEffectType) ||
             effect.TargetMode == CharacterEffectTargetMode.Source)
         {
             return true;
@@ -4290,6 +4292,19 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
                        !float.IsInfinity(effect.Amount) &&
                        effect.Amount >= 1f &&
                        effect.SourceResourceScale == 0f &&
+                       effect.TargetCurrentHealthScale == 0f &&
+                       effect.TargetMaxHealthScale == 0f &&
+                       effect.SourceStatusStacksScale == 0f &&
+                       effect.TargetStatusStacksScale == 0f;
+            case CharacterEffectType.CardDraw:
+                return effect.AmountMode ==
+                           CharacterDamageAmountMode.Fixed &&
+                       !float.IsNaN(effect.Amount) &&
+                       !float.IsInfinity(effect.Amount) &&
+                       effect.Amount >= 1f &&
+                       effect.SourceResourceScale == 0f &&
+                       effect.SourceCurrentHealthScale == 0f &&
+                       effect.SourceMaxHealthScale == 0f &&
                        effect.TargetCurrentHealthScale == 0f &&
                        effect.TargetMaxHealthScale == 0f &&
                        effect.SourceStatusStacksScale == 0f &&

@@ -12,6 +12,7 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
     IBattlePresentationEventPublisher,
     IBattleVfxTargetResolver,
     IBattleManualTargetSelectionService,
+    IBattleCardDrawServiceProvider,
     IBattleObjectiveProvider
 {
     private const int MaximumStatusEventsPerDispatch = 128;
@@ -67,10 +68,16 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
     {
         public float ApproachProgress;
         public float AttackTimeRemaining;
+        public Vector2 SpawnDirection { get; }
 
-        public CircularEnemyState(float attackInterval)
+        public CircularEnemyState(
+            float attackInterval,
+            Vector2 spawnDirection)
         {
             AttackTimeRemaining = Mathf.Max(0.1f, attackInterval);
+            SpawnDirection = spawnDirection.sqrMagnitude > 0.0001f
+                ? spawnDirection.normalized
+                : Vector2.up;
         }
     }
 
@@ -565,6 +572,10 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
     [SerializeField]
     private DungeonBattleCoreWorldGaugeView worldBattleCoreGauge;
     [SerializeField, Min(0.1f)] private float worldSpawnRadius = 4.25f;
+    [SerializeField, Min(0f), Tooltip(
+        "Extra world-space distance beyond the camera's longest visible " +
+        "horizontal ground edge used by the circular enemy spawn line.")]
+    private float worldSpawnLinePadding = 0.35f;
     [SerializeField, Min(0.1f)] private float worldAllyHeight = 1.7f;
     [SerializeField, Min(0.1f)] private float worldEnemyHeight = 1.85f;
 
@@ -604,6 +615,7 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
     private readonly HashSet<EnemySO> _missingWorldEnemySpriteWarnings = new();
     private readonly HashSet<EnemyRuntime> _worldEnemySync = new();
     private Func<EnemyRuntime, bool> _itemTargetHandler;
+    private IBattleCardDrawService _cardDrawService;
     private BattleManualTargetSelectionRequest _manualTargetRequest;
     private readonly List<EnemyRuntime> _manualEnemyTargets = new();
     private readonly List<IBattleCharacter> _manualAllyTargets = new();
@@ -618,6 +630,7 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
     private bool _manualAreaPointerDown;
     private EnemyRuntime _forcedPriorityTarget;
     private float _forcedPriorityRemaining;
+    private float _worldSpawnLineRadius;
     private int _maximumStackSize = 8;
     private bool _initialized;
     private readonly Queue<BattleStatusAppliedEvent> _statusEventQueue = new();
@@ -679,6 +692,7 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
         ? _activeTileCount
         : GridSize * GridSize;
     public IBattleObjective Objective => _battleCore;
+    public IBattleCardDrawService CardDrawService => _cardDrawService;
     public int LivingEnemyCount
     {
         get
@@ -941,6 +955,12 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
         Func<EnemyRuntime, bool> itemTargetHandler)
     {
         _itemTargetHandler = itemTargetHandler;
+    }
+
+    public void BindCardDrawService(
+        IBattleCardDrawService cardDrawService)
+    {
+        _cardDrawService = cardDrawService;
     }
 
     public bool TryBeginManualTargetSelection(
@@ -1620,7 +1640,9 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
         {
             _circularEnemyStates[pending.Enemy] =
                 new CircularEnemyState(
-                    pending.Enemy.CoreAttackInterval);
+                    pending.Enemy.CoreAttackInterval,
+                    DungeonWorldSpawnGeometry.DirectionFromUnitSample(
+                        Random.value));
         }
         if (!pending.IsExclusive)
             return;
@@ -2710,7 +2732,9 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
             !TryResolveEnemyAbilityTargets(
                 sourceTile,
                 source,
-                ability.Target,
+                BattleAbilityRules.RequiresActionTargets(ability)
+                    ? ability.Target
+                    : null,
                 characters,
                 out CharacterTargetFaction targetFaction,
                 out IReadOnlyList<EnemyRuntime> enemyTargets,
@@ -2749,7 +2773,9 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
                 !TryResolveEnemyAbilityTargets(
                     sourceTile,
                     source,
-                    ability.Target,
+                    BattleAbilityRules.RequiresActionTargets(ability)
+                        ? ability.Target
+                        : null,
                     _battleCharacters,
                     out CharacterTargetFaction targetFaction,
                     out IReadOnlyList<EnemyRuntime> enemyTargets,
@@ -2814,7 +2840,9 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
                 !TryResolveEnemyAbilityTargets(
                     sourceTile,
                     source,
-                    ability.Target,
+                    BattleAbilityRules.RequiresActionTargets(ability)
+                        ? ability.Target
+                        : null,
                     _battleCharacters,
                     out CharacterTargetFaction targetFaction,
                     out IReadOnlyList<EnemyRuntime> enemyTargets,
@@ -2955,7 +2983,9 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
                 !TryResolveEnemyAbilityTargets(
                     sourceTile,
                     source,
-                    ability.Target,
+                    BattleAbilityRules.RequiresActionTargets(ability)
+                        ? ability.Target
+                        : null,
                     _battleCharacters,
                     out CharacterTargetFaction targetFaction,
                     out IReadOnlyList<EnemyRuntime> enemyTargets,
@@ -3816,28 +3846,16 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
             if (!active)
                 continue;
 
-            float progress = 0f;
             EnemyRuntime enemy = tile.TopEnemy;
             if (enemy != null &&
                 _circularEnemyStates.TryGetValue(
                     enemy,
                     out CircularEnemyState state))
             {
-                progress = state.ApproachProgress;
-            }
-
-            float angle = 90f - index * (360f / laneCount);
-            float radians = angle * Mathf.Deg2Rad;
-            Vector2 direction = new(
-                Mathf.Cos(radians),
-                Mathf.Sin(radians));
-
-            if (enemy != null)
-            {
                 UpdateWorldEnemyView(
                     enemy,
-                    direction,
-                    progress,
+                    state.SpawnDirection,
+                    state.ApproachProgress,
                     index);
             }
         }
@@ -3953,6 +3971,7 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
         float maximumX = float.NegativeInfinity;
         float minimumZ = float.PositiveInfinity;
         float maximumZ = float.NegativeInfinity;
+        Vector2[] actorGroundCorners = new Vector2[viewportCorners.Length];
         int intersectionCount = 0;
         for (int index = 0; index < viewportCorners.Length; index++)
         {
@@ -3960,17 +3979,34 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
             if (!plane.Raycast(ray, out float distance) || distance < 0f)
                 continue;
 
+            Vector3 worldPoint = ray.GetPoint(distance);
             Vector3 localPoint = groundSpace.InverseTransformPoint(
-                ray.GetPoint(distance));
+                worldPoint);
             minimumX = Mathf.Min(minimumX, localPoint.x);
             maximumX = Mathf.Max(maximumX, localPoint.x);
             minimumZ = Mathf.Min(minimumZ, localPoint.z);
             maximumZ = Mathf.Max(maximumZ, localPoint.z);
+            if (worldActorRoot != null)
+            {
+                Vector3 actorPoint = worldActorRoot.InverseTransformPoint(
+                    worldPoint);
+                actorGroundCorners[index] = new Vector2(
+                    actorPoint.x,
+                    actorPoint.z);
+            }
             intersectionCount++;
         }
 
         if (intersectionCount != viewportCorners.Length)
             return;
+
+        if (worldActorRoot != null)
+        {
+            _worldSpawnLineRadius =
+                DungeonWorldSpawnGeometry.ResolveSpawnLineRadius(
+                    actorGroundCorners,
+                    worldSpawnLinePadding);
+        }
 
         float visibleWidth = maximumX - minimumX;
         float visibleDepth = maximumZ - minimumZ;
@@ -5148,6 +5184,13 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
             request.AreaDefinition.OriginMode ==
             CharacterAreaOriginMode.Caster;
         _manualAreaPointerDown = false;
+        if (!_manualAreaAnchorSet)
+        {
+            _manualEnemyTargets.Clear();
+            _manualAllyTargets.Clear();
+            _areaPreview?.Hide();
+            return;
+        }
         RefreshManualAreaTargets();
     }
 
@@ -5173,7 +5216,8 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
         _manualAreaOrigin = ResolveManualAreaOrigin(
             cursor,
             source,
-            definition);
+            definition,
+            request.AreaPlacementMode);
         Vector2 initialDirection = _manualAreaOrigin - source;
         if (initialDirection.sqrMagnitude > 0.0001f)
             _manualAreaDirection = initialDirection.normalized;
@@ -5197,7 +5241,8 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
         _manualAreaOrigin = ResolveManualAreaOrigin(
             cursor,
             source,
-            definition);
+            definition,
+            request.AreaPlacementMode);
         Vector2 previewDirection = _manualAreaOrigin - source;
         if (previewDirection.sqrMagnitude > 0.0001f)
             _manualAreaDirection = previewDirection.normalized;
@@ -5235,16 +5280,15 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
     private Vector2 ResolveManualAreaOrigin(
         Vector2 cursor,
         Vector2 source,
-        BattleAreaDefinition definition)
+        BattleAreaDefinition definition,
+        BattleManualAreaPlacementMode placementMode)
     {
-        Vector2 resolved = BattleAreaGeometry.ClampToRadius(
+        return BattleAreaGeometry.ResolveManualOrigin(
             cursor,
             source,
-            definition.MaxCastDistance);
-        return BattleAreaGeometry.ClampToRadius(
-            resolved,
-            Vector2.zero,
-            GetWorldWallRadius());
+            definition,
+            GetWorldWallRadius(),
+            placementMode);
     }
 
     private void RefreshManualAreaTargets()
@@ -5462,14 +5506,14 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
 
     private float GetWorldSpawnRadius()
     {
-        if (!_arenaSetup.UsesBattleCore)
-            return worldSpawnRadius;
-
-        return GetWorldWallRadius() *
-               (_arenaSetup.SpawnRadiusNormalized /
-                Mathf.Max(
-                    0.01f,
-                    _arenaSetup.WallRadiusNormalized));
+        float authoredRadius = !_arenaSetup.UsesBattleCore
+            ? worldSpawnRadius
+            : GetWorldWallRadius() *
+              (_arenaSetup.SpawnRadiusNormalized /
+               Mathf.Max(
+                   0.01f,
+                   _arenaSetup.WallRadiusNormalized));
+        return Mathf.Max(authoredRadius, _worldSpawnLineRadius);
     }
 
     private float GetWorldEnemyStopRadius(
@@ -5554,5 +5598,48 @@ public sealed class BattleAreaPreviewView
     {
         if (_root != null)
             UnityEngine.Object.Destroy(_root);
+    }
+}
+
+public static class DungeonWorldSpawnGeometry
+{
+    public static float ResolveSpawnLineRadius(
+        IReadOnlyList<Vector2> viewportGroundCorners,
+        float padding)
+    {
+        float radius = 0f;
+        if (viewportGroundCorners?.Count >= 4)
+        {
+            float bottomWidth = Vector2.Distance(
+                viewportGroundCorners[0],
+                viewportGroundCorners[2]);
+            float topWidth = Vector2.Distance(
+                viewportGroundCorners[1],
+                viewportGroundCorners[3]);
+            int leftIndex = topWidth >= bottomWidth ? 1 : 0;
+            int rightIndex = topWidth >= bottomWidth ? 3 : 2;
+            radius = Mathf.Max(
+                viewportGroundCorners[leftIndex].magnitude,
+                viewportGroundCorners[rightIndex].magnitude);
+        }
+        else if (viewportGroundCorners != null)
+        {
+            for (int index = 0;
+                 index < viewportGroundCorners.Count;
+                 index++)
+            {
+                radius = Mathf.Max(
+                    radius,
+                    viewportGroundCorners[index].magnitude);
+            }
+        }
+
+        return radius + Mathf.Max(0f, padding);
+    }
+
+    public static Vector2 DirectionFromUnitSample(float sample)
+    {
+        float angle = Mathf.Clamp01(sample) * Mathf.PI * 2f;
+        return new Vector2(Mathf.Cos(angle), Mathf.Sin(angle));
     }
 }

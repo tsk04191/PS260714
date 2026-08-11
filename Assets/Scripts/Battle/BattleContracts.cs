@@ -14,6 +14,16 @@ public interface IActiveSkillResource
     bool TryGain(int amount);
 }
 
+public interface IBattleCardDrawService
+{
+    int TryDrawCards(int count);
+}
+
+public interface IBattleCardDrawServiceProvider
+{
+    IBattleCardDrawService CardDrawService { get; }
+}
+
 public readonly struct BattleEffectResult
 {
     public bool Attempted { get; }
@@ -450,6 +460,22 @@ public static class BattleEffectExecutor
                     showAttackRange,
                     actionId);
                 break;
+
+            case BattleEffectType.CardDraw:
+            {
+                int amount = CalculateAmount(
+                    effect,
+                    effectContext,
+                    sourceData,
+                    false,
+                    amountMultiplier,
+                    actionId);
+                int drawn = amount > 0
+                    ? effectContext.CardDrawService?.TryDrawCards(amount) ?? 0
+                    : 0;
+                result = new BattleEffectResult(true, drawn > 0);
+                break;
+            }
 
             default:
                 return default;
@@ -1000,7 +1026,7 @@ public static class BattleEffectExecutor
         resolved = default;
         if (effect == null)
             return false;
-        if (!RequiresTargets(effect.BattleEffectType))
+        if (!BattleEffectRules.RequiresTargets(effect.BattleEffectType))
         {
             resolved = context;
             return true;
@@ -1085,13 +1111,6 @@ public static class BattleEffectExecutor
                    typeof(BattleEffectTargetMode),
                    effect.BattleTargetMode) &&
                effect.AmountScaling.IsFinite;
-    }
-
-    private static bool RequiresTargets(BattleEffectType effectType)
-    {
-        return effectType != BattleEffectType.GainResource &&
-               effectType != BattleEffectType.SpendResource &&
-               effectType != BattleEffectType.SpendHealth;
     }
 
     private static bool IsDirectDamageType(
@@ -1326,6 +1345,12 @@ public readonly struct BattleManualTargetSelectionResult
     }
 }
 
+public enum BattleManualAreaPlacementMode
+{
+    AbilityConstrained = 0,
+    FreePointer = 1
+}
+
 public sealed class BattleManualTargetSelectionRequest
 {
     private readonly Action<BattleManualTargetSelectionResult> _complete;
@@ -1339,6 +1364,7 @@ public sealed class BattleManualTargetSelectionRequest
     public IReadOnlyList<IBattleCharacter> AllyCandidates { get; }
     public bool AllowCancel { get; }
     public BattleAreaDefinition AreaDefinition { get; }
+    public BattleManualAreaPlacementMode AreaPlacementMode { get; }
     public bool UsesWorldArea => AreaDefinition?.UsesWorldArea == true;
 
     public BattleManualTargetSelectionRequest(
@@ -1353,7 +1379,9 @@ public sealed class BattleManualTargetSelectionRequest
         CharacterAttackSubject prioritySubject =
             CharacterAttackSubject.Manual,
         CharacterAttackSubjectMetric priorityMetric =
-            CharacterAttackSubjectMetric.Health)
+            CharacterAttackSubjectMetric.Health,
+        BattleManualAreaPlacementMode areaPlacementMode =
+            BattleManualAreaPlacementMode.AbilityConstrained)
     {
         Source = source;
         Faction = faction;
@@ -1368,6 +1396,11 @@ public sealed class BattleManualTargetSelectionRequest
             allyCandidates ?? Array.Empty<IBattleCharacter>();
         AllowCancel = allowCancel;
         AreaDefinition = areaDefinition;
+        AreaPlacementMode = Enum.IsDefined(
+            typeof(BattleManualAreaPlacementMode),
+            areaPlacementMode)
+                ? areaPlacementMode
+                : BattleManualAreaPlacementMode.AbilityConstrained;
         _complete = complete;
     }
 
@@ -1464,6 +1497,29 @@ public sealed class CharacterAreaDefinition : BattleAreaDefinition
 public static class BattleAreaGeometry
 {
     private const float DirectionEpsilon = 0.0001f;
+
+    public static Vector2 ResolveManualOrigin(
+        Vector2 cursor,
+        Vector2 source,
+        BattleAreaDefinition definition,
+        float arenaRadius,
+        BattleManualAreaPlacementMode placementMode)
+    {
+        if (definition == null ||
+            placementMode == BattleManualAreaPlacementMode.FreePointer)
+        {
+            return cursor;
+        }
+
+        Vector2 castLimited = ClampToRadius(
+            cursor,
+            source,
+            definition.MaxCastDistance);
+        return ClampToRadius(
+            castLimited,
+            Vector2.zero,
+            Mathf.Max(0f, arenaRadius));
+    }
 
     public static bool Contains(
         Vector2 point,

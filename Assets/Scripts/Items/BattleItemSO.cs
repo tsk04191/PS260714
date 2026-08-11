@@ -342,22 +342,26 @@ public sealed class BattleItemSO : ItemDefinitionSO,
         int amount = primaryAbility != null
             ? Mathf.Max(0, Mathf.RoundToInt(primaryAbility.Amount))
             : primaryEffect?.Amount ?? 0;
-        LocalizationArgument[] arguments =
+        List<LocalizationArgument> arguments = new(
+            BattleAbilityLocalizationArguments.Build(this));
+        arguments.Add(LocalizationService.Arg("cost", EnergyCost));
+        arguments.Add(LocalizationService.Arg("interval", interval));
+        arguments.Add(LocalizationService.Arg(
+            "multiplier",
+            primaryEffect?.Multiplier ?? 0f));
+        arguments.Add(LocalizationService.Arg(
+            "uses",
+            UsesPerAcquisition));
+        if (primaryAbility == null)
         {
-            LocalizationService.Arg("cost", EnergyCost),
-            LocalizationService.Arg("duration", duration),
-            LocalizationService.Arg("interval", interval),
-            LocalizationService.Arg(
-                "multiplier",
-                primaryEffect?.Multiplier ?? 0f),
-            LocalizationService.Arg("damage", amount),
-            LocalizationService.Arg("amount", amount),
-            LocalizationService.Arg("uses", UsesPerAcquisition),
-        };
+            arguments.Add(LocalizationService.Arg("duration", duration));
+            arguments.Add(LocalizationService.Arg("damage", amount));
+            arguments.Add(LocalizationService.Arg("amount", amount));
+        }
         if (TryResolveCurrentLocale(
                 DescriptionLocalizationKey,
                 out string localized,
-                arguments))
+                arguments.ToArray()))
         {
             return localized;
         }
@@ -384,9 +388,8 @@ public sealed class BattleItemSO : ItemDefinitionSO,
             return false;
         }
 
-        bool usesTargets = effect.Type != CharacterEffectType.GainResource &&
-                           effect.Type != CharacterEffectType.SpendResource &&
-                           effect.Type != CharacterEffectType.SpendHealth;
+        bool usesTargets = BattleEffectRules.RequiresTargets(
+            effect.BattleEffectType);
         CharacterTargetFaction targetFaction = targetType ==
                                                 BattleItemTargetType.Enemy
             ? CharacterTargetFaction.Enemy
@@ -433,6 +436,7 @@ public sealed class BattleItemSO : ItemDefinitionSO,
 
             case CharacterEffectType.SpendResource:
             case CharacterEffectType.SpendHealth:
+            case CharacterEffectType.CardDraw:
                 return effect.AmountMode == CharacterDamageAmountMode.Fixed &&
                        effect.Amount >= 1f;
 

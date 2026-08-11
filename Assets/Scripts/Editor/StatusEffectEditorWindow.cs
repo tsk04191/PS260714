@@ -82,7 +82,8 @@ public sealed class StatusEffectEditorWindow : EditorWindow
         "자원 소비",
         "체력 회복",
         "체력 소비",
-        "보호막 부여"
+        "보호막 부여",
+        "카드 드로우"
     };
 
     private static readonly string[] EffectTargetModeOptions =
@@ -741,10 +742,8 @@ public sealed class StatusEffectEditorWindow : EditorWindow
             (CharacterEffectType)type.enumValueIndex;
         SerializedProperty targetMode =
             effect.FindPropertyRelative("targetMode");
-        bool usesTargets =
-            selectedType != CharacterEffectType.GainResource &&
-            selectedType != CharacterEffectType.SpendResource &&
-            selectedType != CharacterEffectType.SpendHealth;
+        bool usesTargets = BattleEffectRules.RequiresTargets(
+            (BattleEffectType)(int)selectedType);
         if (usesTargets)
         {
             DrawEnumProperty(

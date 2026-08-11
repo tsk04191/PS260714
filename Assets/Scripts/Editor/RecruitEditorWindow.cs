@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using PS260714.Localization;
 using UnityEditor;
 using UnityEditor.SceneManagement;
 using UnityEngine;
@@ -54,6 +55,7 @@ public sealed class RecruitEditorWindow : EditorWindow
     private void OnEnable()
     {
         EditorApplication.hierarchyChanged += HandleHierarchyChanged;
+        PS260714LocalizationKeyField.Refresh();
         FindRecruitPage();
     }
 
@@ -304,6 +306,7 @@ public sealed class RecruitEditorWindow : EditorWindow
             {
                 DrawProperty(banner, "bannerId", "배너 ID");
                 DrawProperty(banner, "ticketGroupId", "모집권 그룹 ID");
+                DrawLocalizationSettings(banner);
                 DrawProperty(banner, "bannerArt", "배경 배너 이미지");
                 DrawProperty(banner, "totalRecruitCount", "누적 모집 횟수");
                 DrawProperty(banner, "currentStack", "현재 스택");
@@ -316,6 +319,34 @@ public sealed class RecruitEditorWindow : EditorWindow
             }
         }
         EditorGUILayout.EndFoldoutHeaderGroup();
+    }
+
+    private static void DrawLocalizationSettings(SerializedProperty banner)
+    {
+        EditorGUILayout.Space(4f);
+        using (new EditorGUILayout.HorizontalScope())
+        {
+            EditorGUILayout.LabelField(
+                "로컬라이제이션",
+                EditorStyles.miniBoldLabel);
+            if (GUILayout.Button("키 새로고침", GUILayout.Width(90f)))
+                PS260714LocalizationKeyField.Refresh();
+        }
+
+        PS260714LocalizationKeyField.Draw(
+            banner.FindPropertyRelative("titleLocalizationKey"),
+            "제목 키");
+        DrawProperty(banner, "fallbackTitle", "제목 Fallback");
+        PS260714LocalizationKeyField.Draw(
+            banner.FindPropertyRelative("descriptionLocalizationKey"),
+            "설명 키");
+        DrawProperty(banner, "fallbackDescription", "설명 Fallback");
+        PS260714LocalizationKeyField.Draw(
+            banner.FindPropertyRelative("periodLocalizationKey"),
+            "기간 키");
+        DrawProperty(banner, "fallbackPeriod", "기간 Fallback");
+        PS260714LocalizationKeyField.DrawLoadError();
+        EditorGUILayout.Space(4f);
     }
 
     private static void DrawBannerImagePreview(
@@ -1751,12 +1782,21 @@ public sealed class RecruitEditorWindow : EditorWindow
     {
         SetString(banner, "bannerId", index == 0 ? "main" : $"banner_{index + 1}");
         SetString(banner, "ticketGroupId", "standard");
-        SetString(banner, "koreanTitle", "상시 모집");
-        SetString(banner, "englishTitle", "STANDARD RECRUITMENT");
-        SetString(banner, "koreanDescription", "새로운 대원을 모집합니다");
-        SetString(banner, "englishDescription", "RECRUIT NEW OPERATORS");
-        SetString(banner, "koreanPeriod", "상시");
-        SetString(banner, "englishPeriod", "PERMANENT");
+        SetString(
+            banner,
+            "titleLocalizationKey",
+            LocalizationKeys.UiRecruitTitle);
+        SetString(banner, "fallbackTitle", "상시 모집");
+        SetString(
+            banner,
+            "descriptionLocalizationKey",
+            LocalizationKeys.UiRecruitDescription);
+        SetString(banner, "fallbackDescription", "새로운 대원을 모집합니다");
+        SetString(
+            banner,
+            "periodLocalizationKey",
+            LocalizationKeys.UiDungeonItemDurationPermanent);
+        SetString(banner, "fallbackPeriod", "상시");
         banner.FindPropertyRelative("bannerArt").objectReferenceValue = null;
         banner.FindPropertyRelative("currencyIcon").objectReferenceValue = null;
         banner.FindPropertyRelative("totalRecruitCount").intValue = 0;

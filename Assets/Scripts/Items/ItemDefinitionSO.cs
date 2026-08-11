@@ -1,6 +1,7 @@
 using System;
 using PS260714.Localization;
 using UnityEngine;
+using UnityEngine.Serialization;
 
 public enum ItemCategory
 {
@@ -42,10 +43,10 @@ public abstract class ItemDefinitionSO : ScriptableObject
     [Header("Localization")]
     [SerializeField] private string nameLocalizationKey;
     [SerializeField] private string descriptionLocalizationKey;
-    [SerializeField] private string koreanName;
-    [SerializeField] private string englishName;
-    [SerializeField, TextArea] private string koreanDescription;
-    [SerializeField, TextArea] private string englishDescription;
+    [FormerlySerializedAs("koreanName")]
+    [SerializeField] private string fallbackName;
+    [FormerlySerializedAs("koreanDescription")]
+    [SerializeField, TextArea] private string fallbackDescription;
 
     [Header("Presentation")]
     [SerializeField] private Sprite icon;
@@ -78,7 +79,7 @@ public abstract class ItemDefinitionSO : ScriptableObject
             nameLocalizationKey,
             korean);
         if (string.IsNullOrWhiteSpace(localized))
-            localized = korean ? koreanName : englishName;
+            localized = fallbackName;
         if (!string.IsNullOrWhiteSpace(localized))
             return localized.Trim();
         return string.IsNullOrWhiteSpace(ItemId)
@@ -92,11 +93,7 @@ public abstract class ItemDefinitionSO : ScriptableObject
             descriptionLocalizationKey,
             korean);
         if (string.IsNullOrWhiteSpace(localized))
-        {
-            localized = korean
-                ? koreanDescription
-                : englishDescription;
-        }
+            localized = fallbackDescription;
         return localized?.Trim() ?? string.Empty;
     }
 
@@ -139,8 +136,7 @@ public abstract class ItemDefinitionSO : ScriptableObject
             nameLocalizationKey?.Trim() ?? string.Empty;
         descriptionLocalizationKey =
             descriptionLocalizationKey?.Trim() ?? string.Empty;
-        koreanName = koreanName?.Trim() ?? string.Empty;
-        englishName = englishName?.Trim() ?? string.Empty;
+        fallbackName = fallbackName?.Trim() ?? string.Empty;
         maximumStack = Math.Max(0L, maximumStack);
         initialAmount = ClampAmount(
             Math.Max(0L, initialAmount));

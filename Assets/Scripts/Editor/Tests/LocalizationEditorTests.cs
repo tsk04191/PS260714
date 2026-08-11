@@ -88,6 +88,72 @@ public sealed class LocalizationEditorTests
     }
 
     [Test]
+    public void InsertNumericArgument_ReplacesSelectionAndKeepsCaretAfterToken()
+    {
+        LocalizationMarkupEditResult result =
+            LocalizationMarkupEditUtility.InsertNumericArgument(
+                "Armor value",
+                11,
+                6,
+                "armor",
+                "0.#");
+
+        Assert.That(result.Text, Is.EqualTo("Armor {armor:0.#}"));
+        Assert.That(result.CursorIndex, Is.EqualTo(result.Text.Length));
+        Assert.That(result.SelectIndex, Is.EqualTo(result.Text.Length));
+    }
+
+    [Test]
+    public void InsertNumericArgument_WithoutFormatCreatesGeneralValueToken()
+    {
+        LocalizationMarkupEditResult result =
+            LocalizationMarkupEditUtility.InsertNumericArgument(
+                "Count ",
+                6,
+                6,
+                "count",
+                string.Empty);
+
+        Assert.That(result.Text, Is.EqualTo("Count {count}"));
+    }
+
+    [Test]
+    public void InsertNumericArgument_CreatesCircleRadiusToken()
+    {
+        LocalizationMarkupEditResult result =
+            LocalizationMarkupEditUtility.InsertNumericArgument(
+                "Radius ",
+                7,
+                7,
+                "radius",
+                "0.##");
+
+        Assert.That(result.Text, Is.EqualTo("Radius {radius:0.##}"));
+    }
+
+    [Test]
+    public void UnsafeNumericArgument_DoesNotModifyText()
+    {
+        LocalizationMarkupEditResult unsafeName =
+            LocalizationMarkupEditUtility.InsertNumericArgument(
+                "safe",
+                4,
+                4,
+                "armor}bad",
+                "0.#");
+        LocalizationMarkupEditResult unsafeFormat =
+            LocalizationMarkupEditUtility.InsertNumericArgument(
+                "safe",
+                4,
+                4,
+                "armor",
+                "0.#}");
+
+        Assert.That(unsafeName.Text, Is.EqualTo("safe"));
+        Assert.That(unsafeFormat.Text, Is.EqualTo("safe"));
+    }
+
+    [Test]
     public void UnsafeMarkupIdentifier_DoesNotModifyText()
     {
         LocalizationMarkupEditResult result =
@@ -160,6 +226,46 @@ public sealed class LocalizationEditorTests
             LocalizationEditorWindow.TryStageRowDeletion(document, 0),
             Is.False,
             "The CSV header must not be deletable.");
+    }
+
+    [Test]
+    public void StringInputClick_SelectsOnlyPrimaryMouseDownInsideField()
+    {
+        Rect inputRect = new(10f, 20f, 100f, 18f);
+        Event insideClick = new()
+        {
+            type = EventType.MouseDown,
+            button = 0,
+            mousePosition = new Vector2(20f, 25f),
+        };
+        Event rightClick = new()
+        {
+            type = EventType.MouseDown,
+            button = 1,
+            mousePosition = new Vector2(20f, 25f),
+        };
+        Event outsideClick = new()
+        {
+            type = EventType.MouseDown,
+            button = 0,
+            mousePosition = new Vector2(200f, 25f),
+        };
+
+        Assert.That(
+            LocalizationEditorWindow.IsPrimaryInputClick(
+                insideClick,
+                inputRect),
+            Is.True);
+        Assert.That(
+            LocalizationEditorWindow.IsPrimaryInputClick(
+                rightClick,
+                inputRect),
+            Is.False);
+        Assert.That(
+            LocalizationEditorWindow.IsPrimaryInputClick(
+                outsideClick,
+                inputRect),
+            Is.False);
     }
 
     [Test]

@@ -466,7 +466,7 @@ public sealed class CharacterEditorWindow : EditorWindow
         "상태 제거"
     };
 
-    private static readonly string[] EffectTypeOptions =
+    private static readonly string[] CommonEffectTypeOptions =
     {
         "피해",
         "상태 부여",
@@ -475,7 +475,21 @@ public sealed class CharacterEditorWindow : EditorWindow
         "자원 소비",
         "체력 회복",
         "체력 소비",
-        "보호막 부여"
+        "보호막 회복",
+        "카드 드로우"
+    };
+
+    private static readonly int[] CommonEffectTypeValues =
+    {
+        (int)CharacterEffectType.Damage,
+        (int)CharacterEffectType.ApplyStatus,
+        (int)CharacterEffectType.RemoveStatus,
+        (int)CharacterEffectType.GainResource,
+        (int)CharacterEffectType.SpendResource,
+        (int)CharacterEffectType.Heal,
+        (int)CharacterEffectType.SpendHealth,
+        (int)CharacterEffectType.Shield,
+        (int)CharacterEffectType.CardDraw
     };
 
     private static readonly string[] EffectTargetModeOptions =
@@ -4477,8 +4491,37 @@ public sealed class CharacterEditorWindow : EditorWindow
             GUI.changed = true;
         }
 
-        if (GUILayout.Button(
-                new GUIContent("+ 효과 추가", "새 피해 효과를 추가합니다.")))
+        if (effects != null)
+        {
+            using (new EditorGUILayout.HorizontalScope())
+            {
+                if (GUILayout.Button(new GUIContent(
+                        "+ 피해",
+                        "새 피해 효과를 추가합니다.")))
+                {
+                    AddEffect(effects, CharacterEffectType.Damage);
+                    GUI.changed = true;
+                }
+                if (GUILayout.Button(new GUIContent(
+                        "+ 보호막 회복",
+                        "대상의 보호막을 회복하는 효과를 추가합니다.")))
+                {
+                    AddEffect(effects, CharacterEffectType.Shield);
+                    GUI.changed = true;
+                }
+                if (GUILayout.Button(new GUIContent(
+                        "+ 카드 드로우",
+                        "현재 덱에서 지정한 수만큼 카드를 뽑습니다.")))
+                {
+                    AddEffect(effects, CharacterEffectType.CardDraw);
+                    GUI.changed = true;
+                }
+            }
+        }
+        else if (GUILayout.Button(
+                     new GUIContent(
+                         "+ 효과 추가",
+                         "새 피해 효과를 추가합니다.")))
         {
             AddDefaultEffect(effects);
             GUI.changed = true;
@@ -4503,7 +4546,11 @@ public sealed class CharacterEditorWindow : EditorWindow
         }
 
         int previousType = effectType.enumValueIndex;
-        DrawAttackEnumPopup(effectType, "효과 종류", EffectTypeOptions);
+        DrawMappedEnumPopup(
+            effectType,
+            "효과 종류",
+            CommonEffectTypeOptions,
+            CommonEffectTypeValues);
         if (effectType.enumValueIndex != previousType)
         {
             ResetEffectValues(
@@ -4517,7 +4564,8 @@ public sealed class CharacterEditorWindow : EditorWindow
             EffectTargetModePropertyName);
         if (selectedType != CharacterEffectType.GainResource &&
             selectedType != CharacterEffectType.SpendResource &&
-            selectedType != CharacterEffectType.SpendHealth)
+            selectedType != CharacterEffectType.SpendHealth &&
+            selectedType != CharacterEffectType.CardDraw)
         {
             if (targetMode != null)
             {
@@ -4637,6 +4685,9 @@ public sealed class CharacterEditorWindow : EditorWindow
             case CharacterEffectType.SpendHealth:
                 DrawHealthSpendAmount(effect);
                 break;
+            case CharacterEffectType.CardDraw:
+                DrawCardDrawAmount(effect);
+                break;
             default:
                 DrawAttackEnumPopup(
                     effect.FindPropertyRelative(
@@ -4692,6 +4743,13 @@ public sealed class CharacterEditorWindow : EditorWindow
 
     private static void AddDefaultEffect(SerializedProperty effects)
     {
+        AddEffect(effects, CharacterEffectType.Damage);
+    }
+
+    private static void AddEffect(
+        SerializedProperty effects,
+        CharacterEffectType effectType)
+    {
         if (effects == null)
             return;
 
@@ -4702,7 +4760,7 @@ public sealed class CharacterEditorWindow : EditorWindow
             EffectIdPropertyName);
         if (effectId != null)
             effectId.stringValue = $"effect_{newIndex + 1}";
-        ResetEffectValues(effect, CharacterEffectType.Damage);
+        ResetEffectValues(effect, effectType);
         effect.isExpanded = true;
     }
 
@@ -4849,7 +4907,8 @@ public sealed class CharacterEditorWindow : EditorWindow
             DamageAmountModePropertyName,
             effectType == CharacterEffectType.GainResource ||
             effectType == CharacterEffectType.SpendResource ||
-            effectType == CharacterEffectType.SpendHealth
+            effectType == CharacterEffectType.SpendHealth ||
+            effectType == CharacterEffectType.CardDraw
                 ? (int)CharacterDamageAmountMode.Fixed
                 : (int)CharacterDamageAmountMode.Ratio);
         SerializedProperty damageAmount = effect.FindPropertyRelative(
@@ -5259,6 +5318,34 @@ public sealed class CharacterEditorWindow : EditorWindow
             MessageType.Info);
     }
 
+    private static void DrawCardDrawAmount(
+        SerializedProperty definition)
+    {
+        SerializedProperty amountMode = definition.FindPropertyRelative(
+            DamageAmountModePropertyName);
+        SerializedProperty amount = definition.FindPropertyRelative(
+            DamageAmountPropertyName);
+        if (amountMode == null || amount == null)
+        {
+            EditorGUILayout.HelpBox(
+                "카드 드로우 수 속성을 찾을 수 없습니다.",
+                MessageType.Error);
+            return;
+        }
+
+        amountMode.enumValueIndex =
+            (int)CharacterDamageAmountMode.Fixed;
+        amount.floatValue = Mathf.Max(
+            1f,
+            Mathf.Round(EditorGUILayout.FloatField(
+                "드로우 수",
+                amount.floatValue)));
+        EditorGUILayout.HelpBox(
+            "현재 드로우 더미에서 지정한 수만큼 손패에 추가합니다. " +
+            "드로우 더미가 비면 버린 카드 더미를 섞어 계속 뽑습니다.",
+            MessageType.Info);
+    }
+
     private static void DrawShieldAmount(
         SerializedProperty definition)
     {
@@ -5269,7 +5356,7 @@ public sealed class CharacterEditorWindow : EditorWindow
         if (amountMode == null || amount == null)
         {
             EditorGUILayout.HelpBox(
-                "보호막 부여량 속성을 찾을 수 없습니다.",
+                "보호막 회복량 속성을 찾을 수 없습니다.",
                 MessageType.Error);
             return;
         }
@@ -5283,7 +5370,7 @@ public sealed class CharacterEditorWindow : EditorWindow
         amount.floatValue = Mathf.Max(
             0f,
             EditorGUILayout.FloatField(
-                isFixed ? "고정 보호막" : "공격력 배율",
+                isFixed ? "고정 보호막 회복량" : "공격력 배율",
                 amount.floatValue));
         DrawSourceResourceScale(definition);
         DrawSourceHealthScales(definition);

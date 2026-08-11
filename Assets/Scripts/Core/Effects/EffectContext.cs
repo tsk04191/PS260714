@@ -11,7 +11,8 @@ public enum BattleEffectType
     SpendResource = 4,
     Heal = 5,
     SpendHealth = 6,
-    Shield = 7
+    Shield = 7,
+    CardDraw = 8
 }
 
 public enum BattleEffectTargetMode
@@ -67,6 +68,36 @@ public interface IBattleEffectDefinition
     int StatusRemovalCount { get; }
     float StatusRemovalRatio { get; }
     CharacterStatusRemovalAmount StatusRemovalAmount { get; }
+}
+
+/// <summary>
+/// Canonical runtime rules for every shared battle effect. Ability owners,
+/// editors, validators, and executors must use this class instead of keeping
+/// owner-specific effect-type switches.
+/// </summary>
+public static class BattleEffectRules
+{
+    public static bool IsDefined(BattleEffectType effectType)
+    {
+        return Enum.IsDefined(typeof(BattleEffectType), effectType);
+    }
+
+    public static bool RequiresTargets(BattleEffectType effectType)
+    {
+        return effectType != BattleEffectType.GainResource &&
+               effectType != BattleEffectType.SpendResource &&
+               effectType != BattleEffectType.SpendHealth &&
+               effectType != BattleEffectType.CardDraw;
+    }
+
+    public static bool RequiresActionTargets(
+        IBattleEffectDefinition effect)
+    {
+        return effect != null &&
+               RequiresTargets(effect.BattleEffectType) &&
+               effect.BattleTargetMode ==
+                   BattleEffectTargetMode.InheritContext;
+    }
 }
 
 /// <summary>
@@ -304,6 +335,23 @@ public interface IBattleAbilityDefinition : IAbilityDefinition
     bool HasExecutableContent { get; }
 }
 
+public static class BattleAbilityRules
+{
+    public static bool RequiresActionTargets(
+        IBattleAbilityDefinition ability)
+    {
+        if (ability?.BattleEffects == null)
+            return false;
+
+        foreach (IBattleEffectDefinition effect in ability.BattleEffects)
+        {
+            if (BattleEffectRules.RequiresActionTargets(effect))
+                return true;
+        }
+        return false;
+    }
+}
+
 public interface IBattleAbilityProvider
 {
     IEnumerable<IBattleAbilityDefinition> EnumerateBattleAbilities();
@@ -411,7 +459,17 @@ public static class AbilityDefinitionValidator
                         "area definition.";
                 return false;
             }
-            if (!battleDefinition.Targeting.UsesWorldArea &&
+            bool requiresActionTargets =
+                BattleAbilityRules.RequiresActionTargets(battleDefinition);
+            if (requiresActionTargets &&
+                !battleDefinition.Targeting.HasTarget)
+            {
+                error = $"Ability '{definition.AbilityId}' requires " +
+                        "action targets but has no target selection.";
+                return false;
+            }
+            if (requiresActionTargets &&
+                !battleDefinition.Targeting.UsesWorldArea &&
                 battleDefinition.Targeting.TargetCount == 0)
             {
                 error = $"Ability '{definition.AbilityId}' uses zero " +
@@ -443,8 +501,7 @@ public static class AbilityDefinitionValidator
                             $"{effectCount + 1} is null.";
                     return false;
                 }
-                if (!Enum.IsDefined(
-                        typeof(BattleEffectType),
+                if (!BattleEffectRules.IsDefined(
                         effect.BattleEffectType) ||
                     !Enum.IsDefined(
                         typeof(BattleEffectTargetMode),
@@ -824,6 +881,7 @@ public readonly struct BattleEffectContext
     public IBattleCharacter Source => _characterContext.Source;
     public IBattleBoard Board => _characterContext.Board;
     public IActiveSkillResource Resource => _characterContext.Resource;
+    public IBattleCardDrawService CardDrawService { get; }
     public CharacterTargetFaction TargetFaction =>
         _characterContext.TargetFaction;
     public float SourceAttackPower => _characterContext.SourceAttackPower;
@@ -867,7 +925,8 @@ public readonly struct BattleEffectContext
         int previousStacks,
         int currentStacks,
         int occurrenceCount,
-        bool statusEffectsLastUntilBattleEnd = false)
+        bool statusEffectsLastUntilBattleEnd = false,
+        IBattleCardDrawService cardDrawService = null)
     {
         _characterContext = characterContext;
         OriginKind = originKind;
@@ -877,6 +936,7 @@ public readonly struct BattleEffectContext
         OccurrenceCount = Math.Max(1, occurrenceCount);
         StatusEffectsLastUntilBattleEnd =
             statusEffectsLastUntilBattleEnd;
+        CardDrawService = cardDrawService;
     }
 
     public static BattleEffectContext FromCharacter(
@@ -888,7 +948,9 @@ public readonly struct BattleEffectContext
             context.SourceTarget,
             0,
             0,
-            1);
+            1,
+            false,
+            ResolveCardDrawService(context.Board));
     }
 
     public static BattleEffectContext ForEnemyAbility(
@@ -916,7 +978,9 @@ public readonly struct BattleEffectContext
             sourceTarget,
             0,
             0,
-            1);
+            1,
+            false,
+            ResolveCardDrawService(board));
     }
 
     public static BattleEffectContext ForBattleItem(
@@ -945,7 +1009,8 @@ public readonly struct BattleEffectContext
             0,
             0,
             1,
-            statusEffectsLastUntilBattleEnd);
+            statusEffectsLastUntilBattleEnd,
+            ResolveCardDrawService(board));
     }
 
     public static BattleEffectContext ForBattleCard(
@@ -955,7 +1020,8 @@ public readonly struct BattleEffectContext
         CharacterTargetFaction targetFaction,
         IReadOnlyList<EnemyRuntime> enemyTargets,
         IReadOnlyList<IBattleCharacter> allyTargets,
-        float sourceAttackPower = 0f)
+        float sourceAttackPower = 0f,
+        IBattleCardDrawService cardDrawService = null)
     {
         BattleStatusTarget sourceTarget =
             BattleStatusTarget.FromAlly(source);
@@ -974,7 +1040,9 @@ public readonly struct BattleEffectContext
             sourceTarget,
             0,
             0,
-            1);
+            1,
+            false,
+            ResolveCardDrawService(board, cardDrawService));
     }
 
     public static BattleEffectContext ForPreview(
@@ -1037,7 +1105,9 @@ public readonly struct BattleEffectContext
             sourceTarget,
             previousStacks,
             currentStacks,
-            occurrenceCount);
+            occurrenceCount,
+            false,
+            ResolveCardDrawService(board));
     }
 
     public BattleEffectContext SnapshotSourceStatus(
@@ -1092,7 +1162,8 @@ public readonly struct BattleEffectContext
             previousStacks,
             currentStacks,
             occurrenceCount,
-            StatusEffectsLastUntilBattleEnd);
+            StatusEffectsLastUntilBattleEnd,
+            CardDrawService);
     }
 
     private BattleEffectContext Copy(EffectContext context)
@@ -1104,7 +1175,16 @@ public readonly struct BattleEffectContext
             PreviousStacks,
             CurrentStacks,
             OccurrenceCount,
-            StatusEffectsLastUntilBattleEnd);
+            StatusEffectsLastUntilBattleEnd,
+            CardDrawService);
+    }
+
+    private static IBattleCardDrawService ResolveCardDrawService(
+        IBattleBoard board,
+        IBattleCardDrawService explicitService = null)
+    {
+        return explicitService ??
+               (board as IBattleCardDrawServiceProvider)?.CardDrawService;
     }
 
     private static BattleEffectOriginKind ToOriginKind(

@@ -59,7 +59,8 @@ public sealed class CharacterRolePassiveDefinition :
         return ResolveLocalizedText(
             descriptionLocalizationKey,
             fallbackDescription,
-            string.Empty);
+            string.Empty,
+            BattleAbilityLocalizationArguments.Build(this));
     }
 
     public void Validate()
@@ -79,12 +80,14 @@ public sealed class CharacterRolePassiveDefinition :
     internal static string ResolveLocalizedText(
         string localizationKey,
         string fallback,
-        string defaultFallback)
+        string defaultFallback,
+        params LocalizationArgument[] arguments)
     {
         if (!string.IsNullOrWhiteSpace(localizationKey) &&
             LocalizationService.TryGet(
                 localizationKey,
-                out string localized))
+                out string localized,
+                arguments ?? Array.Empty<LocalizationArgument>()))
         {
             return localized;
         }

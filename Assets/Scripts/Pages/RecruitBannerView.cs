@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using PS260714.Localization;
 using TMPro;
 using UnityEngine;
+using UnityEngine.Serialization;
 using UnityEngine.UI;
 
 public enum RecruitRateInputMode
@@ -675,15 +676,19 @@ public sealed class RecruitBannerPageDefinition
 
     [SerializeField] private string bannerId = "main";
     [SerializeField] private string ticketGroupId = "standard";
-    [SerializeField, HideInInspector] private string koreanTitle = "상시 모집";
-    [SerializeField, HideInInspector] private string englishTitle =
-        "STANDARD RECRUITMENT";
-    [SerializeField, HideInInspector, TextArea] private string koreanDescription =
-        "새로운 대원을 모집합니다";
-    [SerializeField, HideInInspector, TextArea] private string englishDescription =
-        "RECRUIT NEW OPERATORS";
-    [SerializeField, HideInInspector] private string koreanPeriod = "상시";
-    [SerializeField, HideInInspector] private string englishPeriod = "PERMANENT";
+    [SerializeField, HideInInspector] private string titleLocalizationKey =
+        LocalizationKeys.UiRecruitTitle;
+    [FormerlySerializedAs("koreanTitle")]
+    [SerializeField, HideInInspector] private string fallbackTitle = "상시 모집";
+    [SerializeField, HideInInspector] private string descriptionLocalizationKey =
+        LocalizationKeys.UiRecruitDescription;
+    [FormerlySerializedAs("koreanDescription")]
+    [SerializeField, HideInInspector, TextArea]
+    private string fallbackDescription = "새로운 대원을 모집합니다";
+    [SerializeField, HideInInspector] private string periodLocalizationKey =
+        LocalizationKeys.UiDungeonItemDurationPermanent;
+    [FormerlySerializedAs("koreanPeriod")]
+    [SerializeField, HideInInspector] private string fallbackPeriod = "상시";
     [Tooltip("모집 배너에 직접 표시할 이미지입니다.")]
     [SerializeField] private Sprite bannerArt;
     [SerializeField, HideInInspector] private Sprite currencyIcon;
@@ -848,15 +853,15 @@ public sealed class RecruitBannerPageDefinition
         bool korean,
         InventoryData inventory)
     {
-        string localizedTitle = korean
-            ? koreanTitle
-            : englishTitle;
-        string localizedDescription = korean
-            ? koreanDescription
-            : englishDescription;
-        string localizedPeriod = korean
-            ? koreanPeriod
-            : englishPeriod;
+        string localizedTitle = ResolveForLocale(
+            titleLocalizationKey,
+            korean);
+        string localizedDescription = ResolveForLocale(
+            descriptionLocalizationKey,
+            korean);
+        string localizedPeriod = ResolveForLocale(
+            periodLocalizationKey,
+            korean);
 
         RecruitPaymentRouteSelection singlePayment =
             ResolvePaymentRoute(1, inventory);
@@ -874,17 +879,9 @@ public sealed class RecruitBannerPageDefinition
 
         return new RecruitBannerPageModel(
             BannerId,
-            Fallback(
-                localizedTitle,
-                korean ? "모집" : "RECRUITMENT"),
-            Fallback(
-                localizedDescription,
-                korean
-                    ? "새로운 대원을 모집합니다"
-                    : "RECRUIT NEW OPERATORS"),
-            Fallback(
-                localizedPeriod,
-                korean ? "상시" : "PERMANENT"),
+            Fallback(localizedTitle, fallbackTitle),
+            Fallback(localizedDescription, fallbackDescription),
+            Fallback(localizedPeriod, fallbackPeriod),
             bannerArt,
             singlePayment.Item != null
                 ? singlePayment.Item.Icon
@@ -1192,6 +1189,23 @@ public sealed class RecruitBannerPageDefinition
         return string.IsNullOrWhiteSpace(value)
             ? fallback
             : value.Trim();
+    }
+
+    private static string ResolveForLocale(
+        string localizationKey,
+        bool korean)
+    {
+        localizationKey = localizationKey?.Trim() ?? string.Empty;
+        if (string.IsNullOrEmpty(localizationKey))
+            return string.Empty;
+
+        string locale = korean ? "ko-KR" : "en-US";
+        return GeneratedLocalizationTables.TryGet(
+            locale,
+            localizationKey,
+            out LocalizationEntry entry)
+            ? entry.Text
+            : string.Empty;
     }
 }
 

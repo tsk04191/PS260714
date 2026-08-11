@@ -27,6 +27,67 @@ namespace PS260714.Localization.Editor
             "Font & Markup",
         };
 
+        private static readonly NumericArgumentPreset[]
+            NumericArgumentPresets =
+            {
+                new("Armor", "armor", "0.#"),
+                new(
+                    "Attack",
+                    "attack",
+                    "0.##",
+                    "Source unit's attack-power stat before effect " +
+                    "scaling."),
+                new(
+                    "Damage",
+                    "damage",
+                    "0.#",
+                    "Damage amount calculated for an attack or effect."),
+                new(
+                    "Radius",
+                    "radius",
+                    "0.##",
+                    "Circle or sector area radius in world units."),
+                new("Duration", "duration", "0.#"),
+                new("Cooldown", "cooldown", "0.#"),
+                new("Interval", "interval", "0.##"),
+                new("Seconds", "seconds", "0.0"),
+                new("Threat", "threat", "0.##"),
+                new("Before", "before", "0.#"),
+                new("After", "after", "0.#"),
+                new("Health", "health", string.Empty),
+                new("Power", "power", string.Empty),
+                new("Cost", "cost", string.Empty),
+                new("Count", "count", string.Empty),
+                new("Stacks", "stacks", "0.#"),
+                new("Draw Count", "drawCount", "0"),
+                new("Amount", "amount", string.Empty),
+                new("Uses", "uses", string.Empty),
+            };
+
+        private readonly struct NumericArgumentPreset
+        {
+            public NumericArgumentPreset(
+                string label,
+                string argumentName,
+                string numberFormat,
+                string description = null)
+            {
+                Label = label;
+                ArgumentName = argumentName;
+                NumberFormat = numberFormat;
+                Description = description ?? string.Empty;
+            }
+
+            public string Label { get; }
+            public string ArgumentName { get; }
+            public string NumberFormat { get; }
+            public string Description { get; }
+            public string Token =>
+                LocalizationMarkupEditUtility.BuildNumericArgumentToken(
+                    ArgumentName,
+                    NumberFormat);
+        }
+
         private LocalizationCsvDocument locales;
         private LocalizationCsvDocument strings;
         private LocalizationValidationResult validation;
@@ -50,6 +111,8 @@ namespace PS260714.Localization.Editor
         private int translationCursorIndex = -1;
         private int translationSelectIndex = -1;
         private bool restoreTranslationSelection;
+        private string numericArgumentName = "value";
+        private string numericArgumentFormat = "0.#";
 
         [MenuItem(
             PS260714EditorMenu.LocalizationEditor,
@@ -71,7 +134,7 @@ namespace PS260714.Localization.Editor
 
         private void OnEnable()
         {
-            minSize = new Vector2(820f, 520f);
+            minSize = new Vector2(820f, 620f);
             Reload();
             FindCatalogs();
         }
@@ -254,9 +317,21 @@ namespace PS260714.Localization.Editor
                         string before = document.Get(row, column);
                         float width = ResolveColumnWidth(
                             document.Get(0, column));
-                        string after = EditorGUILayout.TextField(
-                            before,
+                        Rect inputRect = EditorGUILayout.GetControlRect(
+                            false,
+                            EditorGUIUtility.singleLineHeight,
                             GUILayout.Width(width));
+                        bool selectInput = isStrings &&
+                                           IsPrimaryInputClick(
+                                               Event.current,
+                                               inputRect);
+
+                        string after = EditorGUI.TextField(
+                            inputRect,
+                            before,
+                            EditorStyles.textField);
+                        if (selectInput)
+                            SelectStringInput(row, column);
                         if (!string.Equals(
                             before,
                             after,
@@ -299,6 +374,31 @@ namespace PS260714.Localization.Editor
             }
 
             EditorGUILayout.EndScrollView();
+        }
+
+        private void SelectStringInput(int row, int column)
+        {
+            bool rowChanged = selectedStringRow != row;
+            bool localeChanged = column >= 4 &&
+                                 previewLocaleColumn != column;
+            if (!rowChanged && !localeChanged)
+                return;
+
+            selectedStringRow = row;
+            if (column >= 4)
+                previewLocaleColumn = column;
+            ResetTranslationSelection();
+            Repaint();
+        }
+
+        internal static bool IsPrimaryInputClick(
+            Event current,
+            Rect inputRect)
+        {
+            return current != null &&
+                   current.type == EventType.MouseDown &&
+                   current.button == 0 &&
+                   inputRect.Contains(current.mousePosition);
         }
 
         /// <summary>
@@ -966,6 +1066,8 @@ namespace PS260714.Localization.Editor
                     }
                 }
 
+                DrawNumericArgumentTools(source);
+
                 if (markupCatalog == null)
                 {
                     EditorGUILayout.HelpBox(
@@ -1056,6 +1158,117 @@ namespace PS260714.Localization.Editor
                         }
                     }
                 }
+            }
+        }
+
+        private void DrawNumericArgumentTools(string source)
+        {
+            const int presetsPerRow = 8;
+            for (int start = 0;
+                 start < NumericArgumentPresets.Length;
+                 start += presetsPerRow)
+            {
+                using (new EditorGUILayout.HorizontalScope())
+                {
+                    EditorGUILayout.LabelField(
+                        start == 0 ? "Value" : string.Empty,
+                        GUILayout.Width(42f));
+                    int end = Mathf.Min(
+                        start + presetsPerRow,
+                        NumericArgumentPresets.Length);
+                    for (int index = start; index < end; index++)
+                    {
+                        NumericArgumentPreset preset =
+                            NumericArgumentPresets[index];
+                        string buttonLabel = string.IsNullOrEmpty(
+                            preset.NumberFormat)
+                            ? preset.Label
+                            : $"{preset.Label} {preset.NumberFormat}";
+                        GUIContent content = new(
+                            buttonLabel,
+                            string.IsNullOrWhiteSpace(preset.Description)
+                                ? $"Insert {preset.Token}."
+                                : preset.Description + "\nInsert " +
+                                  preset.Token + ".");
+                        if (GUILayout.Button(
+                                content,
+                                GUILayout.MinWidth(72f),
+                                GUILayout.Height(22f)))
+                        {
+                            ApplyMarkupEdit(
+                                source,
+                                LocalizationMarkupEditUtility
+                                    .InsertNumericArgument(
+                                        source,
+                                        ResolveTranslationCursor(source),
+                                        ResolveTranslationSelection(source),
+                                        preset.ArgumentName,
+                                        preset.NumberFormat));
+                        }
+                    }
+
+                    GUILayout.FlexibleSpace();
+                }
+            }
+
+            EditorGUILayout.HelpBox(
+                "Attack = the source unit's attack-power stat. " +
+                "Damage = the damage amount calculated for one attack " +
+                "or effect. Radius = a circle/sector area's radius in " +
+                "world units. These tokens are placeholders; the UI " +
+                "code that resolves the localization key must supply " +
+                "their values.",
+                MessageType.Info);
+
+            using (new EditorGUILayout.HorizontalScope())
+            {
+                EditorGUILayout.LabelField(
+                    "Custom",
+                    GUILayout.Width(42f));
+                EditorGUILayout.LabelField(
+                    "Name",
+                    EditorStyles.miniLabel,
+                    GUILayout.Width(34f));
+                numericArgumentName = EditorGUILayout.TextField(
+                    numericArgumentName,
+                    GUILayout.Width(100f));
+                EditorGUILayout.LabelField(
+                    "Format",
+                    EditorStyles.miniLabel,
+                    GUILayout.Width(42f));
+                numericArgumentFormat = EditorGUILayout.TextField(
+                    numericArgumentFormat,
+                    GUILayout.Width(72f));
+
+                string token = LocalizationMarkupEditUtility
+                    .BuildNumericArgumentToken(
+                        numericArgumentName,
+                        numericArgumentFormat);
+                using (new EditorGUI.DisabledScope(
+                           string.IsNullOrEmpty(token)))
+                {
+                    if (GUILayout.Button(
+                            new GUIContent(
+                                "Insert",
+                                string.IsNullOrEmpty(token)
+                                    ? "Enter a safe argument name and " +
+                                      "number format."
+                                    : $"Insert {token}."),
+                            GUILayout.Width(64f)))
+                    {
+                        ApplyMarkupEdit(
+                            source,
+                            LocalizationMarkupEditUtility
+                                .InsertNumericArgument(
+                                    source,
+                                    ResolveTranslationCursor(source),
+                                    ResolveTranslationSelection(source),
+                                    numericArgumentName,
+                                    numericArgumentFormat));
+                    }
+                }
+
+                GUILayout.FlexibleSpace();
             }
         }
 

@@ -18,11 +18,9 @@ MonoBehaviour:
   sortOrder: 40
   nameLocalizationKey: item.client.standard_recruit_ticket.name
   descriptionLocalizationKey: item.client.standard_recruit_ticket.description
-  koreanName: "\uC77C\uBC18 \uBAA8\uC9D1\uAD8C"
-  englishName: STANDARD RECRUIT TICKET
-  koreanDescription: "\uC77C\uBC18 \uBAA8\uC9D1\uC5D0\uC11C 1\uD68C \uC0AC\uC6A9\uD560
+  fallbackName: "\uC77C\uBC18 \uBAA8\uC9D1\uAD8C"
+  fallbackDescription: "\uC77C\uBC18 \uBAA8\uC9D1\uC5D0\uC11C 1\uD68C \uC0AC\uC6A9\uD560
     \uC218 \uC788\uB294 \uBAA8\uC9D1\uAD8C\uC785\uB2C8\uB2E4."
-  englishDescription: A ticket used for one standard recruitment.
   icon: {fileID: 21300000, guid: d49fe738676c79e42aae32faa4088ca2, type: 3}
   illustration: {fileID: 0}
   maximumStack: 0

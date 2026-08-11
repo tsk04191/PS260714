@@ -3,28 +3,12 @@ using UnityEngine;
 
 public sealed class CharacterStandingFramingEditorWindow : EditorWindow
 {
-    public const string MenuPath =
-        "PS260714/Character Standing Framing Editor";
-
     private static readonly Vector2 HudViewportReferenceSize =
         new(152f, 140f);
 
     private CharacterSO character;
     private SerializedObject serializedCharacter;
     private bool isDragging;
-
-    [MenuItem(
-        MenuPath,
-        false,
-        PS260714EditorMenu.CharacterStandingFramingEditorPriority)]
-    private static void OpenFromMenu()
-    {
-        CharacterSO selected = Selection.activeObject as CharacterSO;
-        selected ??= CharacterDefinitionCatalog.GetAll().Count > 0
-            ? CharacterDefinitionCatalog.GetAll()[0]
-            : null;
-        Open(selected);
-    }
 
     public static void Open(CharacterSO target)
     {

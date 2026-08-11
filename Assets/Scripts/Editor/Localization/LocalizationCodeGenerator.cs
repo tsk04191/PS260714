@@ -95,6 +95,32 @@ namespace PS260714.Localization.Editor
             return result;
         }
 
+        public static void GenerateForBatchMode()
+        {
+            LocalizationValidationResult result = Generate();
+            foreach (LocalizationValidationIssue issue in result.Issues)
+            {
+                if (issue.Severity ==
+                    LocalizationValidationSeverity.Error)
+                {
+                    UnityEngine.Debug.LogError(
+                        $"[Localization] {issue}");
+                }
+                else
+                {
+                    UnityEngine.Debug.LogWarning(
+                        $"[Localization] {issue}");
+                }
+            }
+
+            if (!result.IsValid)
+            {
+                throw new InvalidOperationException(
+                    $"Localization generation failed with " +
+                    $"{result.ErrorCount} error(s).");
+            }
+        }
+
         public static bool IsStale(
             out string expectedHash,
             out string generatedHash)

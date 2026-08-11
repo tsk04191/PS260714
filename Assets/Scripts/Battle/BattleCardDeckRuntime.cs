@@ -22,7 +22,7 @@ public sealed class BattleCardInstance
     }
 }
 
-public sealed class BattleCardDeckRuntime
+public sealed class BattleCardDeckRuntime : IBattleCardDrawService
 {
     private readonly List<BattleCardInstance> allCards = new();
     private readonly List<BattleCardInstance> drawPile = new();
@@ -194,6 +194,17 @@ public sealed class BattleCardDeckRuntime
         return true;
     }
 
+    public int TryDrawCards(int count)
+    {
+        if (!IsReady || count <= 0)
+            return 0;
+
+        int drawn = DrawCards(Mathf.Max(0, count));
+        if (drawn > 0)
+            Changed?.Invoke();
+        return drawn;
+    }
+
     public bool TryMulligan()
     {
         if (!IsReady || hand.Count == 0)
@@ -271,7 +282,13 @@ public sealed class BattleCardDeckRuntime
 
     private void DrawCards()
     {
-        while (hand.Count < cardsDrawnPerTurn)
+        DrawCards(Mathf.Max(0, cardsDrawnPerTurn - hand.Count));
+    }
+
+    private int DrawCards(int count)
+    {
+        int drawn = 0;
+        while (drawn < count)
         {
             if (drawPile.Count == 0)
             {
@@ -286,7 +303,9 @@ public sealed class BattleCardDeckRuntime
             BattleCardInstance card = drawPile[last];
             drawPile.RemoveAt(last);
             hand.Add(card);
+            drawn++;
         }
+        return drawn;
     }
 
     private void Shuffle(List<BattleCardInstance> cards)

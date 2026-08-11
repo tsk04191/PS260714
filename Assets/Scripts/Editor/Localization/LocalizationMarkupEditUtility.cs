@@ -85,6 +85,48 @@ namespace PS260714.Localization.Editor
                 "[br]");
         }
 
+        public static LocalizationMarkupEditResult InsertNumericArgument(
+            string source,
+            int cursorIndex,
+            int selectIndex,
+            string argumentName,
+            string numberFormat)
+        {
+            string token = BuildNumericArgumentToken(
+                argumentName,
+                numberFormat);
+            if (string.IsNullOrEmpty(token))
+            {
+                return Unchanged(
+                    source ?? string.Empty,
+                    cursorIndex,
+                    selectIndex);
+            }
+
+            return ReplaceSelection(
+                source,
+                cursorIndex,
+                selectIndex,
+                token);
+        }
+
+        public static string BuildNumericArgumentToken(
+            string argumentName,
+            string numberFormat)
+        {
+            string name = (argumentName ?? string.Empty).Trim();
+            string format = (numberFormat ?? string.Empty).Trim();
+            if (!LocalizationMarkupDefaults.IsSafeIdentifier(name) ||
+                !IsSafeNumberFormat(format))
+            {
+                return string.Empty;
+            }
+
+            return string.IsNullOrEmpty(format)
+                ? $"{{{name}}}"
+                : $"{{{name}:{format}}}";
+        }
+
         private static LocalizationMarkupEditResult ReplaceSelection(
             string source,
             int cursorIndex,
@@ -123,6 +165,32 @@ namespace PS260714.Localization.Editor
                 source,
                 end,
                 start);
+        }
+
+        private static bool IsSafeNumberFormat(string format)
+        {
+            for (int index = 0; index < format.Length; index++)
+            {
+                char character = format[index];
+                if (char.IsLetterOrDigit(character) ||
+                    character == '#' ||
+                    character == '.' ||
+                    character == ',' ||
+                    character == '%' ||
+                    character == '+' ||
+                    character == '-' ||
+                    character == ';' ||
+                    character == '(' ||
+                    character == ')' ||
+                    character == ' ')
+                {
+                    continue;
+                }
+
+                return false;
+            }
+
+            return true;
         }
 
         private static void NormalizeSelection(

@@ -151,8 +151,7 @@ public sealed class ItemDefinitionTests
         {
             SerializedObject serialized = new(item);
             serialized.FindProperty("itemId").stringValue = "test.card";
-            serialized.FindProperty("koreanName").stringValue = "테스트 카드";
-            serialized.FindProperty("englishName").stringValue = "Test Card";
+            serialized.FindProperty("fallbackName").stringValue = "테스트 카드";
             serialized.FindProperty("icon").objectReferenceValue = icon;
             serialized.FindProperty("illustration").objectReferenceValue =
                 illustration;
@@ -214,7 +213,7 @@ public sealed class ItemDefinitionTests
             SerializedObject serialized = new(item);
             serialized.FindProperty("itemId").stringValue =
                 "test.blank-card";
-            serialized.FindProperty("englishName").stringValue =
+            serialized.FindProperty("fallbackName").stringValue =
                 "Blank Card";
             serialized.ApplyModifiedPropertiesWithoutUndo();
 
@@ -465,15 +464,20 @@ public sealed class ItemDefinitionTests
             serialized.FindProperty(
                     "descriptionLocalizationKey").stringValue =
                 fixture.Key;
-            serialized.FindProperty("koreanName").stringValue =
-                "한글 대체 이름";
-            serialized.FindProperty("englishName").stringValue =
-                "English Fallback Name";
-            serialized.FindProperty("koreanDescription").stringValue =
-                "한글 대체 설명";
-            serialized.FindProperty("englishDescription").stringValue =
-                "English fallback description";
+            serialized.FindProperty("fallbackName").stringValue =
+                "구분용 대체 이름";
+            serialized.FindProperty("fallbackDescription").stringValue =
+                "구분용 대체 설명";
             serialized.ApplyModifiedPropertiesWithoutUndo();
+
+            Assert.That(serialized.FindProperty("koreanName"), Is.Null);
+            Assert.That(serialized.FindProperty("englishName"), Is.Null);
+            Assert.That(
+                serialized.FindProperty("koreanDescription"),
+                Is.Null);
+            Assert.That(
+                serialized.FindProperty("englishDescription"),
+                Is.Null);
 
             Assert.That(
                 item.GetDisplayName(true),
@@ -496,11 +500,13 @@ public sealed class ItemDefinitionTests
             serialized.ApplyModifiedPropertiesWithoutUndo();
 
             Assert.That(item.GetDisplayName(true), Is.EqualTo(
-                "한글 대체 이름"));
+                "구분용 대체 이름"));
             Assert.That(item.GetDisplayName(false), Is.EqualTo(
-                "English Fallback Name"));
+                "구분용 대체 이름"));
             Assert.That(item.GetDescription(true), Is.EqualTo(
-                "한글 대체 설명"));
+                "구분용 대체 설명"));
+            Assert.That(item.GetDescription(false), Is.EqualTo(
+                "구분용 대체 설명"));
         }
         finally
         {

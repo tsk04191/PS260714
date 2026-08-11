@@ -6,6 +6,26 @@ namespace PS260714.Localization
 {
     public static class LocalizationKeys
     {
+        public const string CardPublicCommonAttack0Description = "card.public.common.attack0.description";
+        public const string CardPublicCommonAttack0Name = "card.public.common.attack0.name";
+        public const string CardPublicCommonAttack1Description = "card.public.common.attack1.description";
+        public const string CardPublicCommonAttack1Name = "card.public.common.attack1.name";
+        public const string CardPublicCommonAttack2Description = "card.public.common.attack2.description";
+        public const string CardPublicCommonAttack2Name = "card.public.common.attack2.name";
+        public const string CardPublicCommonAttack3Description = "card.public.common.attack3.description";
+        public const string CardPublicCommonAttack3Name = "card.public.common.attack3.name";
+        public const string CardPublicCommonAttack4Description = "card.public.common.attack4.description";
+        public const string CardPublicCommonAttack4Name = "card.public.common.attack4.name";
+        public const string CardPublicCommonBuff0Description = "card.public.common.buff0.description";
+        public const string CardPublicCommonBuff0Name = "card.public.common.buff0.name";
+        public const string CardPublicCommonBuff1Description = "card.public.common.buff1.description";
+        public const string CardPublicCommonBuff1Name = "card.public.common.buff1.name";
+        public const string CardPublicCommonBuff2Description = "card.public.common.buff2.description";
+        public const string CardPublicCommonBuff2Name = "card.public.common.buff2.name";
+        public const string CardPublicCommonDrawDescription = "card.public.common.draw.description";
+        public const string CardPublicCommonDrawName = "card.public.common.draw.name";
+        public const string CardPublicCommonRepairDescription = "card.public.common.repair.description";
+        public const string CardPublicCommonRepairName = "card.public.common.repair.name";
         public const string CharacterAislingDescription = "character.aisling.description";
         public const string CharacterAislingName = "character.aisling.name";
         public const string CharacterByeolhaDescription = "character.byeolha.description";
@@ -80,14 +100,6 @@ namespace PS260714.Localization
         public const string EnemyMedicName = "enemy.medic.name";
         public const string EnemyPointmanName = "enemy.pointman.name";
         public const string EnemyShieldBearerName = "enemy.shield_bearer.name";
-        public const string ItemBattleBloodDaggerDescription = "item.battle.blood_dagger.description";
-        public const string ItemBattleBloodDaggerName = "item.battle.blood_dagger.name";
-        public const string ItemBattleBoomDescription = "item.battle.boom.description";
-        public const string ItemBattleBoomName = "item.battle.boom.name";
-        public const string ItemBattlePowerDrinkDescription = "item.battle.power_drink.description";
-        public const string ItemBattlePowerDrinkName = "item.battle.power_drink.name";
-        public const string ItemBattleSpeedDrinkDescription = "item.battle.speed_drink.description";
-        public const string ItemBattleSpeedDrinkName = "item.battle.speed_drink.name";
         public const string ItemClientBasicUpgradeMaterialDescription = "item.client.basic_upgrade_material.description";
         public const string ItemClientBasicUpgradeMaterialName = "item.client.basic_upgrade_material.name";
         public const string ItemClientFreeCreditDescription = "item.client.free_credit.description";

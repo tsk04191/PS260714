@@ -58,7 +58,8 @@ public static class EnemyLocalization
         return !string.IsNullOrWhiteSpace(
             definition.DescriptionLocalizationKey)
             ? LocalizationService.Get(
-                definition.DescriptionLocalizationKey)
+                definition.DescriptionLocalizationKey,
+                BattleAbilityLocalizationArguments.Build(definition))
             : definition.FallbackDescription;
     }
 

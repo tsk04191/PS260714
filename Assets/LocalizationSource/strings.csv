@@ -343,11 +343,23 @@ roll.sub.exploration.name,세부 직군 이름,title,,탐험 동아리,Explorati
 roll.sub.exploration.description,세부 직군 설명,body,,탐험 동아리,Exploration Club
 roll.sub.exploration.passive.stage_attack.name,세부 직군 패시브 이름,title,,탐험의 성과,Exploration Results
 roll.sub.exploration.passive.stage_attack.description,세부 직군 패시브 설명,body,,"완료한 던전 스테이지마다 공격력을 1 획득합니다. 이벤트, 휴식, 상점 스테이지를 포함합니다.","Gain 1 Attack Power for each completed dungeon stage, including event, rest, and shop stages."
-item.battle.power_drink.name,아이템 이름,title,,파워 음료,Power Drink
-item.battle.power_drink.description,아이템 설명,tooltip,,[icon=power] 파워 1 획득,Gain [icon=power] Power 1 status
-item.battle.speed_drink.name,아이템 이름,title,,스피드 음료,Speed Drink
-item.battle.speed_drink.description,아이템 설명,tooltip,,[icon=speed] 스피드 1 획득,Gain [icon=speed]  Speed 1 status
-item.battle.boom.name,아이템 이름,title,,폭탄,Boom
-item.battle.boom.description,아이템 설명,tooltip,,[icon=damage] 피해량을 3X3 범위로 부여,Give [icon=damage] damage to 3X3
-item.battle.blood_dagger.name,아이템 이름,title,,출혈 단검,Bloody dagger
-item.battle.blood_dagger.description,아이템 설명,tooltip,,[icon=damage] 피해량과 [icon=blood] 를 5초 부여,Give [icon=damage] damange and [icon=blood] 5 sec
+card.public.common.attack0.name,카드 이름,title,,공격 0,Attack 0
+card.public.common.attack0.description,카드 설명,tooltip,,{damage:0.#} 의 피해를 {count}에게 준다.,Give {damage:0.#} damage to {count}.
+card.public.common.attack1.name,카드 이름,title,,공격 1,Attack 1
+card.public.common.attack1.description,카드 설명,tooltip,,{damage:0.#} 의 피해를 {radius:0.##} 의 원범위에 준다.,Give {damage:0.#} damage to {radius:0.##} radius circle
+card.public.common.attack2.name,카드 이름,title,,공격 2,Attack 2
+card.public.common.attack2.description,카드 설명,tooltip,,{damage:0.#} 의 피해를 무작위 적 {count}에게 준다.,Give {damage:0.#} damage to {count} random enemy.
+card.public.common.attack3.name,카드 이름,title,,공격 3,Attack 3
+card.public.common.attack3.description,카드 설명,tooltip,,{damage:0.#} 의 피해를 {count}에게 준다.,Give {damage:0.#} damage to {count}.
+card.public.common.attack4.name,카드 이름,title,,공격 4,Attack 4
+card.public.common.attack4.description,카드 설명,tooltip,,{damage:0.#} 의 피해를 {radius:0.##} 의 원범위에 준다.,Give {damage:0.#} damage to {radius:0.##} radius circle
+card.public.common.repair.name,카드 이름,title,,수리,Repair
+card.public.common.repair.description,카드 설명,tooltip,,보호막을 {armor:0.#} 회복합니다.,Restore {armor:0.#} shield.
+card.public.common.draw.name,카드 이름,title,,뽑기,Draw
+card.public.common.draw.description,카드 설명,tooltip,,카드를 {drawCount:0}장 뽑습니다.,Draw {drawCount:0} cards.
+card.public.common.buff0.name,카드 이름,title,,버프 0,Buff 0
+card.public.common.buff0.description,카드 설명,tooltip,,선택한 아군에게 [icon=power] {stacks:0.#}스택을 {seconds:0.0}초 동안 부여합니다.,Grant the selected ally {stacks:0.#} stack(s) of [icon=power] for {seconds:0.0} seconds.
+card.public.common.buff1.name,카드 이름,title,,버프 1,Buff 1
+card.public.common.buff1.description,카드 설명,tooltip,,선택한 아군에게 [icon=speed] {stacks:0.#}스택을 {seconds:0.0}초 동안 부여합니다.,Grant the selected ally {stacks:0.#} stack(s) of [icon=speed] for {seconds:0.0} seconds.
+card.public.common.buff2.name,카드 이름,title,,버프 2,Buff 2
+card.public.common.buff2.description,카드 설명,tooltip,,모든 아군에게 [icon=power] {stacks:0.#}스택을 {seconds:0.0}초 동안 부여합니다.,Grant all allies {stacks:0.#} stack(s) of [icon=power] for {seconds:0.0} seconds.

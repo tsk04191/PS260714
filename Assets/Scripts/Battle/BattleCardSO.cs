@@ -45,10 +45,10 @@ public sealed class BattleCardSO : ScriptableObject,
     [Header("Localization")]
     [SerializeField] private string nameLocalizationKey;
     [SerializeField] private string descriptionLocalizationKey;
-    [SerializeField] private string koreanName;
-    [SerializeField] private string englishName;
-    [SerializeField, TextArea] private string koreanDescription;
-    [SerializeField, TextArea] private string englishDescription;
+    [FormerlySerializedAs("koreanName")]
+    [SerializeField] private string fallbackName;
+    [FormerlySerializedAs("koreanDescription")]
+    [SerializeField, TextArea] private string fallbackDescription;
 
     [Header("Presentation")]
     [SerializeField] private Sprite icon;
@@ -80,9 +80,7 @@ public sealed class BattleCardSO : ScriptableObject,
     [SerializeField] private List<CharacterEffectDefinition> abilityEffects =
         new();
 
-    public string CardId => !string.IsNullOrWhiteSpace(cardId)
-        ? cardId.Trim()
-        : name;
+    public string CardId => (cardId ?? string.Empty).Trim();
     public ItemRarity Rarity => rarity;
     public int SortOrder => sortOrder;
     public Sprite Icon => icon;
@@ -125,6 +123,8 @@ public sealed class BattleCardSO : ScriptableObject,
         (IEnumerable<IBattleEffectDefinition>)AbilityEffects;
     public bool UsesLegacyEffectStorage => false;
     public bool HasExecutableContent => AbilityEffects.Count > 0;
+    public bool RequiresActionTargets =>
+        BattleAbilityRules.RequiresActionTargets(this);
 
     public IEnumerable<IBattleAbilityDefinition> EnumerateBattleAbilities()
     {
@@ -133,6 +133,11 @@ public sealed class BattleCardSO : ScriptableObject,
 
     public bool IsEligible(IReadOnlyList<CharacterSO> party)
     {
+        if (sourcePolicy == BattleCardSourcePolicy.FixedCharacter &&
+            !ContainsCharacter(party, ownerCharacter))
+        {
+            return false;
+        }
         if (affiliation == BattleCardAffiliation.Neutral)
             return true;
         if (affiliation == BattleCardAffiliation.CharacterExclusive)
@@ -193,21 +198,22 @@ public sealed class BattleCardSO : ScriptableObject,
     {
         if (TryGetLocalized(nameLocalizationKey, out string localized))
             return localized;
-        string fallback = IsKorean() ? koreanName : englishName;
-        if (!string.IsNullOrWhiteSpace(fallback))
-            return fallback.Trim();
+        if (!string.IsNullOrWhiteSpace(fallbackName))
+            return fallbackName.Trim();
         return CardId;
     }
 
     public string GetLocalizedDescription()
     {
-        if (TryGetLocalized(descriptionLocalizationKey, out string localized))
+        LocalizationArgument[] arguments =
+            BattleAbilityLocalizationArguments.Build(this);
+        if (TryGetLocalized(
+                descriptionLocalizationKey,
+                out string localized,
+                arguments))
             return localized;
-        string fallback = IsKorean()
-            ? koreanDescription
-            : englishDescription;
-        if (!string.IsNullOrWhiteSpace(fallback))
-            return fallback.Trim();
+        if (!string.IsNullOrWhiteSpace(fallbackDescription))
+            return fallbackDescription.Trim();
         return string.Empty;
     }
 
@@ -217,6 +223,7 @@ public sealed class BattleCardSO : ScriptableObject,
         nameLocalizationKey = (nameLocalizationKey ?? string.Empty).Trim();
         descriptionLocalizationKey =
             (descriptionLocalizationKey ?? string.Empty).Trim();
+        fallbackName = (fallbackName ?? string.Empty).Trim();
         energyCost = Mathf.Max(0, energyCost);
         requiredCharacters ??= new List<CharacterSO>();
         requiredCharacters.RemoveAll(character => character == null);
@@ -244,25 +251,21 @@ public sealed class BattleCardSO : ScriptableObject,
         return false;
     }
 
-    private static bool TryGetLocalized(string key, out string value)
+    private static bool TryGetLocalized(
+        string key,
+        out string value,
+        params LocalizationArgument[] arguments)
     {
         key = (key ?? string.Empty).Trim();
         if (!string.IsNullOrEmpty(key) &&
-            LocalizationService.TryGet(key, out _))
+            LocalizationService.TryGet(key, out value, arguments))
         {
-            value = LocalizationService.Get(key);
             return !string.IsNullOrWhiteSpace(value);
         }
         value = string.Empty;
         return false;
     }
 
-    private static bool IsKorean()
-    {
-        return LocalizationService.CurrentLocale?.StartsWith(
-            "ko",
-            StringComparison.OrdinalIgnoreCase) == true;
-    }
 }
 
 [Serializable]
@@ -280,7 +283,7 @@ public sealed class BattleCardDeckRules
 {
     public const int DefaultBaseDrawCount = 5;
     public const int DefaultHandSize = DefaultBaseDrawCount;
-    public const float DefaultRedrawCooldown = 2f;
+    public const float DefaultRedrawCooldown = 10f;
 
     [FormerlySerializedAs("handSize")]
     [SerializeField, Range(1, 10), Tooltip(

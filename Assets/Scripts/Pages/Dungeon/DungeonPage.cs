@@ -467,6 +467,7 @@ public class DungeonPage : MonoBehaviour, IPage
         }
 
         EnsureCharacterInfoInstances();
+        board.BindCardDrawService(_battleCardDeck);
         board.Initialize(initialGridSize, maximumStackSize);
         InitializePlayerCharacters();
 
@@ -2171,6 +2172,15 @@ public class DungeonPage : MonoBehaviour, IPage
         if (source == null || !source.IsAlive || board == null)
             return false;
 
+        if (!BattleAbilityRules.RequiresActionTargets(card))
+        {
+            return ExecuteBattleCard(
+                instance,
+                source,
+                Array.Empty<EnemyRuntime>(),
+                Array.Empty<IBattleCharacter>());
+        }
+
         CharacterTargetFaction faction = card.TargetFaction;
         IReadOnlyList<CharacterNumericCondition> noConditions =
             Array.Empty<CharacterNumericCondition>();
@@ -2226,7 +2236,8 @@ public class DungeonPage : MonoBehaviour, IPage
                     result),
                 card.AreaDefinition,
                 card.Subject,
-                card.SubjectMetric);
+                card.SubjectMetric,
+                BattleManualAreaPlacementMode.FreePointer);
             return service.TryBeginManualTargetSelection(request);
         }
 
@@ -2302,7 +2313,8 @@ public class DungeonPage : MonoBehaviour, IPage
             card.TargetFaction,
             enemyTargets,
             allyTargets,
-            source.CurrentAttackPower);
+            source.CurrentAttackPower,
+            _battleCardDeck);
         BattleEffectResult result = BattleEffectExecutor.ExecuteAbility(
             context,
             card,

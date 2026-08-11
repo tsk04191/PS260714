@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using System.Reflection;
 using NUnit.Framework;
+using PS260714.Localization;
 using UnityEditor;
 using UnityEngine;
 
@@ -18,6 +19,14 @@ public sealed class BattleCardTests
         }
         created.Clear();
         BattleCardCatalog.Invalidate();
+    }
+
+    [Test]
+    public void DeckRules_DefaultAutomaticRedrawCooldownIsTenSeconds()
+    {
+        BattleCardDeckRules rules = new();
+
+        Assert.That(rules.RedrawCooldown, Is.EqualTo(10f));
     }
 
     [Test]
@@ -94,6 +103,52 @@ public sealed class BattleCardTests
         Assert.That(deck.Hand, Has.Count.EqualTo(4));
         foreach (BattleCardInstance instance in deck.Hand)
             Assert.That(instance, Is.Not.SameAs(exhausted));
+    }
+
+    [Test]
+    public void CardDrawEffect_AddsRequestedCardsToCurrentHand()
+    {
+        BattleCardDeckRules rules = CreateRules(
+            baseDrawCount: 2,
+            redrawCooldown: 2f);
+        List<BattleCardSO> definitions = CreateCards(6);
+        BattleCardSO drawCard = definitions[0];
+        SerializedObject data = new(drawCard);
+        SerializedProperty effect = data.FindProperty("abilityEffects")
+            .GetArrayElementAtIndex(0);
+        effect.FindPropertyRelative("type").enumValueIndex =
+            (int)CharacterEffectType.CardDraw;
+        effect.FindPropertyRelative("damageAmountMode").enumValueIndex =
+            (int)CharacterDamageAmountMode.Fixed;
+        effect.FindPropertyRelative("damageAmount").floatValue = 2f;
+        data.ApplyModifiedPropertiesWithoutUndo();
+
+        BattleCardDeckRuntime deck = new();
+        Assert.That(
+            deck.ConfigureResolvedDeck(rules, definitions, 44),
+            Is.True);
+        Assert.That(deck.BeginBattle(), Is.True);
+        Assert.That(deck.Hand, Has.Count.EqualTo(2));
+
+        BattleEffectContext context = BattleEffectContext.ForBattleCard(
+            null,
+            null,
+            null,
+            CharacterTargetFaction.Enemy,
+            null,
+            null,
+            0f,
+            deck);
+        BattleEffectResult result = BattleEffectExecutor.ExecuteAbility(
+            context,
+            drawCard);
+
+        Assert.That(result.Attempted, Is.True);
+        Assert.That(result.Succeeded, Is.True);
+        Assert.That(deck.Hand, Has.Count.EqualTo(4));
+        Assert.That(
+            drawCard.AbilityEffects[0].RequiresActionTargets,
+            Is.False);
     }
 
     [Test]
@@ -256,6 +311,172 @@ public sealed class BattleCardTests
             AbilityDefinitionValidator.TryValidate(card, out string error),
             Is.True,
             error);
+    }
+
+    [TestCase(CharacterEffectType.GainResource)]
+    [TestCase(CharacterEffectType.SpendResource)]
+    [TestCase(CharacterEffectType.SpendHealth)]
+    [TestCase(CharacterEffectType.CardDraw)]
+    public void SharedTargetlessEffects_DoNotRequireActionTarget(
+        CharacterEffectType effectType)
+    {
+        BattleCardSO card = CreateCard($"card.targetless.{effectType}");
+        SerializedObject data = new(card);
+        SerializedProperty effect = data.FindProperty("abilityEffects")
+            .GetArrayElementAtIndex(0);
+        effect.FindPropertyRelative("type").enumValueIndex =
+            (int)effectType;
+        effect.FindPropertyRelative("targetMode").enumValueIndex =
+            (int)CharacterEffectTargetMode.InheritAction;
+        data.ApplyModifiedPropertiesWithoutUndo();
+
+        Assert.That(
+            BattleEffectRules.RequiresTargets(
+                (BattleEffectType)(int)effectType),
+            Is.False);
+        Assert.That(card.RequiresActionTargets, Is.False);
+    }
+
+    [Test]
+    public void SharedLocalizationArguments_ExposeEffectAndAreaValues()
+    {
+        BattleCardSO card = CreateCard("card.localization.arguments");
+        SerializedObject data = new(card);
+        SerializedProperty area = data.FindProperty("areaDefinition");
+        area.FindPropertyRelative("shapeType").enumValueIndex =
+            (int)CharacterAreaShapeType.CircleSector;
+        area.FindPropertyRelative("radius").floatValue = 2.75f;
+        SerializedProperty effect = data.FindProperty("abilityEffects")
+            .GetArrayElementAtIndex(0);
+        effect.FindPropertyRelative("type").enumValueIndex =
+            (int)CharacterEffectType.CardDraw;
+        effect.FindPropertyRelative("damageAmountMode").enumValueIndex =
+            (int)CharacterDamageAmountMode.Fixed;
+        effect.FindPropertyRelative("damageAmount").floatValue = 3f;
+        data.ApplyModifiedPropertiesWithoutUndo();
+
+        Dictionary<string, object> values = new();
+        foreach (LocalizationArgument argument in
+                 BattleAbilityLocalizationArguments.Build(card))
+        {
+            values[argument.Name] = argument.Value;
+        }
+
+        Assert.That(values["radius"], Is.EqualTo(2.75f));
+        Assert.That(values["drawCount"], Is.EqualTo(3f));
+        Assert.That(values["amount"], Is.EqualTo(3f));
+    }
+
+    [Test]
+    public void CircularCardArea_UsesClickedWorldPointWithoutRecentering()
+    {
+        BattleAreaDefinition area = new();
+        SetField(
+            area,
+            "shapeType",
+            CharacterAreaShapeType.CircleSector);
+        SetField(area, "maxCastDistance", 1f);
+        Vector2 clicked = new(7f, -3f);
+
+        Vector2 resolved = BattleAreaGeometry.ResolveManualOrigin(
+            clicked,
+            Vector2.zero,
+            area,
+            2f,
+            BattleManualAreaPlacementMode.FreePointer);
+        Vector2 abilityConstrained =
+            BattleAreaGeometry.ResolveManualOrigin(
+                clicked,
+                Vector2.zero,
+                area,
+                2f,
+                BattleManualAreaPlacementMode.AbilityConstrained);
+
+        Assert.That(resolved, Is.EqualTo(clicked));
+        Assert.That(abilityConstrained.magnitude, Is.EqualTo(1f)
+            .Within(0.0001f));
+    }
+
+    [Test]
+    public void FixedSourceCard_IsIneligibleWithoutConfiguredOwner()
+    {
+        BattleCardSO card = CreateCard("card.fixed-source");
+        SerializedObject data = new(card);
+        data.FindProperty("affiliation").enumValueIndex =
+            (int)BattleCardAffiliation.Neutral;
+        data.FindProperty("sourcePolicy").enumValueIndex =
+            (int)BattleCardSourcePolicy.FixedCharacter;
+        data.ApplyModifiedPropertiesWithoutUndo();
+
+        Assert.That(card.IsEligible(System.Array.Empty<CharacterSO>()),
+            Is.False);
+    }
+
+    [Test]
+    public void MissingLocalization_UsesSingleFallback()
+    {
+        BattleCardSO card = CreateCard("card.single-fallback");
+        SerializedObject data = new(card);
+        string missingKey = $"test.missing.{System.Guid.NewGuid():N}";
+        data.FindProperty("nameLocalizationKey").stringValue =
+            missingKey + ".name";
+        data.FindProperty("descriptionLocalizationKey").stringValue =
+            missingKey + ".description";
+        data.FindProperty("fallbackName").stringValue =
+            "CARD_IDENTIFIER";
+        data.FindProperty("fallbackDescription").stringValue =
+            "CARD_DESCRIPTION_IDENTIFIER";
+        data.ApplyModifiedPropertiesWithoutUndo();
+
+        Assert.That(data.FindProperty("koreanName"), Is.Null);
+        Assert.That(data.FindProperty("englishName"), Is.Null);
+        Assert.That(data.FindProperty("koreanDescription"), Is.Null);
+        Assert.That(data.FindProperty("englishDescription"), Is.Null);
+        Assert.That(
+            card.GetLocalizedDisplayName(),
+            Is.EqualTo("CARD_IDENTIFIER"));
+        Assert.That(
+            card.GetLocalizedDescription(),
+            Is.EqualTo("CARD_DESCRIPTION_IDENTIFIER"));
+    }
+
+    [Test]
+    public void SelectingDifferentCard_ClearsEditingFocus()
+    {
+        BattleCardSO first = CreateCard("card.focus.first");
+        BattleCardSO second = CreateCard("card.focus.second");
+        BattleCardEditorWindow window =
+            ScriptableObject.CreateInstance<BattleCardEditorWindow>();
+        window.hideFlags = HideFlags.HideAndDontSave;
+        created.Add(window);
+
+        FieldInfo selectedField = typeof(BattleCardEditorWindow).GetField(
+            "selected",
+            BindingFlags.Instance | BindingFlags.NonPublic);
+        FieldInfo serializedField = typeof(BattleCardEditorWindow).GetField(
+            "serialized",
+            BindingFlags.Instance | BindingFlags.NonPublic);
+        MethodInfo select = typeof(BattleCardEditorWindow).GetMethod(
+            "Select",
+            BindingFlags.Instance | BindingFlags.NonPublic);
+        Assert.That(selectedField, Is.Not.Null);
+        Assert.That(serializedField, Is.Not.Null);
+        Assert.That(select, Is.Not.Null);
+        selectedField.SetValue(window, first);
+        serializedField.SetValue(window, new SerializedObject(first));
+
+        try
+        {
+            EditorGUIUtility.editingTextField = true;
+            select.Invoke(window, new object[] { second });
+
+            Assert.That(EditorGUIUtility.editingTextField, Is.False);
+            Assert.That(selectedField.GetValue(window), Is.SameAs(second));
+        }
+        finally
+        {
+            EditorGUIUtility.editingTextField = false;
+        }
     }
 
     private BattleCardDeckRules CreateRules(

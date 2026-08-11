@@ -963,9 +963,32 @@ public sealed class AbilityDefinitionContractTests
     }
 
     [Test]
-    public void EnemyItemAndStatus_ExposeTheSameBattleAbilityContract()
+    public void CharacterEnemyItemAndStatus_UseTargetlessCardDrawContract()
     {
         CharacterEffectDefinition effect = new();
+        SetField(effect, "type", CharacterEffectType.CardDraw);
+        SetField(
+            effect,
+            "damageAmountMode",
+            CharacterDamageAmountMode.Fixed);
+        SetField(effect, "damageAmount", 2f);
+        effect.Validate();
+
+        CharacterSkillDefinition skill = new();
+        SetField(skill, "actionId", "skill.contract_test");
+        SetField(
+            skill,
+            "sections",
+            new List<CharacterSkillSectionType>
+            {
+                CharacterSkillSectionType.Ability,
+            });
+        SetField(skill, "subject", CharacterAttackSubject.None);
+        SetField(
+            skill,
+            "effects",
+            new List<CharacterEffectDefinition> { effect });
+        skill.Validate();
 
         EnemyAbilityOperationDefinition operation = new();
         SetField(
@@ -988,13 +1011,13 @@ public sealed class AbilityDefinitionContractTests
             SetField(
                 item,
                 "abilityEffects",
-                new List<CharacterEffectDefinition> { new() });
+                new List<CharacterEffectDefinition> { effect });
             status.RegenerateStatusId();
             StatusEffectTriggerBlockDefinition triggerBlock = new();
             SetField(
                 triggerBlock,
                 "effects",
-                new List<CharacterEffectDefinition> { new() });
+                new List<CharacterEffectDefinition> { effect });
             SetField(
                 status,
                 "triggerBlocks",
@@ -1004,6 +1027,7 @@ public sealed class AbilityDefinitionContractTests
                 });
             status.ValidateDefinition();
 
+            AssertCommonAbility(skill, BattleEffectOriginKind.CharacterSkill);
             AssertCommonAbility(enemyAbility, BattleEffectOriginKind.EnemyAbility);
             AssertCommonAbility(item, BattleEffectOriginKind.BattleItem);
             AssertCommonAbility(status, BattleEffectOriginKind.StatusEffect);
@@ -1054,6 +1078,9 @@ public sealed class AbilityDefinitionContractTests
         Assert.That(ability, Is.Not.Null);
         Assert.That(ability.OriginKind, Is.EqualTo(expectedOrigin));
         Assert.That(ability.HasExecutableContent, Is.True);
+        Assert.That(
+            BattleAbilityRules.RequiresActionTargets(ability),
+            Is.False);
         Assert.That(
             AbilityDefinitionValidator.TryValidate(ability, out string error),
             Is.True,

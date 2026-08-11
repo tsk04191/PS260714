@@ -2065,9 +2065,8 @@ public static class CharacterDefinitionValidator
             }
 
             CharacterTargetFaction? effectTargetFaction;
-            if (effect.Type == CharacterEffectType.GainResource ||
-                effect.Type == CharacterEffectType.SpendResource ||
-                effect.Type == CharacterEffectType.SpendHealth)
+            if (!BattleEffectRules.RequiresTargets(
+                    effect.BattleEffectType))
             {
                 effectTargetFaction = targetFaction;
                 if (effect.TargetMode !=
@@ -2167,6 +2166,13 @@ public static class CharacterDefinitionValidator
 
                 case CharacterEffectType.SpendHealth:
                     ValidateHealthSpendEffect(
+                        effect,
+                        effectPath,
+                        result);
+                    break;
+
+                case CharacterEffectType.CardDraw:
+                    ValidateCardDrawEffect(
                         effect,
                         effectPath,
                         result);
@@ -2450,6 +2456,34 @@ public static class CharacterDefinitionValidator
                 "effect.health_spend_invalid",
                 $"{effectPath}.damageAmount",
                 "Health spend requires a fixed amount of at least one and " +
+                "does not support scaling terms.");
+        }
+    }
+
+    private static void ValidateCardDrawEffect(
+        CharacterEffectDefinition effect,
+        string effectPath,
+        CharacterDefinitionValidationResult result)
+    {
+        bool hasFixedPositiveAmount =
+            effect.AmountMode == CharacterDamageAmountMode.Fixed &&
+            IsFinite(effect.Amount) &&
+            effect.Amount >= 1f;
+        bool hasUnsupportedScaling =
+            effect.SourceResourceScale != 0f ||
+            effect.SourceCurrentHealthScale != 0f ||
+            effect.SourceMaxHealthScale != 0f ||
+            effect.TargetCurrentHealthScale != 0f ||
+            effect.TargetMaxHealthScale != 0f ||
+            effect.SourceStatusStacksScale != 0f ||
+            effect.TargetStatusStacksScale != 0f;
+        if (!hasFixedPositiveAmount || hasUnsupportedScaling)
+        {
+            AddError(
+                result,
+                "effect.card_draw_invalid",
+                $"{effectPath}.damageAmount",
+                "Card draw requires a fixed amount of at least one and " +
                 "does not support scaling terms.");
         }
     }

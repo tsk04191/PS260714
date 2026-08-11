@@ -616,4 +616,84 @@ namespace PS260714.Localization
             }
         }
     }
+
+    /// <summary>
+    /// Builds the shared placeholder set used by every battle ability owner.
+    /// Owner-specific localization code may add values, but must not redefine
+    /// the meaning of these common names.
+    /// </summary>
+    public static class BattleAbilityLocalizationArguments
+    {
+        public static LocalizationArgument[] Build(
+            IBattleAbilityDefinition ability,
+            float? sourceAttackPower = null)
+        {
+            List<LocalizationArgument> arguments = new();
+            if (ability == null)
+                return arguments.ToArray();
+
+            BattleAbilityTargeting targeting = ability.Targeting;
+            Add(arguments, "targetCount", targeting.TargetCount);
+            Add(arguments, "count", targeting.TargetCount);
+            Add(
+                arguments,
+                "radius",
+                targeting.AreaDefinition?.Radius ?? 0f);
+            if (sourceAttackPower.HasValue)
+                Add(arguments, "attack", sourceAttackPower.Value);
+
+            HashSet<BattleEffectType> addedTypes = new();
+            IEnumerable<IBattleEffectDefinition> effects =
+                ability.BattleEffects;
+            if (effects == null)
+                return arguments.ToArray();
+
+            bool addedAmount = false;
+            foreach (IBattleEffectDefinition effect in effects)
+            {
+                if (effect == null)
+                    continue;
+
+                float amount = effect.AmountScaling.FixedAmount;
+                if (!addedAmount)
+                {
+                    Add(arguments, "amount", amount);
+                    addedAmount = true;
+                }
+                if (!addedTypes.Add(effect.BattleEffectType))
+                    continue;
+
+                switch (effect.BattleEffectType)
+                {
+                    case BattleEffectType.Damage:
+                        Add(arguments, "damage", amount);
+                        break;
+                    case BattleEffectType.Heal:
+                        Add(arguments, "heal", amount);
+                        break;
+                    case BattleEffectType.Shield:
+                        Add(arguments, "armor", amount);
+                        break;
+                    case BattleEffectType.CardDraw:
+                        Add(arguments, "drawCount", amount);
+                        break;
+                    case BattleEffectType.ApplyStatus:
+                        Add(arguments, "stacks", effect.StatusStacks);
+                        Add(arguments, "duration", effect.StatusDuration);
+                        Add(arguments, "seconds", effect.StatusDuration);
+                        break;
+                }
+            }
+
+            return arguments.ToArray();
+        }
+
+        private static void Add(
+            ICollection<LocalizationArgument> arguments,
+            string name,
+            object value)
+        {
+            arguments.Add(new LocalizationArgument(name, value));
+        }
+    }
 }
