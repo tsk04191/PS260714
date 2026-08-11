@@ -83,7 +83,7 @@ public sealed class DungeonRoomEffectDefinition
 }
 
 [Serializable]
-public class DungeonRoomChoiceDefinition
+public class DungeonRoomChoiceDefinition : IRunAbilityDefinition
 {
     [BoxGroup("Choice")]
     [SerializeField] private string choiceId = "choice";
@@ -111,6 +111,10 @@ public class DungeonRoomChoiceDefinition
         Array.Empty<DungeonRoomEffectDefinition>();
 
     public string ChoiceId => choiceId;
+    public string AbilityId => ChoiceId ?? string.Empty;
+    public AbilityExecutionDomain ExecutionDomain =>
+        AbilityExecutionDomain.Run;
+    public int AbilitySchemaVersion => 1;
     public int RunCurrencyCost => Mathf.Max(0, runCurrencyCost);
     public bool SinglePurchase => singlePurchase;
     public IReadOnlyList<DungeonRoomConditionDefinition> Conditions =>

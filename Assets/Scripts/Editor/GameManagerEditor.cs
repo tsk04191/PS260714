@@ -254,6 +254,25 @@ public sealed class CharacterGradePaletteEditor : Editor
     }
 }
 
+[CustomEditor(typeof(DungeonHudPresentationSO))]
+public sealed class DungeonHudPresentationEditor : Editor
+{
+    public override void OnInspectorGUI()
+    {
+        serializedObject.Update();
+        DrawPropertiesExcluding(serializedObject, "m_Script");
+        if (serializedObject.ApplyModifiedProperties())
+        {
+            EditorUtility.SetDirty(target);
+            DungeonHudPresentation.Invalidate();
+        }
+
+        EditorGUILayout.Space(8f);
+        if (GUILayout.Button("Open Common Settings"))
+            CommonSettingsProjectProvider.Open();
+    }
+}
+
 [CustomEditor(typeof(CharacterRoleCatalogSO))]
 public sealed class CharacterRoleCatalogEditor : Editor
 {
@@ -681,6 +700,7 @@ public sealed class CommonSettingsProjectProvider : SettingsProvider
 
     private CharacterGradePaletteSO _palette;
     private CharacterRoleCatalogSO _roleCatalog;
+    private DungeonHudPresentationSO _dungeonHud;
     private UnityEngine.Object _selectedRoleDefinition;
     private Vector2 _scroll;
     private Vector2 _roleListScroll;
@@ -753,6 +773,11 @@ public sealed class CommonSettingsProjectProvider : SettingsProvider
             _roleCatalog =
                 CommonSettingsEditorUtility.LoadRoleCatalog();
         }
+        if (_dungeonHud == null)
+        {
+            _dungeonHud =
+                CommonSettingsEditorUtility.LoadDungeonHudPresentation();
+        }
 
         _scroll = EditorGUILayout.BeginScrollView(_scroll);
         EditorGUILayout.LabelField(
@@ -764,6 +789,8 @@ public sealed class CommonSettingsProjectProvider : SettingsProvider
             MessageType.Info);
 
         DrawBuildSettings();
+        EditorGUILayout.Space(16f);
+        DrawDungeonHudSettings();
         EditorGUILayout.Space(16f);
         DrawGradeSettings();
         EditorGUILayout.Space(16f);
@@ -808,6 +835,141 @@ public sealed class CommonSettingsProjectProvider : SettingsProvider
                 : MessageType.Info);
         if (GUILayout.Button("CommonDef.cs 열기"))
             CommonSettingsEditorUtility.OpenCommonDefSource();
+    }
+
+    private void DrawDungeonHudSettings()
+    {
+        EditorGUILayout.LabelField(
+            "Dungeon Battle HUD",
+            EditorStyles.boldLabel);
+        EditorGUILayout.HelpBox(
+            "Configure the world movement marker, attack cooldown ring, " +
+            "ability-ready icon, and battle panel transparency here.",
+            MessageType.Info);
+
+        if (_dungeonHud == null)
+        {
+            EditorGUILayout.HelpBox(
+                "The common Dungeon HUD presentation asset is missing.",
+                MessageType.Warning);
+            if (GUILayout.Button("Create Dungeon HUD Settings"))
+            {
+                _dungeonHud = CommonSettingsEditorUtility
+                    .CreateDungeonHudPresentation();
+            }
+            return;
+        }
+
+        using (new EditorGUILayout.HorizontalScope())
+        {
+            using (new EditorGUI.DisabledScope(true))
+            {
+                EditorGUILayout.ObjectField(
+                    "Settings Asset",
+                    _dungeonHud,
+                    typeof(DungeonHudPresentationSO),
+                    false);
+            }
+            if (GUILayout.Button("Select", GUILayout.Width(72f)))
+                CommonSettingsEditorUtility.SelectAsset(_dungeonHud);
+        }
+
+        SerializedObject serialized = new(_dungeonHud);
+        serialized.UpdateIfRequiredOrScript();
+        EditorGUILayout.LabelField("World Camera", EditorStyles.boldLabel);
+        EditorGUILayout.PropertyField(
+            serialized.FindProperty("worldCameraLocalPosition"));
+        EditorGUILayout.PropertyField(
+            serialized.FindProperty("worldCameraLocalEulerAngles"));
+        EditorGUILayout.PropertyField(
+            serialized.FindProperty("worldCameraFieldOfView"));
+        EditorGUILayout.Space(4f);
+        EditorGUILayout.LabelField("World Actors", EditorStyles.boldLabel);
+        EditorGUILayout.PropertyField(
+            serialized.FindProperty("worldAllyHeight"));
+        EditorGUILayout.PropertyField(
+            serialized.FindProperty("worldEnemyHeight"));
+        EditorGUILayout.PropertyField(
+            serialized.FindProperty("worldEnemyArenaRingClearance"));
+        EditorGUILayout.PropertyField(
+            serialized.FindProperty("worldDepthSortingRange"));
+        EditorGUILayout.Space(4f);
+        EditorGUILayout.LabelField("World Movement", EditorStyles.boldLabel);
+        EditorGUILayout.PropertyField(
+            serialized.FindProperty("movementDestinationSprite"));
+        EditorGUILayout.PropertyField(
+            serialized.FindProperty("movementLineColor"));
+        EditorGUILayout.PropertyField(
+            serialized.FindProperty("movementDestinationColor"));
+        EditorGUILayout.PropertyField(
+            serialized.FindProperty("movementLineWidth"));
+        EditorGUILayout.PropertyField(
+            serialized.FindProperty("movementDestinationSize"));
+        EditorGUILayout.Space(4f);
+        EditorGUILayout.LabelField(
+            "World Character Status",
+            EditorStyles.boldLabel);
+        EditorGUILayout.PropertyField(
+            serialized.FindProperty("abilityReadySprite"));
+        EditorGUILayout.PropertyField(
+            serialized.FindProperty("abilityReadyColor"));
+        EditorGUILayout.PropertyField(
+            serialized.FindProperty("abilityReadyIconSize"));
+        EditorGUILayout.PropertyField(
+            serialized.FindProperty("abilityReadyIconOffset"));
+        EditorGUILayout.PropertyField(
+            serialized.FindProperty("attackCooldownTrackColor"));
+        EditorGUILayout.PropertyField(
+            serialized.FindProperty("attackCooldownReadyColor"));
+        EditorGUILayout.PropertyField(
+            serialized.FindProperty("attackCooldownRingRadius"));
+        EditorGUILayout.PropertyField(
+            serialized.FindProperty("attackCooldownRingWidth"));
+        EditorGUILayout.Space(4f);
+        EditorGUILayout.LabelField("Battle Core Ring", EditorStyles.boldLabel);
+        EditorGUILayout.PropertyField(
+            serialized.FindProperty("battleCoreRingTrackColor"));
+        EditorGUILayout.PropertyField(
+            serialized.FindProperty("battleCoreRingDelayedColor"));
+        EditorGUILayout.PropertyField(
+            serialized.FindProperty("battleCoreRingHealthyColor"));
+        EditorGUILayout.PropertyField(
+            serialized.FindProperty("battleCoreRingCriticalColor"));
+        EditorGUILayout.PropertyField(
+            serialized.FindProperty("battleCoreRingThickness"));
+        EditorGUILayout.PropertyField(
+            serialized.FindProperty("battleCoreRingGap"));
+        EditorGUILayout.PropertyField(
+            serialized.FindProperty("battleCoreRingGroundHeight"));
+        EditorGUILayout.PropertyField(
+            serialized.FindProperty("battleCoreRingSegments"));
+        EditorGUILayout.PropertyField(
+            serialized.FindProperty("battleCoreRingStartAngle"));
+        EditorGUILayout.PropertyField(
+            serialized.FindProperty("battleCoreRingSweepAngle"));
+        EditorGUILayout.PropertyField(
+            serialized.FindProperty("battleCoreRingClockwise"));
+        EditorGUILayout.PropertyField(
+            serialized.FindProperty("battleCoreRingAnimationDuration"));
+        EditorGUILayout.PropertyField(
+            serialized.FindProperty("battleCoreRingDamageDelay"));
+        EditorGUILayout.PropertyField(
+            serialized.FindProperty("battleCoreRingDelayedDuration"));
+        EditorGUILayout.PropertyField(
+            serialized.FindProperty("battleCoreRingCriticalThreshold"));
+        EditorGUILayout.Space(4f);
+        EditorGUILayout.LabelField("Battle UI", EditorStyles.boldLabel);
+        EditorGUILayout.PropertyField(
+            serialized.FindProperty("hudPanelAlpha"));
+        EditorGUILayout.PropertyField(
+            serialized.FindProperty("characterPanelAlpha"));
+        EditorGUILayout.PropertyField(
+            serialized.FindProperty("cardPanelAlpha"));
+        if (serialized.ApplyModifiedProperties())
+        {
+            EditorUtility.SetDirty(_dungeonHud);
+            DungeonHudPresentation.Invalidate();
+        }
     }
 
     private void DrawGradeSettings()
@@ -1406,6 +1568,8 @@ public sealed class CommonSettingsProjectProvider : SettingsProvider
             CommonSettingsEditorUtility.LoadGradePalette();
         _roleCatalog =
             CommonSettingsEditorUtility.LoadRoleCatalog();
+        _dungeonHud =
+            CommonSettingsEditorUtility.LoadDungeonHudPresentation();
         PS260714LocalizationKeyField.Refresh();
         if (_selectedRoleDefinition != null &&
             (_roleCatalog == null ||
@@ -1447,6 +1611,10 @@ internal static class CommonSettingsEditorUtility
         "Assets/Resources/" +
         CommonDef.CharacterRoleCatalogResourcePath +
         ".asset";
+    private const string DungeonHudPresentationAssetPath =
+        "Assets/Resources/" +
+        CommonDef.DungeonHudPresentationResourcePath +
+        ".asset";
     private const string RoleAssetFolder =
         "Assets/Resources/Presentation/Roles";
     private const string ArchetypeAssetFolder =
@@ -1456,6 +1624,29 @@ internal static class CommonSettingsEditorUtility
     {
         return AssetDatabase.LoadAssetAtPath<CharacterGradePaletteSO>(
             GradePaletteAssetPath);
+    }
+
+    public static DungeonHudPresentationSO LoadDungeonHudPresentation()
+    {
+        return AssetDatabase.LoadAssetAtPath<DungeonHudPresentationSO>(
+            DungeonHudPresentationAssetPath);
+    }
+
+    public static DungeonHudPresentationSO CreateDungeonHudPresentation()
+    {
+        DungeonHudPresentationSO existing =
+            LoadDungeonHudPresentation();
+        if (existing != null)
+            return existing;
+
+        EnsureFolder("Assets/Resources/Presentation");
+        DungeonHudPresentationSO settings =
+            ScriptableObject.CreateInstance<DungeonHudPresentationSO>();
+        AssetDatabase.CreateAsset(settings, DungeonHudPresentationAssetPath);
+        AssetDatabase.SaveAssets();
+        DungeonHudPresentation.Invalidate();
+        SelectAsset(settings);
+        return settings;
     }
 
     public static CharacterGradePaletteSO CreateGradePalette()

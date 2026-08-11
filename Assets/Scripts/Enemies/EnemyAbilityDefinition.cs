@@ -356,7 +356,7 @@ public sealed class EnemyAbilityOperationDefinition
 }
 
 [Serializable]
-public sealed class EnemyAbilityDefinition
+public sealed class EnemyAbilityDefinition : IBattleAbilityDefinition
 {
     [SerializeField]
     private string abilityId;
@@ -419,6 +419,32 @@ public sealed class EnemyAbilityDefinition
         operations != null
             ? operations
             : Array.Empty<EnemyAbilityOperationDefinition>();
+    public AbilityExecutionDomain ExecutionDomain =>
+        AbilityExecutionDomain.Battle;
+    public int AbilitySchemaVersion => 1;
+    public BattleEffectOriginKind OriginKind =>
+        BattleEffectOriginKind.EnemyAbility;
+    public BattleAbilityTargeting Targeting =>
+        BattleAbilityTargeting.FromEnemy(Target);
+    public IEnumerable<IBattleEffectDefinition> BattleEffects =>
+        EnumerateBattleEffects();
+    public bool UsesLegacyEffectStorage => false;
+    public bool HasExecutableContent => Operations.Count > 0;
+
+    private IEnumerable<IBattleEffectDefinition> EnumerateBattleEffects()
+    {
+        foreach (EnemyAbilityOperationDefinition operation in Operations)
+        {
+            if (operation == null)
+                continue;
+
+            foreach (CharacterEffectDefinition effect in operation.Effects)
+            {
+                if (effect != null)
+                    yield return effect;
+            }
+        }
+    }
 
     internal static EnemyAbilityDefinition CreateRuntimePreset(
         string id,

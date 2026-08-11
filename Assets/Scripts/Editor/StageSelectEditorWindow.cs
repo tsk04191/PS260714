@@ -27,6 +27,7 @@ public sealed class StageSelectEditorWindow : EditorWindow
     private bool _stageSelectExpanded = true;
     private bool _flowExpanded = true;
     private bool _rulesExpanded = true;
+    private bool _battleArenaExpanded = true;
     private bool _encountersExpanded;
     private bool _presentationExpanded = true;
     private bool _modifiersExpanded;
@@ -307,6 +308,7 @@ public sealed class StageSelectEditorWindow : EditorWindow
             DrawStageSelectSection();
             DrawFlowSection();
             DrawRulesSection();
+            DrawBattleArenaSection();
             DrawEncountersSection();
             DrawPresentationSection();
             DrawModifiersSection();
@@ -432,6 +434,23 @@ public sealed class StageSelectEditorWindow : EditorWindow
             DrawAssetReferenceArray(
                 "enemyPoolOverride",
                 "Enemy Pool Override");
+        }
+        EditorGUILayout.EndFoldoutHeaderGroup();
+    }
+
+    private void DrawBattleArenaSection()
+    {
+        _battleArenaExpanded = EditorGUILayout.BeginFoldoutHeaderGroup(
+            _battleArenaExpanded,
+            "Battle Arena");
+        if (_battleArenaExpanded)
+        {
+            DrawProperty("battleArenaRadius", "Circular Arena Radius");
+            EditorGUILayout.HelpBox(
+                "This world-space radius controls the authored arena ring, " +
+                "enemy approach radius, ally movement boundary, and the " +
+                "projected shield health UI.",
+                MessageType.Info);
         }
         EditorGUILayout.EndFoldoutHeaderGroup();
     }

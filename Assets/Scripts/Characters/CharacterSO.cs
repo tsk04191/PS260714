@@ -2028,7 +2028,8 @@ public sealed class CharacterEffectDefinition :
 
 [Serializable]
 public sealed class CharacterSkillDefinition :
-    ICharacterConditionalActionDefinition
+    ICharacterConditionalActionDefinition,
+    IBattleAbilityDefinition
 {
     [SerializeField]
     private string actionId;
@@ -2085,6 +2086,8 @@ public sealed class CharacterSkillDefinition :
     [SerializeField]
     private List<CharacterTargetAreaOffset> areaOffsets = new();
     [SerializeField]
+    private BattleAreaDefinition areaDefinition = new();
+    [SerializeField]
     private List<CharacterEffectDefinition> effects = new();
 
     public string ActionId => actionId ?? string.Empty;
@@ -2137,8 +2140,30 @@ public sealed class CharacterSkillDefinition :
             statusRemovalRatio);
     public IReadOnlyList<CharacterTargetAreaOffset> AreaOffsets =>
         areaOffsets;
+    public BattleAreaDefinition AreaDefinition =>
+        areaDefinition ??= new BattleAreaDefinition();
     public IReadOnlyList<CharacterEffectDefinition> Effects => effects;
     public bool HasExplicitEffects => effects != null && effects.Count > 0;
+    public string AbilityId => ActionId;
+    public AbilityExecutionDomain ExecutionDomain =>
+        AbilityExecutionDomain.Battle;
+    public int AbilitySchemaVersion => HasExplicitEffects ? 1 : 0;
+    public BattleEffectOriginKind OriginKind =>
+        BattleEffectOriginKind.CharacterSkill;
+    public BattleAbilityTargeting Targeting =>
+        BattleAbilityTargeting.FromCharacter(
+            targetFaction,
+            subject,
+            subjectMetric,
+            subjectCount,
+            AreaDefinition,
+            areaOffsets);
+    public IEnumerable<IBattleEffectDefinition> BattleEffects =>
+        (IEnumerable<IBattleEffectDefinition>)effects ??
+        Array.Empty<IBattleEffectDefinition>();
+    public bool UsesLegacyEffectStorage => !HasExplicitEffects;
+    public bool HasExecutableContent =>
+        HasExplicitEffects || HasSection(CharacterSkillSectionType.Ability);
 
     public bool HasSection(CharacterSkillSectionType sectionType)
     {
@@ -2175,6 +2200,8 @@ public sealed class CharacterSkillDefinition :
         CharacterTargetAreaOffset.ValidateList(
             areaOffsets,
             DungeonBoardView.MaximumGridSize / 2);
+        areaDefinition ??= new BattleAreaDefinition();
+        areaDefinition.Validate();
         effects ??= new List<CharacterEffectDefinition>();
         foreach (CharacterEffectDefinition effect in effects)
             effect?.Validate();
@@ -2211,7 +2238,8 @@ public sealed class CharacterStatusStackCostDefinition
 
 [Serializable]
 public sealed class CharacterPassiveDefinition :
-    ICharacterConditionalActionDefinition
+    ICharacterConditionalActionDefinition,
+    IBattleAbilityDefinition
 {
     [SerializeField]
     private string actionId;
@@ -2390,6 +2418,26 @@ public sealed class CharacterPassiveDefinition :
         HasSection(CharacterPassiveSectionType.StatusContribution);
     public IReadOnlyList<CharacterEffectDefinition> Effects => effects;
     public bool HasExplicitEffects => effects != null && effects.Count > 0;
+    public string AbilityId => ActionId;
+    public AbilityExecutionDomain ExecutionDomain =>
+        AbilityExecutionDomain.Battle;
+    public int AbilitySchemaVersion => HasExplicitEffects ? 1 : 0;
+    public BattleEffectOriginKind OriginKind =>
+        BattleEffectOriginKind.CharacterPassive;
+    public BattleAbilityTargeting Targeting =>
+        BattleAbilityTargeting.FromCharacter(
+            targetFaction,
+            subject,
+            subjectMetric,
+            subjectCount,
+            null,
+            areaOffsets);
+    public IEnumerable<IBattleEffectDefinition> BattleEffects =>
+        (IEnumerable<IBattleEffectDefinition>)effects ??
+        Array.Empty<IBattleEffectDefinition>();
+    public bool UsesLegacyEffectStorage => !HasExplicitEffects;
+    public bool HasExecutableContent =>
+        HasExplicitEffects || HasSection(CharacterPassiveSectionType.Ability);
     public bool IsEmptyPlaceholder => sections != null &&
         sections.Count == 0;
 
@@ -2516,7 +2564,8 @@ public sealed class CharacterTargetAreaOffset
 
 [Serializable]
 public sealed class CharacterAttackDefinition :
-    ICharacterConditionalActionDefinition
+    ICharacterConditionalActionDefinition,
+    IBattleAbilityDefinition
 {
     [SerializeField]
     private string actionId;
@@ -2626,6 +2675,26 @@ public sealed class CharacterAttackDefinition :
         areaOffsets;
     public IReadOnlyList<CharacterEffectDefinition> Effects => effects;
     public bool HasExplicitEffects => effects != null && effects.Count > 0;
+    public string AbilityId => ActionId;
+    public AbilityExecutionDomain ExecutionDomain =>
+        AbilityExecutionDomain.Battle;
+    public int AbilitySchemaVersion => HasExplicitEffects ? 1 : 0;
+    public BattleEffectOriginKind OriginKind =>
+        BattleEffectOriginKind.CharacterAttack;
+    public BattleAbilityTargeting Targeting =>
+        BattleAbilityTargeting.FromCharacter(
+            targetFaction,
+            subject,
+            subjectMetric,
+            subjectCount,
+            null,
+            areaOffsets);
+    public IEnumerable<IBattleEffectDefinition> BattleEffects =>
+        (IEnumerable<IBattleEffectDefinition>)effects ??
+        Array.Empty<IBattleEffectDefinition>();
+    public bool UsesLegacyEffectStorage => !HasExplicitEffects;
+    public bool HasExecutableContent =>
+        HasExplicitEffects || HasSection(CharacterAttackSectionType.Ability);
 
     public bool HasSection(CharacterAttackSectionType sectionType)
     {
@@ -2711,9 +2780,39 @@ public sealed class CharacterAttackDefinition :
     }
 }
 
+[Serializable]
+public sealed class CharacterStandingFraming
+{
+    public static readonly Vector2 DefaultFocus = new(0.5f, 0.6f);
+    public const float DefaultZoom = 1.1f;
+    public const float MinimumZoom = 1f;
+    public const float MaximumZoom = 4f;
+
+    [SerializeField] private Vector2 focusNormalized = new(0.5f, 0.6f);
+    [SerializeField, Range(MinimumZoom, MaximumZoom)]
+    private float zoom = DefaultZoom;
+
+    public Vector2 FocusNormalized => new(
+        Mathf.Clamp01(focusNormalized.x),
+        Mathf.Clamp01(focusNormalized.y));
+    public float Zoom => Mathf.Clamp(
+        zoom,
+        MinimumZoom,
+        MaximumZoom);
+
+    internal void Validate()
+    {
+        focusNormalized = new Vector2(
+            Mathf.Clamp01(focusNormalized.x),
+            Mathf.Clamp01(focusNormalized.y));
+        zoom = Mathf.Clamp(zoom, MinimumZoom, MaximumZoom);
+    }
+}
+
 [CreateAssetMenu(fileName = "Character", menuName = "Dungeon/Character")]
 public sealed class CharacterSO : ScriptableObject,
-    IBattlePresentationUnitDefinition
+    IBattlePresentationUnitDefinition,
+    IBattleAbilityProvider
 {
     [SerializeField, HideInInspector] private string characterId;
     [SerializeField] private bool initiallyOwned = true;
@@ -2732,6 +2831,18 @@ public sealed class CharacterSO : ScriptableObject,
     [SerializeField] private Sprite sittingSdSprite;
     [SerializeField] private Sprite skillSdSprite;
     [SerializeField] private Sprite passiveSdSprite;
+
+    [Header("Dungeon HUD Standing Framing")]
+    [SerializeField] private CharacterStandingFraming
+        dungeonHudStandingFraming = new();
+
+    [Header("World SD Presentation")]
+    [SerializeField, Min(0.1f)] private float worldSdScaleMultiplier = 1f;
+    [SerializeField] private float worldSdGroundOffset;
+    [SerializeField, Range(0.4f, 1.4f)]
+    private float worldSdHeadHeightNormalized = 1f;
+    [Tooltip("Enable when the source SD sprite faces right by default.")]
+    [SerializeField] private bool worldSdFacesRight = true;
     [SerializeField] private string nameLocalizationKey;
     [SerializeField] private string descriptionLocalizationKey;
     [SerializeField] private string characterName = "CHARACTER";
@@ -2784,6 +2895,18 @@ public sealed class CharacterSO : ScriptableObject,
     public Sprite SittingSdSprite => sittingSdSprite;
     public Sprite SkillSdSprite => skillSdSprite;
     public Sprite PassiveSdSprite => passiveSdSprite;
+    public Vector2 DungeonHudStandingFocus =>
+        dungeonHudStandingFraming?.FocusNormalized ??
+        CharacterStandingFraming.DefaultFocus;
+    public float DungeonHudStandingZoom =>
+        dungeonHudStandingFraming?.Zoom ??
+        CharacterStandingFraming.DefaultZoom;
+    public float WorldSdScaleMultiplier =>
+        Mathf.Max(0.1f, worldSdScaleMultiplier);
+    public float WorldSdGroundOffset => worldSdGroundOffset;
+    public float WorldSdHeadHeightNormalized =>
+        Mathf.Clamp(worldSdHeadHeightNormalized, 0.4f, 1.4f);
+    public bool WorldSdFacesRight => worldSdFacesRight;
     public string CharacterId => !string.IsNullOrWhiteSpace(characterId)
         ? characterId
         : name;
@@ -2819,6 +2942,53 @@ public sealed class CharacterSO : ScriptableObject,
     public float ActiveSkillRecoveryDuration =>
         TimePrecision.Normalize(activeSkillRecoveryDuration);
 
+    public IEnumerable<IBattleAbilityDefinition> EnumerateBattleAbilities()
+    {
+        if (attackDefinitions != null)
+        {
+            foreach (CharacterAttackDefinition definition in
+                     attackDefinitions)
+            {
+                if (definition != null)
+                    yield return definition;
+            }
+        }
+        if (skillDefinitions != null)
+        {
+            foreach (CharacterSkillDefinition definition in
+                     skillDefinitions)
+            {
+                if (definition != null)
+                    yield return definition;
+            }
+        }
+        if (passiveDefinitions != null)
+        {
+            foreach (CharacterPassiveDefinition definition in
+                     passiveDefinitions)
+            {
+                if (definition != null)
+                    yield return definition;
+            }
+        }
+        if (role != null)
+        {
+            foreach (IBattleAbilityDefinition definition in
+                     role.EnumerateBattleAbilities())
+            {
+                yield return definition;
+            }
+        }
+        if (archetype != null)
+        {
+            foreach (IBattleAbilityDefinition definition in
+                     archetype.EnumerateBattleAbilities())
+            {
+                yield return definition;
+            }
+        }
+    }
+
     public CharacterCumulativeUpgradeDefinition
         GetCumulativeUpgradeDefinition(string upgradeId)
     {
@@ -2848,6 +3018,14 @@ public sealed class CharacterSO : ScriptableObject,
         if (string.IsNullOrWhiteSpace(characterId))
             RegenerateCharacterId();
         grade = CharacterGradePresentation.Clamp(grade);
+        worldSdScaleMultiplier = Mathf.Max(0.1f, worldSdScaleMultiplier);
+        worldSdGroundOffset = Mathf.Clamp(worldSdGroundOffset, -2f, 2f);
+        worldSdHeadHeightNormalized = Mathf.Clamp(
+            worldSdHeadHeightNormalized,
+            0.4f,
+            1.4f);
+        dungeonHudStandingFraming ??= new CharacterStandingFraming();
+        dungeonHudStandingFraming.Validate();
 
         passiveDefinitions ??= new List<CharacterPassiveDefinition>();
         foreach (CharacterPassiveDefinition definition in passiveDefinitions)

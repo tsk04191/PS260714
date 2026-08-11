@@ -154,6 +154,13 @@ public sealed class CharacterEditorWindow : EditorWindow
         "projectileVfxCue";
     private const string ImpactVfxCuePropertyName = "impactVfxCue";
     private const string AreaOffsetsPropertyName = "areaOffsets";
+    private const string AreaDefinitionPropertyName = "areaDefinition";
+    private const string AreaShapeTypePropertyName = "shapeType";
+    private const string AreaOriginModePropertyName = "originMode";
+    private const string AreaRadiusPropertyName = "radius";
+    private const string AreaConeAnglePropertyName = "coneAngle";
+    private const string AreaMaxCastDistancePropertyName =
+        "maxCastDistance";
     private const string AreaRowOffsetPropertyName = "rowOffset";
     private const string AreaColumnOffsetPropertyName = "columnOffset";
     private const string ActionIconSpritePropertyName = "iconSprite";
@@ -600,6 +607,8 @@ public sealed class CharacterEditorWindow : EditorWindow
     private bool _attackExpanded;
     private bool _skillExpanded;
     private bool _validationExpanded = true;
+    private bool _standingFramingExpanded = true;
+    private bool _standingFramingDragging;
     private bool _cumulativeUpgradeExpanded;
     private bool _dungeonUpgradeExpanded;
     private bool _restSkillExpanded;
@@ -979,6 +988,7 @@ public sealed class CharacterEditorWindow : EditorWindow
         EditorGUILayout.EndVertical();
 
         EditorGUILayout.EndHorizontal();
+        DrawDungeonHudStandingFraming();
         EditorGUILayout.Space(10f);
         EditorGUILayout.LabelField(
             "SD 스프라이트",
@@ -1032,6 +1042,28 @@ public sealed class CharacterEditorWindow : EditorWindow
             new Vector2(150f, 150f));
         EditorGUILayout.EndHorizontal();
         EditorGUILayout.EndScrollView();
+        EditorGUILayout.Space(8f);
+        EditorGUILayout.LabelField(
+            "World SD Presentation",
+            EditorStyles.boldLabel);
+        EditorGUILayout.HelpBox(
+            "The waiting SD sprite defines the stable world scale. " +
+            "Adjust the ground and head anchors only when a character's " +
+            "source images use unusual transparent padding.",
+            MessageType.Info);
+        EditorGUILayout.PropertyField(
+            _serializedCharacter.FindProperty("worldSdScaleMultiplier"),
+            new GUIContent("Scale Multiplier"));
+        EditorGUILayout.PropertyField(
+            _serializedCharacter.FindProperty("worldSdGroundOffset"),
+            new GUIContent("Ground Offset"));
+        EditorGUILayout.PropertyField(
+            _serializedCharacter.FindProperty(
+                "worldSdHeadHeightNormalized"),
+            new GUIContent("Head Height"));
+        EditorGUILayout.PropertyField(
+            _serializedCharacter.FindProperty("worldSdFacesRight"),
+            new GUIContent("Source Faces Right"));
         EditorGUILayout.EndVertical();
         EditorGUILayout.Space(8f);
     }
@@ -1110,6 +1142,32 @@ public sealed class CharacterEditorWindow : EditorWindow
                 });
         }
 
+        EditorGUILayout.EndVertical();
+    }
+
+    private void DrawDungeonHudStandingFraming()
+    {
+        EditorGUILayout.Space(8f);
+        EditorGUILayout.BeginVertical(EditorStyles.helpBox);
+        _standingFramingExpanded = EditorGUILayout.Foldout(
+            _standingFramingExpanded,
+            "Dungeon HUD Standing Framing",
+            true,
+            EditorStyles.foldoutHeader);
+        if (_standingFramingExpanded)
+        {
+            CharacterStandingFramingEditorWindow.DrawEmbedded(
+                _selectedCharacter,
+                _serializedCharacter,
+                ref _standingFramingDragging,
+                false,
+                360f);
+            if (GUILayout.Button("별도 창으로 크게 편집"))
+            {
+                CharacterStandingFramingEditorWindow.Open(
+                    _selectedCharacter);
+            }
+        }
         EditorGUILayout.EndVertical();
     }
 
@@ -2819,7 +2877,12 @@ public sealed class CharacterEditorWindow : EditorWindow
                 DrawAttackSubject(
                     definition,
                     CurrentActionEditorContext,
-                    true);
+                    true,
+                    true,
+                    false);
+                DrawSkillAreaEditor(
+                    definition,
+                    CurrentActionEditorContext.Owner);
                 break;
 
             case CharacterSkillSectionType.Ability:
@@ -2848,6 +2911,22 @@ public sealed class CharacterEditorWindow : EditorWindow
             SkillSectionsPropertyName);
         sections?.ClearArray();
         ResetSkillDefinitionValues(definition);
+        if (newIndex > 0)
+        {
+            SetEnumValue(
+                definition,
+                AttackSubjectPropertyName,
+                (int)CharacterAttackSubject.None);
+            SerializedProperty area = definition.FindPropertyRelative(
+                AreaDefinitionPropertyName);
+            SerializedProperty shape = area?.FindPropertyRelative(
+                AreaShapeTypePropertyName);
+            if (shape != null)
+            {
+                shape.enumValueIndex =
+                    (int)CharacterAreaShapeType.LegacyTileOffsets;
+            }
+        }
         definition.isExpanded = true;
 
         if (_serializedCharacter.ApplyModifiedProperties())
@@ -2898,7 +2977,7 @@ public sealed class CharacterEditorWindow : EditorWindow
                 SetEnumValue(
                     definition,
                     AttackSubjectPropertyName,
-                    (int)CharacterAttackSubject.Random);
+                    (int)CharacterAttackSubject.Manual);
                 SerializedProperty subjectCount =
                     definition.FindPropertyRelative(
                         AttackSubjectCountPropertyName);
@@ -2909,6 +2988,7 @@ public sealed class CharacterEditorWindow : EditorWindow
                     AttackSubjectMetricPropertyName,
                     (int)CharacterAttackSubjectMetric.Health);
                 ClearAreaOffsets(definition);
+                ResetWorldAreaDefinition(definition);
                 break;
 
             case CharacterSkillSectionType.Ability:
@@ -3287,7 +3367,8 @@ public sealed class CharacterEditorWindow : EditorWindow
         SerializedProperty definition,
         ActionEditorContext context,
         bool allowAllyFaction = false,
-        bool allowInheritedSubject = true)
+        bool allowInheritedSubject = true,
+        bool drawAreaEditor = true)
     {
         SerializedProperty targetFaction = definition.FindPropertyRelative(
             TargetFactionPropertyName);
@@ -3419,12 +3500,132 @@ public sealed class CharacterEditorWindow : EditorWindow
             }
         }
 
-        DrawTargetAreaEditor(
-            definition,
-            context.Owner,
-            reusesPreviousTargets
-                ? CharacterTargetFaction.Enemy
-                : faction);
+        if (drawAreaEditor)
+        {
+            DrawTargetAreaEditor(
+                definition,
+                context.Owner,
+                reusesPreviousTargets
+                    ? CharacterTargetFaction.Enemy
+                    : faction);
+        }
+    }
+
+    private static void DrawSkillAreaEditor(
+        SerializedProperty definition,
+        UnityEngine.Object owner)
+    {
+        SerializedProperty area = definition.FindPropertyRelative(
+            AreaDefinitionPropertyName);
+        if (area == null)
+        {
+            EditorGUILayout.HelpBox(
+                "새 범위 설정 속성을 찾을 수 없습니다.",
+                MessageType.Error);
+            return;
+        }
+
+        SerializedProperty shape = area.FindPropertyRelative(
+            AreaShapeTypePropertyName);
+        SerializedProperty origin = area.FindPropertyRelative(
+            AreaOriginModePropertyName);
+        SerializedProperty radius = area.FindPropertyRelative(
+            AreaRadiusPropertyName);
+        SerializedProperty coneAngle = area.FindPropertyRelative(
+            AreaConeAnglePropertyName);
+        SerializedProperty castDistance = area.FindPropertyRelative(
+            AreaMaxCastDistancePropertyName);
+
+        EditorGUILayout.PropertyField(shape, new GUIContent("범위 형태"));
+        CharacterAreaShapeType shapeType = shape != null
+            ? (CharacterAreaShapeType)shape.enumValueIndex
+            : CharacterAreaShapeType.LegacyTileOffsets;
+        if (shapeType == CharacterAreaShapeType.LegacyTileOffsets)
+        {
+            area.isExpanded = EditorGUILayout.Foldout(
+                area.isExpanded,
+                "레거시 타일 범위",
+                true);
+            if (area.isExpanded)
+            {
+                EditorGUILayout.HelpBox(
+                    "기존 에셋 호환용 설정입니다. 새 스킬은 월드 범위를 사용하세요.",
+                    MessageType.Info);
+                DrawTargetAreaEditor(
+                    definition,
+                    owner,
+                    CharacterTargetFaction.Enemy);
+            }
+            return;
+        }
+
+        EditorGUILayout.PropertyField(origin, new GUIContent("범위 중심"));
+        if (radius != null)
+        {
+            radius.floatValue = Mathf.Max(
+                0.1f,
+                EditorGUILayout.FloatField(
+                    "반지름",
+                    radius.floatValue));
+        }
+        if (shapeType == CharacterAreaShapeType.Cone && coneAngle != null)
+        {
+            coneAngle.floatValue = EditorGUILayout.Slider(
+                "원뿔 각도",
+                coneAngle.floatValue,
+                1f,
+                179f);
+        }
+        if (origin != null &&
+            origin.enumValueIndex == (int)CharacterAreaOriginMode.Cursor &&
+            castDistance != null)
+        {
+            castDistance.floatValue = Mathf.Max(
+                0.1f,
+                EditorGUILayout.FloatField(
+                    "최대 시전 거리",
+                    castDistance.floatValue));
+        }
+
+        SerializedProperty subject = definition.FindPropertyRelative(
+            AttackSubjectPropertyName);
+        if (subject != null &&
+            subject.enumValueIndex != (int)CharacterAttackSubject.Manual)
+        {
+            EditorGUILayout.HelpBox(
+                "월드 범위 조준은 선정 방식을 Manual로 설정해야 사용됩니다.",
+                MessageType.Warning);
+        }
+    }
+
+    private static void ResetWorldAreaDefinition(
+        SerializedProperty definition)
+    {
+        SerializedProperty area = definition.FindPropertyRelative(
+            AreaDefinitionPropertyName);
+        if (area == null)
+            return;
+
+        SerializedProperty shape = area.FindPropertyRelative(
+            AreaShapeTypePropertyName);
+        SerializedProperty origin = area.FindPropertyRelative(
+            AreaOriginModePropertyName);
+        SerializedProperty radius = area.FindPropertyRelative(
+            AreaRadiusPropertyName);
+        SerializedProperty coneAngle = area.FindPropertyRelative(
+            AreaConeAnglePropertyName);
+        SerializedProperty castDistance = area.FindPropertyRelative(
+            AreaMaxCastDistancePropertyName);
+        if (shape != null)
+            shape.enumValueIndex = (int)CharacterAreaShapeType.Circle;
+        if (origin != null)
+            origin.enumValueIndex = (int)CharacterAreaOriginMode.Cursor;
+        if (radius != null)
+            radius.floatValue = 1.5f;
+        if (coneAngle != null)
+            coneAngle.floatValue = 60f;
+        if (castDistance != null)
+            castDistance.floatValue = 4.25f;
     }
 
     internal static void DrawTargetAreaEditor(
@@ -4077,6 +4278,12 @@ public sealed class CharacterEditorWindow : EditorWindow
         DrawEffectList(
             effects,
             new ActionEditorContext(owner, previewAttackPower));
+    }
+
+    internal static void AddEmbeddedDefaultEffect(
+        SerializedProperty effects)
+    {
+        AddDefaultEffect(effects);
     }
 
     private static void DrawEffectList(
@@ -6410,6 +6617,7 @@ public sealed class CharacterEditorWindow : EditorWindow
         {
             RequestEditingFocusClear();
             CancelRenameSelectedCharacter();
+            _standingFramingDragging = false;
         }
 
         _selectedCharacter = character;
@@ -6918,6 +7126,30 @@ public sealed class CharacterEditorWindow : EditorWindow
                 CharacterRolePresentation.Invalidate();
             editorWindow?.Repaint();
         }
+    }
+}
+
+/// <summary>
+/// Owner-neutral entry point for the shared battle effect authoring UI.
+/// Character, item, enemy, and status editors must use this facade so effect
+/// defaults and validation controls cannot drift apart again.
+/// </summary>
+internal static class BattleAbilityEditorGUI
+{
+    internal static void DrawEffectList(
+        SerializedProperty effects,
+        UnityEngine.Object owner,
+        float? previewAttackPower = null)
+    {
+        CharacterEditorWindow.DrawEmbeddedEffectList(
+            effects,
+            owner,
+            previewAttackPower);
+    }
+
+    internal static void AddDefaultEffect(SerializedProperty effects)
+    {
+        CharacterEditorWindow.AddEmbeddedDefaultEffect(effects);
     }
 }
 

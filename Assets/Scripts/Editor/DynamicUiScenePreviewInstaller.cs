@@ -14,8 +14,6 @@ public static class DynamicUiScenePreviewInstaller
         "Assets/Resources/Presentation/AttendanceRewardCell.prefab";
     private const string BuffIconPath =
         "Assets/Resources/Presentation/CharacterBuffIcon.prefab";
-    private const string EnemyCardPath =
-        "Assets/Prefabs/UI/Dungeon/EnemyCard.prefab";
     private const string OperatorRosterCardPath =
         "Assets/Resources/Presentation/OperatorRosterCard.prefab";
     private const string RestCharacterSdPath =
@@ -305,7 +303,6 @@ public static class DynamicUiScenePreviewInstaller
         InstallCharacterPreview(scene, page, pageSerialized, characterPrefab);
         InstallBattleItemPreviews(scene);
         InstallSpawnQueuePreviews(scene);
-        InstallEnemyCardPreview(scene);
 
         foreach (Transform root in FindTransforms(scene, "grpEventButtons"))
         {
@@ -399,15 +396,26 @@ public static class DynamicUiScenePreviewInstaller
         previewSerialized.ApplyModifiedPropertiesWithoutUndo();
         if (sample != null)
         {
-            Image sdImage = previewSerialized.FindProperty("sdImage")
+            Image standingImage = previewSerialized.FindProperty("standingImage")
                 .objectReferenceValue as Image;
-            if (sdImage != null)
+            Sprite standingSprite = sample.StandingSprite != null
+                ? sample.StandingSprite
+                : sample.IconSprite;
+            if (standingImage != null)
             {
-                sdImage.sprite = sample.WaitingSdSprite != null
-                    ? sample.WaitingSdSprite
-                    : sample.IconSprite;
-                sdImage.enabled = sdImage.sprite != null;
+                standingImage.sprite = standingSprite;
+                standingImage.enabled = standingSprite != null;
             }
+
+            CharacterStandingPortraitView portraitView = previewSerialized
+                .FindProperty("standingPortraitView").objectReferenceValue
+                as CharacterStandingPortraitView;
+            Require(portraitView, "Character standing portrait view");
+            portraitView.Configure(
+                standingSprite,
+                sample.DungeonHudStandingFocus,
+                sample.DungeonHudStandingZoom);
+            EditorUtility.SetDirty(portraitView);
         }
 
         CharacterBuffIconView buffPrefab = AssetDatabase.LoadAssetAtPath<
@@ -485,34 +493,6 @@ public static class DynamicUiScenePreviewInstaller
                 content,
                 prefab,
                 "grpSpawnQueueItem_Preview");
-        }
-    }
-
-    private static void InstallEnemyCardPreview(Scene scene)
-    {
-        EnemyCard prefab = AssetDatabase.LoadAssetAtPath<EnemyCard>(
-            EnemyCardPath);
-        Require(prefab, "Enemy card prefab");
-        DungeonTileView[] tiles = FindAll<DungeonTileView>(scene)
-            .OrderBy(item => item.transform.GetSiblingIndex())
-            .ToArray();
-        if (tiles.Length == 0)
-            throw new InvalidOperationException("Dungeon tiles were not found.");
-
-        for (int index = 0; index < tiles.Length; index++)
-        {
-            SerializedObject serialized = new(tiles[index]);
-            RectTransform stackRoot = serialized.FindProperty("stackRoot")
-                .objectReferenceValue as RectTransform;
-            Require(stackRoot, "Enemy card stack root");
-            RemoveDirectComponents<EnemyCard>(stackRoot);
-            if (index == 0)
-            {
-                EnsureSingleComponentPrefab(
-                    stackRoot,
-                    prefab,
-                    "grpEnemyCard_Preview");
-            }
         }
     }
 

@@ -395,6 +395,13 @@ public sealed class EnemyEditorWindow : EditorWindow
             DrawProperty(
                 "spawnIntervalMultiplier",
                 "Base Spawn Interval Multiplier");
+            EditorGUILayout.Space(6f);
+            EditorGUILayout.LabelField(
+                "Circular Defense",
+                EditorStyles.boldLabel);
+            DrawProperty("approachSpeed", "Approach Speed");
+            DrawProperty("coreAttackDamage", "Core Attack Damage");
+            DrawProperty("coreAttackInterval", "Core Attack Interval");
             DrawProperty("threatCost", "Threat Cost (0 = Type Default)");
             DrawProperty(
                 "unlockDifficulty",
@@ -464,7 +471,7 @@ public sealed class EnemyEditorWindow : EditorWindow
                 }
 
                 if (ability.isExpanded)
-                    DrawAbility(ability);
+                    DrawAbility(ability, _selected);
             }
         }
 
@@ -490,7 +497,7 @@ public sealed class EnemyEditorWindow : EditorWindow
         using (new EditorGUILayout.VerticalScope(EditorStyles.helpBox))
         {
             DrawProperty("iconSprite", "Codex Icon");
-            DrawProperty("boardSprite", "Board Sprite");
+            DrawBoardSprite();
             PS260714AssetReferenceField.Draw(
                 Find("spawnVfxCue"),
                 new GUIContent("Spawn VFX Cue"));
@@ -503,7 +510,65 @@ public sealed class EnemyEditorWindow : EditorWindow
         }
     }
 
-    private static void DrawAbility(SerializedProperty ability)
+    private void DrawBoardSprite()
+    {
+        SerializedProperty property = Find("boardSprite");
+        if (property == null)
+            return;
+
+        using (new EditorGUILayout.HorizontalScope())
+        {
+            Rect fieldRect = GUILayoutUtility.GetRect(
+                116f,
+                116f,
+                GUILayout.Width(116f),
+                GUILayout.Height(116f));
+            EditorGUI.BeginProperty(
+                fieldRect,
+                GUIContent.none,
+                property);
+            property.objectReferenceValue = EditorGUI.ObjectField(
+                fieldRect,
+                GUIContent.none,
+                property.objectReferenceValue,
+                typeof(Sprite),
+                false);
+            EditorGUI.EndProperty();
+
+            using (new EditorGUILayout.VerticalScope())
+            {
+                EditorGUILayout.LabelField(
+                    "Dungeon Board Sprite (1:1)",
+                    EditorStyles.boldLabel);
+                Sprite sprite = property.objectReferenceValue as Sprite;
+                if (sprite == null)
+                {
+                    EditorGUILayout.HelpBox(
+                        "Assign this enemy's square Sprite. Enemies without " +
+                        "this reference are not rendered in the dungeon world.",
+                        MessageType.Warning);
+                    return;
+                }
+
+                float width = sprite.rect.width;
+                float height = sprite.rect.height;
+                bool isSquare = Mathf.Abs(width - height) <= 0.5f;
+                EditorGUILayout.LabelField(
+                    $"Sprite Rect: {width:0.#} x {height:0.#}",
+                    EditorStyles.miniLabel);
+                EditorGUILayout.HelpBox(
+                    isSquare
+                        ? "1:1 sprite ratio verified."
+                        : "The selected Sprite is not 1:1. Crop or slice it " +
+                          "to a square rect before use.",
+                    isSquare ? MessageType.Info : MessageType.Error);
+            }
+        }
+    }
+
+    private static void DrawAbility(
+        SerializedProperty ability,
+        UnityEngine.Object owner)
     {
         DrawRelative(ability, "abilityId", "Ability ID");
         PS260714LocalizationKeyField.Draw(
@@ -550,7 +615,10 @@ public sealed class EnemyEditorWindow : EditorWindow
 
         DrawConditions(ability);
         DrawTarget(ability);
-        DrawOperations(ability, (EnemyAbilityTrigger)trigger.enumValueIndex);
+        DrawOperations(
+            ability,
+            (EnemyAbilityTrigger)trigger.enumValueIndex,
+            owner);
     }
 
     private static void DrawConditions(SerializedProperty ability)
@@ -748,7 +816,8 @@ public sealed class EnemyEditorWindow : EditorWindow
 
     private static void DrawOperations(
         SerializedProperty ability,
-        EnemyAbilityTrigger trigger)
+        EnemyAbilityTrigger trigger,
+        UnityEngine.Object owner)
     {
         SerializedProperty operations =
             ability.FindPropertyRelative("operations");
@@ -804,8 +873,9 @@ public sealed class EnemyEditorWindow : EditorWindow
                 switch (type)
                 {
                     case EnemyAbilityOperationType.ExecuteEffects:
-                        DrawEffects(
-                            operation.FindPropertyRelative("effects"));
+                        BattleAbilityEditorGUI.DrawEffectList(
+                            operation.FindPropertyRelative("effects"),
+                            owner);
                         break;
                     case EnemyAbilityOperationType.ModifySpawnInterval:
                         DrawRelative(
@@ -934,7 +1004,7 @@ public sealed class EnemyEditorWindow : EditorWindow
         if (removeIndex >= 0)
             effects.DeleteArrayElementAtIndex(removeIndex);
         if (GUILayout.Button("Add Effect", EditorStyles.miniButton))
-            AddEffect(effects);
+            BattleAbilityEditorGUI.AddDefaultEffect(effects);
     }
 
     private static void AddAbility(SerializedProperty abilities)
@@ -1108,7 +1178,7 @@ public sealed class EnemyEditorWindow : EditorWindow
             operation.FindPropertyRelative("effects");
         effects.ClearArray();
         if (operationType == EnemyAbilityOperationType.ExecuteEffects)
-            AddEffect(effects);
+            BattleAbilityEditorGUI.AddDefaultEffect(effects);
     }
 
     private static void AddEffect(SerializedProperty effects)

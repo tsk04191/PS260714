@@ -69,6 +69,378 @@ public interface IBattleEffectDefinition
     CharacterStatusRemovalAmount StatusRemovalAmount { get; }
 }
 
+/// <summary>
+/// Execution boundary shared by battle abilities and run/room actions.
+/// The domain is deliberately explicit so a room effect cannot be sent to
+/// the battle executor by mistake.
+/// </summary>
+public enum AbilityExecutionDomain
+{
+    Battle = 0,
+    Run = 1
+}
+
+public enum BattleAbilityTargetRelation
+{
+    None = 0,
+    Self = 1,
+    Friendly = 2,
+    Hostile = 3,
+    Any = 4,
+    Objective = 5
+}
+
+public enum BattleAbilitySelectionMode
+{
+    None = 0,
+    Inherit = 1,
+    Self = 2,
+    All = 3,
+    Random = 4,
+    HighestValue = 5,
+    LowestValue = 6,
+    Adjacent = 7,
+    Manual = 8,
+    AllExceptSelf = 9,
+    RandomExceptSelf = 10
+}
+
+public enum BattleAbilityTargetMetric
+{
+    None = 0,
+    Health = 1,
+    HealthPercentage = 2,
+    StackCount = 3,
+    AttackPower = 4,
+    AttackSpeed = 5,
+    Shield = 6,
+    TotalDamageDealt = 7
+}
+
+/// <summary>
+/// Neutral, read-only targeting view used by every ability owner. Existing
+/// serialized fields remain the source of truth during the compatibility
+/// migration; adapters expose them through this contract.
+/// </summary>
+public readonly struct BattleAbilityTargeting
+{
+    private readonly IReadOnlyList<CharacterTargetAreaOffset>
+        _legacyAreaOffsets;
+
+    public BattleAbilityTargetRelation Relation { get; }
+    public BattleAbilitySelectionMode SelectionMode { get; }
+    public BattleAbilityTargetMetric Metric { get; }
+    public int TargetCount { get; }
+    public int Range { get; }
+    public bool IncludeDiagonals { get; }
+    public BattleAreaDefinition AreaDefinition { get; }
+    public IReadOnlyList<CharacterTargetAreaOffset> LegacyAreaOffsets =>
+        _legacyAreaOffsets ?? Array.Empty<CharacterTargetAreaOffset>();
+    public bool HasTarget =>
+        Relation != BattleAbilityTargetRelation.None &&
+        SelectionMode != BattleAbilitySelectionMode.None;
+    public bool UsesWorldArea => AreaDefinition?.UsesWorldArea == true;
+    public bool UsesLegacyTileArea =>
+        !UsesWorldArea && LegacyAreaOffsets.Count > 0;
+    public bool IsValid =>
+        Enum.IsDefined(typeof(BattleAbilityTargetRelation), Relation) &&
+        Enum.IsDefined(typeof(BattleAbilitySelectionMode), SelectionMode) &&
+        Enum.IsDefined(typeof(BattleAbilityTargetMetric), Metric) &&
+        TargetCount >= 0 &&
+        Range >= 0 &&
+        (Relation != BattleAbilityTargetRelation.None ||
+         SelectionMode == BattleAbilitySelectionMode.None ||
+         SelectionMode == BattleAbilitySelectionMode.Inherit);
+
+    public BattleAbilityTargeting(
+        BattleAbilityTargetRelation relation,
+        BattleAbilitySelectionMode selectionMode,
+        BattleAbilityTargetMetric metric = BattleAbilityTargetMetric.None,
+        int targetCount = 1,
+        int range = 0,
+        bool includeDiagonals = false,
+        BattleAreaDefinition areaDefinition = null,
+        IReadOnlyList<CharacterTargetAreaOffset> legacyAreaOffsets = null)
+    {
+        Relation = relation;
+        SelectionMode = selectionMode;
+        Metric = metric;
+        TargetCount = Mathf.Max(0, targetCount);
+        Range = Mathf.Max(0, range);
+        IncludeDiagonals = includeDiagonals;
+        AreaDefinition = areaDefinition;
+        _legacyAreaOffsets = legacyAreaOffsets ??
+            Array.Empty<CharacterTargetAreaOffset>();
+    }
+
+    public static BattleAbilityTargeting FromCharacter(
+        CharacterTargetFaction faction,
+        CharacterAttackSubject subject,
+        CharacterAttackSubjectMetric metric,
+        int targetCount,
+        BattleAreaDefinition areaDefinition = null,
+        IReadOnlyList<CharacterTargetAreaOffset> legacyAreaOffsets = null)
+    {
+        return new BattleAbilityTargeting(
+            faction == CharacterTargetFaction.Ally
+                ? BattleAbilityTargetRelation.Friendly
+                : BattleAbilityTargetRelation.Hostile,
+            ToSelectionMode(subject),
+            ToTargetMetric(metric),
+            targetCount,
+            areaDefinition?.UsesWorldArea == true
+                ? Mathf.CeilToInt(areaDefinition.MaxCastDistance)
+                : 0,
+            false,
+            areaDefinition,
+            legacyAreaOffsets);
+    }
+
+    public static BattleAbilityTargeting FromEnemy(
+        EnemyAbilityTargetDefinition target)
+    {
+        if (target == null)
+            return default;
+
+        BattleAbilityTargetRelation relation = target.Faction switch
+        {
+            EnemyAbilityTargetFaction.Self =>
+                BattleAbilityTargetRelation.Self,
+            EnemyAbilityTargetFaction.EnemyAllies =>
+                BattleAbilityTargetRelation.Friendly,
+            EnemyAbilityTargetFaction.PlayerCharacters =>
+                BattleAbilityTargetRelation.Hostile,
+            _ => BattleAbilityTargetRelation.None,
+        };
+        BattleAbilitySelectionMode selection = target.Subject switch
+        {
+            EnemyAbilityTargetSubject.Self =>
+                BattleAbilitySelectionMode.Self,
+            EnemyAbilityTargetSubject.All =>
+                BattleAbilitySelectionMode.All,
+            EnemyAbilityTargetSubject.Random =>
+                BattleAbilitySelectionMode.Random,
+            EnemyAbilityTargetSubject.HighestValue =>
+                BattleAbilitySelectionMode.HighestValue,
+            EnemyAbilityTargetSubject.LowestValue =>
+                BattleAbilitySelectionMode.LowestValue,
+            EnemyAbilityTargetSubject.Adjacent =>
+                BattleAbilitySelectionMode.Adjacent,
+            _ => BattleAbilitySelectionMode.None,
+        };
+        BattleAbilityTargetMetric metric = target.Metric switch
+        {
+            EnemyAbilityTargetMetric.Health =>
+                BattleAbilityTargetMetric.Health,
+            EnemyAbilityTargetMetric.HealthPercentage =>
+                BattleAbilityTargetMetric.HealthPercentage,
+            EnemyAbilityTargetMetric.Shield =>
+                BattleAbilityTargetMetric.Shield,
+            EnemyAbilityTargetMetric.TotalDamageDealt =>
+                BattleAbilityTargetMetric.TotalDamageDealt,
+            EnemyAbilityTargetMetric.StackCount =>
+                BattleAbilityTargetMetric.StackCount,
+            _ => BattleAbilityTargetMetric.None,
+        };
+        return new BattleAbilityTargeting(
+            relation,
+            selection,
+            metric,
+            target.TargetCount,
+            target.Range,
+            target.IncludeDiagonals);
+    }
+
+    private static BattleAbilitySelectionMode ToSelectionMode(
+        CharacterAttackSubject subject)
+    {
+        return subject switch
+        {
+            CharacterAttackSubject.Random =>
+                BattleAbilitySelectionMode.Random,
+            CharacterAttackSubject.All =>
+                BattleAbilitySelectionMode.All,
+            CharacterAttackSubject.HighestValue =>
+                BattleAbilitySelectionMode.HighestValue,
+            CharacterAttackSubject.LowestValue =>
+                BattleAbilitySelectionMode.LowestValue,
+            CharacterAttackSubject.Self =>
+                BattleAbilitySelectionMode.Self,
+            CharacterAttackSubject.AllExceptSelf =>
+                BattleAbilitySelectionMode.AllExceptSelf,
+            CharacterAttackSubject.RandomExceptSelf =>
+                BattleAbilitySelectionMode.RandomExceptSelf,
+            CharacterAttackSubject.Manual =>
+                BattleAbilitySelectionMode.Manual,
+            _ => BattleAbilitySelectionMode.None,
+        };
+    }
+
+    private static BattleAbilityTargetMetric ToTargetMetric(
+        CharacterAttackSubjectMetric metric)
+    {
+        return metric switch
+        {
+            CharacterAttackSubjectMetric.Health =>
+                BattleAbilityTargetMetric.Health,
+            CharacterAttackSubjectMetric.StackCount =>
+                BattleAbilityTargetMetric.StackCount,
+            CharacterAttackSubjectMetric.AttackPower =>
+                BattleAbilityTargetMetric.AttackPower,
+            CharacterAttackSubjectMetric.AttackSpeed =>
+                BattleAbilityTargetMetric.AttackSpeed,
+            CharacterAttackSubjectMetric.Shield =>
+                BattleAbilityTargetMetric.Shield,
+            _ => BattleAbilityTargetMetric.None,
+        };
+    }
+}
+
+public interface IAbilityDefinition
+{
+    string AbilityId { get; }
+    AbilityExecutionDomain ExecutionDomain { get; }
+    int AbilitySchemaVersion { get; }
+}
+
+/// <summary>
+/// Common battle ability projection. Owner-specific activation rules such as
+/// passive triggers, item charges, or enemy operations stay on the owner.
+/// </summary>
+public interface IBattleAbilityDefinition : IAbilityDefinition
+{
+    BattleEffectOriginKind OriginKind { get; }
+    BattleAbilityTargeting Targeting { get; }
+    IEnumerable<IBattleEffectDefinition> BattleEffects { get; }
+    bool UsesLegacyEffectStorage { get; }
+    bool HasExecutableContent { get; }
+}
+
+public interface IBattleAbilityProvider
+{
+    IEnumerable<IBattleAbilityDefinition> EnumerateBattleAbilities();
+}
+
+public interface IRunAbilityDefinition : IAbilityDefinition
+{
+}
+
+public static class AbilityDefinitionValidator
+{
+    public static bool TryValidateProvider(
+        IBattleAbilityProvider provider,
+        out string error)
+    {
+        if (provider == null)
+        {
+            error = "Battle ability provider is null.";
+            return false;
+        }
+
+        HashSet<string> abilityIds = new(StringComparer.Ordinal);
+        IEnumerable<IBattleAbilityDefinition> abilities =
+            provider.EnumerateBattleAbilities();
+        if (abilities == null)
+        {
+            error = "Battle ability provider returned a null sequence.";
+            return false;
+        }
+
+        int index = 0;
+        foreach (IBattleAbilityDefinition ability in abilities)
+        {
+            if (!TryValidate(ability, out string abilityError))
+            {
+                error = $"Ability {index + 1}: {abilityError}";
+                return false;
+            }
+            if (!abilityIds.Add(ability.AbilityId))
+            {
+                error = $"Ability ID '{ability.AbilityId}' is duplicated.";
+                return false;
+            }
+            index++;
+        }
+
+        error = string.Empty;
+        return true;
+    }
+
+    public static bool TryValidate(
+        IAbilityDefinition definition,
+        out string error)
+    {
+        if (definition == null)
+        {
+            error = "Ability definition is null.";
+            return false;
+        }
+
+        if (string.IsNullOrWhiteSpace(definition.AbilityId))
+        {
+            error = "Ability ID is required.";
+            return false;
+        }
+
+        if (definition.AbilitySchemaVersion < 0)
+        {
+            error = $"Ability '{definition.AbilityId}' has an invalid " +
+                    "schema version.";
+            return false;
+        }
+
+        if (definition is IBattleAbilityDefinition battleDefinition)
+        {
+            if (battleDefinition.ExecutionDomain !=
+                AbilityExecutionDomain.Battle)
+            {
+                error = $"Ability '{definition.AbilityId}' is exposed as " +
+                        "a battle ability with a non-battle domain.";
+                return false;
+            }
+            if (!battleDefinition.Targeting.IsValid)
+            {
+                error = $"Ability '{definition.AbilityId}' has invalid " +
+                        "targeting data.";
+                return false;
+            }
+            if (!battleDefinition.HasExecutableContent)
+            {
+                error = $"Ability '{definition.AbilityId}' has no " +
+                        "executable content.";
+                return false;
+            }
+
+            IEnumerable<IBattleEffectDefinition> effects =
+                battleDefinition.BattleEffects;
+            if (effects != null)
+            {
+                int index = 0;
+                foreach (IBattleEffectDefinition effect in effects)
+                {
+                    if (effect == null)
+                    {
+                        error = $"Ability '{definition.AbilityId}' effect " +
+                                $"{index + 1} is null.";
+                        return false;
+                    }
+                    index++;
+                }
+            }
+        }
+        else if (definition.ExecutionDomain ==
+                 AbilityExecutionDomain.Battle)
+        {
+            error = $"Ability '{definition.AbilityId}' declares the battle " +
+                    "domain without the battle ability contract.";
+            return false;
+        }
+
+        error = string.Empty;
+        return true;
+    }
+}
+
 public enum CharacterActionKind
 {
     Attack = 0,

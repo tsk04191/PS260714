@@ -6,7 +6,8 @@ using UnityEngine.Serialization;
 [CreateAssetMenu(
     fileName = "CharacterArchetype",
     menuName = "PS260714/Characters/Archetype")]
-public sealed class CharacterArchetypeSO : ScriptableObject
+public sealed class CharacterArchetypeSO : ScriptableObject,
+    IBattleAbilityProvider
 {
     [SerializeField] private string archetypeId =
         Guid.NewGuid().ToString("N");
@@ -35,6 +36,16 @@ public sealed class CharacterArchetypeSO : ScriptableObject
         PassiveDefinitions => passiveDefinitions != null
             ? passiveDefinitions
             : Array.Empty<CharacterRolePassiveDefinition>();
+
+    public IEnumerable<IBattleAbilityDefinition> EnumerateBattleAbilities()
+    {
+        foreach (CharacterRolePassiveDefinition passive in
+                 PassiveDefinitions)
+        {
+            if (passive != null)
+                yield return passive;
+        }
+    }
 
     public string GetDisplayName()
     {

@@ -502,7 +502,7 @@ public sealed class ItemEditorWindow : EditorWindow
                     "appliedStatusDurationMode",
                     "Applied Status Duration");
                 SerializedProperty abilityEffects = Find("abilityEffects");
-                CharacterEditorWindow.DrawEmbeddedEffectList(
+                BattleAbilityEditorGUI.DrawEffectList(
                     abilityEffects,
                     _selected);
 

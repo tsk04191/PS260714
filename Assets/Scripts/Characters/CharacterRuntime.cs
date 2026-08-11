@@ -13,71 +13,6 @@ internal enum CharacterAbilityIconKind
     Active,
 }
 
-[DisallowMultipleComponent]
-internal sealed class CharacterAbilityIconView : MonoBehaviour,
-    IPointerEnterHandler,
-    IPointerExitHandler,
-    IPointerClickHandler
-{
-    private CharacterRuntime _owner;
-    private CharacterAbilityIconKind _kind;
-
-    public void Configure(
-        CharacterRuntime owner,
-        CharacterAbilityIconKind kind)
-    {
-        _owner = owner;
-        _kind = kind;
-    }
-
-    public void OnPointerEnter(PointerEventData eventData)
-    {
-        _owner?.ShowAbilityTooltip(_kind);
-    }
-
-    public void OnPointerExit(PointerEventData eventData)
-    {
-        _owner?.HideAbilityTooltip(_kind);
-    }
-
-    public void OnPointerClick(PointerEventData eventData)
-    {
-        if (_kind != CharacterAbilityIconKind.Active ||
-            eventData == null ||
-            eventData.button != PointerEventData.InputButton.Left)
-        {
-            return;
-        }
-
-        _owner?.HandleAbilityIconClick(_kind);
-    }
-}
-
-[DisallowMultipleComponent]
-internal sealed class CharacterInfoHoverView : MonoBehaviour,
-    IPointerEnterHandler,
-    IPointerExitHandler
-{
-    private CharacterRuntime _owner;
-
-    public void Configure(CharacterRuntime owner)
-    {
-        _owner = owner;
-    }
-
-    public void OnPointerEnter(PointerEventData eventData)
-    {
-        _owner?.ShowAbilityTooltip(
-            CharacterAbilityIconKind.Details);
-    }
-
-    public void OnPointerExit(PointerEventData eventData)
-    {
-        _owner?.HideAbilityTooltip(
-            CharacterAbilityIconKind.Details);
-    }
-}
-
 public class CharacterBuffIconView : MonoBehaviour
 {
     [SerializeField] private Image icon;
@@ -342,6 +277,14 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
     [SerializeField] private AudioSource attackSfxSpeaker;
     [SerializeField] private Image sdImage;
 
+    [Header("Dungeon Character HUD")]
+    [SerializeField] private CharacterStandingPortraitView
+        standingPortraitView;
+    [SerializeField] private Image standingImage;
+    [SerializeField] private Image healthFill;
+    [SerializeField] private TextMeshProUGUI healthText;
+    [SerializeField] private Image selectionHighlight;
+
     [Header("Designer Prefab References")]
     [SerializeField] private Image passiveIconFrame;
     [SerializeField] private Image passiveIconImage;
@@ -408,6 +351,7 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
         new();
     private bool _buffIconPrefabErrorLogged;
     private bool _buffIconPoolPrepared;
+    private bool _useWorldSdPresentation;
     private readonly Dictionary<CharacterPassiveDefinition, float>
         _passiveCooldowns = new();
     private bool _lastAttackAttempted;
@@ -427,6 +371,36 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
 
     public CharacterSO Definition => original;
     public CharacterData Data { get; private set; }
+    public Sprite CurrentBattleSdSprite => ResolveCurrentBattleSdSprite();
+    public Sprite WorldSdReferenceSprite => Data != null
+        ? Data.WaitingSdSprite != null
+            ? Data.WaitingSdSprite
+            : Data.IconSprite
+        : null;
+    public float WorldSdScaleMultiplier =>
+        Data?.WorldSdScaleMultiplier ?? 1f;
+    public float WorldSdGroundOffset => Data?.WorldSdGroundOffset ?? 0f;
+    public float WorldSdHeadHeightNormalized =>
+        Data?.WorldSdHeadHeightNormalized ?? 1f;
+    public bool WorldSdFacesRight => Data?.WorldSdFacesRight ?? true;
+    public Sprite ActiveSkillIconSprite => Data != null
+        ? Data.GetActiveAbilityIconSprite(
+            ResolveDisplayedSkillDefinition())
+        : null;
+    public float AttackCooldownProgress
+    {
+        get
+        {
+            float effectiveCooldown = GetEffectiveAttackCooldown();
+            return _attackRecoveryRemaining > 0f
+                ? 0f
+                : effectiveCooldown > 0f
+                    ? 1f - Mathf.Clamp01(
+                        _remainingCooldown / effectiveCooldown)
+                    : 1f;
+        }
+    }
+    public bool IsActiveSkillReady => CanActivateActiveSkill();
     internal IActiveSkillResource ActiveSkillResource =>
         _activeSkillResource;
     internal IBattleBoard BoundBattleBoard => _board;
@@ -487,7 +461,9 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
     {
         RectTransform anchorRect = sdImage != null
             ? sdImage.rectTransform
-            : transform as RectTransform;
+            : standingImage != null
+                ? standingImage.rectTransform
+                : transform as RectTransform;
         return BattleVfxUiAnchorUtility.TryCreateScreenAnchor(
             anchorRect,
             anchorType,
@@ -708,15 +684,19 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
             return true;
 
         if (original == null || nameText == null ||
-            attackText == null || cooldownText == null || cooldownFill == null)
+            standingPortraitView == null || standingImage == null ||
+            healthFill == null || healthText == null)
         {
             Debug.LogError("CharacterRuntime references are incomplete.", this);
             return false;
         }
 
         LocalizationFontResolver.ApplyGameDefault(nameText);
-        LocalizationFontResolver.ApplyGameDefault(attackText);
-        LocalizationFontResolver.ApplyGameDefault(cooldownText);
+        LocalizationFontResolver.ApplyGameDefault(healthText);
+        if (attackText != null)
+            LocalizationFontResolver.ApplyGameDefault(attackText);
+        if (cooldownText != null)
+            LocalizationFontResolver.ApplyGameDefault(cooldownText);
 
         SetCharacterData(CreateCharacterData(original));
         _currentHealth = Data.MaximumHealth;
@@ -730,11 +710,18 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
         }
 
         _initialized = true;
+        RefreshStandingImage();
         EnsureSdInfoView();
         EnsureAbilityIconView();
         EnsureSkillTooltip();
         RefreshUi();
         return true;
+    }
+
+    public void ConfigureWorldSdPresentation(bool enabled)
+    {
+        _useWorldSdPresentation = enabled;
+        EnsureSdInfoView();
     }
 
     private void OnDisable()
@@ -1730,14 +1717,13 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
 
     private void RefreshManualTargetHighlight()
     {
-        if (_panelImage == null)
+        if (selectionHighlight == null)
             return;
 
-        _panelImage.color = !_manualTargetCandidate
-            ? _defaultPanelColor
-            : _manualTargetSelected
-                ? new Color(1f, 0.78f, 0.12f, 0.72f)
-                : new Color(0.2f, 0.9f, 0.5f, 0.5f);
+        selectionHighlight.gameObject.SetActive(_manualTargetCandidate);
+        selectionHighlight.color = _manualTargetSelected
+            ? new Color(1f, 0.78f, 0.12f, 0.95f)
+            : new Color(0.2f, 0.9f, 0.5f, 0.85f);
     }
 
     public bool ApplyAttackSpeedBoost(float multiplier, float duration)
@@ -1792,7 +1778,16 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
         if (_itemTargetHandler != null && _itemTargetHandler(this))
             return;
 
-        TryActivateActiveSkill();
+        // Active skills are triggered only by the authored large skill icon.
+        // The remaining HUD surface stays available for item/manual targets.
+    }
+
+    public bool TryHandleWorldTargetClick()
+    {
+        if (_manualTargetHandler != null && _manualTargetHandler(this))
+            return true;
+
+        return _itemTargetHandler != null && _itemTargetHandler(this);
     }
 
     public void OnPointerEnter(PointerEventData eventData)
@@ -2199,10 +2194,13 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
             return false;
         }
 
-        targets = ExpandCustomAbilityArea(
-            _board,
-            selectedTargets,
-            definition.AreaOffsets);
+        targets = subject == CharacterAttackSubject.Manual &&
+                  definition.AreaDefinition.UsesWorldArea
+            ? selectedTargets
+            : ExpandCustomAbilityArea(
+                _board,
+                selectedTargets,
+                definition.AreaOffsets);
         if (definition.HasExplicitEffects)
         {
             effects = PrepareExplicitEffects(
@@ -2228,6 +2226,22 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
         CharacterActionConditionData actionCondition,
         AbilityTargetSelection inheritedTargets)
     {
+        if (subject == CharacterAttackSubject.Manual &&
+            definition.AreaDefinition.UsesWorldArea)
+        {
+            IReadOnlyList<CharacterNumericCondition> conditions =
+                actionCondition.HasNumericConditions
+                    ? actionCondition.NumericConditions
+                    : System.Array.Empty<CharacterNumericCondition>();
+            return ResolveManualAbilityTargets(
+                _board,
+                definition.TargetFaction,
+                definition.SubjectCount,
+                actionCondition.MatchMode,
+                conditions,
+                definition.AreaDefinition);
+        }
+
         if (subject != CharacterAttackSubject.None ||
             !UsesActionTargets(definition))
         {
@@ -3387,7 +3401,8 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
         CharacterTargetFaction targetFaction,
         int targetCount,
         CharacterConditionMatchMode conditionMatchMode,
-        IReadOnlyList<CharacterNumericCondition> conditions)
+        IReadOnlyList<CharacterNumericCondition> conditions,
+        BattleAreaDefinition areaDefinition = null)
     {
         if (_manualTargetSelectionCancelled)
         {
@@ -3452,11 +3467,14 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
         BattleManualTargetSelectionRequest request = new(
             this,
             targetFaction,
-            Mathf.Max(1, targetCount),
+            areaDefinition?.UsesWorldArea == true
+                ? 1
+                : Mathf.Max(1, targetCount),
             enemyCandidates,
             allyCandidates,
-            false,
-            HandleManualTargetSelectionCompleted);
+            true,
+            HandleManualTargetSelectionCompleted,
+            areaDefinition);
         if (!service.TryBeginManualTargetSelection(request))
             return default;
 
@@ -4896,6 +4914,13 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
 
     private void EnsureSdInfoView()
     {
+        if (_useWorldSdPresentation)
+        {
+            if (sdImage != null)
+                sdImage.gameObject.SetActive(false);
+            return;
+        }
+
         bool hasSdSprite = Data != null &&
             (Data.WaitingSdSprite != null ||
              Data.AttackSdSprite != null ||
@@ -4920,9 +4945,9 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
             return;
 
         CharacterInfoHoverView interaction =
-            sdImage.GetComponent<CharacterInfoHoverView>() ??
-            sdImage.gameObject.AddComponent<CharacterInfoHoverView>();
-        interaction.Configure(this);
+            sdImage.GetComponent<CharacterInfoHoverView>();
+        if (interaction != null)
+            interaction.Configure(this);
         sdImage.gameObject.SetActive(true);
         sdImage.enabled = true;
         RefreshSdImage();
@@ -4959,8 +4984,15 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
             return;
 
         CharacterAbilityIconView interaction =
-            frameImage.GetComponent<CharacterAbilityIconView>() ??
-            frameImage.gameObject.AddComponent<CharacterAbilityIconView>();
+            frameImage.GetComponent<CharacterAbilityIconView>();
+        if (interaction == null)
+        {
+            Debug.LogError(
+                $"{frameImage.name} requires an authored " +
+                "CharacterAbilityIconView component.",
+                frameImage);
+            return;
+        }
         interaction.Configure(this, kind);
         if (iconImage != null)
             iconImage.raycastTarget = false;
@@ -5323,6 +5355,30 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
             return;
         }
 
+        Sprite sprite = ResolveCurrentBattleSdSprite();
+        sdImage.sprite = sprite;
+        sdImage.enabled = sprite != null;
+    }
+
+    private void RefreshStandingImage()
+    {
+        if (standingImage == null || Data == null)
+            return;
+
+        Sprite sprite = Data.StandingSprite != null
+            ? Data.StandingSprite
+            : Data.IconSprite;
+        standingPortraitView.Configure(
+            sprite,
+            Data.DungeonHudStandingFocus,
+            Data.DungeonHudStandingZoom);
+    }
+
+    public Sprite ResolveCurrentBattleSdSprite()
+    {
+        if (Data == null)
+            return null;
+
         Sprite sprite = null;
         if (!IsAlive)
             sprite = Data.ResolveDefeatSdSprite();
@@ -5336,11 +5392,7 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
             sprite = Data.DamagedSdSprite;
         if (sprite == null)
             sprite = Data.WaitingSdSprite;
-        if (sprite == null)
-            sprite = Data.IconSprite;
-
-        sdImage.sprite = sprite;
-        sdImage.enabled = sprite != null;
+        return sprite != null ? sprite : Data.IconSprite;
     }
 
     public Sprite ResolveRestSdSprite()
@@ -5358,6 +5410,7 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
         if (!_initialized)
             return;
 
+        RefreshStandingImage();
         RefreshSdImage();
 
         string slotLabel = PartySlotIndex >= 0
@@ -5365,16 +5418,18 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
             : string.Empty;
         nameText.text = slotLabel + CharacterLocalization.GetTurretName(Data);
         nameText.color = EffectColor;
-        attackText.text = CharacterLocalization.GetTurretAttack(Data);
-        cooldownText.text = GetCurrentCooldownStatusText();
-        float effectiveAttackCooldown = GetEffectiveAttackCooldown();
-        cooldownFill.fillAmount = _attackRecoveryRemaining > 0f
-            ? 0f
-            : effectiveAttackCooldown > 0f
-                ? 1f - Mathf.Clamp01(
-                    _remainingCooldown / effectiveAttackCooldown)
-                : 1f;
-        cooldownFill.color = EffectColor;
+        if (attackText != null)
+            attackText.text = CharacterLocalization.GetTurretAttack(Data);
+        if (cooldownText != null)
+            cooldownText.text = GetCurrentCooldownStatusText();
+        if (cooldownFill != null)
+        {
+            cooldownFill.fillAmount = AttackCooldownProgress;
+            cooldownFill.color = EffectColor;
+        }
+        healthFill.fillAmount = CurrentHealth / (float)MaximumHealth;
+        healthFill.color = EffectColor;
+        healthText.text = $"{CurrentHealth} / {MaximumHealth}";
 
         RefreshManualTargetHighlight();
 

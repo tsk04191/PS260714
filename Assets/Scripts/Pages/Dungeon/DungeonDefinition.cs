@@ -22,6 +22,8 @@ public sealed class DungeonDefinition : ScriptableObject
 {
     public const int AutomaticClearedBattleHealthCost = -1;
     public const float DefaultActiveSkillCostRecoveryDuration = 10f;
+    public const float DefaultBattleArenaRadius =
+        BattleArenaSetup.DefaultWorldRadius;
 
     [Header("Identity")]
     [SerializeField] private string dungeonId = "free_battle";
@@ -73,6 +75,12 @@ public sealed class DungeonDefinition : ScriptableObject
         "difficulty scale divided by 10. Set 0 to disable the cost.")]
     private int clearedBattleHealthCost =
         AutomaticClearedBattleHealthCost;
+
+    [Header("Battle Arena")]
+    [SerializeField, Min(BattleArenaSetup.MinimumWorldRadius), Tooltip(
+        "World-space radius shared by the circular wall, movement bounds, " +
+        "enemy approach, and shield health ring.")]
+    private float battleArenaRadius = DefaultBattleArenaRadius;
 
     [Header("Encounters")]
     [SerializeField] private BattleSO[] fixedBattles =
@@ -191,6 +199,8 @@ public sealed class DungeonDefinition : ScriptableObject
         clearedBattleHealthCost);
     public bool HasClearedBattleHealthCostOverride =>
         ClearedBattleHealthCost >= 0;
+    public float BattleArenaRadius =>
+        BattleArenaSetup.NormalizeWorldRadius(battleArenaRadius);
     public DungeonFieldView FieldViewPrefab => fieldViewPrefab;
     public DungeonThemeDefinition Theme => theme;
     public DungeonBgmProfile BgmProfile => bgmProfile;
@@ -516,6 +526,8 @@ public sealed class DungeonDefinition : ScriptableObject
         clearedBattleHealthCost = Mathf.Max(
             AutomaticClearedBattleHealthCost,
             clearedBattleHealthCost);
+        battleArenaRadius = BattleArenaSetup.NormalizeWorldRadius(
+            battleArenaRadius);
         enemyPoolOverride ??= Array.Empty<EnemySO>();
         modifiers ??= Array.Empty<DungeonModifier>();
     }

@@ -5,7 +5,8 @@ using UnityEngine;
 using UnityEngine.Serialization;
 
 [Serializable]
-public sealed class CharacterRolePassiveDefinition
+public sealed class CharacterRolePassiveDefinition :
+    IBattleAbilityDefinition
 {
     [SerializeField] private string passiveId;
     [SerializeField] private string nameLocalizationKey;
@@ -29,6 +30,21 @@ public sealed class CharacterRolePassiveDefinition
     public CharacterPassiveDefinition Ability => ability;
     public bool IsConfigured =>
         ability != null && !ability.IsEmptyPlaceholder;
+    public string AbilityId => PassiveId;
+    public AbilityExecutionDomain ExecutionDomain =>
+        AbilityExecutionDomain.Battle;
+    public int AbilitySchemaVersion =>
+        ability?.AbilitySchemaVersion ?? 0;
+    public BattleEffectOriginKind OriginKind =>
+        BattleEffectOriginKind.CharacterPassive;
+    public BattleAbilityTargeting Targeting =>
+        ability?.Targeting ?? default;
+    public IEnumerable<IBattleEffectDefinition> BattleEffects =>
+        ability?.BattleEffects ?? Array.Empty<IBattleEffectDefinition>();
+    public bool UsesLegacyEffectStorage =>
+        ability?.UsesLegacyEffectStorage ?? true;
+    public bool HasExecutableContent =>
+        ability?.HasExecutableContent ?? false;
 
     public string GetDisplayName()
     {
@@ -82,7 +98,8 @@ public sealed class CharacterRolePassiveDefinition
 [CreateAssetMenu(
     fileName = "CharacterRole",
     menuName = "PS260714/Characters/Role")]
-public sealed class CharacterRoleSO : ScriptableObject
+public sealed class CharacterRoleSO : ScriptableObject,
+    IBattleAbilityProvider
 {
     [SerializeField] private string roleId =
         Guid.NewGuid().ToString("N");
@@ -109,6 +126,16 @@ public sealed class CharacterRoleSO : ScriptableObject
         PassiveDefinitions => passiveDefinitions != null
             ? passiveDefinitions
             : Array.Empty<CharacterRolePassiveDefinition>();
+
+    public IEnumerable<IBattleAbilityDefinition> EnumerateBattleAbilities()
+    {
+        foreach (CharacterRolePassiveDefinition passive in
+                 PassiveDefinitions)
+        {
+            if (passive != null)
+                yield return passive;
+        }
+    }
 
     public string GetDisplayName()
     {

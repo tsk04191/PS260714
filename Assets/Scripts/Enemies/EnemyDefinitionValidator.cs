@@ -161,7 +161,37 @@ public static class EnemyDefinitionValidator
 
         ValidateIdentity(definition, result);
         ValidateBaseData(definition, result);
+        ValidatePresentation(definition, result);
         ValidateAbilities(definition.Abilities, result);
+    }
+
+    private static void ValidatePresentation(
+        EnemySO definition,
+        EnemyDefinitionValidationResult result)
+    {
+        if (definition.BoardSprite == null)
+        {
+            AddWarning(
+                result,
+                "enemy.board_sprite_missing",
+                "boardSprite",
+                "A square enemy-specific Board Sprite is required for " +
+                "dungeon world rendering.");
+            return;
+        }
+
+        float width = definition.BoardSprite.rect.width;
+        float height = definition.BoardSprite.rect.height;
+        if (width <= 0f || height <= 0f ||
+            Math.Abs(width - height) > 0.5f)
+        {
+            AddError(
+                result,
+                "enemy.board_sprite_not_square",
+                "boardSprite",
+                $"Board Sprite must use a 1:1 rect. Current rect is " +
+                $"{width:0.#} x {height:0.#}.");
+        }
     }
 
     private static void ValidateIdentity(
@@ -248,6 +278,35 @@ public static class EnemyDefinitionValidator
                 "enemy.initial_defense_invalid",
                 "initialArmor",
                 "Initial armor and shield cannot be negative.");
+        }
+
+        if (!IsFinite(definition.AuthoredApproachSpeed) ||
+            definition.AuthoredApproachSpeed <= 0f)
+        {
+            AddError(
+                result,
+                "enemy.approach_speed_invalid",
+                "approachSpeed",
+                "Circular approach speed must be finite and greater than zero.");
+        }
+
+        if (definition.AuthoredCoreAttackDamage <= 0)
+        {
+            AddError(
+                result,
+                "enemy.core_attack_damage_invalid",
+                "coreAttackDamage",
+                "Core attack damage must be at least one.");
+        }
+
+        if (!IsFinite(definition.AuthoredCoreAttackInterval) ||
+            definition.AuthoredCoreAttackInterval <= 0f)
+        {
+            AddError(
+                result,
+                "enemy.core_attack_interval_invalid",
+                "coreAttackInterval",
+                "Core attack interval must be finite and greater than zero.");
         }
 
         if (!IsFinite(definition.ThreatCost) ||

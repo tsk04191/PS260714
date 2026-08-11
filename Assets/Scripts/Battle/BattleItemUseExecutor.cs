@@ -153,9 +153,9 @@ public static class BattleItemUseExecutor
         if (item == null || !item.UsesUnifiedAbilityEffects)
             return false;
 
-        BattleEffectResult result = BattleEffectExecutor.ExecuteSequence(
+        BattleEffectResult result = BattleEffectExecutor.ExecuteAbility(
             context,
-            item.AbilityEffects);
+            item);
         return result.Succeeded;
     }
 

@@ -1,8 +1,6 @@
-using System.Reflection;
 using NUnit.Framework;
 using UnityEditor;
 using UnityEngine;
-using UnityEngine.UI;
 
 public sealed class BattleVfx3DMigrationTests
 {
@@ -10,6 +8,9 @@ public sealed class BattleVfx3DMigrationTests
         "Assets/Resources/StatusEffects/Fire.asset";
     private const string DungeonTilePath =
         "Assets/Prefabs/UI/Dungeon/DungeonTile.prefab";
+    private const string AreaPreviewPath =
+        "Assets/Resources/Presentation/DungeonWorld/" +
+        "DungeonBattleAreaPreview.prefab";
 
     [Test]
     public void FireStatus_UsesPersistent3DLoopCue()
@@ -40,13 +41,12 @@ public sealed class BattleVfx3DMigrationTests
     }
 
     [Test]
-    public void DungeonTile_HasNoLegacy2DFireOverlay()
+    public void LegacyDungeonTileAnd2DFireOverlayAssets_AreDeleted()
     {
         GameObject prefab =
             AssetDatabase.LoadAssetAtPath<GameObject>(DungeonTilePath);
 
-        Assert.That(prefab, Is.Not.Null);
-        Assert.That(prefab.transform.Find("grpFireStatusEffect"), Is.Null);
+        Assert.That(prefab, Is.Null);
         Assert.That(
             typeof(BattleEditorWindow).Assembly.GetType(
                 "FireStatusEffectAssetGenerator"),
@@ -69,47 +69,18 @@ public sealed class BattleVfx3DMigrationTests
     }
 
     [Test]
-    public void DungeonTile_TargetAreaFeedbackDoesNotAccumulateOpacity()
+    public void BattleAreaPreview_UsesAuthoredWorldMeshPrefab()
     {
         GameObject prefab =
-            AssetDatabase.LoadAssetAtPath<GameObject>(DungeonTilePath);
+            AssetDatabase.LoadAssetAtPath<GameObject>(AreaPreviewPath);
         Assert.That(prefab, Is.Not.Null);
-        GameObject instance = Object.Instantiate(prefab);
-
-        try
-        {
-            DungeonTileView tile = instance.GetComponent<DungeonTileView>();
-            Image overlay = instance.transform
-                .Find("imgAttackRangeOverlay")
-                ?.GetComponent<Image>();
-            MethodInfo showTargetArea = typeof(DungeonTileView).GetMethod(
-                "ShowTargetArea",
-                BindingFlags.Instance | BindingFlags.NonPublic);
-            FieldInfo remainingField = typeof(DungeonTileView).GetField(
-                "_targetAreaDisplayRemaining",
-                BindingFlags.Instance | BindingFlags.NonPublic);
-
-            Assert.That(tile, Is.Not.Null);
-            Assert.That(overlay, Is.Not.Null);
-            Assert.That(showTargetArea, Is.Not.Null);
-            Assert.That(remainingField, Is.Not.Null);
-
-            showTargetArea.Invoke(tile, null);
-            Color firstColor = overlay.color;
-            float firstRemaining = (float)remainingField.GetValue(tile);
-            showTargetArea.Invoke(tile, null);
-
-            Assert.That(overlay.enabled, Is.True);
-            Assert.That(overlay.color, Is.EqualTo(firstColor));
-            Assert.That(
-                (float)remainingField.GetValue(tile),
-                Is.EqualTo(firstRemaining));
-            Assert.That(firstColor.a, Is.LessThanOrEqualTo(0.3f));
-            Assert.That(firstColor.g, Is.GreaterThan(0.25f));
-        }
-        finally
-        {
-            Object.DestroyImmediate(instance);
-        }
+        Assert.That(
+            prefab.GetComponent<DungeonBattleAreaPreviewPrefabView>(),
+            Is.Not.Null);
+        Assert.That(prefab.GetComponent<MeshFilter>(), Is.Not.Null);
+        Assert.That(prefab.GetComponent<MeshRenderer>(), Is.Not.Null);
+        Assert.That(
+            prefab.GetComponentInChildren<DungeonWorldPolylineRenderer>(true),
+            Is.Not.Null);
     }
 }

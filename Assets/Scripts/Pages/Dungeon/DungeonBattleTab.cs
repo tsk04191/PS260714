@@ -35,6 +35,10 @@ public sealed class DungeonBattleTab : MonoBehaviour
     [Header("Enemy Spawn Queue")]
     [SerializeField] private DungeonSpawnQueueView spawnQueueView;
 
+    [Header("Battle Core")]
+    [SerializeField]
+    private DungeonBattleCoreWorldGaugeView battleCoreGaugeView;
+
     [Header("Page Navigation")]
     [SerializeField] private Button settingsButton;
     [SerializeField] private GameObject dungeonPage;
@@ -51,19 +55,23 @@ public sealed class DungeonBattleTab : MonoBehaviour
     private bool _battleEventsBound;
     private bool _localizationEventsBound;
     [SerializeField] private RectTransform _partyInfoRect;
+    private bool _refreshingResponsiveLayout;
 
     public float BottomReservedHeight
     {
         get
         {
             RectTransform parent = transform as RectTransform;
-            if (parent == null || _partyInfoRect == null)
+            RectTransform reserved = _itemHandView != null
+                ? _itemHandView.transform as RectTransform
+                : _partyInfoRect;
+            if (parent == null || reserved == null)
                 return 0f;
 
             Bounds bounds = RectTransformUtility
                 .CalculateRelativeRectTransformBounds(
                     parent,
-                    _partyInfoRect);
+                    reserved);
             return Mathf.Max(0f, bounds.max.y - parent.rect.yMin);
         }
     }
@@ -154,6 +162,7 @@ public sealed class DungeonBattleTab : MonoBehaviour
         UnbindBattleEvents();
         UnbindLocalizationEvents();
         _itemHandView?.Teardown();
+        battleCoreGaugeView?.SetVisible(false);
         _battleManager = null;
         _page = null;
         _initialized = false;
@@ -164,6 +173,7 @@ public sealed class DungeonBattleTab : MonoBehaviour
         RefreshSpawnQueue();
         RefreshBattleTime();
         RefreshActiveSkillResource();
+        RefreshBattleCoreHealth();
         RefreshTimeControls();
     }
 
@@ -205,6 +215,7 @@ public sealed class DungeonBattleTab : MonoBehaviour
             pauseText == null || pauseOverlay == null ||
             _pauseOverlayText == null || battleTimeText == null ||
             activeSkillResourceText == null ||
+            battleCoreGaugeView == null ||
             spawnQueueView == null ||
             _pauseMenuPanel == null ||
             _continueButton == null || _continueText == null ||
@@ -284,6 +295,8 @@ public sealed class DungeonBattleTab : MonoBehaviour
             HandleActiveSkillResourceChanged;
         _battleManager.ActiveSkillRechargeChanged +=
             RefreshActiveSkillResource;
+        _battleManager.BattleObjectiveHealthChanged +=
+            HandleBattleObjectiveHealthChanged;
         _battleEventsBound = true;
     }
 
@@ -303,6 +316,8 @@ public sealed class DungeonBattleTab : MonoBehaviour
                 HandleActiveSkillResourceChanged;
             _battleManager.ActiveSkillRechargeChanged -=
                 RefreshActiveSkillResource;
+            _battleManager.BattleObjectiveHealthChanged -=
+                HandleBattleObjectiveHealthChanged;
         }
 
         _battleEventsBound = false;
@@ -392,6 +407,28 @@ public sealed class DungeonBattleTab : MonoBehaviour
     private void HandleActiveSkillResourceChanged(int _)
     {
         RefreshActiveSkillResource();
+    }
+
+    private void HandleBattleObjectiveHealthChanged(int _, int __)
+    {
+        RefreshBattleCoreHealth();
+    }
+
+    private void RefreshBattleCoreHealth()
+    {
+        if (battleCoreGaugeView == null)
+            return;
+
+        bool visible = _battleManager?.HasBattleObjective == true;
+        battleCoreGaugeView.SetVisible(visible);
+        if (!visible)
+            return;
+
+        int current = Mathf.Max(0, _battleManager.BattleObjectiveHealth);
+        int maximum = Mathf.Max(
+            1,
+            _battleManager.BattleObjectiveMaximumHealth);
+        battleCoreGaugeView.SetHealth(current, maximum, true);
     }
 
     private void RefreshSpawnQueue()
@@ -598,13 +635,11 @@ public sealed class DungeonBattleTab : MonoBehaviour
 
     private void RefreshResponsiveLayout()
     {
+        if (_refreshingResponsiveLayout)
+            return;
+        _refreshingResponsiveLayout = true;
         _pausePanelFitter?.RefreshLayout();
-        spawnQueueView?.ConfigureResponsiveBounds(_partyInfoRect);
-        _itemHandView?.ConfigureResponsiveBounds(
-            _partyInfoRect,
-            spawnQueueView != null
-                ? spawnQueueView.transform as RectTransform
-                : null);
+        _refreshingResponsiveLayout = false;
     }
 
     private void ResolveActiveSkillResourceView()
@@ -646,11 +681,6 @@ public sealed class DungeonBattleTab : MonoBehaviour
             return;
         }
 
-        _itemHandView.ConfigureResponsiveBounds(
-            _partyInfoRect,
-            spawnQueueView != null
-                ? spawnQueueView.transform as RectTransform
-                : null);
         _itemHandView.Initialize(_page, _battleManager);
     }
 }
@@ -792,6 +822,22 @@ public abstract class DungeonItemHandViewBase : MonoBehaviour
         }
     }
 
+    public float ReservedHeight
+    {
+        get
+        {
+            RectTransform rect = transform as RectTransform;
+            RectTransform parent = rect != null
+                ? rect.parent as RectTransform
+                : null;
+            if (rect == null || parent == null)
+                return 0f;
+            Bounds bounds = RectTransformUtility
+                .CalculateRelativeRectTransformBounds(parent, rect);
+            return Mathf.Max(0f, bounds.max.y - parent.rect.yMin);
+        }
+    }
+
     public void Initialize(DungeonPage page, BattleManager battleManager)
     {
         if (page == null || battleManager == null)
@@ -823,13 +869,6 @@ public abstract class DungeonItemHandViewBase : MonoBehaviour
         }
         _initialized = true;
         RebuildCards();
-    }
-
-    public void ConfigureResponsiveBounds(
-        RectTransform bottomReservedArea,
-        RectTransform topAlignedArea)
-    {
-        RefreshCardLayout();
     }
 
     public void Teardown()
@@ -914,27 +953,7 @@ public abstract class DungeonItemHandViewBase : MonoBehaviour
             return;
         }
 
-        RectTransform prefabRect =
-            resolvedCardPrefab.transform as RectTransform;
-        float cardHeight = prefabRect != null
-            ? Mathf.Max(1f, prefabRect.sizeDelta.y)
-            : 1f;
-
-        int visibleCount = 0;
-        foreach (BattleItemSO item in BattleItemCatalog.GetAll())
-        {
-            visibleCount += GetVisibleCardCount(item);
-        }
-
         int visibleIndex = 0;
-        float handHeight = ((RectTransform)transform).rect.height;
-        float maximumCardStep = cardHeight * 0.6f;
-        float cardStep = visibleCount > 1
-            ? Mathf.Min(
-                maximumCardStep,
-                Mathf.Max(0f, handHeight - cardHeight) /
-                (visibleCount - 1))
-            : 0f;
         foreach (BattleItemSO item in BattleItemCatalog.GetAll())
         {
             int itemCardCount = GetVisibleCardCount(item);
@@ -946,20 +965,11 @@ public abstract class DungeonItemHandViewBase : MonoBehaviour
                 DungeonItemCardView card = GetOrCreateCard(
                     visibleIndex,
                     resolvedCardPrefab);
+                card.SetLayoutOrder(visibleIndex);
                 card.name =
                     $"crdBattleItem_{item.ItemId.Replace('.', '_')}_" +
                     $"{copyIndex + 1}";
                 card.gameObject.SetActive(true);
-                RectTransform cardRect =
-                    card.transform as RectTransform;
-                cardRect.anchorMin = new Vector2(0f, 0.5f);
-                cardRect.anchorMax = new Vector2(0f, 0.5f);
-                cardRect.pivot = new Vector2(0f, 0.5f);
-                float top =
-                    (visibleCount - 1) * cardStep * 0.5f;
-                cardRect.anchoredPosition = new Vector2(
-                    0f,
-                    top - visibleIndex * cardStep);
 
                 if (!card.Initialize(item, HandleCardClicked))
                 {
@@ -1008,51 +1018,36 @@ public abstract class DungeonItemHandViewBase : MonoBehaviour
 
     private void RefreshCardLayout()
     {
-        int visibleCount = 0;
-        float cardHeight = 0f;
-        for (int index = 0; index < _cards.Count; index++)
-        {
-            DungeonItemCardView card = _cards[index];
-            if (card == null || !card.gameObject.activeSelf)
-                continue;
+        if (transform is RectTransform rect)
+            LayoutRebuilder.ForceRebuildLayoutImmediate(rect);
+    }
 
-            visibleCount++;
-            if (cardHeight <= 0f &&
-                card.transform is RectTransform cardRect)
+    internal void RestoreCardSiblingOrder()
+    {
+        int firstCardIndex = transform.childCount;
+        for (int index = 0; index < transform.childCount; index++)
+        {
+            if (transform.GetChild(index)
+                    .GetComponent<DungeonItemCardView>() != null)
             {
-                cardHeight = cardRect.rect.height;
+                firstCardIndex = Mathf.Min(firstCardIndex, index);
             }
         }
-
-        if (visibleCount == 0 || cardHeight <= 0f)
+        if (firstCardIndex >= transform.childCount)
             return;
 
-        float handHeight = ((RectTransform)transform).rect.height;
-        float cardStep = visibleCount > 1
-            ? Mathf.Min(
-                cardHeight * 0.6f,
-                Mathf.Max(0f, handHeight - cardHeight) /
-                (visibleCount - 1))
-            : 0f;
-        float top = (visibleCount - 1) * cardStep * 0.5f;
-        int visibleIndex = 0;
-        for (int index = 0; index < _cards.Count; index++)
+        List<DungeonItemCardView> ordered = new(_cards);
+        ordered.Sort((left, right) =>
+            (left?.LayoutOrder ?? int.MaxValue).CompareTo(
+                right?.LayoutOrder ?? int.MaxValue));
+        for (int index = 0; index < ordered.Count; index++)
         {
-            DungeonItemCardView card = _cards[index];
-            if (card == null || !card.gameObject.activeSelf ||
-                card.transform is not RectTransform cardRect)
-            {
-                continue;
-            }
-
-            cardRect.anchorMin = new Vector2(0f, 0.5f);
-            cardRect.anchorMax = new Vector2(0f, 0.5f);
-            cardRect.pivot = new Vector2(0f, 0.5f);
-            cardRect.anchoredPosition = new Vector2(
-                0f,
-                top - visibleIndex * cardStep);
-            visibleIndex++;
+            DungeonItemCardView card = ordered[index];
+            if (card != null)
+                card.transform.SetSiblingIndex(firstCardIndex + index);
         }
+
+        RefreshCardLayout();
     }
 
     private DungeonItemCardView ResolveCardPrefab()
@@ -1236,6 +1231,14 @@ public abstract class DungeonItemHandViewBase : MonoBehaviour
             bool korean = LocalizationService.CurrentLocale?.StartsWith(
                 "ko",
                 StringComparison.OrdinalIgnoreCase) == true;
+            if (request?.UsesWorldArea == true)
+            {
+                _instructionText.text = korean
+                    ? "마우스로 범위를 조준한 뒤 좌클릭하세요. (우클릭 취소)"
+                    : "Aim with the mouse and left-click to cast. " +
+                      "(Right-click to cancel)";
+                return;
+            }
             _instructionText.text = korean
                 ? $"대상을 선택하세요 ({selected}/{required})"
                 : $"Select target(s) ({selected}/{required})";
@@ -1291,13 +1294,47 @@ public class DungeonItemCardView : MonoBehaviour,
     [Header("Interaction")]
     [SerializeField, Min(1f)] private float hoverScale = 1.12f;
     [SerializeField, Min(0f)] private float hoverResponse = 18f;
+    [SerializeField, Min(0f)] private float hoverLift = 46f;
 
     private BattleItemSO _item;
     private System.Action<BattleItemSO> _clicked;
     private bool _hovered;
+    private int _layoutOrder;
+    private Vector2 _layoutPosition;
+    private float _layoutAngle;
+    private bool _layoutPoseInitialized;
     private PopupLayerPlacement _popupLayerPlacement;
 
     public BattleItemSO Item => _item;
+    public int LayoutOrder => _layoutOrder;
+
+    public void SetLayoutOrder(int order)
+    {
+        _layoutOrder = Mathf.Max(0, order);
+    }
+
+    public void ApplyLayoutPose(Vector2 position, float angle)
+    {
+        _layoutPosition = position;
+        _layoutAngle = angle;
+        if (!Application.isPlaying && transform is RectTransform previewRect)
+        {
+            previewRect.anchoredPosition = position;
+            previewRect.localRotation = Quaternion.Euler(0f, 0f, angle);
+            _layoutPoseInitialized = true;
+            return;
+        }
+
+        if (_layoutPoseInitialized)
+            return;
+
+        _layoutPoseInitialized = true;
+        if (transform is RectTransform rect)
+        {
+            rect.anchoredPosition = position;
+            rect.localRotation = Quaternion.Euler(0f, 0f, angle);
+        }
+    }
 
     public bool Initialize(
         BattleItemSO item,
@@ -1313,7 +1350,7 @@ public class DungeonItemCardView : MonoBehaviour,
 
         _item = item;
         _clicked = clicked;
-        background.color = availableColor;
+        background.color = WithPanelAlpha(availableColor);
         illustration.sprite = item.Illustration;
         illustration.enabled = item.Illustration != null;
         icon.sprite = item.Icon;
@@ -1351,11 +1388,11 @@ public class DungeonItemCardView : MonoBehaviour,
                          energy >= _item.EnergyCost &&
                          cooldown <= 0f &&
                          (_item.HasUnlimitedUses || count > 0);
-        background.color = selected
+        background.color = WithPanelAlpha(selected
             ? selectedColor
             : available
                 ? availableColor
-                : disabledColor;
+                : disabledColor);
         statusOverlay.color = selected
             ? selectedOverlayColor
             : available
@@ -1375,6 +1412,14 @@ public class DungeonItemCardView : MonoBehaviour,
         stateText.text = state;
         costText.text = _item.EnergyCost.ToString();
         RefreshDetailText(state);
+    }
+
+    private static Color WithPanelAlpha(Color color)
+    {
+        color.a = Mathf.Min(
+            color.a,
+            DungeonHudPresentation.Load().CardPanelAlpha);
+        return color;
     }
 
     private void RefreshDetailText(string state)
@@ -1462,13 +1507,32 @@ public class DungeonItemCardView : MonoBehaviour,
 
     private void Update()
     {
+        float response = 1f - Mathf.Exp(
+            -hoverResponse * Time.unscaledDeltaTime);
         Vector3 targetScale = _hovered
             ? new Vector3(hoverScale, hoverScale, 1f)
             : Vector3.one;
         transform.localScale = Vector3.Lerp(
             transform.localScale,
             targetScale,
-            1f - Mathf.Exp(-hoverResponse * Time.unscaledDeltaTime));
+            response);
+        if (_layoutPoseInitialized && transform is RectTransform rect)
+        {
+            Vector2 targetPosition = _layoutPosition +
+                                     Vector2.up * (_hovered ? hoverLift : 0f);
+            rect.anchoredPosition = Vector2.Lerp(
+                rect.anchoredPosition,
+                targetPosition,
+                response);
+            Quaternion targetRotation = Quaternion.Euler(
+                0f,
+                0f,
+                _hovered ? 0f : _layoutAngle);
+            rect.localRotation = Quaternion.Slerp(
+                rect.localRotation,
+                targetRotation,
+                response);
+        }
     }
 
     public void OnPointerEnter(PointerEventData eventData)
@@ -1494,6 +1558,8 @@ public class DungeonItemCardView : MonoBehaviour,
     {
         _hovered = false;
         HidePopup();
+        GetComponentInParent<DungeonItemHandView>()
+            ?.RestoreCardSiblingOrder();
     }
 
     public void OnPointerClick(PointerEventData eventData)
@@ -1510,6 +1576,7 @@ public class DungeonItemCardView : MonoBehaviour,
         _hovered = false;
         HidePopup();
         transform.localScale = Vector3.one;
+        _layoutPoseInitialized = false;
     }
 
     private void HidePopup()

@@ -1008,7 +1008,9 @@ internal sealed class StatusEffectRuntimeState
 [CreateAssetMenu(
     fileName = "StatusEffect",
     menuName = "Dungeon/Status Effect")]
-public sealed class StatusEffectSO : ScriptableObject
+public sealed class StatusEffectSO : ScriptableObject,
+    IBattleAbilityDefinition,
+    IBattleAbilityProvider
 {
     [SerializeField, HideInInspector]
     private string statusId;
@@ -1142,6 +1144,45 @@ public sealed class StatusEffectSO : ScriptableObject
         statModifiers != null && statModifiers.Count > 0;
     public bool HasControlEffects =>
         controlEffects != null && controlEffects.Count > 0;
+    public string AbilityId => StatusId ?? string.Empty;
+    public AbilityExecutionDomain ExecutionDomain =>
+        AbilityExecutionDomain.Battle;
+    public int AbilitySchemaVersion => HasTriggerBlocks ? 1 : 0;
+    public BattleEffectOriginKind OriginKind =>
+        BattleEffectOriginKind.StatusEffect;
+    public BattleAbilityTargeting Targeting => default;
+    public IEnumerable<IBattleEffectDefinition> BattleEffects =>
+        EnumerateBattleEffects();
+    public bool UsesLegacyEffectStorage =>
+        !HasTriggerBlocks &&
+        ((operations != null && operations.Count > 0) ||
+         HasPersistentModifiers || HasControlEffects);
+    public bool HasExecutableContent =>
+        HasTriggerBlocks ||
+        (operations != null && operations.Count > 0) ||
+        HasPersistentModifiers ||
+        HasControlEffects;
+
+    public IEnumerable<IBattleAbilityDefinition> EnumerateBattleAbilities()
+    {
+        yield return this;
+    }
+
+    private IEnumerable<IBattleEffectDefinition> EnumerateBattleEffects()
+    {
+        foreach (StatusEffectTriggerBlockDefinition block in TriggerBlocks ??
+                 Array.Empty<StatusEffectTriggerBlockDefinition>())
+        {
+            if (block == null)
+                continue;
+
+            foreach (IBattleEffectDefinition effect in block.BattleEffects)
+            {
+                if (effect != null)
+                    yield return effect;
+            }
+        }
+    }
 
     private void OnEnable()
     {

@@ -875,6 +875,12 @@ public sealed class CharacterData
     public Sprite SittingSdSprite { get; }
     public Sprite SkillSdSprite { get; }
     public Sprite PassiveSdSprite { get; }
+    public Vector2 DungeonHudStandingFocus { get; }
+    public float DungeonHudStandingZoom { get; }
+    public float WorldSdScaleMultiplier { get; }
+    public float WorldSdGroundOffset { get; }
+    public float WorldSdHeadHeightNormalized { get; }
+    public bool WorldSdFacesRight { get; }
     public int MaximumHealth => ResolveMaximumHealth();
     public float HealthPerformanceCap => Mathf.Max(
         0f,
@@ -1107,6 +1113,22 @@ public sealed class CharacterData
         SittingSdSprite = original != null ? original.SittingSdSprite : null;
         SkillSdSprite = original != null ? original.SkillSdSprite : null;
         PassiveSdSprite = original != null ? original.PassiveSdSprite : null;
+        DungeonHudStandingFocus = original != null
+            ? original.DungeonHudStandingFocus
+            : CharacterStandingFraming.DefaultFocus;
+        DungeonHudStandingZoom = original != null
+            ? original.DungeonHudStandingZoom
+            : CharacterStandingFraming.DefaultZoom;
+        WorldSdScaleMultiplier = original != null
+            ? original.WorldSdScaleMultiplier
+            : 1f;
+        WorldSdGroundOffset = original != null
+            ? original.WorldSdGroundOffset
+            : 0f;
+        WorldSdHeadHeightNormalized = original != null
+            ? original.WorldSdHeadHeightNormalized
+            : 1f;
+        WorldSdFacesRight = original == null || original.WorldSdFacesRight;
         _baseMaximumHealth = original != null
             ? original.MaximumHealth
             : 1;

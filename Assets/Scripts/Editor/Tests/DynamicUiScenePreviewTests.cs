@@ -147,7 +147,23 @@ public sealed class DynamicUiScenePreviewTests
             characters[0].gameObject,
             "Assets/Resources/Presentation/CharacterInfo.prefab");
 
-        RectTransform buffRoot = new SerializedObject(characters[0])
+        SerializedObject characterSerialized = new(characters[0]);
+        Image standingImage = characterSerialized.FindProperty("standingImage")
+            .objectReferenceValue as Image;
+        CharacterStandingPortraitView portraitView = characterSerialized
+            .FindProperty("standingPortraitView").objectReferenceValue
+            as CharacterStandingPortraitView;
+        Assert.That(standingImage, Is.Not.Null);
+        Assert.That(portraitView, Is.Not.Null);
+        Assert.That(portraitView.Artwork, Is.SameAs(standingImage));
+        Assert.That(portraitView.Viewport.GetComponent<RectMask2D>(),
+            Is.Not.Null);
+        Assert.That(characterSerialized.FindProperty("healthFill")
+            .objectReferenceValue, Is.Not.Null);
+        Assert.That(characterSerialized.FindProperty("healthText")
+            .objectReferenceValue, Is.Not.Null);
+
+        RectTransform buffRoot = characterSerialized
             .FindProperty("buffIconContainer").objectReferenceValue
             as RectTransform;
         CharacterBuffIconView[] buffs = DirectComponents<
@@ -162,6 +178,8 @@ public sealed class DynamicUiScenePreviewTests
     {
         foreach (DungeonItemHandView hand in FindAll<DungeonItemHandView>(scene))
         {
+            Assert.That(hand.GetComponent<DungeonCardFanLayout>(),
+                Is.Not.Null);
             DungeonItemCardView[] cards = DirectComponents<
                 DungeonItemCardView>(hand.transform).ToArray();
             Assert.That(cards.Length, Is.EqualTo(1));
@@ -173,7 +191,12 @@ public sealed class DynamicUiScenePreviewTests
         foreach (DungeonSpawnQueueView queue in
                  FindAll<DungeonSpawnQueueView>(scene))
         {
-            RectTransform content = new SerializedObject(queue)
+            SerializedObject queueSerialized = new(queue);
+            Assert.That(queueSerialized.FindProperty("collapseButton")
+                .objectReferenceValue, Is.Not.Null);
+            Assert.That(queueSerialized.FindProperty("collapseArrowText")
+                .objectReferenceValue, Is.Not.Null);
+            RectTransform content = queueSerialized
                 .FindProperty("content").objectReferenceValue
                 as RectTransform;
             DungeonSpawnQueueItemView[] items = DirectComponents<
@@ -184,19 +207,6 @@ public sealed class DynamicUiScenePreviewTests
                 "Assets/Prefabs/UI/Dungeon/DungeonSpawnQueueItem.prefab");
         }
 
-        EnemyCard[] enemyCards = FindAll<DungeonTileView>(scene)
-            .SelectMany(tile =>
-            {
-                RectTransform stack = new SerializedObject(tile)
-                    .FindProperty("stackRoot").objectReferenceValue
-                    as RectTransform;
-                return DirectComponents<EnemyCard>(stack);
-            })
-            .ToArray();
-        Assert.That(enemyCards.Length, Is.EqualTo(1));
-        AssertPrefabPath(
-            enemyCards[0].gameObject,
-            "Assets/Prefabs/UI/Dungeon/EnemyCard.prefab");
     }
 
     private static void AssertDungeonChoicePreviews(Scene scene)

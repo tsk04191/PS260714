@@ -13,38 +13,76 @@ public sealed class DungeonSpawnQueueView : MonoBehaviour
     [SerializeField] private RectTransform content;
     [SerializeField] private DungeonSpawnQueueItemView itemPrefab;
 
+    [Header("Collapsible Panel")]
+    [SerializeField] private RectTransform panelRect;
+    [SerializeField] private Button collapseButton;
+    [SerializeField] private TextMeshProUGUI collapseArrowText;
+    [SerializeField] private GameObject[] expandedOnly =
+        System.Array.Empty<GameObject>();
+    [SerializeField, Min(40f)] private float expandedWidth = 300f;
+    [SerializeField, Min(40f)] private float collapsedWidth = 48f;
+
     private readonly List<DungeonSpawnQueueItemView> _items = new();
     private bool _initialized;
+    private bool _collapsed;
     private int _visibleItemCount;
-    private RectTransform _bottomReservedArea;
-    private float _authoredHeight;
-    private bool _refreshingLayout;
-
-    public void ConfigureResponsiveBounds(
-        RectTransform bottomReservedArea)
-    {
-        _bottomReservedArea = bottomReservedArea;
-        RectTransform rect = transform as RectTransform;
-        if (_authoredHeight <= 0f && rect != null && rect.rect.height > 0f)
-            _authoredHeight = rect.rect.height;
-        RefreshResponsiveLayout();
-    }
 
     public bool Initialize()
     {
         if (_initialized)
             return true;
 
-        if (timerText == null || timerFill == null || content == null || itemPrefab == null)
+        if (timerText == null || timerFill == null || content == null ||
+            itemPrefab == null || panelRect == null ||
+            collapseButton == null || collapseArrowText == null)
         {
             Debug.LogError("DungeonSpawnQueueView scene and prefab references are incomplete.", this);
             return false;
         }
 
         LocalizationFontResolver.ApplyGameDefault(timerText);
+        LocalizationFontResolver.ApplyGameDefault(collapseArrowText);
         CollectAuthoredItems();
+        collapseButton.onClick.AddListener(ToggleCollapsed);
+        ApplyCollapsedState();
         _initialized = true;
         return true;
+    }
+
+    private void OnDestroy()
+    {
+        if (collapseButton != null)
+            collapseButton.onClick.RemoveListener(ToggleCollapsed);
+    }
+
+    private void ToggleCollapsed()
+    {
+        _collapsed = !_collapsed;
+        ApplyCollapsedState();
+    }
+
+    private void ApplyCollapsedState()
+    {
+        if (panelRect != null)
+        {
+            Vector2 size = panelRect.sizeDelta;
+            size.x = _collapsed
+                ? Mathf.Max(40f, collapsedWidth)
+                : Mathf.Max(collapsedWidth, expandedWidth);
+            panelRect.sizeDelta = size;
+        }
+
+        if (expandedOnly != null)
+        {
+            for (int index = 0; index < expandedOnly.Length; index++)
+            {
+                if (expandedOnly[index] != null)
+                    expandedOnly[index].SetActive(!_collapsed);
+            }
+        }
+
+        if (collapseArrowText != null)
+            collapseArrowText.text = _collapsed ? "<" : ">";
     }
 
     private void CollectAuthoredItems()
@@ -59,48 +97,6 @@ public sealed class DungeonSpawnQueueView : MonoBehaviour
             item.gameObject.SetActive(false);
             _items.Add(item);
         }
-    }
-
-    private void OnRectTransformDimensionsChange()
-    {
-        RefreshResponsiveLayout();
-    }
-
-    private void RefreshResponsiveLayout()
-    {
-        if (_refreshingLayout)
-            return;
-
-        RectTransform rect = transform as RectTransform;
-        RectTransform parent = rect != null
-            ? rect.parent as RectTransform
-            : null;
-        if (rect == null || parent == null || parent.rect.height <= 0f)
-            return;
-
-        if (_authoredHeight <= 0f)
-            _authoredHeight = rect.rect.height;
-        if (_authoredHeight <= 0f)
-            return;
-
-        Vector3[] corners = new Vector3[4];
-        rect.GetWorldCorners(corners);
-        float availableTop = parent.InverseTransformPoint(corners[1]).y;
-        float availableBottom = parent.rect.yMin;
-        if (_bottomReservedArea != null)
-        {
-            _bottomReservedArea.GetWorldCorners(corners);
-            availableBottom = parent.InverseTransformPoint(corners[1]).y;
-        }
-
-        float height = Mathf.Min(
-            _authoredHeight,
-            Mathf.Max(0f, availableTop - availableBottom));
-        _refreshingLayout = true;
-        rect.SetSizeWithCurrentAnchors(
-            RectTransform.Axis.Vertical,
-            height);
-        _refreshingLayout = false;
     }
 
     public void RefreshQueue(IReadOnlyList<EnemyRuntime> enemies)

@@ -508,6 +508,8 @@ $RECYCLE.BIN/
 !/Assets/Resources/Presentation/CharacterInfo.prefab.meta
 !/Assets/Resources/Presentation/CharacterBuffIcon.prefab
 !/Assets/Resources/Presentation/CharacterBuffIcon.prefab.meta
+!/Assets/Resources/Presentation/DungeonHudPresentation.asset
+!/Assets/Resources/Presentation/DungeonHudPresentation.asset.meta
 !/Assets/Resources/Presentation/AttendancePopup.prefab
 !/Assets/Resources/Presentation/AttendancePopup.prefab.meta
 !/Assets/Resources/Presentation/AttendanceRewardCell.prefab
@@ -524,6 +526,10 @@ $RECYCLE.BIN/
 !/Assets/Resources/Presentation/DungeonStartingItemSlot.prefab.meta
 !/Assets/Resources/Presentation/DungeonRestCharacterSd.prefab
 !/Assets/Resources/Presentation/DungeonRestCharacterSd.prefab.meta
+!/Assets/Resources/Presentation/DungeonAllyActor.prefab
+!/Assets/Resources/Presentation/DungeonAllyActor.prefab.meta
+!/Assets/Resources/Presentation/DungeonWorld/
+!/Assets/Resources/Presentation/DungeonWorld/**
 !/Assets/Resources/Presentation/OperatorRosterCard.prefab
 !/Assets/Resources/Presentation/OperatorRosterCard.prefab.meta
 !/Assets/Resources/Presentation/OperatorAbilityIcon.prefab
@@ -532,6 +538,10 @@ $RECYCLE.BIN/
 /Assets/Prefabs/*
 !/Assets/Prefabs/UI/
 /Assets/Prefabs/UI/*
+!/Assets/Prefabs/UI/Dungeon/
+/Assets/Prefabs/UI/Dungeon/*
+!/Assets/Prefabs/UI/Dungeon/DungeonSpawnQueueItem.prefab
+!/Assets/Prefabs/UI/Dungeon/DungeonSpawnQueueItem.prefab.meta
 !/Assets/Prefabs/UI/DungeonTile.prefab
 !/Assets/Prefabs/UI/DungeonTile.prefab.meta
 !/Assets/Scenes/
@@ -564,3 +574,6 @@ $RECYCLE.BIN/
 /Assets/Resources/Items/Ticket/*
 !/Assets/Resources/Items/Ticket/StandardRecruitTicket.asset
 !/Assets/Resources/Items/Ticket/StandardRecruitTicket.asset.meta
+!/ProjectSettings/
+/ProjectSettings/*
+!/ProjectSettings/TagManager.asset

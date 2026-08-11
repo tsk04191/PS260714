@@ -1242,6 +1242,7 @@ public sealed class BattleVfxPlayer : MonoBehaviour, IBattleVfxRequestSink
         BattleVfxAnchorSnapshot anchor)
     {
         pooled.Instance.transform.SetParent(GetOrCreateSpawnRoot(), false);
+        ApplyPlaybackLayer(pooled.Instance);
         RestoreAuthoredAudioVolumes(pooled);
         ApplyTransform(pooled, cue, anchor);
         RoutePooledAudioToSfx(pooled);
@@ -1255,12 +1256,31 @@ public sealed class BattleVfxPlayer : MonoBehaviour, IBattleVfxRequestSink
         BattleVfxAnchorSnapshot anchor)
     {
         pooled.Instance.transform.SetParent(GetOrCreateSpawnRoot(), false);
+        ApplyPlaybackLayer(pooled.Instance);
         RestorePlaybackSettings(pooled);
         RestoreAuthoredAudioVolumes(pooled);
         ApplyEmbeddedAudioVolume(pooled, clip.AudioVolumeScale);
         ApplyClipTransform(pooled, clip, anchor);
         RoutePooledAudioToSfx(pooled);
         pooled.Instance.SetActive(true);
+    }
+
+    private void ApplyPlaybackLayer(GameObject instance)
+    {
+        if (instance == null)
+            return;
+
+        int layer = spawnRoot != null
+            ? spawnRoot.gameObject.layer
+            : 0;
+        SetLayerRecursively(instance, layer);
+    }
+
+    private static void SetLayerRecursively(GameObject target, int layer)
+    {
+        target.layer = layer;
+        foreach (Transform child in target.transform)
+            SetLayerRecursively(child.gameObject, layer);
     }
 
     private void ApplyTransform(

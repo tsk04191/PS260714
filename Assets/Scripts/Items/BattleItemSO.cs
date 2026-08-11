@@ -180,7 +180,9 @@ public sealed class BattleItemEffectDefinition
 [CreateAssetMenu(
     fileName = "BattleItem",
     menuName = "PS260714/Items/Battle Item")]
-public sealed class BattleItemSO : ItemDefinitionSO
+public sealed class BattleItemSO : ItemDefinitionSO,
+    IBattleAbilityDefinition,
+    IBattleAbilityProvider
 {
     [Header("Battle Item")]
     [SerializeField] private BattleItemTargetType targetType;
@@ -276,6 +278,37 @@ public sealed class BattleItemSO : ItemDefinitionSO
     public bool UsesUnifiedAbilityEffects => AbilityEffects.Count > 0;
     public IReadOnlyList<BattleItemEffectDefinition> Effects =>
         effects ??= new List<BattleItemEffectDefinition>();
+    public string AbilityId => ItemId;
+    public AbilityExecutionDomain ExecutionDomain =>
+        AbilityExecutionDomain.Battle;
+    public int AbilitySchemaVersion => UsesUnifiedAbilityEffects ? 1 : 0;
+    public BattleEffectOriginKind OriginKind =>
+        BattleEffectOriginKind.BattleItem;
+    public BattleAbilityTargeting Targeting => new(
+        targetType == BattleItemTargetType.Enemy
+            ? BattleAbilityTargetRelation.Hostile
+            : BattleAbilityTargetRelation.Friendly,
+        BattleAbilitySelectionMode.Manual,
+        BattleAbilityTargetMetric.None,
+        1,
+        0,
+        false,
+        null,
+        targetType == BattleItemTargetType.Enemy
+            ? EnemyTargeting.AreaOffsets
+            : null);
+    public IEnumerable<IBattleEffectDefinition> BattleEffects =>
+        (IEnumerable<IBattleEffectDefinition>)abilityEffects ??
+        Array.Empty<IBattleEffectDefinition>();
+    public bool UsesLegacyEffectStorage =>
+        !UsesUnifiedAbilityEffects && Effects.Count > 0;
+    public bool HasExecutableContent =>
+        UsesUnifiedAbilityEffects || Effects.Count > 0;
+
+    public IEnumerable<IBattleAbilityDefinition> EnumerateBattleAbilities()
+    {
+        yield return this;
+    }
     public bool HasCompatibleEffects
     {
         get

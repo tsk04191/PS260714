@@ -1809,18 +1809,13 @@ public sealed class EnemyP0RegressionTests
         foreach ((int row, int column, EnemyRuntime enemy) in occupants)
             occupantMap[(row, column)] = enemy;
 
-        List<DungeonTileView> tiles =
-            GetPrivateList<DungeonTileView>(board, "_tiles");
+        List<DungeonBoardSlot> tiles =
+            GetPrivateList<DungeonBoardSlot>(board, "_tiles");
         for (int row = 0; row < 3; row++)
         {
             for (int column = 0; column < 3; column++)
             {
-                GameObject tileObject = new(
-                    $"Test_Tile_{row}_{column}",
-                    typeof(RectTransform));
-                tileObject.transform.SetParent(boardObject.transform, false);
-                DungeonTileView tile =
-                    tileObject.AddComponent<DungeonTileView>();
+                DungeonBoardSlot tile = new();
                 tile.Initialize(row, column, 8);
 
                 if (occupantMap.TryGetValue(
@@ -1830,9 +1825,6 @@ public sealed class EnemyP0RegressionTests
                     GetPrivateList<EnemyRuntime>(
                         tile,
                         "_enemies").Add(enemy);
-                    GetPrivateList<EnemyCard>(
-                        tile,
-                        "_cards").Add(null);
                 }
 
                 tiles.Add(tile);
@@ -1844,26 +1836,7 @@ public sealed class EnemyP0RegressionTests
 
     private DungeonBoardView CreatePlaceableBoard()
     {
-        DungeonBoardView board = CreateBoard();
-        GameObject cardObject = new(
-            "Test_EnemyCardPrefab",
-            typeof(RectTransform),
-            typeof(EnemyCard));
-        cardObject.SetActive(false);
-        _createdObjects.Add(cardObject);
-        EnemyCard cardPrefab = cardObject.GetComponent<EnemyCard>();
-        foreach (DungeonTileView tile in
-                 GetPrivateList<DungeonTileView>(board, "_tiles"))
-        {
-            SetPrivateField(
-                tile,
-                "stackRoot",
-                tile.GetComponent<RectTransform>());
-            SetPrivateField(tile, "enemyCardPrefab", cardPrefab);
-            SetPrivateField(tile, "slotSurface", tile.GetComponent<Image>());
-        }
-
-        return board;
+        return CreateBoard();
     }
 
     private EnemySO CreateFootprintDefinition(int width, int height)
@@ -1992,9 +1965,9 @@ public sealed class EnemyP0RegressionTests
         int column,
         EnemyRuntime source)
     {
-        List<DungeonTileView> tiles =
-            GetPrivateList<DungeonTileView>(board, "_tiles");
-        DungeonTileView tile = tiles[row * board.GridSize + column];
+        List<DungeonBoardSlot> tiles =
+            GetPrivateList<DungeonBoardSlot>(board, "_tiles");
+        DungeonBoardSlot tile = tiles[row * board.GridSize + column];
         MethodInfo method = typeof(DungeonBoardView).GetMethod(
             "ExecuteSpawnAbilities",
             InstanceNonPublic);
@@ -3009,6 +2982,65 @@ public sealed class DungeonDefinitionRegressionTests
             AssetDatabase.DeleteAsset(folder);
             AssetDatabase.Refresh();
         }
+    }
+
+    [Test]
+    public void BattleArenaSetup_CircularValuesAreClampedToPlayableRange()
+    {
+        BattleArenaSetup setup = new(
+            BattleArenaMode.CircularDefense,
+            0,
+            2,
+            0.48f,
+            0.1f);
+
+        Assert.That(setup.UsesBattleCore, Is.True);
+        Assert.That(setup.CoreMaximumHealth, Is.EqualTo(1));
+        Assert.That(setup.LaneCount, Is.EqualTo(4));
+        Assert.That(setup.WallRadiusNormalized, Is.EqualTo(0.4f));
+        Assert.That(
+            setup.SpawnRadiusNormalized,
+            Is.EqualTo(0.45f).Within(0.0001f));
+    }
+
+    [Test]
+    public void BattleCoreRuntime_DamageHealAndDestructionAreBounded()
+    {
+        BattleCoreRuntime core = new();
+        int destroyedCount = 0;
+        int healthEventCount = 0;
+        core.Destroyed += () => destroyedCount++;
+        core.HealthChanged += (_, _) => healthEventCount++;
+
+        core.Configure(100, true);
+        Assert.That(core.TakeDamage(30), Is.EqualTo(30));
+        Assert.That(core.Heal(10), Is.EqualTo(10));
+        Assert.That(core.CurrentHealth, Is.EqualTo(80));
+        Assert.That(core.TakeDamage(999), Is.EqualTo(80));
+        Assert.That(core.IsDestroyed, Is.True);
+        Assert.That(core.TakeDamage(1), Is.Zero);
+        Assert.That(core.Heal(1), Is.Zero);
+        Assert.That(destroyedCount, Is.EqualTo(1));
+        Assert.That(healthEventCount, Is.EqualTo(4));
+    }
+
+    [Test]
+    public void BattleSetup_LegacyConstructorKeepsGridCapacity()
+    {
+        List<EnemyRuntime> enemies = new();
+        for (int index = 0; index < 12; index++)
+            enemies.Add(null);
+
+        BattleSetup setup = new(
+            3,
+            8,
+            1f,
+            30f,
+            default,
+            enemies);
+
+        Assert.That(setup.Arena.UsesBattleCore, Is.False);
+        Assert.That(setup.InitialEnemyCount, Is.EqualTo(9));
     }
 
     private static void ConfigureEventNode(

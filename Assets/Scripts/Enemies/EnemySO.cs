@@ -8,9 +8,56 @@ public enum EnemyStackingPolicy
     Exclusive = 1,
 }
 
+/// <summary>
+/// Compatibility projection for the fixed core-attack fields. New enemy
+/// attacks can move to authored EnemyAbilityDefinition data without forcing
+/// existing enemy assets to migrate immediately.
+/// </summary>
+public sealed class EnemyCoreAttackAbilityDefinition :
+    IBattleAbilityDefinition
+{
+    private readonly EnemySO _owner;
+    private readonly CharacterEffectDefinition _damageEffect;
+
+    public EnemyCoreAttackAbilityDefinition(EnemySO owner)
+    {
+        _owner = owner;
+        _damageEffect = owner != null
+            ? CharacterEffectDefinition.CreateFixedRuntimeEffect(
+                CharacterEffectType.Damage,
+                owner.CoreAttackDamage)
+            : null;
+    }
+
+    public string AbilityId => _owner == null
+        ? string.Empty
+        : $"{_owner.EnemyId}.core_attack";
+    public AbilityExecutionDomain ExecutionDomain =>
+        AbilityExecutionDomain.Battle;
+    public int AbilitySchemaVersion => 0;
+    public BattleEffectOriginKind OriginKind =>
+        BattleEffectOriginKind.EnemyAbility;
+    public BattleAbilityTargeting Targeting => new(
+        BattleAbilityTargetRelation.Hostile,
+        BattleAbilitySelectionMode.Random,
+        BattleAbilityTargetMetric.None,
+        1);
+    public IEnumerable<IBattleEffectDefinition> BattleEffects
+    {
+        get
+        {
+            if (_damageEffect != null)
+                yield return _damageEffect;
+        }
+    }
+    public bool UsesLegacyEffectStorage => true;
+    public bool HasExecutableContent => _owner != null;
+}
+
 [CreateAssetMenu(fileName = "Enemy", menuName = "Dungeon/Enemy")]
 public sealed class EnemySO : ScriptableObject,
-    IBattlePresentationUnitDefinition
+    IBattlePresentationUnitDefinition,
+    IBattleAbilityProvider
 {
     public const int MaximumFootprintSize = 9;
 
@@ -26,6 +73,7 @@ public sealed class EnemySO : ScriptableObject,
 
     [Header("Presentation")]
     [SerializeField] private Sprite iconSprite;
+    [Tooltip("Enemy-specific 1:1 Sprite used by the dungeon world actor.")]
     [SerializeField] private Sprite boardSprite;
     [SerializeField] private int sortOrder;
 
@@ -39,6 +87,11 @@ public sealed class EnemySO : ScriptableObject,
     [SerializeField, Min(0)] private int initialArmor;
     [SerializeField, Min(0)] private int initialShield;
     [SerializeField, Min(0.1f)] private float spawnIntervalMultiplier = 1f;
+    [SerializeField, Min(0.01f), Tooltip(
+        "Normalized radial distance travelled per second in circular battles.")]
+    private float approachSpeed = 0.08f;
+    [SerializeField, Min(1)] private int coreAttackDamage = 5;
+    [SerializeField, Min(0.1f)] private float coreAttackInterval = 2f;
     [SerializeField, Min(0f), Tooltip("0 uses the default threat for this enemy type.")]
     private float threatCost;
     [SerializeField, Range(-1, 100), Tooltip("-1 uses the default unlock difficulty for this enemy type.")]
@@ -75,6 +128,11 @@ public sealed class EnemySO : ScriptableObject,
     public int InitialShield => Mathf.Max(0, initialShield);
     public float SpawnIntervalMultiplier =>
         TimePrecision.Normalize(spawnIntervalMultiplier, 0.1f);
+    public float ApproachSpeed => Mathf.Max(0.01f, approachSpeed);
+    public int CoreAttackDamage => Mathf.Max(1, coreAttackDamage);
+    public float CoreAttackInterval => TimePrecision.Normalize(
+        coreAttackInterval,
+        0.1f);
     public float ThreatCost => threatCost > 0f
         ? threatCost
         : GetDefaultThreatCost(type);
@@ -98,10 +156,25 @@ public sealed class EnemySO : ScriptableObject,
         abilities != null
             ? abilities
             : Array.Empty<EnemyAbilityDefinition>();
+    public IBattleAbilityDefinition CoreAttackAbility =>
+        new EnemyCoreAttackAbilityDefinition(this);
+
+    public IEnumerable<IBattleAbilityDefinition> EnumerateBattleAbilities()
+    {
+        yield return CoreAttackAbility;
+        foreach (EnemyAbilityDefinition ability in Abilities)
+        {
+            if (ability != null)
+                yield return ability;
+        }
+    }
 
     internal float AuthoredHealthScale => healthScale;
     internal int AuthoredInitialArmor => initialArmor;
     internal int AuthoredInitialShield => initialShield;
+    internal float AuthoredApproachSpeed => approachSpeed;
+    internal int AuthoredCoreAttackDamage => coreAttackDamage;
+    internal float AuthoredCoreAttackInterval => coreAttackInterval;
     internal int AuthoredUnlockDifficulty => unlockDifficulty;
     internal int AuthoredFootprintWidth => footprintWidth;
     internal int AuthoredFootprintHeight => footprintHeight;
@@ -138,6 +211,11 @@ public sealed class EnemySO : ScriptableObject,
         initialShield = Mathf.Max(0, initialShield);
         spawnIntervalMultiplier =
             TimePrecision.Normalize(spawnIntervalMultiplier, 0.1f);
+        approachSpeed = Mathf.Max(0.01f, approachSpeed);
+        coreAttackDamage = Mathf.Max(1, coreAttackDamage);
+        coreAttackInterval = TimePrecision.Normalize(
+            coreAttackInterval,
+            0.1f);
         threatCost = Mathf.Max(0f, threatCost);
         unlockDifficulty = Mathf.Clamp(unlockDifficulty, -1, 100);
         footprintWidth = Mathf.Clamp(

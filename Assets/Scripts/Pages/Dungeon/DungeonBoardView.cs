@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using UnityEngine;
+using UnityEngine.EventSystems;
 using UnityEngine.UI;
 using Random = UnityEngine.Random;
 
@@ -10,25 +11,29 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
     IDungeonStageProgressProvider,
     IBattlePresentationEventPublisher,
     IBattleVfxTargetResolver,
-    IBattleManualTargetSelectionService
+    IBattleManualTargetSelectionService,
+    IBattleObjectiveProvider
 {
     private const int MaximumStatusEventsPerDispatch = 128;
     private const int MaximumDefeatEventsPerDispatch = 128;
     private const int MaximumPresentationEventsPerDispatch = 256;
+    private const float AuthoredArenaRingRadius = 2.24f;
+    private const float MinimumWorldGroundSize = 40f;
+    private const float WorldActorGroundHeight = 0f;
     public const int MinimumGridSize = 3;
     public const int MaximumGridSize = 9;
 
     private sealed class EnemyPlacement
     {
         public EnemyRuntime Enemy { get; }
-        public DungeonTileView Anchor { get; }
-        public IReadOnlyList<DungeonTileView> OccupiedTiles { get; }
+        public DungeonBoardSlot Anchor { get; }
+        public IReadOnlyList<DungeonBoardSlot> OccupiedTiles { get; }
         public bool IsExclusive { get; }
 
         public EnemyPlacement(
             EnemyRuntime enemy,
-            DungeonTileView anchor,
-            IReadOnlyList<DungeonTileView> occupiedTiles,
+            DungeonBoardSlot anchor,
+            IReadOnlyList<DungeonBoardSlot> occupiedTiles,
             bool isExclusive)
         {
             Enemy = enemy;
@@ -41,14 +46,14 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
     private readonly struct PendingEnemyPlacement
     {
         public EnemyRuntime Enemy { get; }
-        public DungeonTileView Anchor { get; }
-        public IReadOnlyList<DungeonTileView> OccupiedTiles { get; }
+        public DungeonBoardSlot Anchor { get; }
+        public IReadOnlyList<DungeonBoardSlot> OccupiedTiles { get; }
         public bool IsExclusive { get; }
 
         public PendingEnemyPlacement(
             EnemyRuntime enemy,
-            DungeonTileView anchor,
-            IReadOnlyList<DungeonTileView> occupiedTiles,
+            DungeonBoardSlot anchor,
+            IReadOnlyList<DungeonBoardSlot> occupiedTiles,
             bool isExclusive)
         {
             Enemy = enemy;
@@ -58,25 +63,557 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
         }
     }
 
+    private sealed class CircularEnemyState
+    {
+        public float ApproachProgress;
+        public float AttackTimeRemaining;
+
+        public CircularEnemyState(float attackInterval)
+        {
+            AttackTimeRemaining = Mathf.Max(0.1f, attackInterval);
+        }
+    }
+
+    private sealed class AllyMovementState
+    {
+        public Vector2 Position;
+        public Vector2 Destination;
+
+        public AllyMovementState(Vector2 position)
+        {
+            Position = position;
+            Destination = position;
+        }
+    }
+
+    private sealed class WorldActorView
+    {
+        private const float FootHudLocalHeight = 0.012f;
+        private readonly Transform _root;
+        private readonly Transform _footHudRoot;
+        private readonly Transform _verticalBillboardRoot;
+        private readonly Transform _spriteTransform;
+        private readonly SpriteRenderer _spriteRenderer;
+        private readonly SpriteRenderer _shadowRenderer;
+        private readonly DungeonWorldPolylineRenderer _movementLine;
+        private readonly SpriteRenderer _movementMarker;
+        private readonly DungeonWorldPolylineRenderer _movementMarkerRing;
+        private readonly DungeonWorldPolylineRenderer _cooldownTrack;
+        private readonly DungeonWorldPolylineRenderer _cooldownFill;
+        private readonly SpriteRenderer _abilityReady;
+        private float _height;
+        private float _spriteScale = 1f;
+        private float _groundOffset;
+        private float _visualTopLocalY;
+        private Sprite _groundAnchoredSprite;
+        private float _spriteVisualBottom;
+        private int _sortingOrder;
+        private int _sortingTieBreaker;
+        private bool _sourceFacesRight = true;
+        private Color _hitFlashColor = Color.white;
+        private float _hitFlashDuration;
+        private float _hitFlashRemaining;
+        private bool _selected;
+
+        public GameObject GameObject => _root != null
+            ? _root.gameObject
+            : null;
+        public Vector3 WorldPosition => _root != null
+            ? _root.localPosition
+            : Vector3.zero;
+        public Vector3 InteractionWorldPosition =>
+            TransformBillboardPoint(_height * 0.5f);
+
+        public WorldActorView(GameObject instance, bool useAllyHud)
+        {
+            _root = instance != null ? instance.transform : null;
+            DungeonWorldActorPrefabView prefabView = instance != null
+                ? instance.GetComponent<DungeonWorldActorPrefabView>()
+                : null;
+            if (prefabView == null || !prefabView.HasRequiredReferences)
+            {
+                Debug.LogError(
+                    "DungeonWorldActor prefab references are incomplete.",
+                    instance);
+                return;
+            }
+
+            _footHudRoot = prefabView.FootHudRoot;
+            _verticalBillboardRoot = prefabView.VerticalBillboardRoot;
+            _spriteTransform = prefabView.ActorTransform;
+            _spriteRenderer = prefabView.ActorRenderer;
+            _shadowRenderer = prefabView.ShadowRenderer;
+            if (!useAllyHud)
+            {
+                _footHudRoot.gameObject.SetActive(false);
+                prefabView.AbilityReady.gameObject.SetActive(false);
+                return;
+            }
+
+            _footHudRoot.gameObject.SetActive(true);
+            _movementLine = prefabView.MovementLine;
+            _movementMarker = prefabView.MovementMarker;
+            _movementMarkerRing = prefabView.MovementMarkerRing;
+            _cooldownTrack = prefabView.CooldownTrack;
+            _cooldownFill = prefabView.CooldownFill;
+            _abilityReady = prefabView.AbilityReady;
+        }
+
+        public bool Configure(
+            Sprite sprite,
+            float height,
+            int sortingOrder,
+            Sprite scaleReference = null,
+            float scaleMultiplier = 1f,
+            float groundOffset = 0f,
+            float headHeightNormalized = 1f,
+            bool sourceFacesRight = true)
+        {
+            if (_root == null || _spriteRenderer == null || sprite == null)
+            {
+                if (_root != null)
+                    _root.gameObject.SetActive(false);
+                return false;
+            }
+
+            _height = Mathf.Max(0.1f, height) *
+                      Mathf.Max(0.1f, scaleMultiplier);
+            Sprite reference = scaleReference != null
+                ? scaleReference
+                : sprite;
+            float referenceHeight = Mathf.Max(
+                0.0001f,
+                reference.bounds.size.y);
+            _spriteScale = _height / referenceHeight;
+            _groundOffset = Mathf.Clamp(groundOffset, -2f, 2f);
+            _visualTopLocalY = _groundOffset +
+                               _height * Mathf.Clamp(
+                                   headHeightNormalized,
+                                   0.4f,
+                                   1.4f);
+            _sourceFacesRight = sourceFacesRight;
+            _sortingTieBreaker = sortingOrder;
+            _sortingOrder = sortingOrder;
+            SetSprite(sprite);
+            RefreshSpriteColor();
+            _spriteRenderer.sortingOrder = sortingOrder;
+            if (_shadowRenderer != null)
+                _shadowRenderer.sortingOrder = sortingOrder - 1;
+            SetHudSortingOrders();
+            _root.gameObject.SetActive(true);
+            return true;
+        }
+
+        public void SetSprite(Sprite sprite)
+        {
+            if (_spriteRenderer == null || sprite == null)
+                return;
+
+            if (!ReferenceEquals(_spriteRenderer.sprite, sprite))
+                _spriteRenderer.sprite = sprite;
+            if (!ReferenceEquals(_groundAnchoredSprite, sprite))
+            {
+                _groundAnchoredSprite = sprite;
+                _spriteVisualBottom = ResolveVisualBottom(sprite);
+            }
+            _spriteTransform.localScale = Vector3.one * _spriteScale;
+            _spriteTransform.localPosition = new Vector3(
+                0f,
+                _groundOffset - _spriteVisualBottom * _spriteScale,
+                0f);
+        }
+
+        private static float ResolveVisualBottom(Sprite sprite)
+        {
+            float visualBottom = sprite.bounds.min.y;
+            Vector2[] vertices = sprite.vertices;
+            if (vertices == null || vertices.Length == 0)
+                return visualBottom;
+
+            float minimum = float.PositiveInfinity;
+            for (int index = 0; index < vertices.Length; index++)
+                minimum = Mathf.Min(minimum, vertices[index].y);
+            return float.IsNaN(minimum) || float.IsInfinity(minimum)
+                ? visualBottom
+                : minimum;
+        }
+
+        public void RefreshAllyHud(
+            CharacterRuntime runtime,
+            AllyMovementState movement,
+            DungeonHudPresentationSO style,
+            Camera camera)
+        {
+            if (runtime == null || movement == null || style == null)
+                return;
+
+            SetSprite(runtime.ResolveCurrentBattleSdSprite());
+            RefreshCooldownRing(runtime.AttackCooldownProgress, style);
+            RefreshMovementIndicator(movement, style);
+            RefreshAbilityReady(runtime, style, camera);
+        }
+
+        public void ShowHitFlash(Color color, float duration)
+        {
+            if (_spriteRenderer == null)
+                return;
+
+            _hitFlashColor = new Color(
+                Mathf.Clamp01(color.r),
+                Mathf.Clamp01(color.g),
+                Mathf.Clamp01(color.b),
+                Mathf.Clamp01(color.a));
+            _hitFlashDuration = Mathf.Max(0.01f, duration);
+            _hitFlashRemaining = _hitFlashDuration;
+            RefreshSpriteColor();
+        }
+
+        public void TickHitFlash(float deltaTime)
+        {
+            if (_hitFlashRemaining <= 0f)
+                return;
+
+            _hitFlashRemaining = Mathf.Max(
+                0f,
+                _hitFlashRemaining - Mathf.Max(0f, deltaTime));
+            RefreshSpriteColor();
+        }
+
+        public void SetSelected(bool selected)
+        {
+            if (_selected == selected)
+                return;
+
+            _selected = selected;
+            RefreshSpriteColor();
+        }
+
+        public void SetWorldPosition(Vector3 position)
+        {
+            if (_root != null)
+                _root.localPosition = position;
+        }
+
+        public void FaceCamera(Camera camera)
+        {
+            if (_spriteRenderer == null || camera == null)
+                return;
+
+            Quaternion screenFacing = camera.transform.rotation;
+            if (_verticalBillboardRoot != null)
+                _verticalBillboardRoot.rotation = screenFacing;
+            else
+                _spriteRenderer.transform.rotation = screenFacing;
+        }
+
+        public void SetFacingDirection(Vector2 direction, Camera camera)
+        {
+            if (_spriteRenderer == null || camera == null ||
+                direction.sqrMagnitude <= 0.0001f)
+            {
+                return;
+            }
+
+            Vector3 worldDirection = new(direction.x, 0f, direction.y);
+            float screenHorizontal = Vector3.Dot(
+                worldDirection.normalized,
+                camera.transform.right);
+            if (Mathf.Abs(screenHorizontal) <= 0.001f)
+                return;
+
+            bool faceScreenRight = screenHorizontal > 0f;
+            _spriteRenderer.flipX = _sourceFacesRight
+                ? !faceScreenRight
+                : faceScreenRight;
+        }
+
+        public void RefreshDepthSorting(Camera camera, int sortingRange)
+        {
+            if (_root == null || camera == null)
+                return;
+
+            Vector3 viewport = camera.WorldToViewportPoint(_root.position);
+            int depthOrder = Mathf.RoundToInt(
+                (1f - Mathf.Clamp01(viewport.y)) *
+                Mathf.Max(100, sortingRange));
+            _sortingOrder = 1000 + depthOrder + _sortingTieBreaker;
+            _spriteRenderer.sortingOrder = _sortingOrder;
+            if (_shadowRenderer != null)
+                _shadowRenderer.sortingOrder = _sortingOrder - 1;
+            SetHudSortingOrders();
+        }
+
+        public bool TryGetAnchor(
+            Camera camera,
+            BattleVfxAnchorType anchorType,
+            out BattleVfxAnchorSnapshot snapshot)
+        {
+            snapshot = default;
+            if (_root == null || !_root.gameObject.activeInHierarchy ||
+                camera == null)
+            {
+                return false;
+            }
+
+            float vertical = anchorType switch
+            {
+                BattleVfxAnchorType.Ground => 0.05f,
+                BattleVfxAnchorType.Head => Mathf.Max(
+                    _height * 0.88f,
+                    _visualTopLocalY),
+                BattleVfxAnchorType.Muzzle => _height * 0.62f,
+                BattleVfxAnchorType.Status => _height * 0.76f,
+                _ => _height * 0.48f,
+            };
+            Vector3 position = anchorType == BattleVfxAnchorType.Ground
+                ? _root.position + Vector3.up * vertical
+                : TransformBillboardPoint(vertical);
+            Vector3 frameRight = camera.transform.right * (_height * 0.42f);
+            Vector3 frameUp = camera.transform.up * _height;
+            snapshot = BattleVfxAnchorSnapshot.FromWorld(
+                position,
+                camera.transform.rotation,
+                TransformBillboardPoint(_height * 0.5f),
+                frameRight,
+                frameUp);
+            return snapshot.IsValid;
+        }
+
+        private Vector3 TransformBillboardPoint(float localHeight)
+        {
+            if (_verticalBillboardRoot != null)
+            {
+                return _verticalBillboardRoot.TransformPoint(
+                    new Vector3(0f, localHeight, 0f));
+            }
+
+            return _root != null
+                ? _root.position + Vector3.up * localHeight
+                : Vector3.zero;
+        }
+
+        private void RefreshSpriteColor()
+        {
+            if (_spriteRenderer == null)
+                return;
+
+            if (_hitFlashRemaining <= 0f)
+            {
+                _spriteRenderer.color = _selected
+                    ? new Color(0.45f, 0.9f, 1f, 1f)
+                    : Color.white;
+                return;
+            }
+
+            float normalizedRemaining = _hitFlashDuration > 0f
+                ? Mathf.Clamp01(_hitFlashRemaining / _hitFlashDuration)
+                : 0f;
+            _spriteRenderer.color = Color.Lerp(
+                _hitFlashColor,
+                Color.white,
+                1f - normalizedRemaining);
+        }
+
+        private void RefreshMovementIndicator(
+            AllyMovementState movement,
+            DungeonHudPresentationSO style)
+        {
+            if (_movementLine == null)
+                return;
+
+            Vector2 delta = movement.Destination - movement.Position;
+            bool moving = delta.sqrMagnitude > 0.0004f;
+            _movementLine.SetVisible(moving);
+            if (_movementMarker != null)
+                _movementMarker.gameObject.SetActive(false);
+            if (_movementMarkerRing != null)
+                _movementMarkerRing.SetVisible(false);
+            if (!moving)
+                return;
+
+            _movementLine.SetSegment(
+                new Vector3(0f, 0.055f, 0f),
+                new Vector3(delta.x, 0.055f, delta.y),
+                style.MovementLineWidth,
+                style.MovementLineColor);
+
+            Sprite markerSprite = style.MovementDestinationSprite;
+            if (_movementMarker != null && markerSprite != null)
+            {
+                _movementMarker.sprite = markerSprite;
+                _movementMarker.color = style.MovementDestinationColor;
+                _movementMarker.transform.localPosition = new Vector3(
+                    delta.x,
+                    0.06f,
+                    delta.y);
+                _movementMarker.transform.localRotation =
+                    Quaternion.Euler(90f, 0f, 0f);
+                SetSpriteWorldSize(
+                    _movementMarker,
+                    style.MovementDestinationSize);
+                _movementMarker.gameObject.SetActive(true);
+            }
+            else if (_movementMarkerRing != null)
+            {
+                _movementMarkerRing.SetRing(
+                    style.MovementDestinationSize * 0.5f,
+                    1f,
+                    style.MovementLineWidth,
+                    style.MovementDestinationColor,
+                    new Vector3(delta.x, 0.06f, delta.y));
+            }
+        }
+
+        private void RefreshCooldownRing(
+            float progress,
+            DungeonHudPresentationSO style)
+        {
+            if (_cooldownTrack == null || _cooldownFill == null)
+                return;
+
+            _cooldownTrack.SetRing(
+                style.AttackCooldownRingRadius,
+                1f,
+                style.AttackCooldownRingWidth,
+                style.AttackCooldownTrackColor,
+                new Vector3(0f, FootHudLocalHeight, 0f));
+
+            progress = Mathf.Clamp01(progress);
+            _cooldownFill.SetVisible(progress > 0.001f);
+            if (progress <= 0.001f)
+                return;
+            _cooldownFill.SetRing(
+                style.AttackCooldownRingRadius,
+                progress,
+                style.AttackCooldownRingWidth,
+                style.AttackCooldownReadyColor,
+                new Vector3(0f, FootHudLocalHeight + 0.002f, 0f));
+        }
+
+        private void RefreshAbilityReady(
+            CharacterRuntime runtime,
+            DungeonHudPresentationSO style,
+            Camera camera)
+        {
+            if (_abilityReady == null)
+                return;
+
+            Sprite sprite = style.AbilityReadySprite;
+            bool visible = runtime.IsActiveSkillReady && sprite != null;
+            _abilityReady.gameObject.SetActive(visible);
+            if (!visible)
+                return;
+
+            _abilityReady.sprite = sprite;
+            _abilityReady.color = style.AbilityReadyColor;
+            _abilityReady.transform.localRotation = Quaternion.identity;
+            _abilityReady.transform.localPosition = new Vector3(
+                0f,
+                _visualTopLocalY +
+                style.AbilityReadyIconOffset +
+                style.AbilityReadyIconSize * 0.5f,
+                -0.01f);
+            SetSpriteWorldSize(_abilityReady, style.AbilityReadyIconSize);
+        }
+
+        private void SetHudSortingOrders()
+        {
+            if (_movementLine != null)
+                _movementLine.SetSortingOrder(_sortingOrder - 6);
+            if (_movementMarker != null)
+                _movementMarker.sortingOrder = _sortingOrder - 5;
+            if (_movementMarkerRing != null)
+                _movementMarkerRing.SetSortingOrder(_sortingOrder - 5);
+            if (_cooldownTrack != null)
+                _cooldownTrack.SetSortingOrder(_sortingOrder - 4);
+            if (_cooldownFill != null)
+                _cooldownFill.SetSortingOrder(_sortingOrder - 3);
+            if (_abilityReady != null)
+                _abilityReady.sortingOrder = _sortingOrder + 4;
+        }
+
+        private static void SetSpriteWorldSize(
+            SpriteRenderer renderer,
+            float targetSize)
+        {
+            if (renderer == null || renderer.sprite == null)
+                return;
+            Vector2 size = renderer.sprite.bounds.size;
+            float largest = Mathf.Max(0.0001f, size.x, size.y);
+            renderer.transform.localScale =
+                Vector3.one * (Mathf.Max(0.01f, targetSize) / largest);
+        }
+
+    }
+
     [SerializeField] private RectTransform boardRect;
-    [SerializeField] private GridLayoutGroup gridLayout;
-    [SerializeField] private DungeonTileView tilePrefab;
+
+    [Header("2.5D World Presentation")]
+    [SerializeField] private GameObject worldPresentationRoot;
+    [SerializeField] private GameObject worldOutput;
+    [SerializeField] private Camera worldCamera;
+    [SerializeField] private Camera worldForegroundCamera;
+    [SerializeField] private Transform worldActorRoot;
+    [SerializeField] private Transform worldVfxRoot;
+    [SerializeField] private GameObject worldActorPrefab;
+    [SerializeField] private GameObject worldAreaPreviewPrefab;
+    [SerializeField] private GameObject worldActorPreview;
+    [SerializeField] private DungeonWorldInputView worldInputView;
+    [SerializeField] private SpriteRenderer worldBackdrop;
+    [SerializeField] private Transform worldGround;
+    [SerializeField] private Transform worldArenaRing;
+    [SerializeField]
+    private DungeonBattleCoreWorldGaugeView worldBattleCoreGauge;
+    [SerializeField, Min(0.1f)] private float worldSpawnRadius = 4.25f;
+    [SerializeField, Min(0.1f)] private float worldAllyHeight = 1.7f;
+    [SerializeField, Min(0.1f)] private float worldEnemyHeight = 1.85f;
+
+    [Header("World Ally Movement")]
+    [SerializeField, Min(0.1f)] private float worldAllyMoveSpeed = 2.5f;
+    [SerializeField, Min(0f)] private float worldAllyBoundaryPadding = 0.35f;
+    [SerializeField, Min(0f)] private float worldAllyMinimumSpacing = 0.55f;
+    [SerializeField, Min(1f)] private float worldActorHitRadiusPixels = 46f;
+
+    [Header("Enemy Hit Feedback")]
+    [SerializeField]
+    private Color enemyHitFlashColor = new(1f, 0.16f, 0.16f, 1f);
+    [SerializeField, Min(0.01f)]
+    private float enemyHitFlashDuration = 0.16f;
 
     [Header("3D VFX")]
     [SerializeField] private BattleVfxPlayer vfxPlayer;
     [SerializeField]
     private BattleVfxQualityProfileSO vfxQualityProfile;
 
-    private readonly List<DungeonTileView> _tiles = new();
+    private readonly List<DungeonBoardSlot> _tiles = new();
     private readonly Dictionary<EnemyRuntime, EnemyPlacement>
         _enemyPlacements = new();
-    private readonly Dictionary<DungeonTileView, EnemyRuntime>
+    private readonly Dictionary<DungeonBoardSlot, EnemyRuntime>
         _exclusiveOccupants = new();
+    private readonly Dictionary<EnemyRuntime, CircularEnemyState>
+        _circularEnemyStates = new();
+    private readonly List<EnemyRuntime> _circularEnemySnapshot = new();
+    private readonly BattleCoreRuntime _battleCore = new();
     private readonly List<IBattleCharacter> _battleCharacters = new();
+    private readonly Dictionary<EnemyRuntime, WorldActorView>
+        _worldEnemyActors = new();
+    private readonly Dictionary<IBattleCharacter, WorldActorView>
+        _worldAllyActors = new();
+    private readonly Dictionary<IBattleCharacter, AllyMovementState>
+        _worldAllyMovement = new();
+    private readonly HashSet<EnemySO> _missingWorldEnemySpriteWarnings = new();
+    private readonly HashSet<EnemyRuntime> _worldEnemySync = new();
     private Func<EnemyRuntime, bool> _itemTargetHandler;
     private BattleManualTargetSelectionRequest _manualTargetRequest;
     private readonly List<EnemyRuntime> _manualEnemyTargets = new();
     private readonly List<IBattleCharacter> _manualAllyTargets = new();
+    private BattleAreaPreviewView _areaPreview;
+    private RenderTexture _runtimeWorldRenderTexture;
+    private IBattleCharacter _selectedWorldAlly;
+    private IBattleCharacter _pressedWorldAlly;
+    private bool _draggingWorldAlly;
+    private Vector2 _manualAreaOrigin;
+    private Vector2 _manualAreaDirection = Vector2.up;
     private EnemyRuntime _forcedPriorityTarget;
     private float _forcedPriorityRemaining;
     private int _maximumStackSize = 8;
@@ -107,20 +644,49 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
         _lastEnemyVfxAnchors = new();
     private int _nextVfxTargetHandle = 1;
     private BattlePresentationDispatcher _presentationDispatcher;
+    private BattleArenaSetup _arenaSetup = BattleArenaSetup.Legacy;
+    private BattleEnvironmentSetup _environmentSetup =
+        BattleEnvironmentSetup.Default;
+    private int _activeTileCount;
+
+    private bool HasWorldPresentation =>
+        worldPresentationRoot != null &&
+        worldOutput != null &&
+        worldCamera != null &&
+        worldForegroundCamera != null &&
+        worldActorRoot != null &&
+        worldActorPrefab != null &&
+        worldAreaPreviewPrefab != null &&
+        worldGround != null &&
+        worldArenaRing != null &&
+        worldBattleCoreGauge != null &&
+        worldInputView != null;
+
+    private bool UsesWorldPresentation =>
+        _arenaSetup.UsesBattleCore && HasWorldPresentation;
+
+    public bool UsesFullscreenWorldPresentation => UsesWorldPresentation;
+    public bool SupportsWorldPresentation => HasWorldPresentation;
 
     public int GridSize { get; private set; } = MinimumGridSize;
     public float DungeonStageProgress { get; private set; }
     public RectTransform HighlightRect => boardRect != null
         ? boardRect
         : transform as RectTransform;
-    public int InitialEnemyCapacity => GridSize * GridSize;
+    public int InitialEnemyCapacity => _activeTileCount > 0
+        ? _activeTileCount
+        : GridSize * GridSize;
+    public IBattleObjective Objective => _battleCore;
     public int LivingEnemyCount
     {
         get
         {
             int count = 0;
-            foreach (DungeonTileView tile in _tiles)
+            for (int index = 0;
+                 index < _tiles.Count && index < InitialEnemyCapacity;
+                 index++)
             {
+                DungeonBoardSlot tile = _tiles[index];
                 if (tile != null)
                     count += tile.StackCount;
             }
@@ -132,8 +698,11 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
     {
         get
         {
-            foreach (DungeonTileView tile in _tiles)
+            for (int index = 0;
+                 index < _tiles.Count && index < InitialEnemyCapacity;
+                 index++)
             {
+                DungeonBoardSlot tile = _tiles[index];
                 if (tile != null &&
                     tile.StackCount == 0 &&
                     !_exclusiveOccupants.ContainsKey(tile))
@@ -377,6 +946,7 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
     {
         if (request == null || request.Source == null ||
             request.RequiredCount <= 0 ||
+            (request.UsesWorldArea && !UsesWorldPresentation) ||
             IsManualTargetSelectionPending)
         {
             return false;
@@ -385,6 +955,8 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
         _manualTargetRequest = request;
         _manualEnemyTargets.Clear();
         _manualAllyTargets.Clear();
+        if (request.UsesWorldArea)
+            InitializeManualAreaAim(request);
         RefreshManualTargetHighlights();
         ManualTargetSelectionPendingChanged?.Invoke(true);
         ManualTargetSelectionProgressChanged?.Invoke();
@@ -429,6 +1001,7 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
         _manualTargetRequest = null;
         _manualEnemyTargets.Clear();
         _manualAllyTargets.Clear();
+        _areaPreview?.Hide();
         RefreshManualTargetHighlights();
         ManualTargetSelectionProgressChanged?.Invoke();
         ManualTargetSelectionPendingChanged?.Invoke(false);
@@ -480,10 +1053,11 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
     {
         BattleManualTargetSelectionRequest request =
             _manualTargetRequest;
-        foreach (DungeonTileView tile in _tiles)
+        foreach (DungeonBoardSlot tile in _tiles)
         {
             EnemyRuntime enemy = tile?.TopEnemy;
             bool candidate = request != null &&
+                             !request.UsesWorldArea &&
                              request.Faction ==
                              CharacterTargetFaction.Enemy &&
                              ContainsReference(
@@ -506,6 +1080,23 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
             character?.SetManualTargetSelectionState(
                 candidate,
                 candidate && _manualAllyTargets.Contains(character));
+        }
+
+        foreach (KeyValuePair<EnemyRuntime, WorldActorView> entry in
+                 _worldEnemyActors)
+        {
+            entry.Value?.SetSelected(
+                request?.UsesWorldArea == true &&
+                _manualEnemyTargets.Contains(entry.Key));
+        }
+
+        foreach (KeyValuePair<IBattleCharacter, WorldActorView> entry in
+                 _worldAllyActors)
+        {
+            entry.Value?.SetSelected(
+                ReferenceEquals(entry.Key, _selectedWorldAlly) ||
+                (request?.UsesWorldArea == true &&
+                 _manualAllyTargets.Contains(entry.Key)));
         }
     }
 
@@ -532,9 +1123,15 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
         HashSet<IBattleCharacter> previousCharacters =
             new(_battleCharacters);
         UnbindAllPresentationCharacters();
+        ClearWorldAllyViews();
         _battleCharacters.Clear();
         if (characters == null)
+        {
+            _worldAllyMovement.Clear();
+            _selectedWorldAlly = null;
+            RefreshWorldAllyViews();
             return;
+        }
 
         foreach (IBattleCharacter character in characters)
         {
@@ -553,6 +1150,8 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
                 }
             }
         }
+        RemoveStaleWorldAllyMovementStates();
+        RefreshWorldAllyViews();
     }
 
     public BattleVfxTarget ResolveVfxTarget(
@@ -567,7 +1166,15 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
             BattleVfxTargetHandle handle =
                 GetOrCreateEnemyVfxHandle(target.Enemy);
             BattleVfxAnchorSnapshot anchor = default;
-            if (TryFindEnemyTile(target.Enemy, out DungeonTileView tile) &&
+            if (TryGetWorldEnemyAnchor(
+                    target.Enemy,
+                    anchorType,
+                    out BattleVfxAnchorSnapshot worldAnchor))
+            {
+                anchor = worldAnchor;
+                StoreEnemyVfxAnchor(target.Enemy, anchorType, worldAnchor);
+            }
+            else if (TryFindEnemyTile(target.Enemy, out DungeonBoardSlot tile) &&
                 tile.TryGetEnemyVfxAnchor(
                     target.Enemy,
                     anchorType,
@@ -590,7 +1197,14 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
         BattleVfxTargetHandle allyHandle =
             GetOrCreateAllyVfxHandle(target.Ally);
         BattleVfxAnchorSnapshot allyAnchor = default;
-        if (target.Ally is IBattleVfxAnchorProvider provider)
+        if (TryGetWorldAllyAnchor(
+                target.Ally,
+                anchorType,
+                out BattleVfxAnchorSnapshot worldAllyAnchor))
+        {
+            allyAnchor = worldAllyAnchor;
+        }
+        else if (target.Ally is IBattleVfxAnchorProvider provider)
         {
             provider.TryGetVfxAnchor(anchorType, out allyAnchor);
             if (!allyAnchor.HasFrame &&
@@ -607,16 +1221,6 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
 
     private bool TryGetVfxTileFrame(out RectTransform tileFrame)
     {
-        foreach (DungeonTileView tile in _tiles)
-        {
-            if (tile == null || !tile.gameObject.activeInHierarchy)
-                continue;
-
-            tileFrame = tile.transform as RectTransform;
-            if (tileFrame != null)
-                return true;
-        }
-
         tileFrame = null;
         return false;
     }
@@ -624,16 +1228,64 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
     public void Initialize(int gridSize, int stackSize)
     {
         EnsurePresentationPipeline();
-        if (boardRect == null || gridLayout == null || tilePrefab == null)
+        if (boardRect == null)
         {
-            Debug.LogError("DungeonBoardView scene and prefab references are incomplete.", this);
+            Debug.LogError(
+                "DungeonBoardView requires an authored world viewport.",
+                this);
             return;
+        }
+
+        if (_arenaSetup.UsesBattleCore && !HasWorldPresentation)
+        {
+            Debug.LogError(
+                "DungeonBoardView 2.5D world Scene and prefab " +
+                "references are incomplete.",
+                this);
+            return;
+        }
+
+        if (_arenaSetup.UsesBattleCore)
+        {
+            gridSize = Mathf.Clamp(
+                Mathf.CeilToInt(Mathf.Sqrt(_arenaSetup.LaneCount)),
+                MinimumGridSize,
+                MaximumGridSize);
+            stackSize = 1;
+            _activeTileCount = Mathf.Min(
+                _arenaSetup.LaneCount,
+                gridSize * gridSize);
+        }
+        else
+        {
+            _activeTileCount = gridSize * gridSize;
         }
 
         _maximumStackSize = Mathf.Max(1, stackSize);
         _initialized = true;
-        CollectSceneTiles(gridSize);
+        CreateEnemySlots(gridSize);
         SetGridSize(gridSize);
+    }
+
+    public void ConfigureArena(
+        BattleArenaSetup setup,
+        BattleEnvironmentSetup environment = null)
+    {
+        _arenaSetup = setup ?? BattleArenaSetup.Legacy;
+        _environmentSetup = environment ?? BattleEnvironmentSetup.Default;
+        _battleCore.Configure(
+            _arenaSetup.CoreMaximumHealth,
+            _arenaSetup.UsesBattleCore);
+        worldBattleCoreGauge?.SetArenaRadius(
+            _arenaSetup.UsesBattleCore
+                ? _arenaSetup.WorldRadius
+                : BattleArenaSetup.DefaultWorldRadius);
+        ApplyWorldArenaRadius();
+        ApplyWorldEnvironment();
+        ApplyArenaPresentation();
+        ConfigureVfxPresentationTarget();
+        _circularEnemyStates.Clear();
+        RefreshWorldAllyViews();
     }
 
     public void SetDungeonStageProgress(float progress)
@@ -646,17 +1298,7 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
 
     public void SetPixelSize(float size)
     {
-        if (boardRect == null)
-            return;
-
-        size = Mathf.Max(1f, size);
-        boardRect.SetSizeWithCurrentAnchors(
-            RectTransform.Axis.Horizontal,
-            size);
-        boardRect.SetSizeWithCurrentAnchors(
-            RectTransform.Axis.Vertical,
-            size);
-        RefreshLayout();
+        RefreshWorldRenderTexture();
     }
 
     public void SetGridSize(int size)
@@ -665,6 +1307,9 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
             return;
 
         size = Mathf.Clamp(size, MinimumGridSize, MaximumGridSize);
+        _activeTileCount = _arenaSetup.UsesBattleCore
+            ? Mathf.Min(_arenaSetup.LaneCount, size * size)
+            : size * size;
 
         if (size == GridSize && _tiles.Count == size * size)
         {
@@ -679,16 +1324,12 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
         _enemyPlacements.Clear();
         _exclusiveOccupants.Clear();
         GridSize = size;
-        gridLayout.constraintCount = GridSize;
-
         for (int row = 0; row < GridSize; row++)
         {
             for (int column = 0; column < GridSize; column++)
             {
-                DungeonTileView tile = Instantiate(tilePrefab, gridLayout.transform);
-                tile.name = $"grpDungeonTile_{row}_{column}";
+                DungeonBoardSlot tile = new();
                 tile.Initialize(row, column, _maximumStackSize);
-                BindTile(tile);
                 _tiles.Add(tile);
             }
         }
@@ -772,7 +1413,7 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
         if (enemies == null || enemies.Count == 0)
             return false;
 
-        HashSet<DungeonTileView> reservedTiles = new();
+        HashSet<DungeonBoardSlot> reservedTiles = new();
         List<PendingEnemyPlacement> placements = new(enemies.Count);
         return TryBuildGroupPlacements(
                    enemies,
@@ -785,7 +1426,7 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
     private bool TryBuildGroupPlacements(
         IReadOnlyList<EnemyRuntime> enemies,
         int index,
-        HashSet<DungeonTileView> reservedTiles,
+        HashSet<DungeonBoardSlot> reservedTiles,
         List<PendingEnemyPlacement> placements)
     {
         if (index >= enemies.Count)
@@ -799,7 +1440,7 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
             CollectPlacementCandidates(enemy, reservedTiles);
         foreach (PendingEnemyPlacement candidate in candidates)
         {
-            foreach (DungeonTileView tile in candidate.OccupiedTiles)
+            foreach (DungeonBoardSlot tile in candidate.OccupiedTiles)
                 reservedTiles.Add(tile);
             placements.Add(candidate);
 
@@ -813,7 +1454,7 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
             }
 
             placements.RemoveAt(placements.Count - 1);
-            foreach (DungeonTileView tile in candidate.OccupiedTiles)
+            foreach (DungeonBoardSlot tile in candidate.OccupiedTiles)
                 reservedTiles.Remove(tile);
         }
 
@@ -822,7 +1463,7 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
 
     private List<PendingEnemyPlacement> CollectPlacementCandidates(
         EnemyRuntime enemy,
-        ISet<DungeonTileView> reservedTiles)
+        ISet<DungeonBoardSlot> reservedTiles)
     {
         List<PendingEnemyPlacement> result = new();
         if (enemy == null)
@@ -862,7 +1503,7 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
         int row,
         int column,
         EnemyRuntime enemy,
-        ISet<DungeonTileView> reservedTiles,
+        ISet<DungeonBoardSlot> reservedTiles,
         out PendingEnemyPlacement placement)
     {
         placement = default;
@@ -873,8 +1514,9 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
         }
 
         EnemySO definition = enemy.Definition;
-        bool exclusive = definition.StackingPolicy ==
-                         EnemyStackingPolicy.Exclusive;
+        bool exclusive = !_arenaSetup.UsesBattleCore &&
+                         definition.StackingPolicy ==
+                             EnemyStackingPolicy.Exclusive;
         int width = exclusive ? definition.FootprintWidth : 1;
         int height = exclusive ? definition.FootprintHeight : 1;
         if (row < 0 || column < 0 ||
@@ -884,7 +1526,7 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
             return false;
         }
 
-        List<DungeonTileView> occupiedTiles = new(width * height);
+        List<DungeonBoardSlot> occupiedTiles = new(width * height);
         for (int rowOffset = 0; rowOffset < height; rowOffset++)
         {
             for (int columnOffset = 0;
@@ -894,7 +1536,7 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
                 if (!TryGetTile(
                         row + rowOffset,
                         column + columnOffset,
-                        out DungeonTileView tile) ||
+                        out DungeonBoardSlot tile) ||
                     tile == null ||
                     reservedTiles?.Contains(tile) == true ||
                     _exclusiveOccupants.ContainsKey(tile))
@@ -908,7 +1550,7 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
             }
         }
 
-        DungeonTileView anchor = occupiedTiles[0];
+        DungeonBoardSlot anchor = occupiedTiles[0];
         if (!anchor.CanAddEnemy ||
             (!exclusive && anchor.IsFull))
         {
@@ -970,10 +1612,16 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
             pending.OccupiedTiles,
             pending.IsExclusive);
         _enemyPlacements[pending.Enemy] = placement;
+        if (_arenaSetup.UsesBattleCore)
+        {
+            _circularEnemyStates[pending.Enemy] =
+                new CircularEnemyState(
+                    pending.Enemy.CoreAttackInterval);
+        }
         if (!pending.IsExclusive)
             return;
 
-        foreach (DungeonTileView tile in pending.OccupiedTiles)
+        foreach (DungeonBoardSlot tile in pending.OccupiedTiles)
         {
             _exclusiveOccupants[tile] = pending.Enemy;
             tile.SetExclusiveFootprintOccupant(
@@ -995,10 +1643,12 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
         }
 
         _enemyPlacements.Remove(enemy);
+        _circularEnemyStates.Remove(enemy);
+        RemoveWorldEnemyView(enemy);
 
         if (placement.IsExclusive)
         {
-            foreach (DungeonTileView tile in placement.OccupiedTiles)
+            foreach (DungeonBoardSlot tile in placement.OccupiedTiles)
             {
                 if (tile != null &&
                     _exclusiveOccupants.TryGetValue(
@@ -1014,9 +1664,11 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
 
         if (notify)
             OccupancyChanged?.Invoke();
+        if (_arenaSetup.UsesBattleCore)
+            RefreshCircularLayout();
     }
 
-    private EnemyRuntime GetEnemyAtTile(DungeonTileView tile)
+    private EnemyRuntime GetEnemyAtTile(DungeonBoardSlot tile)
     {
         if (tile == null)
             return null;
@@ -1027,7 +1679,7 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
             : tile.TopEnemy;
     }
 
-    private DungeonTileView ResolveAnchorTile(DungeonTileView tile)
+    private DungeonBoardSlot ResolveAnchorTile(DungeonBoardSlot tile)
     {
         EnemyRuntime enemy = GetEnemyAtTile(tile);
         return enemy != null &&
@@ -1040,10 +1692,10 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
 
     public bool TryRemoveTopEnemyCard(int row, int column)
     {
-        if (!TryGetTile(row, column, out DungeonTileView selectedTile))
+        if (!TryGetTile(row, column, out DungeonBoardSlot selectedTile))
             return false;
 
-        DungeonTileView tile = ResolveAnchorTile(selectedTile);
+        DungeonBoardSlot tile = ResolveAnchorTile(selectedTile);
         EnemyRuntime enemy = GetEnemyAtTile(selectedTile);
         if (tile == null || enemy == null ||
             !ReferenceEquals(tile.TopEnemy, enemy))
@@ -1064,7 +1716,7 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
 
     public int GetStackCount(int row, int column)
     {
-        if (!TryGetTile(row, column, out DungeonTileView tile))
+        if (!TryGetTile(row, column, out DungeonBoardSlot tile))
             return 0;
         return _exclusiveOccupants.ContainsKey(tile)
             ? 1
@@ -1073,16 +1725,16 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
 
     public int GetTopEnemyHealth(int row, int column)
     {
-        return TryGetTile(row, column, out DungeonTileView tile)
+        return TryGetTile(row, column, out DungeonBoardSlot tile)
             ? GetEnemyAtTile(tile)?.Health ?? 0
             : 0;
     }
 
     public bool TrySetTopEnemyHealth(int row, int column, int health)
     {
-        if (!TryGetTile(row, column, out DungeonTileView tile))
+        if (!TryGetTile(row, column, out DungeonBoardSlot tile))
             return false;
-        DungeonTileView anchor = ResolveAnchorTile(tile);
+        DungeonBoardSlot anchor = ResolveAnchorTile(tile);
         return anchor != null && anchor.TrySetTopEnemyHealth(health);
     }
 
@@ -1094,13 +1746,12 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
     public int TryDamageEnemy(EnemyRuntime enemy, int damage)
     {
         if (damage <= 0 ||
-            !TryFindEnemyTile(enemy, out DungeonTileView tile))
+            !TryFindEnemyTile(enemy, out DungeonBoardSlot tile))
         {
             return 0;
         }
 
         bool wasAlive = enemy.Health > 0;
-        tile.ShowTargetArea();
         int appliedDamage = TryDamageTile(tile, damage);
         if (wasAlive && enemy.Health <= 0)
         {
@@ -1118,7 +1769,7 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
         float tickInterval,
         int tickDamage)
     {
-        if (!TryFindEnemyTile(enemy, out DungeonTileView tile))
+        if (!TryFindEnemyTile(enemy, out DungeonBoardSlot tile))
             return false;
 
         bool applied = TryApplyFireStatus(
@@ -1164,7 +1815,7 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
         else if (subject == CharacterAttackSubject.AllExceptSelf)
             subject = CharacterAttackSubject.All;
 
-        List<DungeonTileView> candidates = CollectPriorityTargetTiles(
+        List<DungeonBoardSlot> candidates = CollectPriorityTargetTiles(
             out bool hasAlternateTarget);
         candidates.RemoveAll(tile => !MatchesCharacterConditions(
             source,
@@ -1175,8 +1826,8 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
             return Array.Empty<EnemyRuntime>();
 
         targetCount = Mathf.Clamp(targetCount, 1, candidates.Count);
-        List<DungeonTileView> selected = new(candidates.Count);
-        if (TryGetForcedPriorityTile(out DungeonTileView forcedTarget) &&
+        List<DungeonBoardSlot> selected = new(candidates.Count);
+        if (TryGetForcedPriorityTile(out DungeonBoardSlot forcedTarget) &&
             candidates.Remove(forcedTarget))
         {
             selected.Add(forcedTarget);
@@ -1241,7 +1892,7 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
         }
 
         List<EnemyRuntime> result = new(selected.Count);
-        foreach (DungeonTileView tile in selected)
+        foreach (DungeonBoardSlot tile in selected)
         {
             if (tile?.TopEnemy != null)
                 result.Add(tile.TopEnemy);
@@ -1353,7 +2004,7 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
         foreach (EnemyRuntime target in targets)
         {
             if (target != null &&
-                TryFindEnemyTile(target, out DungeonTileView tile) &&
+                TryFindEnemyTile(target, out DungeonBoardSlot tile) &&
                 MatchesCharacterConditions(
                     source,
                     tile,
@@ -1414,9 +2065,9 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
 
         List<EnemyRuntime> result = new();
         HashSet<EnemyRuntime> uniqueEnemies = new();
-        HashSet<DungeonTileView> uniqueTiles = new();
+        HashSet<DungeonBoardSlot> uniqueTiles = new();
 
-        void AddAreaTile(DungeonTileView tile)
+        void AddAreaTile(DungeonBoardSlot tile)
         {
             if (tile == null || !uniqueTiles.Add(tile))
                 return;
@@ -1429,7 +2080,7 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
 
         foreach (EnemyRuntime centerTarget in centerTargets)
         {
-            if (!TryFindEnemyTile(centerTarget, out DungeonTileView centerTile))
+            if (!TryFindEnemyTile(centerTarget, out DungeonBoardSlot centerTile))
                 continue;
 
             if (includeCenterTargets)
@@ -1443,7 +2094,7 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
                     !TryGetTile(
                         centerTile.Row + offset.RowOffset,
                         centerTile.Column + offset.ColumnOffset,
-                        out DungeonTileView areaTile))
+                        out DungeonBoardSlot areaTile))
                 {
                     continue;
                 }
@@ -1457,7 +2108,7 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
 
     private static bool MatchesCharacterConditions(
         IBattleCharacter source,
-        DungeonTileView tile,
+        DungeonBoardSlot tile,
         CharacterConditionMatchMode matchMode,
         IReadOnlyList<CharacterNumericCondition> conditions)
     {
@@ -1626,13 +2277,11 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
         foreach (EnemyRuntime enemy in targets)
         {
             if (enemy == null || !uniqueTargets.Add(enemy) ||
-                !TryFindEnemyTile(enemy, out DungeonTileView tile))
+                !TryFindEnemyTile(enemy, out DungeonBoardSlot tile))
             {
                 continue;
             }
 
-            if (showAttackRange)
-                tile.ShowTargetArea();
             totalDamage += TryDamageTile(
                 tile,
                 damage,
@@ -1657,7 +2306,7 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
         foreach (EnemyRuntime enemy in targets)
         {
             if (enemy == null || !uniqueTargets.Add(enemy) ||
-                !TryFindEnemyTile(enemy, out DungeonTileView tile) ||
+                !TryFindEnemyTile(enemy, out DungeonBoardSlot tile) ||
                 !ReferenceEquals(tile.TopEnemy, enemy))
             {
                 continue;
@@ -1704,7 +2353,7 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
         foreach (EnemyRuntime enemy in targets)
         {
             if (enemy == null || !uniqueTargets.Add(enemy) ||
-                !TryFindEnemyTile(enemy, out DungeonTileView tile) ||
+                !TryFindEnemyTile(enemy, out DungeonBoardSlot tile) ||
                 !ReferenceEquals(tile.TopEnemy, enemy))
             {
                 continue;
@@ -1771,7 +2420,7 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
         foreach (EnemyRuntime enemy in targets)
         {
             if (enemy == null || !uniqueTargets.Add(enemy) ||
-                !TryFindEnemyTile(enemy, out DungeonTileView tile))
+                !TryFindEnemyTile(enemy, out DungeonBoardSlot tile))
             {
                 continue;
             }
@@ -1848,7 +2497,7 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
         foreach (EnemyRuntime enemy in targets)
         {
             if (enemy == null || !uniqueTargets.Add(enemy) ||
-                !TryFindEnemyTile(enemy, out DungeonTileView tile))
+                !TryFindEnemyTile(enemy, out DungeonBoardSlot tile))
             {
                 continue;
             }
@@ -1894,7 +2543,7 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
     }
 
     private bool TryApplyFireStatus(
-        DungeonTileView tile,
+        DungeonBoardSlot tile,
         IBattleCharacter source,
         float duration,
         float tickInterval,
@@ -1932,7 +2581,7 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
             return;
 
         TickForcedPriorityTarget(deltaTime);
-        foreach (DungeonTileView tile in _tiles)
+        foreach (DungeonBoardSlot tile in _tiles)
         {
             if (tile != null)
                 tile.TickStatusEffects(deltaTime, TryDamageTile);
@@ -1946,7 +2595,12 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
         if (deltaTime <= 0f)
             return;
 
-        foreach (DungeonTileView tile in _tiles)
+        if (UsesWorldPresentation)
+            TickWorldAllyMovement(deltaTime);
+        if (_arenaSetup.UsesBattleCore)
+            TickCircularEnemies(deltaTime);
+
+        foreach (DungeonBoardSlot tile in _tiles)
         {
             EnemyRuntime enemy = tile != null ? tile.TopEnemy : null;
             if (enemy == null)
@@ -1960,8 +2614,65 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
         }
     }
 
+    private void TickCircularEnemies(float deltaTime)
+    {
+        if (!_battleCore.IsActive || _battleCore.IsDestroyed)
+            return;
+
+        float appliedDelta = Mathf.Max(0f, deltaTime);
+        _circularEnemySnapshot.Clear();
+        foreach (EnemyRuntime enemy in _enemyPlacements.Keys)
+            _circularEnemySnapshot.Add(enemy);
+
+        for (int index = 0;
+             index < _circularEnemySnapshot.Count;
+             index++)
+        {
+            if (_battleCore.IsDestroyed)
+                break;
+
+            EnemyRuntime enemy = _circularEnemySnapshot[index];
+            if (enemy == null || enemy.Health <= 0 ||
+                !_enemyPlacements.ContainsKey(enemy) ||
+                !_circularEnemyStates.TryGetValue(
+                    enemy,
+                    out CircularEnemyState state) ||
+                enemy.AreAllActionsDisabled)
+            {
+                continue;
+            }
+
+            if (state.ApproachProgress < 1f)
+            {
+                state.ApproachProgress = Mathf.Clamp01(
+                    state.ApproachProgress +
+                    enemy.ApproachSpeed * appliedDelta /
+                    Mathf.Max(
+                        0.01f,
+                        _arenaSetup.SpawnRadiusNormalized -
+                        _arenaSetup.WallRadiusNormalized));
+                continue;
+            }
+
+            state.AttackTimeRemaining -= appliedDelta;
+            float attackInterval = Mathf.Max(
+                0.1f,
+                enemy.CoreAttackInterval);
+            while (state.AttackTimeRemaining <= 0f &&
+                   !_battleCore.IsDestroyed)
+            {
+                _battleCore.TakeDamage(enemy.CoreAttackDamage);
+                state.AttackTimeRemaining += attackInterval;
+            }
+        }
+
+        _circularEnemySnapshot.Clear();
+
+        RefreshCircularLayout();
+    }
+
     private void TickModularEnemyAbilities(
-        DungeonTileView sourceTile,
+        DungeonBoardSlot sourceTile,
         EnemyRuntime source,
         float deltaTime,
         IReadOnlyList<IBattleCharacter> characters)
@@ -1985,7 +2696,7 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
     }
 
     private BattleEffectResult ExecuteCooldownAbility(
-        DungeonTileView sourceTile,
+        DungeonBoardSlot sourceTile,
         EnemyRuntime source,
         EnemyAbilityDefinition ability,
         IReadOnlyList<IBattleCharacter> characters)
@@ -2020,7 +2731,7 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
     }
 
     private void ExecuteSpawnAbilities(
-        DungeonTileView sourceTile,
+        DungeonBoardSlot sourceTile,
         EnemyRuntime source)
     {
         if (source == null)
@@ -2080,7 +2791,7 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
     }
 
     private int ExecuteBeforeSelfDamageAbilities(
-        DungeonTileView sourceTile,
+        DungeonBoardSlot sourceTile,
         EnemyRuntime source,
         int damage,
         CharacterAttackDamageType damageType)
@@ -2146,15 +2857,15 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
         return damage;
     }
 
-    private DungeonTileView FindModularDamageRedirect(
-        DungeonTileView targetTile,
+    private DungeonBoardSlot FindModularDamageRedirect(
+        DungeonBoardSlot targetTile,
         CharacterAttackDamageType damageType)
     {
         EnemyRuntime target = targetTile?.TopEnemy;
         if (target == null)
             return null;
 
-        foreach (DungeonTileView sourceTile in _tiles)
+        foreach (DungeonBoardSlot sourceTile in _tiles)
         {
             EnemyRuntime source = sourceTile?.TopEnemy;
             if (source == null || ReferenceEquals(source, target) ||
@@ -2226,7 +2937,7 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
     }
 
     private void ExecuteDeathAbilities(
-        DungeonTileView sourceTile,
+        DungeonBoardSlot sourceTile,
         EnemyRuntime source)
     {
         if (source == null)
@@ -2307,8 +3018,8 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
     }
 
     private bool IsWithinAbilityRange(
-        DungeonTileView source,
-        DungeonTileView target,
+        DungeonBoardSlot source,
+        DungeonBoardSlot target,
         int range,
         bool includeDiagonals)
     {
@@ -2318,14 +3029,14 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
         range = Mathf.Max(1, range);
         EnemyRuntime sourceEnemy = GetEnemyAtTile(source);
         EnemyRuntime targetEnemy = GetEnemyAtTile(target);
-        IReadOnlyList<DungeonTileView> sourceTiles =
+        IReadOnlyList<DungeonBoardSlot> sourceTiles =
             GetOccupiedTiles(sourceEnemy, source);
-        IReadOnlyList<DungeonTileView> targetTiles =
+        IReadOnlyList<DungeonBoardSlot> targetTiles =
             GetOccupiedTiles(targetEnemy, target);
 
-        foreach (DungeonTileView sourceTile in sourceTiles)
+        foreach (DungeonBoardSlot sourceTile in sourceTiles)
         {
-            foreach (DungeonTileView targetTile in targetTiles)
+            foreach (DungeonBoardSlot targetTile in targetTiles)
             {
                 int rowDistance = Mathf.Abs(
                     sourceTile.Row - targetTile.Row);
@@ -2343,9 +3054,9 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
         return false;
     }
 
-    private IReadOnlyList<DungeonTileView> GetOccupiedTiles(
+    private IReadOnlyList<DungeonBoardSlot> GetOccupiedTiles(
         EnemyRuntime enemy,
-        DungeonTileView fallback)
+        DungeonBoardSlot fallback)
     {
         if (enemy != null &&
             _enemyPlacements.TryGetValue(
@@ -2357,11 +3068,11 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
 
         return fallback != null
             ? new[] { fallback }
-            : Array.Empty<DungeonTileView>();
+            : Array.Empty<DungeonBoardSlot>();
     }
 
     private bool TryResolveEnemyAbilityTargets(
-        DungeonTileView sourceTile,
+        DungeonBoardSlot sourceTile,
         EnemyRuntime source,
         EnemyAbilityTargetDefinition target,
         IReadOnlyList<IBattleCharacter> characters,
@@ -2448,7 +3159,7 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
         EnemyRuntime source)
     {
         List<EnemyRuntime> result = new();
-        foreach (DungeonTileView tile in _tiles)
+        foreach (DungeonBoardSlot tile in _tiles)
         {
             EnemyRuntime candidate = tile?.TopEnemy;
             if (candidate != null &&
@@ -2463,7 +3174,7 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
     }
 
     private List<EnemyRuntime> CollectAdjacentEnemyTargets(
-        DungeonTileView sourceTile,
+        DungeonBoardSlot sourceTile,
         int range,
         bool includeDiagonals)
     {
@@ -2473,7 +3184,7 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
 
         EnemyRuntime source = GetEnemyAtTile(sourceTile);
         HashSet<EnemyRuntime> unique = new();
-        foreach (DungeonTileView candidateTile in _tiles)
+        foreach (DungeonBoardSlot candidateTile in _tiles)
         {
             EnemyRuntime candidate = candidateTile?.TopEnemy;
             if (candidate == null ||
@@ -2631,7 +3342,7 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
                     : 0f,
             EnemyAbilityTargetMetric.Shield => target.CurrentShield,
             EnemyAbilityTargetMetric.StackCount =>
-                TryFindEnemyTile(target, out DungeonTileView tile)
+                TryFindEnemyTile(target, out DungeonBoardSlot tile)
                     ? tile.StackCount
                     : 0f,
             _ => 0f
@@ -2851,14 +3562,16 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
     public void ClearAllStacks()
     {
         UnbindAllPresentationEnemies();
-        foreach (DungeonTileView tile in _exclusiveOccupants.Keys)
+        foreach (DungeonBoardSlot tile in _exclusiveOccupants.Keys)
         {
             if (tile != null)
                 tile.SetExclusiveFootprintOccupant(null, false);
         }
         _exclusiveOccupants.Clear();
         _enemyPlacements.Clear();
-        foreach (DungeonTileView tile in _tiles)
+        _circularEnemyStates.Clear();
+        ClearWorldEnemyViews();
+        foreach (DungeonBoardSlot tile in _tiles)
         {
             if (tile != null)
                 tile.ClearStack();
@@ -2885,6 +3598,8 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
     {
         if (_initialized)
             RefreshLayout();
+        if (UsesWorldPresentation)
+            RefreshWorldRenderTexture();
     }
 
     private void OnDestroy()
@@ -2893,15 +3608,129 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
         _presentationDispatcher = null;
         UnbindAllPresentationEnemies();
         UnbindAllPresentationCharacters();
+        ClearWorldEnemyViews();
+        ClearWorldAllyViews();
+        _areaPreview?.Dispose();
+        _areaPreview = null;
+        if (_runtimeWorldRenderTexture != null)
+        {
+            if (worldCamera != null &&
+                ReferenceEquals(
+                    worldCamera.targetTexture,
+                    _runtimeWorldRenderTexture))
+            {
+                worldCamera.targetTexture = null;
+            }
+            _runtimeWorldRenderTexture.Release();
+            Destroy(_runtimeWorldRenderTexture);
+        }
+        _runtimeWorldRenderTexture = null;
     }
 
     private void Awake()
     {
+        if (worldActorPreview != null)
+            worldActorPreview.SetActive(false);
+        if (!HasWorldPresentation)
+        {
+            Debug.LogWarning(
+                "DungeonBoardView 2.5D world Scene references are incomplete. " +
+                "The battle world cannot be presented.",
+                this);
+        }
+        if (worldInputView != null)
+            worldInputView.Bind(this);
+        if (worldActorRoot != null && worldAreaPreviewPrefab != null)
+        {
+            _areaPreview = new BattleAreaPreviewView(
+                worldAreaPreviewPrefab,
+                worldActorRoot);
+        }
+        ApplyArenaPresentation();
         EnsurePresentationPipeline();
+    }
+
+    private void ApplyArenaPresentation()
+    {
+        if (worldPresentationRoot != null)
+            worldPresentationRoot.SetActive(UsesWorldPresentation);
+        if (worldOutput != null)
+            worldOutput.SetActive(UsesWorldPresentation);
+        if (worldInputView != null)
+            worldInputView.gameObject.SetActive(UsesWorldPresentation);
+        ApplyResponsiveViewport();
+    }
+
+    public void ApplyResponsiveViewport()
+    {
+        RefreshWorldRenderTexture();
+    }
+
+    private void RefreshWorldRenderTexture()
+    {
+        if (!HasWorldPresentation || boardRect == null || worldCamera == null)
+            return;
+
+        Rect rect = boardRect.rect;
+        float logicalWidth = Mathf.Max(1f, rect.width);
+        float logicalHeight = Mathf.Max(1f, rect.height);
+        float scale = Mathf.Min(
+            1f,
+            1600f / Mathf.Max(logicalWidth, logicalHeight));
+        int width = QuantizeRenderTextureSize(logicalWidth * scale);
+        int height = QuantizeRenderTextureSize(logicalHeight * scale);
+        if (_runtimeWorldRenderTexture != null &&
+            _runtimeWorldRenderTexture.width == width &&
+            _runtimeWorldRenderTexture.height == height)
+        {
+            worldCamera.aspect = (float)width / height;
+            SyncForegroundCamera();
+            ResizeWorldGroundToCamera();
+            return;
+        }
+
+        RenderTexture next = new(
+            width,
+            height,
+            24,
+            RenderTextureFormat.ARGB32)
+        {
+            name = $"Dungeon World {width}x{height}",
+            antiAliasing = 4,
+            filterMode = FilterMode.Bilinear,
+            useMipMap = false,
+            autoGenerateMips = false,
+        };
+        next.Create();
+        RenderTexture previous = _runtimeWorldRenderTexture;
+        _runtimeWorldRenderTexture = next;
+        worldCamera.targetTexture = next;
+        worldCamera.aspect = (float)width / height;
+        SyncForegroundCamera();
+        if (worldOutput.TryGetComponent(out RawImage outputImage))
+            outputImage.texture = next;
+
+        ResizeWorldGroundToCamera();
+
+        if (previous != null)
+        {
+            previous.Release();
+            Destroy(previous);
+        }
+    }
+
+    private static int QuantizeRenderTextureSize(float size)
+    {
+        int pixels = Mathf.Clamp(Mathf.RoundToInt(size), 256, 1600);
+        return Mathf.Clamp(
+            Mathf.CeilToInt(pixels / 16f) * 16,
+            256,
+            1600);
     }
 
     private void OnEnable()
     {
+        ApplyArenaPresentation();
         EnsurePresentationPipeline();
     }
 
@@ -2909,6 +3738,13 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
     {
         _presentationDispatcher?.Unbind();
         vfxPlayer?.ClearActive();
+        if (worldPresentationRoot != null)
+            worldPresentationRoot.SetActive(false);
+        if (worldOutput != null)
+            worldOutput.SetActive(false);
+        if (worldInputView != null)
+            worldInputView.gameObject.SetActive(false);
+        _areaPreview?.Hide();
     }
 
     private void EnsurePresentationPipeline()
@@ -2925,48 +3761,595 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
 
         if (vfxQualityProfile != null)
             vfxPlayer.ConfigureQuality(vfxQualityProfile);
+        ConfigureVfxPresentationTarget();
         vfxPlayer.BindTargetResolver(this);
         _presentationDispatcher ??=
             new BattlePresentationDispatcher(vfxPlayer);
         _presentationDispatcher.Bind(this, this);
     }
 
+    private void ConfigureVfxPresentationTarget()
+    {
+        if (vfxPlayer == null)
+            return;
+
+        if (UsesWorldPresentation)
+            vfxPlayer.Configure(worldCamera, worldVfxRoot);
+        else
+            vfxPlayer.Configure(Camera.main);
+    }
+
     private void RefreshLayout()
     {
-        if (!_initialized || boardRect == null || gridLayout == null)
+        if (!_initialized)
             return;
 
-        float boardSize = boardRect.rect.width;
-        if (boardSize <= 0f)
-            boardSize = boardRect.sizeDelta.x;
-        if (boardSize <= 0f)
+        if (_arenaSetup.UsesBattleCore)
+            RefreshCircularLayout();
+        else
+            ClearWorldEnemyViews();
+    }
+
+    private void RefreshCircularLayout()
+    {
+        if (!_initialized || _tiles.Count == 0)
             return;
 
-        int padding = Mathf.RoundToInt(boardSize * 0.045f);
-        float spacing = Mathf.Max(4f, boardSize * 0.018f);
-        float usableSize = boardSize - padding * 2f - spacing * (GridSize - 1);
-        float cellSize = Mathf.Max(1f, usableSize / GridSize);
+        int laneCount = Mathf.Clamp(
+            InitialEnemyCapacity,
+            1,
+            _tiles.Count);
 
-        gridLayout.padding = new RectOffset(padding, padding, padding, padding);
-        gridLayout.spacing = new Vector2(spacing, spacing);
-        gridLayout.cellSize = new Vector2(cellSize, cellSize);
-        gridLayout.constraintCount = GridSize;
+        _worldEnemySync.Clear();
 
-        foreach (DungeonTileView tile in _tiles)
+        for (int index = 0; index < _tiles.Count; index++)
         {
-            if (tile != null)
-                tile.RefreshLayout(cellSize);
+            DungeonBoardSlot tile = _tiles[index];
+            if (tile == null)
+                continue;
+
+            bool active = index < laneCount;
+            if (!active)
+                continue;
+
+            float progress = 0f;
+            EnemyRuntime enemy = tile.TopEnemy;
+            if (enemy != null &&
+                _circularEnemyStates.TryGetValue(
+                    enemy,
+                    out CircularEnemyState state))
+            {
+                progress = state.ApproachProgress;
+            }
+
+            float angle = 90f - index * (360f / laneCount);
+            float radians = angle * Mathf.Deg2Rad;
+            Vector2 direction = new(
+                Mathf.Cos(radians),
+                Mathf.Sin(radians));
+
+            if (enemy != null)
+            {
+                UpdateWorldEnemyView(
+                    enemy,
+                    direction,
+                    progress,
+                    index);
+            }
+        }
+
+        RemoveWorldEnemyViewsNotInSync();
+    }
+
+    private void LateUpdate()
+    {
+        if (!UsesWorldPresentation || worldCamera == null)
+            return;
+
+        float deltaTime = Time.unscaledDeltaTime;
+        DungeonHudPresentationSO style = DungeonHudPresentation.Load();
+        foreach (WorldActorView view in _worldEnemyActors.Values)
+        {
+            view?.TickHitFlash(deltaTime);
+            view?.FaceCamera(worldCamera);
+            view?.RefreshDepthSorting(
+                worldCamera,
+                style.WorldDepthSortingRange);
+        }
+        foreach (WorldActorView view in _worldAllyActors.Values)
+        {
+            view?.FaceCamera(worldCamera);
+            view?.RefreshDepthSorting(
+                worldCamera,
+                style.WorldDepthSortingRange);
+        }
+
+        foreach (KeyValuePair<IBattleCharacter, WorldActorView> entry in
+                 _worldAllyActors)
+        {
+            if (entry.Key is not CharacterRuntime runtime ||
+                !_worldAllyMovement.TryGetValue(
+                    entry.Key,
+                    out AllyMovementState movement))
+            {
+                continue;
+            }
+
+            entry.Value?.RefreshAllyHud(
+                runtime,
+                movement,
+                style,
+                worldCamera);
+            entry.Value?.SetFacingDirection(
+                movement.Destination - movement.Position,
+                worldCamera);
         }
     }
 
-    private bool TryGetTile(int row, int column, out DungeonTileView tile)
+    private void ApplyWorldEnvironment()
+    {
+        if (!HasWorldPresentation)
+            return;
+
+        DungeonHudPresentationSO presentation =
+            DungeonHudPresentation.Load();
+        worldCamera.transform.localPosition =
+            presentation.WorldCameraLocalPosition;
+        worldCamera.transform.localRotation = Quaternion.Euler(
+            presentation.WorldCameraLocalEulerAngles);
+        worldCamera.fieldOfView = _environmentSetup.CameraFieldOfView;
+        worldCamera.backgroundColor = _environmentSetup.ClearColor;
+        SyncForegroundCamera();
+        ResizeWorldGroundToCamera();
+        if (worldBackdrop != null)
+        {
+            worldBackdrop.sprite = _environmentSetup.Backdrop;
+            worldBackdrop.color = _environmentSetup.BackdropTint;
+            worldBackdrop.gameObject.SetActive(
+                _environmentSetup.Backdrop != null);
+            ScaleWorldBackdrop();
+        }
+    }
+
+    private void SyncForegroundCamera()
+    {
+        if (worldForegroundCamera == null || worldCamera == null)
+            return;
+
+        worldForegroundCamera.transform.localPosition =
+            worldCamera.transform.localPosition;
+        worldForegroundCamera.transform.localRotation =
+            worldCamera.transform.localRotation;
+        worldForegroundCamera.fieldOfView = worldCamera.fieldOfView;
+        worldForegroundCamera.aspect = worldCamera.aspect;
+        worldForegroundCamera.nearClipPlane = worldCamera.nearClipPlane;
+        worldForegroundCamera.farClipPlane = worldCamera.farClipPlane;
+    }
+
+    private void ResizeWorldGroundToCamera()
+    {
+        if (worldGround == null || worldCamera == null)
+            return;
+
+        Transform groundSpace = worldGround.parent;
+        if (groundSpace == null)
+            return;
+
+        Plane plane = new(
+            groundSpace.up,
+            groundSpace.TransformPoint(Vector3.zero));
+        Vector2[] viewportCorners =
+        {
+            new(0f, 0f),
+            new(0f, 1f),
+            new(1f, 0f),
+            new(1f, 1f),
+        };
+        float minimumX = float.PositiveInfinity;
+        float maximumX = float.NegativeInfinity;
+        float minimumZ = float.PositiveInfinity;
+        float maximumZ = float.NegativeInfinity;
+        int intersectionCount = 0;
+        for (int index = 0; index < viewportCorners.Length; index++)
+        {
+            Ray ray = worldCamera.ViewportPointToRay(viewportCorners[index]);
+            if (!plane.Raycast(ray, out float distance) || distance < 0f)
+                continue;
+
+            Vector3 localPoint = groundSpace.InverseTransformPoint(
+                ray.GetPoint(distance));
+            minimumX = Mathf.Min(minimumX, localPoint.x);
+            maximumX = Mathf.Max(maximumX, localPoint.x);
+            minimumZ = Mathf.Min(minimumZ, localPoint.z);
+            maximumZ = Mathf.Max(maximumZ, localPoint.z);
+            intersectionCount++;
+        }
+
+        if (intersectionCount != viewportCorners.Length)
+            return;
+
+        float visibleWidth = maximumX - minimumX;
+        float visibleDepth = maximumZ - minimumZ;
+        float margin = Mathf.Max(
+            2f,
+            Mathf.Max(visibleWidth, visibleDepth) * 0.1f);
+        Vector3 localPosition = worldGround.localPosition;
+        localPosition.x = (minimumX + maximumX) * 0.5f;
+        localPosition.z = (minimumZ + maximumZ) * 0.5f;
+        worldGround.localPosition = localPosition;
+
+        Vector3 localScale = worldGround.localScale;
+        localScale.x = Mathf.Max(
+            MinimumWorldGroundSize,
+            visibleWidth + margin * 2f);
+        localScale.z = Mathf.Max(
+            MinimumWorldGroundSize,
+            visibleDepth + margin * 2f);
+        worldGround.localScale = localScale;
+    }
+
+    private void ApplyWorldArenaRadius()
+    {
+        if (worldArenaRing == null)
+            return;
+
+        float radius = _arenaSetup.UsesBattleCore
+            ? _arenaSetup.WorldRadius
+            : BattleArenaSetup.DefaultWorldRadius;
+        float scale = radius / AuthoredArenaRingRadius;
+        scale = Mathf.Max(0.01f, scale);
+        worldArenaRing.localScale = new Vector3(scale, 1f, scale);
+    }
+
+    private void ScaleWorldBackdrop()
+    {
+        if (worldBackdrop == null || worldBackdrop.sprite == null)
+            return;
+
+        Vector2 size = worldBackdrop.sprite.bounds.size;
+        if (size.x <= 0f || size.y <= 0f)
+            return;
+
+        const float targetWidth = 16f;
+        float scale = targetWidth / size.x;
+        worldBackdrop.transform.localScale = new Vector3(
+            scale,
+            scale,
+            1f);
+    }
+
+    private WorldActorView CreateWorldActor(
+        string objectName,
+        bool createAllyHud = false)
+    {
+        if (!HasWorldPresentation)
+            return null;
+
+        GameObject instance = Instantiate(worldActorPrefab, worldActorRoot);
+        instance.name = objectName;
+        SetLayerRecursively(instance, worldActorRoot.gameObject.layer);
+        return new WorldActorView(instance, createAllyHud);
+    }
+
+    private void UpdateWorldEnemyView(
+        EnemyRuntime enemy,
+        Vector2 direction,
+        float progress,
+        int laneIndex)
+    {
+        if (!UsesWorldPresentation || enemy == null)
+            return;
+
+        _worldEnemySync.Add(enemy);
+        if (!_worldEnemyActors.TryGetValue(enemy, out WorldActorView view) ||
+            view == null || view.GameObject == null)
+        {
+            view = CreateWorldActor($"imgWorldEnemy_{laneIndex + 1}");
+            if (view == null)
+                return;
+            _worldEnemyActors[enemy] = view;
+        }
+
+        Sprite sprite = enemy.Definition != null
+            ? enemy.Definition.BoardSprite
+            : null;
+        if (sprite == null && enemy.Definition != null &&
+            _missingWorldEnemySpriteWarnings.Add(enemy.Definition))
+        {
+            Debug.LogWarning(
+                $"Enemy '{enemy.Definition.name}' has no 1:1 Board Sprite " +
+                "and cannot be rendered in the dungeon world. Assign one " +
+                "in PS260714/Enemy Editor.",
+                enemy.Definition);
+        }
+        DungeonHudPresentationSO presentation =
+            DungeonHudPresentation.Load();
+        if (!view.Configure(
+                sprite,
+                presentation != null
+                    ? presentation.WorldEnemyHeight
+                    : worldEnemyHeight,
+                100 + laneIndex))
+            return;
+
+        float wallRadius = GetWorldEnemyStopRadius(presentation);
+        float spawnRadius = Mathf.Max(
+            GetWorldSpawnRadius(),
+            wallRadius + presentation.WorldEnemyArenaRingClearance);
+        float radius = Mathf.Lerp(
+            spawnRadius,
+            wallRadius,
+            Mathf.Clamp01(progress));
+        view.SetWorldPosition(new Vector3(
+            direction.x * radius,
+            0f,
+            direction.y * radius));
+        view.FaceCamera(worldCamera);
+    }
+
+    private void RefreshWorldAllyViews()
+    {
+        if (!UsesWorldPresentation)
+        {
+            ClearWorldAllyViews();
+            return;
+        }
+
+        List<IBattleCharacter> ordered = new(_battleCharacters);
+        ordered.Sort((left, right) =>
+            left.PartySlotIndex.CompareTo(right.PartySlotIndex));
+        HashSet<IBattleCharacter> active = new(ordered);
+        List<IBattleCharacter> removed = new();
+        foreach (KeyValuePair<IBattleCharacter, WorldActorView> entry in
+                 _worldAllyActors)
+        {
+            if (!active.Contains(entry.Key))
+                removed.Add(entry.Key);
+        }
+        foreach (IBattleCharacter character in removed)
+            RemoveWorldAllyView(character);
+
+        float wallRadius = GetWorldWallRadius();
+        for (int index = 0; index < ordered.Count; index++)
+        {
+            IBattleCharacter character = ordered[index];
+            if (!_worldAllyActors.TryGetValue(
+                    character,
+                    out WorldActorView view) ||
+                view == null || view.GameObject == null)
+            {
+                view = CreateWorldActor(
+                    $"imgWorldAlly_{character.PartySlotIndex + 1}",
+                    true);
+                if (view == null)
+                    continue;
+                _worldAllyActors[character] = view;
+            }
+
+            CharacterRuntime runtime = character as CharacterRuntime;
+            Sprite sprite = runtime != null
+                ? runtime.CurrentBattleSdSprite
+                : null;
+            DungeonHudPresentationSO presentation =
+                DungeonHudPresentation.Load();
+            if (!view.Configure(
+                    sprite,
+                    presentation != null
+                        ? presentation.WorldAllyHeight
+                        : worldAllyHeight,
+                    200 + index,
+                    runtime?.WorldSdReferenceSprite,
+                    runtime?.WorldSdScaleMultiplier ?? 1f,
+                    runtime?.WorldSdGroundOffset ?? 0f,
+                    runtime?.WorldSdHeadHeightNormalized ?? 1f,
+                    runtime?.WorldSdFacesRight ?? true))
+                continue;
+
+            AllyMovementState movement = GetOrCreateAllyMovementState(
+                character,
+                index,
+                ordered.Count,
+                wallRadius);
+            view.SetWorldPosition(new Vector3(
+                movement.Position.x,
+                WorldActorGroundHeight,
+                movement.Position.y));
+            view.SetSelected(ReferenceEquals(character, _selectedWorldAlly));
+            view.FaceCamera(worldCamera);
+        }
+    }
+
+    private AllyMovementState GetOrCreateAllyMovementState(
+        IBattleCharacter character,
+        int index,
+        int count,
+        float wallRadius)
+    {
+        if (_worldAllyMovement.TryGetValue(
+                character,
+                out AllyMovementState movement))
+        {
+            movement.Position = BattleAreaGeometry.ClampToRadius(
+                movement.Position,
+                Vector2.zero,
+                Mathf.Max(0f, wallRadius - worldAllyBoundaryPadding));
+            movement.Destination = BattleAreaGeometry.ClampToRadius(
+                movement.Destination,
+                Vector2.zero,
+                Mathf.Max(0f, wallRadius - worldAllyBoundaryPadding));
+            return movement;
+        }
+
+        float placementRadius = count <= 1 ? 0f : wallRadius * 0.42f;
+        float angle = count switch
+        {
+            1 => 90f,
+            2 => index == 0 ? 180f : 0f,
+            _ => 90f - index * (360f / count),
+        };
+        float radians = angle * Mathf.Deg2Rad;
+        movement = new AllyMovementState(new Vector2(
+            Mathf.Cos(radians) * placementRadius,
+            Mathf.Sin(radians) * placementRadius));
+        _worldAllyMovement[character] = movement;
+        return movement;
+    }
+
+    private void RemoveStaleWorldAllyMovementStates()
+    {
+        List<IBattleCharacter> removed = new();
+        foreach (IBattleCharacter character in _worldAllyMovement.Keys)
+        {
+            if (!_battleCharacters.Contains(character))
+                removed.Add(character);
+        }
+
+        foreach (IBattleCharacter character in removed)
+            _worldAllyMovement.Remove(character);
+        if (_selectedWorldAlly != null &&
+            !_battleCharacters.Contains(_selectedWorldAlly))
+        {
+            _selectedWorldAlly = null;
+        }
+    }
+
+    private void TickWorldAllyMovement(float deltaTime)
+    {
+        float step = Mathf.Max(0.1f, worldAllyMoveSpeed) *
+                     Mathf.Max(0f, deltaTime);
+        foreach (KeyValuePair<IBattleCharacter, AllyMovementState> entry in
+                 _worldAllyMovement)
+        {
+            AllyMovementState movement = entry.Value;
+            movement.Position = Vector2.MoveTowards(
+                movement.Position,
+                movement.Destination,
+                step);
+            if (_worldAllyActors.TryGetValue(
+                    entry.Key,
+                    out WorldActorView view))
+            {
+                view?.SetWorldPosition(new Vector3(
+                    movement.Position.x,
+                    WorldActorGroundHeight,
+                    movement.Position.y));
+            }
+        }
+    }
+
+    private bool TryGetWorldEnemyAnchor(
+        EnemyRuntime enemy,
+        BattleVfxAnchorType anchorType,
+        out BattleVfxAnchorSnapshot anchor)
+    {
+        anchor = default;
+        return UsesWorldPresentation &&
+               enemy != null &&
+               _worldEnemyActors.TryGetValue(enemy, out WorldActorView view) &&
+               view != null &&
+               view.TryGetAnchor(worldCamera, anchorType, out anchor);
+    }
+
+    private bool TryGetWorldAllyAnchor(
+        IBattleCharacter character,
+        BattleVfxAnchorType anchorType,
+        out BattleVfxAnchorSnapshot anchor)
+    {
+        anchor = default;
+        return UsesWorldPresentation &&
+               character != null &&
+               _worldAllyActors.TryGetValue(
+                   character,
+                   out WorldActorView view) &&
+               view != null &&
+               view.TryGetAnchor(worldCamera, anchorType, out anchor);
+    }
+
+    private void RemoveWorldEnemyViewsNotInSync()
+    {
+        if (!UsesWorldPresentation)
+        {
+            ClearWorldEnemyViews();
+            return;
+        }
+
+        List<EnemyRuntime> removed = new();
+        foreach (EnemyRuntime enemy in _worldEnemyActors.Keys)
+        {
+            if (!_worldEnemySync.Contains(enemy))
+                removed.Add(enemy);
+        }
+        foreach (EnemyRuntime enemy in removed)
+            RemoveWorldEnemyView(enemy);
+    }
+
+    private void RemoveWorldEnemyView(EnemyRuntime enemy)
+    {
+        if (enemy == null ||
+            !_worldEnemyActors.TryGetValue(enemy, out WorldActorView view))
+        {
+            return;
+        }
+
+        if (view?.GameObject != null)
+            Destroy(view.GameObject);
+        _worldEnemyActors.Remove(enemy);
+        _worldEnemySync.Remove(enemy);
+    }
+
+    private void RemoveWorldAllyView(IBattleCharacter character)
+    {
+        if (character == null ||
+            !_worldAllyActors.TryGetValue(character, out WorldActorView view))
+        {
+            return;
+        }
+
+        if (view?.GameObject != null)
+            Destroy(view.GameObject);
+        _worldAllyActors.Remove(character);
+    }
+
+    private void ClearWorldEnemyViews()
+    {
+        foreach (WorldActorView view in _worldEnemyActors.Values)
+        {
+            if (view?.GameObject != null)
+                Destroy(view.GameObject);
+        }
+        _worldEnemyActors.Clear();
+        _worldEnemySync.Clear();
+    }
+
+    private void ClearWorldAllyViews()
+    {
+        foreach (WorldActorView view in _worldAllyActors.Values)
+        {
+            if (view?.GameObject != null)
+                Destroy(view.GameObject);
+        }
+        _worldAllyActors.Clear();
+    }
+
+    private static void SetLayerRecursively(GameObject target, int layer)
+    {
+        if (target == null)
+            return;
+
+        target.layer = layer;
+        foreach (Transform child in target.transform)
+            SetLayerRecursively(child.gameObject, layer);
+    }
+
+    private bool TryGetTile(int row, int column, out DungeonBoardSlot tile)
     {
         tile = null;
         if (row < 0 || row >= GridSize || column < 0 || column >= GridSize)
             return false;
 
         int index = row * GridSize + column;
-        if (index < 0 || index >= _tiles.Count)
+        if (index < 0 || index >= _tiles.Count ||
+            index >= InitialEnemyCapacity)
             return false;
 
         tile = _tiles[index];
@@ -2975,12 +4358,12 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
 
     private int TryDamageTile(int row, int column, int damage)
     {
-        return TryGetTile(row, column, out DungeonTileView tile)
+        return TryGetTile(row, column, out DungeonBoardSlot tile)
             ? TryDamageTile(tile, damage)
             : 0;
     }
 
-    private int TryDamageTile(DungeonTileView targetTile, int damage)
+    private int TryDamageTile(DungeonBoardSlot targetTile, int damage)
     {
         return TryDamageTile(
             targetTile,
@@ -2989,7 +4372,7 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
     }
 
     private int TryDamageTile(
-        DungeonTileView targetTile,
+        DungeonBoardSlot targetTile,
         int damage,
         CharacterAttackDamageType damageType)
     {
@@ -2997,7 +4380,7 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
     }
 
     private int TryDamageTile(
-        DungeonTileView targetTile,
+        DungeonBoardSlot targetTile,
         int damage,
         IBattleCharacter source)
     {
@@ -3009,7 +4392,7 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
     }
 
     private int TryDamageTile(
-        DungeonTileView targetTile,
+        DungeonBoardSlot targetTile,
         int damage,
         CharacterAttackDamageType damageType,
         IBattleCharacter source)
@@ -3018,9 +4401,9 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
         if (targetTile == null || targetTile.TopEnemy == null || damage <= 0)
             return 0;
 
-        DungeonTileView redirectTile =
+        DungeonBoardSlot redirectTile =
             FindModularDamageRedirect(targetTile, damageType);
-        DungeonTileView damageReceiver = redirectTile != null
+        DungeonBoardSlot damageReceiver = redirectTile != null
             ? redirectTile
             : targetTile;
         EnemyRuntime damagedEnemy = damageReceiver.TopEnemy;
@@ -3034,6 +4417,10 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
             return 0;
 
         int appliedDamage = damageReceiver.TryDamageTop(damage, damageType);
+        if (appliedDamage > 0)
+        {
+            ShowEnemyHitFeedback(damageReceiver, damagedEnemy);
+        }
         if (appliedDamage > 0 && damagedEnemy.Health <= 0)
         {
             ReleasePlacement(damagedEnemy, false);
@@ -3048,10 +4435,29 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
         return appliedDamage;
     }
 
-    private List<DungeonTileView> CollectOccupiedTiles()
+    private void ShowEnemyHitFeedback(
+        DungeonBoardSlot tile,
+        EnemyRuntime enemy)
     {
-        List<DungeonTileView> result = new();
-        foreach (DungeonTileView tile in _tiles)
+        if (enemy == null)
+            return;
+
+        tile?.ShowEnemyHitFeedback(
+            enemy,
+            enemyHitFlashColor,
+            enemyHitFlashDuration);
+        if (_worldEnemyActors.TryGetValue(enemy, out WorldActorView view))
+        {
+            view?.ShowHitFlash(
+                enemyHitFlashColor,
+                enemyHitFlashDuration);
+        }
+    }
+
+    private List<DungeonBoardSlot> CollectOccupiedTiles()
+    {
+        List<DungeonBoardSlot> result = new();
+        foreach (DungeonBoardSlot tile in _tiles)
         {
             if (tile != null && tile.StackCount > 0)
                 result.Add(tile);
@@ -3080,13 +4486,13 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
         }
     }
 
-    private List<DungeonTileView> CollectPriorityTargetTiles(
+    private List<DungeonBoardSlot> CollectPriorityTargetTiles(
         out bool hasAlternateTarget)
     {
-        List<DungeonTileView> occupiedTiles = CollectOccupiedTiles();
+        List<DungeonBoardSlot> occupiedTiles = CollectOccupiedTiles();
         hasAlternateTarget = occupiedTiles.Count > 1;
-        List<DungeonTileView> priorityTargets = new();
-        foreach (DungeonTileView tile in occupiedTiles)
+        List<DungeonBoardSlot> priorityTargets = new();
+        foreach (DungeonBoardSlot tile in occupiedTiles)
         {
             EnemyRuntime enemy = tile.TopEnemy;
             if (enemy == null)
@@ -3172,8 +4578,8 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
     }
 
     private static int CompareTargetPriority(
-        DungeonTileView left,
-        DungeonTileView right,
+        DungeonBoardSlot left,
+        DungeonBoardSlot right,
         bool hasAlternateTarget)
     {
         EnemyTargetPriorityEvaluation leftPriority =
@@ -3188,12 +4594,12 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
     }
 
     private static void StableSortByTargetPriority(
-        List<DungeonTileView> candidates,
+        List<DungeonBoardSlot> candidates,
         bool hasAlternateTarget)
     {
         for (int index = 1; index < candidates.Count; index++)
         {
-            DungeonTileView candidate = candidates[index];
+            DungeonBoardSlot candidate = candidates[index];
             int insertionIndex = index - 1;
             while (insertionIndex >= 0 &&
                    CompareTargetPriority(
@@ -3212,7 +4618,7 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
 
     private bool TryFindEnemyTile(
         EnemyRuntime enemy,
-        out DungeonTileView targetTile)
+        out DungeonBoardSlot targetTile)
     {
         targetTile = null;
         if (enemy == null)
@@ -3228,7 +4634,7 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
             return true;
         }
 
-        foreach (DungeonTileView tile in _tiles)
+        foreach (DungeonBoardSlot tile in _tiles)
         {
             if (tile != null && ReferenceEquals(tile.TopEnemy, enemy))
             {
@@ -3240,7 +4646,7 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
         return false;
     }
 
-    private bool TryGetForcedPriorityTile(out DungeonTileView targetTile)
+    private bool TryGetForcedPriorityTile(out DungeonBoardSlot targetTile)
     {
         if (_forcedPriorityRemaining > 0f &&
             TryFindEnemyTile(_forcedPriorityTarget, out targetTile))
@@ -3320,55 +4726,22 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
 
     private void ClearTileObjects()
     {
-        foreach (DungeonTileView tile in _tiles)
-        {
-            if (tile != null)
-            {
-                UnbindTile(tile);
-                Destroy(tile.gameObject);
-            }
-        }
-
         _tiles.Clear();
     }
 
-    private void CollectSceneTiles(int gridSize)
+    private void CreateEnemySlots(int gridSize)
     {
         _tiles.Clear();
         GridSize = Mathf.Clamp(gridSize, MinimumGridSize, MaximumGridSize);
-
-        for (int index = 0; index < gridLayout.transform.childCount; index++)
+        for (int row = 0; row < GridSize; row++)
         {
-            Transform child = gridLayout.transform.GetChild(index);
-            if (child.TryGetComponent(out DungeonTileView tile))
-                _tiles.Add(tile);
+            for (int column = 0; column < GridSize; column++)
+            {
+                DungeonBoardSlot slot = new();
+                slot.Initialize(row, column, _maximumStackSize);
+                _tiles.Add(slot);
+            }
         }
-
-        if (_tiles.Count != GridSize * GridSize)
-            return;
-
-        for (int index = 0; index < _tiles.Count; index++)
-        {
-            int row = index / GridSize;
-            int column = index % GridSize;
-            _tiles[index].Initialize(row, column, _maximumStackSize);
-            BindTile(_tiles[index]);
-        }
-    }
-
-    private void BindTile(DungeonTileView tile)
-    {
-        if (tile == null)
-            return;
-
-        tile.EnemyClicked -= HandleEnemyClicked;
-        tile.EnemyClicked += HandleEnemyClicked;
-    }
-
-    private void UnbindTile(DungeonTileView tile)
-    {
-        if (tile != null)
-            tile.EnemyClicked -= HandleEnemyClicked;
     }
 
     private void BindPresentationEnemy(EnemyRuntime enemy)
@@ -3402,7 +4775,7 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
     private void SynchronizeEnemyPresentationBindings()
     {
         HashSet<EnemyRuntime> currentEnemies = new();
-        foreach (DungeonTileView tile in _tiles)
+        foreach (DungeonBoardSlot tile in _tiles)
         {
             if (tile == null)
                 continue;
@@ -3500,7 +4873,7 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
 
     private void CaptureEnemyVfxAnchor(
         EnemyRuntime enemy,
-        DungeonTileView tile)
+        DungeonBoardSlot tile)
     {
         if (enemy == null || tile == null)
             return;
@@ -3557,6 +4930,474 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
                snapshot.IsValid;
     }
 
+    internal void HandleWorldPointerDown(PointerEventData eventData)
+    {
+        if (!UsesWorldPresentation || eventData == null)
+            return;
+
+        if (_manualTargetRequest?.UsesWorldArea == true)
+        {
+            UpdateManualAreaAim(eventData.position);
+            if (eventData.button == PointerEventData.InputButton.Right &&
+                _manualTargetRequest.AllowCancel)
+            {
+                CancelManualTargetSelection();
+            }
+            return;
+        }
+
+        if (eventData.button == PointerEventData.InputButton.Right)
+        {
+            if (_manualTargetRequest != null &&
+                _manualTargetRequest.AllowCancel)
+            {
+                CancelManualTargetSelection();
+            }
+            else if (_selectedWorldAlly != null &&
+                     TryScreenToWorldGround(
+                         eventData.position,
+                         out Vector2 destination))
+            {
+                RequestWorldAllyMove(_selectedWorldAlly, destination);
+            }
+            return;
+        }
+
+        if (_manualTargetRequest != null)
+        {
+            if (eventData.button == PointerEventData.InputButton.Left)
+            {
+                if (_manualTargetRequest.Faction ==
+                        CharacterTargetFaction.Enemy &&
+                    TryHitWorldEnemy(
+                        eventData.position,
+                        out EnemyRuntime manualEnemy))
+                {
+                    HandleEnemyClicked(manualEnemy);
+                }
+                else if (_manualTargetRequest.Faction ==
+                             CharacterTargetFaction.Ally &&
+                         TryHitWorldAlly(
+                             eventData.position,
+                             out IBattleCharacter manualAlly) &&
+                         manualAlly is CharacterRuntime manualRuntime)
+                {
+                    manualRuntime.TryHandleWorldTargetClick();
+                }
+            }
+            return;
+        }
+
+        if (eventData.button != PointerEventData.InputButton.Left)
+            return;
+
+        _pressedWorldAlly = null;
+        _draggingWorldAlly = false;
+        if (TryHitWorldAlly(eventData.position, out IBattleCharacter ally))
+        {
+            if (ally is CharacterRuntime runtime &&
+                runtime.TryHandleWorldTargetClick())
+            {
+                return;
+            }
+
+            SelectWorldAlly(ally);
+            _pressedWorldAlly = ally;
+            return;
+        }
+
+        if (TryHitWorldEnemy(eventData.position, out EnemyRuntime enemy))
+        {
+            HandleEnemyClicked(enemy);
+            return;
+        }
+
+        SelectWorldAlly(null);
+    }
+
+    internal void HandleWorldPointerMove(
+        PointerEventData eventData,
+        bool dragging)
+    {
+        if (!UsesWorldPresentation || eventData == null)
+            return;
+
+        if (_manualTargetRequest?.UsesWorldArea == true)
+        {
+            UpdateManualAreaAim(eventData.position);
+            return;
+        }
+
+        if (dragging &&
+            eventData.button == PointerEventData.InputButton.Left &&
+            _pressedWorldAlly != null)
+        {
+            _draggingWorldAlly = true;
+        }
+    }
+
+    internal void HandleWorldPointerUp(PointerEventData eventData)
+    {
+        if (!UsesWorldPresentation || eventData == null)
+            return;
+
+        if (_manualTargetRequest?.UsesWorldArea == true)
+        {
+            if (eventData.button == PointerEventData.InputButton.Left)
+            {
+                UpdateManualAreaAim(eventData.position);
+                if (_manualEnemyTargets.Count > 0 ||
+                    _manualAllyTargets.Count > 0)
+                {
+                    CompleteManualTargetSelection();
+                }
+            }
+            return;
+        }
+
+        if (eventData.button == PointerEventData.InputButton.Left &&
+            _draggingWorldAlly && _pressedWorldAlly != null &&
+            TryScreenToWorldGround(
+                eventData.position,
+                out Vector2 destination))
+        {
+            RequestWorldAllyMove(_pressedWorldAlly, destination);
+        }
+
+        _pressedWorldAlly = null;
+        _draggingWorldAlly = false;
+    }
+
+    private void SelectWorldAlly(IBattleCharacter character)
+    {
+        _selectedWorldAlly = character;
+        RefreshManualTargetHighlights();
+    }
+
+    private void RequestWorldAllyMove(
+        IBattleCharacter character,
+        Vector2 destination)
+    {
+        if (character == null ||
+            !_worldAllyMovement.TryGetValue(
+                character,
+                out AllyMovementState movement))
+        {
+            return;
+        }
+
+        float allowedRadius = Mathf.Max(
+            0f,
+            GetWorldWallRadius() - worldAllyBoundaryPadding);
+        Vector2 resolved = BattleAreaGeometry.ClampToRadius(
+            destination,
+            Vector2.zero,
+            allowedRadius);
+        foreach (KeyValuePair<IBattleCharacter, AllyMovementState> entry in
+                 _worldAllyMovement)
+        {
+            if (ReferenceEquals(entry.Key, character))
+                continue;
+
+            Vector2 otherDestination = entry.Value.Destination;
+            Vector2 separation = resolved - otherDestination;
+            float spacing = Mathf.Max(0f, worldAllyMinimumSpacing);
+            if (separation.sqrMagnitude >= spacing * spacing)
+                continue;
+
+            Vector2 direction = separation.sqrMagnitude > 0.0001f
+                ? separation.normalized
+                : (movement.Position - otherDestination).normalized;
+            if (direction.sqrMagnitude <= 0.0001f)
+                direction = Vector2.right;
+            resolved = otherDestination + direction * spacing;
+            resolved = BattleAreaGeometry.ClampToRadius(
+                resolved,
+                Vector2.zero,
+                allowedRadius);
+        }
+
+        movement.Destination = resolved;
+    }
+
+    private void InitializeManualAreaAim(
+        BattleManualTargetSelectionRequest request)
+    {
+        Vector2 source = GetWorldAllyPosition(request.Source);
+        _manualAreaDirection = Vector2.up;
+        _manualAreaOrigin = source;
+        RefreshManualAreaTargets();
+    }
+
+    private void UpdateManualAreaAim(Vector2 screenPosition)
+    {
+        BattleManualTargetSelectionRequest request = _manualTargetRequest;
+        BattleAreaDefinition definition = request?.AreaDefinition;
+        if (definition == null || !definition.UsesWorldArea ||
+            !TryScreenToWorldGround(screenPosition, out Vector2 cursor))
+        {
+            return;
+        }
+
+        Vector2 source = GetWorldAllyPosition(request.Source);
+        Vector2 aim = cursor - source;
+        if (aim.sqrMagnitude > 0.0001f)
+            _manualAreaDirection = aim.normalized;
+
+        if (definition.OriginMode == CharacterAreaOriginMode.Caster)
+        {
+            _manualAreaOrigin = source;
+        }
+        else
+        {
+            _manualAreaOrigin = BattleAreaGeometry.ClampToRadius(
+                cursor,
+                source,
+                definition.MaxCastDistance);
+            _manualAreaOrigin = BattleAreaGeometry.ClampToRadius(
+                _manualAreaOrigin,
+                Vector2.zero,
+                GetWorldWallRadius());
+        }
+
+        RefreshManualAreaTargets();
+    }
+
+    private void RefreshManualAreaTargets()
+    {
+        BattleManualTargetSelectionRequest request = _manualTargetRequest;
+        BattleAreaDefinition definition = request?.AreaDefinition;
+        if (definition == null || !definition.UsesWorldArea)
+            return;
+
+        _manualEnemyTargets.Clear();
+        _manualAllyTargets.Clear();
+        if (request.Faction == CharacterTargetFaction.Enemy)
+        {
+            foreach (EnemyRuntime enemy in request.EnemyCandidates)
+            {
+                if (enemy != null &&
+                    _worldEnemyActors.TryGetValue(
+                        enemy,
+                        out WorldActorView view) &&
+                    view != null &&
+                    BattleAreaGeometry.Contains(
+                        ToGround(view.WorldPosition),
+                        _manualAreaOrigin,
+                        _manualAreaDirection,
+                        definition.ShapeType,
+                        definition.Radius,
+                        definition.ConeAngle))
+                {
+                    _manualEnemyTargets.Add(enemy);
+                }
+            }
+        }
+        else
+        {
+            foreach (IBattleCharacter ally in request.AllyCandidates)
+            {
+                if (ally != null &&
+                    BattleAreaGeometry.Contains(
+                        GetWorldAllyPosition(ally),
+                        _manualAreaOrigin,
+                        _manualAreaDirection,
+                        definition.ShapeType,
+                        definition.Radius,
+                        definition.ConeAngle))
+                {
+                    _manualAllyTargets.Add(ally);
+                }
+            }
+        }
+
+        _areaPreview?.Show(
+            _manualAreaOrigin,
+            _manualAreaDirection,
+            definition);
+        RefreshManualTargetHighlights();
+        ManualTargetSelectionProgressChanged?.Invoke();
+    }
+
+    private bool TryScreenToWorldGround(
+        Vector2 screenPosition,
+        out Vector2 ground)
+    {
+        ground = default;
+        if (worldInputView == null || worldCamera == null ||
+            worldInputView.transform is not RectTransform rect)
+        {
+            return false;
+        }
+
+        Camera uiCamera = ResolveUiCamera(rect);
+        if (!RectTransformUtility.ScreenPointToLocalPointInRectangle(
+                rect,
+                screenPosition,
+                uiCamera,
+                out Vector2 local))
+        {
+            return false;
+        }
+
+        Rect bounds = rect.rect;
+        if (bounds.width <= 0f || bounds.height <= 0f)
+            return false;
+        Vector2 viewport = new(
+            Mathf.InverseLerp(bounds.xMin, bounds.xMax, local.x),
+            Mathf.InverseLerp(bounds.yMin, bounds.yMax, local.y));
+        Ray ray = worldCamera.ViewportPointToRay(
+            new Vector3(viewport.x, viewport.y, 0f));
+        Plane plane = new(Vector3.up, worldActorRoot.position);
+        if (!plane.Raycast(ray, out float distance))
+            return false;
+
+        Vector3 localWorld = worldActorRoot.InverseTransformPoint(
+            ray.GetPoint(distance));
+        ground = ToGround(localWorld);
+        return true;
+    }
+
+    private bool TryHitWorldAlly(
+        Vector2 screenPosition,
+        out IBattleCharacter ally)
+    {
+        ally = null;
+        float nearest = float.PositiveInfinity;
+        foreach (KeyValuePair<IBattleCharacter, WorldActorView> entry in
+                 _worldAllyActors)
+        {
+            if (TryGetActorPointerDistance(
+                    entry.Value,
+                    screenPosition,
+                    out float distance) && distance < nearest)
+            {
+                nearest = distance;
+                ally = entry.Key;
+            }
+        }
+        return ally != null;
+    }
+
+    private bool TryHitWorldEnemy(
+        Vector2 screenPosition,
+        out EnemyRuntime enemy)
+    {
+        enemy = null;
+        float nearest = float.PositiveInfinity;
+        foreach (KeyValuePair<EnemyRuntime, WorldActorView> entry in
+                 _worldEnemyActors)
+        {
+            if (TryGetActorPointerDistance(
+                    entry.Value,
+                    screenPosition,
+                    out float distance) && distance < nearest)
+            {
+                nearest = distance;
+                enemy = entry.Key;
+            }
+        }
+        return enemy != null;
+    }
+
+    private bool TryGetActorPointerDistance(
+        WorldActorView view,
+        Vector2 screenPosition,
+        out float distance)
+    {
+        distance = float.PositiveInfinity;
+        if (view == null || view.GameObject == null ||
+            worldInputView == null || worldCamera == null ||
+            worldInputView.transform is not RectTransform rect)
+        {
+            return false;
+        }
+
+        Camera uiCamera = ResolveUiCamera(rect);
+        if (!RectTransformUtility.ScreenPointToLocalPointInRectangle(
+                rect,
+                screenPosition,
+                uiCamera,
+                out Vector2 pointerLocal))
+        {
+            return false;
+        }
+
+        Vector3 world = view.InteractionWorldPosition;
+        Vector3 viewport = worldCamera.WorldToViewportPoint(world);
+        if (viewport.z <= 0f)
+            return false;
+        Rect bounds = rect.rect;
+        Vector2 actorLocal = new(
+            Mathf.Lerp(bounds.xMin, bounds.xMax, viewport.x),
+            Mathf.Lerp(bounds.yMin, bounds.yMax, viewport.y));
+        distance = Vector2.Distance(pointerLocal, actorLocal);
+        return distance <= Mathf.Max(1f, worldActorHitRadiusPixels);
+    }
+
+    private static Camera ResolveUiCamera(RectTransform rect)
+    {
+        Canvas canvas = rect != null
+            ? rect.GetComponentInParent<Canvas>()
+            : null;
+        return canvas != null &&
+               canvas.renderMode != RenderMode.ScreenSpaceOverlay
+            ? canvas.worldCamera
+            : null;
+    }
+
+    private Vector2 GetWorldAllyPosition(IBattleCharacter character)
+    {
+        return character != null &&
+               _worldAllyMovement.TryGetValue(
+                   character,
+                   out AllyMovementState movement)
+            ? movement.Position
+            : Vector2.zero;
+    }
+
+    private float GetWorldWallRadius()
+    {
+        return _arenaSetup.UsesBattleCore
+            ? Mathf.Max(0.5f, _arenaSetup.WorldRadius)
+            : worldSpawnRadius *
+              (_arenaSetup.WallRadiusNormalized /
+               Mathf.Max(
+                   _arenaSetup.WallRadiusNormalized + 0.01f,
+                   _arenaSetup.SpawnRadiusNormalized));
+    }
+
+    private float GetWorldSpawnRadius()
+    {
+        if (!_arenaSetup.UsesBattleCore)
+            return worldSpawnRadius;
+
+        return GetWorldWallRadius() *
+               (_arenaSetup.SpawnRadiusNormalized /
+                Mathf.Max(
+                    0.01f,
+                    _arenaSetup.WallRadiusNormalized));
+    }
+
+    private float GetWorldEnemyStopRadius(
+        DungeonHudPresentationSO presentation)
+    {
+        float arenaRadius = GetWorldWallRadius();
+        if (presentation == null)
+            return arenaRadius;
+
+        float gaugeOuterRadius = arenaRadius +
+                                 presentation.BattleCoreRingGap +
+                                 presentation.BattleCoreRingThickness * 0.5f;
+        return gaugeOuterRadius +
+               presentation.WorldEnemyArenaRingClearance;
+    }
+
+    private static Vector2 ToGround(Vector3 value)
+    {
+        return new Vector2(value.x, value.z);
+    }
+
     private void HandleEnemyClicked(EnemyRuntime enemy)
     {
         if (enemy == null)
@@ -3569,5 +5410,56 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
             return;
 
         EnemyClicked?.Invoke(enemy);
+    }
+}
+
+public sealed class BattleAreaPreviewView
+{
+    private readonly GameObject _root;
+    private readonly DungeonBattleAreaPreviewPrefabView _view;
+
+    public BattleAreaPreviewView(GameObject prefab, Transform parent)
+    {
+        _root = prefab != null && parent != null
+            ? UnityEngine.Object.Instantiate(prefab, parent)
+            : null;
+        if (_root != null)
+            SetLayerRecursively(_root, parent.gameObject.layer);
+        _view = _root != null
+            ? _root.GetComponent<DungeonBattleAreaPreviewPrefabView>()
+            : null;
+        if (_view == null || !_view.HasRequiredReferences)
+        {
+            Debug.LogError(
+                "Dungeon battle area preview prefab references are incomplete.",
+                _root);
+        }
+        _view?.Hide();
+    }
+
+    private static void SetLayerRecursively(GameObject target, int layer)
+    {
+        target.layer = layer;
+        foreach (Transform child in target.transform)
+            SetLayerRecursively(child.gameObject, layer);
+    }
+
+    public void Show(
+        Vector2 origin,
+        Vector2 direction,
+        BattleAreaDefinition definition)
+    {
+        _view?.Show(origin, direction, definition);
+    }
+
+    public void Hide()
+    {
+        _view?.Hide();
+    }
+
+    public void Dispose()
+    {
+        if (_root != null)
+            UnityEngine.Object.Destroy(_root);
     }
 }

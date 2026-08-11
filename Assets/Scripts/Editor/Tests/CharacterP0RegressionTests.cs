@@ -56,6 +56,105 @@ public sealed class CharacterP0RegressionTests
     }
 
     [Test]
+    public void BattleAreaGeometry_CircleUsesRadiusBoundary()
+    {
+        Assert.That(
+            BattleAreaGeometry.Contains(
+                new Vector2(1.5f, 0f),
+                Vector2.zero,
+                Vector2.up,
+                CharacterAreaShapeType.Circle,
+                1.5f,
+                60f),
+            Is.True);
+        Assert.That(
+            BattleAreaGeometry.Contains(
+                new Vector2(1.51f, 0f),
+                Vector2.zero,
+                Vector2.up,
+                CharacterAreaShapeType.Circle,
+                1.5f,
+                60f),
+            Is.False);
+    }
+
+    [Test]
+    public void BattleAreaGeometry_SemicircleExcludesRearHalf()
+    {
+        Assert.That(
+            BattleAreaGeometry.Contains(
+                Vector2.up,
+                Vector2.zero,
+                Vector2.up,
+                CharacterAreaShapeType.Semicircle,
+                2f,
+                60f),
+            Is.True);
+        Assert.That(
+            BattleAreaGeometry.Contains(
+                Vector2.down,
+                Vector2.zero,
+                Vector2.up,
+                CharacterAreaShapeType.Semicircle,
+                2f,
+                60f),
+            Is.False);
+    }
+
+    [Test]
+    public void BattleAreaGeometry_ConeUsesConfiguredFullAngle()
+    {
+        Vector2 inside = Quaternion.Euler(0f, 0f, -29f) * Vector2.up;
+        Vector2 outside = Quaternion.Euler(0f, 0f, -31f) * Vector2.up;
+
+        Assert.That(
+            BattleAreaGeometry.Contains(
+                inside,
+                Vector2.zero,
+                Vector2.up,
+                CharacterAreaShapeType.Cone,
+                2f,
+                60f),
+            Is.True);
+        Assert.That(
+            BattleAreaGeometry.Contains(
+                outside,
+                Vector2.zero,
+                Vector2.up,
+                CharacterAreaShapeType.Cone,
+                2f,
+                60f),
+            Is.False);
+    }
+
+    [Test]
+    public void BattleAreaGeometry_ClampKeepsDestinationInsideWall()
+    {
+        Vector2 clamped = BattleAreaGeometry.ClampToRadius(
+            new Vector2(4f, 0f),
+            Vector2.zero,
+            2f);
+
+        Assert.That(clamped, Is.EqualTo(new Vector2(2f, 0f)));
+    }
+
+    [Test]
+    public void BattleArenaRingMeshBuilder_CreatesClosedAnnularPrism()
+    {
+        Mesh mesh = new();
+        _createdObjects.Add(mesh);
+
+        BattleArenaRingMeshBuilder.Populate(mesh, 2.14f, 2.34f, 0.08f, 96);
+
+        Assert.That(mesh.vertexCount, Is.EqualTo(776));
+        Assert.That(mesh.triangles.Length, Is.EqualTo(2304));
+        Assert.That(mesh.bounds.size.x, Is.EqualTo(4.68f).Within(0.001f));
+        Assert.That(mesh.bounds.size.y, Is.EqualTo(0.08f).Within(0.001f));
+        Assert.That(mesh.bounds.size.z, Is.EqualTo(4.68f).Within(0.001f));
+        Assert.That(mesh.bounds.center.y, Is.EqualTo(0.04f).Within(0.001f));
+    }
+
+    [Test]
     public void CharacterEditorStandingPreview_FitsOneByTwoWithoutStretching()
     {
         Rect fitted = CharacterEditorWindow.CalculateAspectFitRect(
@@ -79,6 +178,41 @@ public sealed class CharacterP0RegressionTests
         Assert.That(fitted.y, Is.EqualTo(0f).Within(0.001f));
         Assert.That(fitted.width, Is.EqualTo(120f).Within(0.001f));
         Assert.That(fitted.height, Is.EqualTo(120f).Within(0.001f));
+    }
+
+    [Test]
+    public void StandingPortrait_CoverLayoutPreservesOneByTwoArtwork()
+    {
+        Vector2 rendered = CharacterStandingPortraitView.CalculateRenderedSize(
+            new Vector2(152f, 140f),
+            new Vector2(1024f, 2048f),
+            1f);
+
+        Assert.That(rendered.x, Is.EqualTo(152f).Within(0.001f));
+        Assert.That(rendered.y, Is.EqualTo(304f).Within(0.001f));
+    }
+
+    [Test]
+    public void StandingPortrait_DefaultFocusMovesTallArtworkIntoMask()
+    {
+        Vector2 viewport = new(152f, 140f);
+        Vector2 rendered = new(152f, 304f);
+        Vector2 anchored = CharacterStandingPortraitView
+            .CalculateAnchoredPosition(
+                viewport,
+                rendered,
+                CharacterStandingFraming.DefaultFocus);
+        Rect visible = CharacterStandingPortraitView.CalculateVisibleSourceRect(
+            viewport,
+            rendered,
+            anchored);
+
+        Assert.That(anchored.x, Is.EqualTo(0f).Within(0.001f));
+        Assert.That(anchored.y, Is.EqualTo(-30.4f).Within(0.001f));
+        Assert.That(visible.x, Is.EqualTo(0f).Within(0.001f));
+        Assert.That(visible.width, Is.EqualTo(1f).Within(0.001f));
+        Assert.That(visible.height, Is.EqualTo(140f / 304f).Within(0.001f));
+        Assert.That(visible.y, Is.EqualTo(0.3697368f).Within(0.001f));
     }
 
     [Test]

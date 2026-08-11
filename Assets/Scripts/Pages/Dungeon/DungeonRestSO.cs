@@ -64,7 +64,7 @@ public sealed class DungeonRestTargetEffectDefinition
 }
 
 [Serializable]
-public sealed class DungeonRestActionDefinition
+public sealed class DungeonRestActionDefinition : IRunAbilityDefinition
 {
     [BoxGroup("Action", Order = 0)]
     [LabelWidth(120)]
@@ -82,6 +82,10 @@ public sealed class DungeonRestActionDefinition
 
     public EDungeonRestActionType ActionType => actionType;
     public DungeonRoomChoiceDefinition Choice => choice;
+    public string AbilityId => Choice?.AbilityId ?? string.Empty;
+    public AbilityExecutionDomain ExecutionDomain =>
+        AbilityExecutionDomain.Run;
+    public int AbilitySchemaVersion => 1;
     public int Amount => Mathf.Max(1, amount);
     public bool AllowRevive => allowRevive;
     public bool RequiresTarget =>
@@ -177,7 +181,7 @@ public sealed class DungeonRestActionDefinition
 }
 
 [Serializable]
-public sealed class CharacterRestSkillDefinition
+public sealed class CharacterRestSkillDefinition : IRunAbilityDefinition
 {
     [SerializeField] private bool enabled;
     [SerializeField] private string skillId = "rest_skill";
@@ -199,6 +203,10 @@ public sealed class CharacterRestSkillDefinition
     public string SkillId => string.IsNullOrWhiteSpace(skillId)
         ? "rest_skill"
         : skillId.Trim();
+    public string AbilityId => SkillId;
+    public AbilityExecutionDomain ExecutionDomain =>
+        AbilityExecutionDomain.Run;
+    public int AbilitySchemaVersion => 1;
     public string Title => ResolveText(titleLocalizationKey, fallbackTitle);
     public string Description => ResolveText(
         descriptionLocalizationKey,

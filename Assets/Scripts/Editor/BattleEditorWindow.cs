@@ -174,6 +174,13 @@ public sealed class BattleEditorWindow : EditorWindow
         DrawProgressBalance();
         DrawSection("Field", "fieldSize", "maximumStackSize");
         DrawSection(
+            "Arena",
+            "arenaMode",
+            "coreMaximumHealth",
+            "circularLaneCount",
+            "wallRadiusNormalized",
+            "spawnRadiusNormalized");
+        DrawSection(
             "Enemy Spawn",
             "totalEnemyCount",
             "minimumEnemyHealth",
@@ -195,6 +202,12 @@ public sealed class BattleEditorWindow : EditorWindow
 
         DrawSection("Time Limit", "timeLimit");
         DrawSection("Presentation Override", "bgmOverride");
+        DrawSection(
+            "2.5D Environment",
+            "environmentBackdrop",
+            "environmentBackdropTint",
+            "environmentClearColor",
+            "environmentCameraFov");
         bool changed = _serializedBattle.ApplyModifiedProperties();
         if (changed)
             EditorUtility.SetDirty(_battle);
@@ -669,6 +682,13 @@ public sealed class BattleEditorWindow : EditorWindow
             spawnInterval;
         _serializedBattle.FindProperty("maximumStackSize").intValue =
             maximumStackSize;
+        SerializedProperty coreHealth =
+            _serializedBattle.FindProperty("coreMaximumHealth");
+        if (coreHealth != null)
+        {
+            coreHealth.intValue = Mathf.RoundToInt(
+                Mathf.Lerp(100f, 180f, progress));
+        }
         _serializedBattle.FindProperty("compositionMode").enumValueIndex =
             (int)EEnemyCompositionMode.FixedCount;
 

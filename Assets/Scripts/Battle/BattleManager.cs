@@ -31,6 +31,7 @@ public sealed class BattleManager : MonoBehaviour, IActiveSkillResource
 
     private GameManager _manager;
     private IBattleBoard _board;
+    private IBattleObjective _objective;
     private int _maximumEnemyCount;
     private int _spawnedEnemyCount;
     private float _spawnInterval;
@@ -55,6 +56,10 @@ public sealed class BattleManager : MonoBehaviour, IActiveSkillResource
     public EBattleState State { get; private set; } = EBattleState.Uninitialized;
     public bool IsInitialized => _manager != null;
     public bool HasSession => _board != null;
+    public bool HasBattleObjective => _objective?.IsActive == true;
+    public int BattleObjectiveHealth => _objective?.CurrentHealth ?? 0;
+    public int BattleObjectiveMaximumHealth =>
+        _objective?.MaximumHealth ?? 0;
     public bool IsPaused => _isPaused;
     public bool IsManualTargetSelectionPending =>
         _manualTargetSelectionPending;
@@ -91,6 +96,7 @@ public sealed class BattleManager : MonoBehaviour, IActiveSkillResource
     public event Action<EBattleResult> BattleEnded;
     public event Action<int> ActiveSkillResourceChanged;
     public event Action ActiveSkillRechargeChanged;
+    public event Action<int, int> BattleObjectiveHealthChanged;
     event Action<int> IActiveSkillResource.Changed
     {
         add => ActiveSkillResourceChanged += value;
@@ -116,6 +122,8 @@ public sealed class BattleManager : MonoBehaviour, IActiveSkillResource
         if (_manualTargetSelectionPending)
             return;
         _board.TickEnemyAbilities(deltaTime, _characters);
+        if (State != EBattleState.Running)
+            return;
         if (CompleteIfPartyDefeated())
             return;
         if (_manualTargetSelectionPending)
@@ -168,6 +176,12 @@ public sealed class BattleManager : MonoBehaviour, IActiveSkillResource
         ReleaseSession();
         _board = board;
         _board.OccupancyChanged += HandleBoardOccupancyChanged;
+        _objective = (board as IBattleObjectiveProvider)?.Objective;
+        if (_objective != null)
+        {
+            _objective.HealthChanged += HandleObjectiveHealthChanged;
+            _objective.Destroyed += HandleObjectiveDestroyed;
+        }
         _manualTargetSelectionService =
             board as IBattleManualTargetSelectionService;
         if (_manualTargetSelectionService != null)
@@ -214,6 +228,12 @@ public sealed class BattleManager : MonoBehaviour, IActiveSkillResource
         _boardFull = false;
         SetActiveSkillResource(_maximumActiveSkillResource);
         SetActiveSkillRechargeRemaining(0f);
+        if (_objective?.IsActive == true)
+        {
+            BattleObjectiveHealthChanged?.Invoke(
+                _objective.CurrentHealth,
+                _objective.MaximumHealth);
+        }
 
         SetState(EBattleState.Running);
         ApplyBattleTimeScale();
@@ -378,6 +398,7 @@ public sealed class BattleManager : MonoBehaviour, IActiveSkillResource
         BattleEnded = null;
         ActiveSkillResourceChanged = null;
         ActiveSkillRechargeChanged = null;
+        BattleObjectiveHealthChanged = null;
     }
 
     private void OnDestroy()
@@ -520,6 +541,9 @@ public sealed class BattleManager : MonoBehaviour, IActiveSkillResource
 
     private bool CompleteIfPartyDefeated()
     {
+        if (_objective?.IsActive == true)
+            return false;
+
         if (State != EBattleState.Running || _characters.Count == 0)
             return false;
 
@@ -575,6 +599,12 @@ public sealed class BattleManager : MonoBehaviour, IActiveSkillResource
                 HandleManualTargetSelectionPendingChanged;
             _manualTargetSelectionService.CancelManualTargetSelection();
         }
+        if (_objective != null)
+        {
+            _objective.HealthChanged -= HandleObjectiveHealthChanged;
+            _objective.Destroyed -= HandleObjectiveDestroyed;
+        }
+        _objective = null;
         _manualTargetSelectionService = null;
         _manualTargetSelectionPending = false;
         foreach (IBattleCharacter character in _characters)
@@ -641,6 +671,17 @@ public sealed class BattleManager : MonoBehaviour, IActiveSkillResource
 
         SpawnTimerChanged?.Invoke();
         CheckForCompletion();
+    }
+
+    private void HandleObjectiveHealthChanged(int current, int maximum)
+    {
+        BattleObjectiveHealthChanged?.Invoke(current, maximum);
+    }
+
+    private void HandleObjectiveDestroyed()
+    {
+        if (State == EBattleState.Running)
+            CompleteBattle(EBattleResult.Defeat);
     }
 
     private void RestoreDefaultTimeScale()

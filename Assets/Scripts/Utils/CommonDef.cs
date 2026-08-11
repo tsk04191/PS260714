@@ -13,6 +13,9 @@ public static class CommonDef
 
     public const string CharacterRoleCatalogResourcePath =
         "Presentation/CharacterRoleCatalog";
+
+    public const string DungeonHudPresentationResourcePath =
+        "Presentation/DungeonHudPresentation";
 }
 
 public static class BattleStatusColors

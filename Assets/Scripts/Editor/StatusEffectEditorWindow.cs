@@ -654,8 +654,9 @@ public sealed class StatusEffectEditorWindow : EditorWindow
                         "발생 횟수 적용",
                         "누적 틱처럼 한 이벤트에 여러 번 발생한 횟수를 " +
                         "공통 효과 수치에 곱합니다."));
-                DrawTriggerBlockEffects(
-                    block.FindPropertyRelative("effects"));
+                BattleAbilityEditorGUI.DrawEffectList(
+                    block.FindPropertyRelative("effects"),
+                    _selected);
             }
             EditorGUILayout.EndVertical();
 
@@ -1426,7 +1427,7 @@ public sealed class StatusEffectEditorWindow : EditorWindow
             true;
         SerializedProperty effects = block.FindPropertyRelative("effects");
         effects.ClearArray();
-        AddBattleEffect(effects);
+        BattleAbilityEditorGUI.AddDefaultEffect(effects);
     }
 
     private static void AddBattleEffect(SerializedProperty effects)

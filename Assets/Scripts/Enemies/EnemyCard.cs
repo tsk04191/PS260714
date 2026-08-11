@@ -16,6 +16,9 @@ public sealed class EnemyCard : MonoBehaviour, IPointerClickHandler
     private RectTransform _rectTransform;
     private Image _tileFaceImage;
     private Color _defaultFaceColor;
+    private Color _hitFlashColor;
+    private float _hitFlashDuration;
+    private float _hitFlashRemaining;
 
     public EnemyRuntime Runtime { get; private set; }
     public event Action<EnemyRuntime> Clicked;
@@ -38,6 +41,18 @@ public sealed class EnemyCard : MonoBehaviour, IPointerClickHandler
     {
         LocalizationService.LocaleChanged -= HandleLocaleChanged;
         LocalizationService.FontChanged -= HandleFontChanged;
+        ClearHitFlash();
+    }
+
+    private void Update()
+    {
+        if (_hitFlashRemaining <= 0f)
+            return;
+
+        _hitFlashRemaining = Mathf.Max(
+            0f,
+            _hitFlashRemaining - Time.unscaledDeltaTime);
+        RefreshFaceColor();
     }
 
     public void Bind(EnemyRuntime runtime)
@@ -81,7 +96,23 @@ public sealed class EnemyCard : MonoBehaviour, IPointerClickHandler
 
         if (Runtime.Definition.BoardSprite != null)
             _tileFaceImage.sprite = Runtime.Definition.BoardSprite;
-        _tileFaceImage.color = _defaultFaceColor;
+        RefreshFaceColor();
+    }
+
+    internal void ShowHitFlash(Color color, float duration)
+    {
+        CacheFaceImage();
+        if (_tileFaceImage == null)
+            return;
+
+        _hitFlashColor = new Color(
+            Mathf.Clamp01(color.r),
+            Mathf.Clamp01(color.g),
+            Mathf.Clamp01(color.b),
+            _defaultFaceColor.a * Mathf.Clamp01(color.a));
+        _hitFlashDuration = Mathf.Max(0.01f, duration);
+        _hitFlashRemaining = _hitFlashDuration;
+        RefreshFaceColor();
     }
 
     public void ApplyLayout(float edge, float sideDepth)
@@ -129,5 +160,34 @@ public sealed class EnemyCard : MonoBehaviour, IPointerClickHandler
             return;
 
         _defaultFaceColor = _tileFaceImage.color;
+    }
+
+    private void RefreshFaceColor()
+    {
+        if (_tileFaceImage == null)
+            return;
+
+        if (_hitFlashRemaining <= 0f)
+        {
+            _tileFaceImage.color = _defaultFaceColor;
+            return;
+        }
+
+        float normalizedRemaining = _hitFlashDuration > 0f
+            ? Mathf.Clamp01(_hitFlashRemaining / _hitFlashDuration)
+            : 0f;
+        float restoreAmount = 1f - normalizedRemaining;
+        _tileFaceImage.color = Color.Lerp(
+            _hitFlashColor,
+            _defaultFaceColor,
+            restoreAmount);
+    }
+
+    private void ClearHitFlash()
+    {
+        _hitFlashDuration = 0f;
+        _hitFlashRemaining = 0f;
+        if (_tileFaceImage != null)
+            _tileFaceImage.color = _defaultFaceColor;
     }
 }

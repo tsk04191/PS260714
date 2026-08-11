@@ -67,12 +67,11 @@ public class DungeonPage : MonoBehaviour, IPage
         EEnemyType.Mechanic,
     };
 
-    [Header("Dungeon Board")]
+    [Header("Dungeon Battle World")]
     [SerializeField, Range(DungeonBoardView.MinimumGridSize, DungeonBoardView.MaximumGridSize)]
     private int initialGridSize = DungeonBoardView.MinimumGridSize;
 
     [SerializeField, Range(1, 20)] private int maximumStackSize = 8;
-    [SerializeField, Min(100f)] private float maximumBoardSize = 760f;
     [SerializeField] private DungeonBoardView board;
 
     [Header("Dungeon Flow")]
@@ -1306,6 +1305,13 @@ public class DungeonPage : MonoBehaviour, IPage
             ? flowController.CurrentStageProgress
             : Mathf.Max(0, battleIndex);
         board.SetDungeonStageProgress(dungeonStageProgress);
+        BattleArenaSetup arena = setup.Arena;
+        if (_session.Definition != null)
+        {
+            arena = arena.WithWorldRadius(
+                _session.Definition.BattleArenaRadius);
+        }
+        board.ConfigureArena(arena, setup.Environment);
         board.Initialize(setup.FieldSize, setup.MaximumStackSize);
         ResetBattleItemCooldowns();
         _battleManager.ConfigureActiveSkillResource(
@@ -1503,7 +1509,13 @@ public class DungeonPage : MonoBehaviour, IPage
                 eliteCount,
                 bossCount),
             enemies,
-            initialEnemyCount);
+            initialEnemyCount,
+            firstBattle != null
+                ? firstBattle.CreateArenaSetup()
+                : BattleArenaSetup.CreateCircular(),
+            firstBattle != null
+                ? firstBattle.CreateEnvironmentSetup()
+                : BattleEnvironmentSetup.Default);
         error = string.Empty;
         return true;
     }
@@ -1584,7 +1596,13 @@ public class DungeonPage : MonoBehaviour, IPage
             TutorialTimeLimit,
             gradeCounts,
             enemies,
-            TutorialInitialEnemyCount);
+            TutorialInitialEnemyCount,
+            firstBattle != null
+                ? firstBattle.CreateArenaSetup()
+                : BattleArenaSetup.CreateCircular(),
+            firstBattle != null
+                ? firstBattle.CreateEnvironmentSetup()
+                : BattleEnvironmentSetup.Default);
         error = string.Empty;
         return true;
     }
@@ -3671,6 +3689,8 @@ public class DungeonPage : MonoBehaviour, IPage
             {
                 instance.ConfigureDefinition(definitions[index]);
             }
+            instance.ConfigureWorldSdPresentation(
+                board != null && board.SupportsWorldPresentation);
         }
 
         playerCharacters = instances;
@@ -3714,37 +3734,9 @@ public class DungeonPage : MonoBehaviour, IPage
 
     private void RefreshBoardSize()
     {
-        if (board == null || transform is not RectTransform pageRect)
+        if (board == null)
             return;
-
-        RectTransform boardRect = board.transform as RectTransform;
-        Bounds boardBounds = RectTransformUtility
-            .CalculateRelativeRectTransformBounds(pageRect, boardRect);
-        float topInset = Mathf.Max(
-            0f,
-            pageRect.rect.yMax - boardBounds.max.y);
-        float bottomInset = battleTab != null
-            ? battleTab.BottomReservedHeight
-            : 0f;
-        float availableWidth = pageRect.rect.width;
-        float availableHeight = Mathf.Max(
-            1f,
-            pageRect.rect.height - topInset - bottomInset);
-        float boardSize = Mathf.Min(maximumBoardSize, availableWidth, availableHeight);
-
-        if (boardSize > 0f)
-        {
-            boardRect.anchorMin = new Vector2(
-                0.5f,
-                boardRect.anchorMin.y);
-            boardRect.anchorMax = new Vector2(
-                0.5f,
-                boardRect.anchorMax.y);
-            boardRect.anchoredPosition = new Vector2(
-                0f,
-                boardRect.anchoredPosition.y);
-            board.SetPixelSize(boardSize);
-        }
+        board.ApplyResponsiveViewport();
     }
 }
 

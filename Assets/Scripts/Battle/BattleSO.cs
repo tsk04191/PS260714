@@ -71,6 +71,20 @@ public sealed class BattleSO : ScriptableObject
     private int fieldSize = 4;
     [SerializeField, Range(1, 20)] private int maximumStackSize = 8;
 
+    [Header("Arena")]
+    [SerializeField] private BattleArenaMode arenaMode =
+        BattleArenaMode.CircularDefense;
+    [SerializeField, Min(1)] private int coreMaximumHealth =
+        BattleArenaSetup.DefaultCoreMaximumHealth;
+    [SerializeField, Range(4, 64)] private int circularLaneCount =
+        BattleArenaSetup.DefaultLaneCount;
+    [SerializeField, Range(0.12f, 0.4f)]
+    private float wallRadiusNormalized =
+        BattleArenaSetup.DefaultWallRadiusNormalized;
+    [SerializeField, Range(0.17f, 0.5f)]
+    private float spawnRadiusNormalized =
+        BattleArenaSetup.DefaultSpawnRadiusNormalized;
+
     [Header("Enemy Spawn")]
     [SerializeField, Min(1)] private int totalEnemyCount = 20;
     [SerializeField, Min(1)] private int minimumEnemyHealth = 20;
@@ -97,12 +111,34 @@ public sealed class BattleSO : ScriptableObject
         "default Battle Clip is used.")]
     private AudioClip bgmOverride;
 
+    [Header("2.5D Environment")]
+    [SerializeField, Tooltip(
+        "Optional 1920x1080 background art rendered behind the authored " +
+        "3D arena. Leave empty to use only the Scene environment.")]
+    private Sprite environmentBackdrop;
+    [SerializeField] private Color environmentBackdropTint = Color.white;
+    [SerializeField] private Color environmentClearColor =
+        new(0.018f, 0.014f, 0.01f, 1f);
+    [SerializeField, Range(25f, 65f)] private float environmentCameraFov =
+        BattleEnvironmentSetup.DefaultCameraFieldOfView;
+
     public string BattleId => battleId;
     public string DisplayName => displayName;
     public int DifficultyPercent => difficultyPercent;
     public int BalanceSeed => balanceSeed;
     public int FieldSize => fieldSize;
     public int MaximumStackSize => maximumStackSize;
+    public BattleArenaMode ArenaMode => arenaMode;
+    public int CoreMaximumHealth => Mathf.Max(1, coreMaximumHealth);
+    public int CircularLaneCount => Mathf.Clamp(circularLaneCount, 4, 64);
+    public float WallRadiusNormalized => Mathf.Clamp(
+        wallRadiusNormalized,
+        0.12f,
+        0.4f);
+    public float SpawnRadiusNormalized => Mathf.Clamp(
+        spawnRadiusNormalized,
+        WallRadiusNormalized + 0.05f,
+        0.5f);
     public int TotalEnemyCount => totalEnemyCount;
     public int MinimumEnemyHealth => minimumEnemyHealth;
     public int RandomHealthBonus => randomHealthBonus;
@@ -110,6 +146,13 @@ public sealed class BattleSO : ScriptableObject
     public EEnemyCompositionMode CompositionMode => compositionMode;
     public float TimeLimit => TimePrecision.Normalize(timeLimit, 1f);
     public AudioClip BgmOverride => bgmOverride;
+    public Sprite EnvironmentBackdrop => environmentBackdrop;
+    public Color EnvironmentBackdropTint => environmentBackdropTint;
+    public Color EnvironmentClearColor => environmentClearColor;
+    public float EnvironmentCameraFov => Mathf.Clamp(
+        environmentCameraFov,
+        25f,
+        65f);
 
     public IReadOnlyList<EnemySO> GetAllEnemyDefinitions()
     {
@@ -142,6 +185,20 @@ public sealed class BattleSO : ScriptableObject
             DungeonBoardView.MinimumGridSize,
             DungeonBoardView.MaximumGridSize);
         maximumStackSize = Mathf.Clamp(maximumStackSize, 1, 20);
+        coreMaximumHealth = Mathf.Max(1, coreMaximumHealth);
+        circularLaneCount = Mathf.Clamp(circularLaneCount, 4, 64);
+        wallRadiusNormalized = Mathf.Clamp(
+            wallRadiusNormalized,
+            0.12f,
+            0.4f);
+        spawnRadiusNormalized = Mathf.Clamp(
+            spawnRadiusNormalized,
+            wallRadiusNormalized + 0.05f,
+            0.5f);
+        environmentCameraFov = Mathf.Clamp(
+            environmentCameraFov,
+            25f,
+            65f);
         totalEnemyCount = Mathf.Max(1, totalEnemyCount);
         minimumEnemyHealth = Mathf.Max(1, minimumEnemyHealth);
         randomHealthBonus = Mathf.Max(0, randomHealthBonus);
@@ -187,6 +244,26 @@ public sealed class BattleSO : ScriptableObject
             resolvedCounts[3]);
         error = string.Empty;
         return true;
+    }
+
+    public BattleArenaSetup CreateArenaSetup()
+    {
+        return arenaMode == BattleArenaMode.CircularDefense
+            ? BattleArenaSetup.CreateCircular(
+                coreMaximumHealth,
+                circularLaneCount,
+                wallRadiusNormalized,
+                spawnRadiusNormalized)
+            : BattleArenaSetup.Legacy;
+    }
+
+    public BattleEnvironmentSetup CreateEnvironmentSetup()
+    {
+        return new BattleEnvironmentSetup(
+            environmentBackdrop,
+            environmentBackdropTint,
+            environmentClearColor,
+            environmentCameraFov);
     }
 
     public bool TryValidate(out string error)
@@ -334,7 +411,10 @@ public sealed class BattleSO : ScriptableObject
             spawnInterval,
             timeLimit,
             counts,
-            enemies);
+            enemies,
+            0,
+            CreateArenaSetup(),
+            CreateEnvironmentSetup());
         return true;
     }
 

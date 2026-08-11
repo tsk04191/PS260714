@@ -24,6 +24,9 @@ MonoBehaviour:
   damagedSdSprite: {fileID: 21300000, guid: 76dfce9fcae7f4646a7882b0610df0bb, type: 3}
   skillSdSprite: {fileID: 21300000, guid: f56d6020056e9e1468823cba0c04ef7c, type: 3}
   passiveSdSprite: {fileID: 21300000, guid: fea96127ca1d1554f9a91df1c8606adf, type: 3}
+  dungeonHudStandingFraming:
+    focusNormalized: {x: 0.5, y: 0.6}
+    zoom: 1.1
   nameLocalizationKey: character.calista.name
   descriptionLocalizationKey: character.calista.description
   characterName: '[CALISTA]'

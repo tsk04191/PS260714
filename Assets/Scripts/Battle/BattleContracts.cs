@@ -93,6 +93,37 @@ public static class BattleEffectExecutor
         }
     }
 
+    public static BattleEffectResult ExecuteAbility(
+        BattleEffectContext context,
+        IBattleAbilityDefinition ability,
+        CharacterData sourceData = null,
+        int amountMultiplier = 1,
+        Func<int, IBattleCharacter, bool>
+            inheritedEnemyDamageFallback = null)
+    {
+        if (ability == null || !ability.HasExecutableContent)
+            return default;
+
+        List<IBattleEffectDefinition> effects = new();
+        IEnumerable<IBattleEffectDefinition> authoredEffects =
+            ability.BattleEffects;
+        if (authoredEffects != null)
+        {
+            foreach (IBattleEffectDefinition effect in authoredEffects)
+            {
+                if (effect != null)
+                    effects.Add(effect);
+            }
+        }
+
+        return ExecuteSequence(
+            context,
+            effects,
+            sourceData,
+            amountMultiplier,
+            inheritedEnemyDamageFallback);
+    }
+
     public static BattleEffectResult ExecuteSequence(
         BattleEffectContext context,
         IReadOnlyList<IBattleEffectDefinition> effects,
@@ -1310,6 +1341,8 @@ public sealed class BattleManualTargetSelectionRequest
     public IReadOnlyList<EnemyRuntime> EnemyCandidates { get; }
     public IReadOnlyList<IBattleCharacter> AllyCandidates { get; }
     public bool AllowCancel { get; }
+    public BattleAreaDefinition AreaDefinition { get; }
+    public bool UsesWorldArea => AreaDefinition?.UsesWorldArea == true;
 
     public BattleManualTargetSelectionRequest(
         IBattleCharacter source,
@@ -1318,7 +1351,8 @@ public sealed class BattleManualTargetSelectionRequest
         IReadOnlyList<EnemyRuntime> enemyCandidates,
         IReadOnlyList<IBattleCharacter> allyCandidates,
         bool allowCancel,
-        Action<BattleManualTargetSelectionResult> complete)
+        Action<BattleManualTargetSelectionResult> complete,
+        BattleAreaDefinition areaDefinition = null)
     {
         Source = source;
         Faction = faction;
@@ -1328,6 +1362,7 @@ public sealed class BattleManualTargetSelectionRequest
         AllyCandidates =
             allyCandidates ?? Array.Empty<IBattleCharacter>();
         AllowCancel = allowCancel;
+        AreaDefinition = areaDefinition;
         _complete = complete;
     }
 
@@ -1354,6 +1389,329 @@ public interface IBattleManualTargetSelectionService
     bool TryBeginManualTargetSelection(
         BattleManualTargetSelectionRequest request);
     void CancelManualTargetSelection();
+}
+
+public enum CharacterAreaShapeType
+{
+    LegacyTileOffsets = 0,
+    Circle = 1,
+    Semicircle = 2,
+    Cone = 3
+}
+
+public enum CharacterAreaOriginMode
+{
+    Caster = 0,
+    Cursor = 1
+}
+
+[Serializable]
+public class BattleAreaDefinition
+{
+    [SerializeField]
+    private CharacterAreaShapeType shapeType =
+        CharacterAreaShapeType.LegacyTileOffsets;
+    [SerializeField]
+    private CharacterAreaOriginMode originMode =
+        CharacterAreaOriginMode.Cursor;
+    [SerializeField, Min(0.1f)]
+    private float radius = 1.5f;
+    [SerializeField, Range(1f, 179f)]
+    private float coneAngle = 60f;
+    [SerializeField, Min(0.1f)]
+    private float maxCastDistance = 4.25f;
+
+    public CharacterAreaShapeType ShapeType => shapeType;
+    public CharacterAreaOriginMode OriginMode => originMode;
+    public float Radius => Mathf.Max(0.1f, radius);
+    public float ConeAngle => Mathf.Clamp(coneAngle, 1f, 179f);
+    public float MaxCastDistance => Mathf.Max(0.1f, maxCastDistance);
+    public bool UsesWorldArea =>
+        shapeType != CharacterAreaShapeType.LegacyTileOffsets;
+
+    public void Validate()
+    {
+        radius = Mathf.Max(0.1f, radius);
+        coneAngle = Mathf.Clamp(coneAngle, 1f, 179f);
+        maxCastDistance = Mathf.Max(0.1f, maxCastDistance);
+    }
+}
+
+/// <summary>
+/// Serialized compatibility name for assets and integrations created before
+/// targeting became ability-owner neutral.
+/// </summary>
+[Serializable]
+public sealed class CharacterAreaDefinition : BattleAreaDefinition
+{
+}
+
+public static class BattleAreaGeometry
+{
+    private const float DirectionEpsilon = 0.0001f;
+
+    public static bool Contains(
+        Vector2 point,
+        Vector2 origin,
+        Vector2 direction,
+        CharacterAreaShapeType shapeType,
+        float radius,
+        float coneAngle)
+    {
+        Vector2 offset = point - origin;
+        float appliedRadius = Mathf.Max(0.1f, radius);
+        if (offset.sqrMagnitude > appliedRadius * appliedRadius)
+            return false;
+
+        if (shapeType == CharacterAreaShapeType.Circle)
+            return true;
+
+        Vector2 forward = direction.sqrMagnitude > DirectionEpsilon
+            ? direction.normalized
+            : Vector2.up;
+        if (shapeType == CharacterAreaShapeType.Semicircle)
+            return Vector2.Dot(forward, offset) >= 0f;
+
+        if (shapeType == CharacterAreaShapeType.Cone)
+        {
+            if (offset.sqrMagnitude <= DirectionEpsilon)
+                return true;
+
+            float halfAngle = Mathf.Clamp(coneAngle, 1f, 179f) * 0.5f;
+            return Vector2.Angle(forward, offset) <= halfAngle;
+        }
+
+        return false;
+    }
+
+    public static Vector2 ClampToRadius(
+        Vector2 point,
+        Vector2 center,
+        float radius)
+    {
+        Vector2 offset = point - center;
+        float appliedRadius = Mathf.Max(0f, radius);
+        return offset.sqrMagnitude <= appliedRadius * appliedRadius
+            ? point
+            : center + offset.normalized * appliedRadius;
+    }
+}
+
+public static class BattleArenaRingMeshBuilder
+{
+    private const int MinimumSegments = 3;
+
+    public static void Populate(
+        Mesh mesh,
+        float innerRadius,
+        float outerRadius,
+        float height,
+        int segmentCount = 96)
+    {
+        if (mesh == null)
+            throw new ArgumentNullException(nameof(mesh));
+
+        int segments = Mathf.Max(MinimumSegments, segmentCount);
+        float inner = Mathf.Max(0f, innerRadius);
+        float outer = Mathf.Max(inner + 0.01f, outerRadius);
+        float top = Mathf.Max(0.01f, height);
+        int loopSize = segments + 1;
+        const int surfaceCount = 4;
+        Vector3[] vertices = new Vector3[loopSize * 2 * surfaceCount];
+        Vector3[] normals = new Vector3[vertices.Length];
+        Vector2[] uv = new Vector2[vertices.Length];
+        int[] triangles = new int[segments * 6 * surfaceCount];
+
+        int vertexOffset = 0;
+        int triangleOffset = 0;
+        BuildHorizontalSurface(
+            vertices,
+            normals,
+            uv,
+            triangles,
+            ref vertexOffset,
+            ref triangleOffset,
+            inner,
+            outer,
+            top,
+            segments,
+            true);
+        BuildHorizontalSurface(
+            vertices,
+            normals,
+            uv,
+            triangles,
+            ref vertexOffset,
+            ref triangleOffset,
+            inner,
+            outer,
+            0f,
+            segments,
+            false);
+        BuildVerticalSurface(
+            vertices,
+            normals,
+            uv,
+            triangles,
+            ref vertexOffset,
+            ref triangleOffset,
+            outer,
+            top,
+            segments,
+            false);
+        BuildVerticalSurface(
+            vertices,
+            normals,
+            uv,
+            triangles,
+            ref vertexOffset,
+            ref triangleOffset,
+            inner,
+            top,
+            segments,
+            true);
+
+        mesh.Clear();
+        mesh.name = "Dungeon Arena Ring";
+        mesh.vertices = vertices;
+        mesh.normals = normals;
+        mesh.uv = uv;
+        mesh.triangles = triangles;
+        mesh.RecalculateBounds();
+    }
+
+    private static void BuildHorizontalSurface(
+        Vector3[] vertices,
+        Vector3[] normals,
+        Vector2[] uv,
+        int[] triangles,
+        ref int vertexOffset,
+        ref int triangleOffset,
+        float innerRadius,
+        float outerRadius,
+        float y,
+        int segments,
+        bool facesUp)
+    {
+        int surfaceOffset = vertexOffset;
+        Vector3 normal = facesUp ? Vector3.up : Vector3.down;
+        for (int index = 0; index <= segments; index++)
+        {
+            float normalized = index / (float)segments;
+            float angle = normalized * Mathf.PI * 2f;
+            Vector3 radial = new(Mathf.Cos(angle), 0f, Mathf.Sin(angle));
+            int outerIndex = surfaceOffset + index * 2;
+            vertices[outerIndex] = radial * outerRadius + Vector3.up * y;
+            vertices[outerIndex + 1] =
+                radial * innerRadius + Vector3.up * y;
+            normals[outerIndex] = normal;
+            normals[outerIndex + 1] = normal;
+            uv[outerIndex] = new Vector2(normalized, 1f);
+            uv[outerIndex + 1] = new Vector2(normalized, 0f);
+        }
+
+        for (int index = 0; index < segments; index++)
+        {
+            int outer = surfaceOffset + index * 2;
+            int inner = outer + 1;
+            int nextOuter = outer + 2;
+            int nextInner = outer + 3;
+            if (facesUp)
+            {
+                AddTriangle(triangles, ref triangleOffset, outer, inner, nextInner);
+                AddTriangle(
+                    triangles,
+                    ref triangleOffset,
+                    outer,
+                    nextInner,
+                    nextOuter);
+            }
+            else
+            {
+                AddTriangle(
+                    triangles,
+                    ref triangleOffset,
+                    outer,
+                    nextOuter,
+                    nextInner);
+                AddTriangle(triangles, ref triangleOffset, outer, nextInner, inner);
+            }
+        }
+
+        vertexOffset += (segments + 1) * 2;
+    }
+
+    private static void BuildVerticalSurface(
+        Vector3[] vertices,
+        Vector3[] normals,
+        Vector2[] uv,
+        int[] triangles,
+        ref int vertexOffset,
+        ref int triangleOffset,
+        float radius,
+        float height,
+        int segments,
+        bool facesInward)
+    {
+        int surfaceOffset = vertexOffset;
+        for (int index = 0; index <= segments; index++)
+        {
+            float normalized = index / (float)segments;
+            float angle = normalized * Mathf.PI * 2f;
+            Vector3 radial = new(Mathf.Cos(angle), 0f, Mathf.Sin(angle));
+            Vector3 normal = facesInward ? -radial : radial;
+            int bottomIndex = surfaceOffset + index * 2;
+            vertices[bottomIndex] = radial * radius;
+            vertices[bottomIndex + 1] =
+                radial * radius + Vector3.up * height;
+            normals[bottomIndex] = normal;
+            normals[bottomIndex + 1] = normal;
+            uv[bottomIndex] = new Vector2(normalized, 0f);
+            uv[bottomIndex + 1] = new Vector2(normalized, 1f);
+        }
+
+        for (int index = 0; index < segments; index++)
+        {
+            int bottom = surfaceOffset + index * 2;
+            int top = bottom + 1;
+            int nextBottom = bottom + 2;
+            int nextTop = bottom + 3;
+            if (facesInward)
+            {
+                AddTriangle(
+                    triangles,
+                    ref triangleOffset,
+                    bottom,
+                    nextBottom,
+                    nextTop);
+                AddTriangle(triangles, ref triangleOffset, bottom, nextTop, top);
+            }
+            else
+            {
+                AddTriangle(triangles, ref triangleOffset, bottom, top, nextTop);
+                AddTriangle(
+                    triangles,
+                    ref triangleOffset,
+                    bottom,
+                    nextTop,
+                    nextBottom);
+            }
+        }
+
+        vertexOffset += (segments + 1) * 2;
+    }
+
+    private static void AddTriangle(
+        int[] triangles,
+        ref int offset,
+        int first,
+        int second,
+        int third)
+    {
+        triangles[offset++] = first;
+        triangles[offset++] = second;
+        triangles[offset++] = third;
+    }
 }
 
 public interface IDungeonStageProgressProvider

@@ -68,6 +68,9 @@ public sealed class EnemyRuntime
         }
     }
     public float SpawnIntervalMultiplier => Definition.SpawnIntervalMultiplier;
+    public float ApproachSpeed => Definition.ApproachSpeed;
+    public int CoreAttackDamage => Definition.CoreAttackDamage;
+    public float CoreAttackInterval => Definition.CoreAttackInterval;
     public float AbilityCooldownRemaining
     {
         get

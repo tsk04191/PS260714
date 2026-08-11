@@ -68,6 +68,73 @@ public sealed class EnemyDefinitionValidationTests
     }
 
     [Test]
+    public void MissingBoardSprite_IsReportedAsWarning()
+    {
+        EnemySO definition = CreateEnemy("missing_board_sprite");
+
+        EnemyDefinitionValidationResult result =
+            EnemyDefinitionValidator.Validate(definition);
+
+        Assert.That(result.ErrorCount, Is.Zero);
+        Assert.That(
+            HasCode(result, "enemy.board_sprite_missing"),
+            Is.True);
+    }
+
+    [Test]
+    public void NonSquareBoardSprite_IsRejected()
+    {
+        EnemySO definition = CreateEnemy("non_square_board_sprite");
+        Texture2D texture = new(128, 64);
+        Sprite sprite = Sprite.Create(
+            texture,
+            new Rect(0f, 0f, 128f, 64f),
+            new Vector2(0.5f, 0.5f));
+        _createdObjects.Add(sprite);
+        _createdObjects.Add(texture);
+
+        SerializedObject serialized = new(definition);
+        serialized.FindProperty("boardSprite").objectReferenceValue = sprite;
+        serialized.ApplyModifiedPropertiesWithoutUndo();
+
+        EnemyDefinitionValidationResult result =
+            EnemyDefinitionValidator.Validate(definition);
+
+        Assert.That(
+            HasCode(result, "enemy.board_sprite_not_square"),
+            Is.True);
+        Assert.That(result.ErrorCount, Is.EqualTo(1));
+    }
+
+    [Test]
+    public void SquareBoardSprite_IsAccepted()
+    {
+        EnemySO definition = CreateEnemy("square_board_sprite");
+        Texture2D texture = new(128, 128);
+        Sprite sprite = Sprite.Create(
+            texture,
+            new Rect(0f, 0f, 128f, 128f),
+            new Vector2(0.5f, 0.5f));
+        _createdObjects.Add(sprite);
+        _createdObjects.Add(texture);
+
+        SerializedObject serialized = new(definition);
+        serialized.FindProperty("boardSprite").objectReferenceValue = sprite;
+        serialized.ApplyModifiedPropertiesWithoutUndo();
+
+        EnemyDefinitionValidationResult result =
+            EnemyDefinitionValidator.Validate(definition);
+
+        Assert.That(
+            HasCode(result, "enemy.board_sprite_missing"),
+            Is.False);
+        Assert.That(
+            HasCode(result, "enemy.board_sprite_not_square"),
+            Is.False);
+        Assert.That(result.ErrorCount, Is.Zero);
+    }
+
+    [Test]
     public void DuplicateEnemyId_IsRejected()
     {
         EnemySO first = CreateEnemy("duplicate_enemy");
@@ -863,5 +930,186 @@ public sealed class EnemyDefinitionValidationTests
         return string.Join(
             Environment.NewLine,
             result.Diagnostics);
+    }
+}
+
+public sealed class AbilityDefinitionContractTests
+{
+    [Test]
+    public void CharacterSkill_ProjectsLegacyStorageThroughCommonContract()
+    {
+        CharacterSkillDefinition skill = new();
+        SetField(skill, "actionId", "skill.contract_test");
+        SetField(
+            skill,
+            "sections",
+            new List<CharacterSkillSectionType>
+            {
+                CharacterSkillSectionType.Subject,
+                CharacterSkillSectionType.Ability,
+            });
+        SetField(skill, "subject", CharacterAttackSubject.Manual);
+        SetField(
+            skill,
+            "effects",
+            new List<CharacterEffectDefinition>
+            {
+                new(),
+            });
+
+        CharacterAreaDefinition area = new();
+        SetField(area, "shapeType", CharacterAreaShapeType.Circle);
+        SetField(area, "originMode", CharacterAreaOriginMode.Cursor);
+        SetField(skill, "areaDefinition", area);
+        skill.Validate();
+
+        IBattleAbilityDefinition ability = skill;
+        Assert.That(ability.AbilityId, Is.EqualTo("skill.contract_test"));
+        Assert.That(
+            ability.ExecutionDomain,
+            Is.EqualTo(AbilityExecutionDomain.Battle));
+        Assert.That(ability.AbilitySchemaVersion, Is.EqualTo(1));
+        Assert.That(ability.UsesLegacyEffectStorage, Is.False);
+        Assert.That(
+            ability.Targeting.SelectionMode,
+            Is.EqualTo(BattleAbilitySelectionMode.Manual));
+        Assert.That(ability.Targeting.UsesWorldArea, Is.True);
+        Assert.That(
+            AbilityDefinitionValidator.TryValidate(ability, out string error),
+            Is.True,
+            error);
+    }
+
+    [Test]
+    public void EnemyItemAndStatus_ExposeTheSameBattleAbilityContract()
+    {
+        CharacterEffectDefinition effect = new();
+
+        EnemyAbilityOperationDefinition operation = new();
+        SetField(
+            operation,
+            "effects",
+            new List<CharacterEffectDefinition> { effect });
+        EnemyAbilityDefinition enemyAbility = new();
+        SetField(enemyAbility, "abilityId", "enemy.contract_test");
+        SetField(
+            enemyAbility,
+            "operations",
+            new List<EnemyAbilityOperationDefinition> { operation });
+        enemyAbility.Validate();
+
+        BattleItemSO item = ScriptableObject.CreateInstance<BattleItemSO>();
+        StatusEffectSO status = ScriptableObject.CreateInstance<StatusEffectSO>();
+        try
+        {
+            SetField(item, "itemId", "item.contract_test");
+            SetField(
+                item,
+                "abilityEffects",
+                new List<CharacterEffectDefinition> { new() });
+            status.RegenerateStatusId();
+            StatusEffectTriggerBlockDefinition triggerBlock = new();
+            SetField(
+                triggerBlock,
+                "effects",
+                new List<CharacterEffectDefinition> { new() });
+            SetField(
+                status,
+                "triggerBlocks",
+                new List<StatusEffectTriggerBlockDefinition>
+                {
+                    triggerBlock,
+                });
+            status.ValidateDefinition();
+
+            AssertCommonAbility(enemyAbility, BattleEffectOriginKind.EnemyAbility);
+            AssertCommonAbility(item, BattleEffectOriginKind.BattleItem);
+            AssertCommonAbility(status, BattleEffectOriginKind.StatusEffect);
+        }
+        finally
+        {
+            UnityEngine.Object.DestroyImmediate(item);
+            UnityEngine.Object.DestroyImmediate(status);
+        }
+    }
+
+    [Test]
+    public void RunActionsRemainSeparatedAndEnemyCoreAttackUsesLegacyAdapter()
+    {
+        IRunAbilityDefinition runAction = new DungeonRoomChoiceDefinition();
+        Assert.That(
+            runAction.ExecutionDomain,
+            Is.EqualTo(AbilityExecutionDomain.Run));
+        Assert.That(
+            AbilityDefinitionValidator.TryValidate(runAction, out string runError),
+            Is.True,
+            runError);
+
+        EnemySO enemy = ScriptableObject.CreateInstance<EnemySO>();
+        try
+        {
+            enemy.RegenerateEnemyId();
+            IBattleAbilityDefinition coreAttack = enemy.CoreAttackAbility;
+            List<IBattleAbilityDefinition> discovered = new(
+                enemy.EnumerateBattleAbilities());
+            Assert.That(discovered, Has.Count.EqualTo(1));
+            Assert.That(
+                discovered[0].AbilityId,
+                Is.EqualTo(coreAttack.AbilityId));
+            Assert.That(
+                AbilityDefinitionValidator.TryValidateProvider(
+                    enemy,
+                    out string providerError),
+                Is.True,
+                providerError);
+            Assert.That(coreAttack.AbilitySchemaVersion, Is.EqualTo(0));
+            Assert.That(coreAttack.UsesLegacyEffectStorage, Is.True);
+            Assert.That(
+                AbilityDefinitionValidator.TryValidate(
+                    coreAttack,
+                    out string battleError),
+                Is.True,
+                battleError);
+        }
+        finally
+        {
+            UnityEngine.Object.DestroyImmediate(enemy);
+        }
+    }
+
+    private static void AssertCommonAbility(
+        IBattleAbilityDefinition ability,
+        BattleEffectOriginKind expectedOrigin)
+    {
+        Assert.That(ability, Is.Not.Null);
+        Assert.That(ability.OriginKind, Is.EqualTo(expectedOrigin));
+        Assert.That(ability.HasExecutableContent, Is.True);
+        Assert.That(
+            AbilityDefinitionValidator.TryValidate(ability, out string error),
+            Is.True,
+            error);
+    }
+
+    private static void SetField(
+        object target,
+        string fieldName,
+        object value)
+    {
+        Type type = target.GetType();
+        while (type != null)
+        {
+            FieldInfo field = type.GetField(
+                fieldName,
+                BindingFlags.Instance | BindingFlags.NonPublic);
+            if (field != null)
+            {
+                field.SetValue(target, value);
+                return;
+            }
+            type = type.BaseType;
+        }
+
+        Assert.Fail(
+            $"Missing field '{fieldName}' on {target.GetType().Name}.");
     }
 }
