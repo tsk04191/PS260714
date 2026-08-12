@@ -259,17 +259,29 @@ ui.dungeon.result.start_new_run,던전 결과 버튼,body,,새로 시작,START N
 ui.dungeon.result.return_main,던전 결과 버튼,body,,메인으로 돌아가기,RETURN TO MAIN
 ui.dungeon.reward.title,던전 보상 선택 제목,title,,보상 선택,CHOOSE REWARD
 ui.dungeon.reward.summary,던전 보상 선택 설명,body,,전투 {current} / {total} 클리어 (스케일 {scale})[br]다음 스케일 {next}[br]{count}개 중 하나를 선택하세요.,BATTLE {current} / {total} CLEAR (SCALE {scale})[br]NEXT SCALE {next}[br]CHOOSE 1 OF {count}
+ui.dungeon.reward.content_title,던전 상세 보상 선택 제목,title,,획득할 보상 선택,CHOOSE YOUR REWARD
+ui.dungeon.reward.content_summary,던전 상세 보상 선택 설명,body,,무작위 후보 {count}개 중 하나를 선택하세요.,CHOOSE 1 OF {count} RANDOM OPTIONS
+ui.dungeon.reward.category.card,던전 보상 분류,title,,전투 카드,BATTLE CARD
+ui.dungeon.reward.category.shield,던전 보상 분류,title,,보호막,SHIELD
 ui.dungeon.reward.category.energy,던전 보상 분류,title,,에너지 강화,ENERGY UPGRADE
 ui.dungeon.reward.category.item,던전 보상 분류,title,,소모형 아이템,CONSUMABLE ITEM
 ui.dungeon.reward.category.new_turret,던전 보상 분류,title,,새 터렛,NEW TURRET
 ui.dungeon.reward.category.turret_upgrade,던전 보상 분류,title,,터렛 강화,TURRET UPGRADE
 ui.dungeon.reward.category.turret_upgrade_slot,던전 보상 분류,number,,터렛 강화 | S{slot},TURRET UPGRADE | S{slot}
 ui.dungeon.reward.category.starting_turret,던전 보상 분류,title,,시작 터렛,STARTING TURRET
+ui.dungeon.reward.card_select_title,전투 카드 보상 선택 제목,title,,카드 획득,ACQUIRE CARD
+ui.dungeon.reward.card_select_description,전투 카드 보상 선택 설명,body,,보상 풀에서 무작위 카드 3개를 확인합니다.,VIEW 3 RANDOM CARDS FROM THE REWARD POOL
+ui.dungeon.reward.item_select_title,소비 아이템 보상 선택 제목,title,,소비 아이템 획득,ACQUIRE CONSUMABLE
+ui.dungeon.reward.item_select_description,소비 아이템 보상 선택 설명,body,,보상 풀에서 무작위 소비 아이템 3개를 확인합니다.,VIEW 3 RANDOM CONSUMABLES FROM THE REWARD POOL
+ui.dungeon.reward.shield_title,보호막 회복 보상 제목,title,,보호막 회복,RECOVER SHIELD
+ui.dungeon.reward.shield_change,보호막 회복 보상 설명,number,,보호막 {before}/{maximum} → {after}/{maximum},SHIELD {before}/{maximum} → {after}/{maximum}
+ui.dungeon.reward.shield_footer,보호막 회복 보상 꼬리말,number,,보호막 +{amount},SHIELD +{amount}
 ui.dungeon.reward.energy.max_title,에너지 보상 제목,title,,최대 에너지 +1,MAX ENERGY +1
 ui.dungeon.reward.energy.recharge_title,에너지 보상 제목,title,,충전 시간 -0.5초,RECHARGE -0.5s
 ui.dungeon.reward.energy.max_change,에너지 보상 설명,number,,최대 {before} → {after},MAX {before} → {after}
 ui.dungeon.reward.energy.recharge_change,에너지 보상 설명,number,,{before:0.0}초 → {after:0.0}초,{before:0.0}s → {after:0.0}s
 ui.dungeon.reward.run_footer,던전 보상 꼬리말,body,,이번 진행에 적용,APPLIES FOR THIS RUN
+ui.dungeon.reward.card_footer,카드 보상 꼬리말,number,,비용 {cost} | 이번 진행 보유 {count}장,COST {cost} | RUN COPIES {count}
 ui.dungeon.reward.item_footer,아이템 보상 꼬리말,number,,보유 x{owned} | 획득 x1,OWNED x{owned} | GAIN x1
 ui.dungeon.reward.new_turret.empty_description,새 터렛 보상 설명,body,,새 터렛을 파티에 추가합니다.,ADD A NEW TURRET
 ui.dungeon.reward.new_turret.footer,새 터렛 보상 꼬리말,number,,기술 C{cost} | 공격 쿨다운 {cooldown:0.#}초,SKILL C{cost} | ATTACK CD {cooldown:0.#}s

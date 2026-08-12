@@ -147,7 +147,7 @@ internal static class PS260714LocalizationKeyField
         Rect fieldRect = EditorGUI.PrefixLabel(
             position,
             controlId,
-            label ?? GUIContent.none);
+            PS260714EditorText.Normalize(label ?? GUIContent.none));
         const float editButtonWidth = 40f;
         const float spacing = 3f;
         Rect editRect = new(

@@ -273,8 +273,13 @@ public readonly struct BattleAbilityTargeting
     private static BattleAbilitySelectionMode ToSelectionMode(
         CharacterAttackSubject subject)
     {
+        // CharacterAttackSubject.None reuses the prior action context. An
+        // ability is targetless only when BattleAbilityRules finds no effect
+        // that requires inherited action targets.
         return subject switch
         {
+            CharacterAttackSubject.None =>
+                BattleAbilitySelectionMode.Inherit,
             CharacterAttackSubject.Random =>
                 BattleAbilitySelectionMode.Random,
             CharacterAttackSubject.All =>

@@ -479,6 +479,38 @@ public sealed class BattleCardTests
         }
     }
 
+    [Test]
+    public void CardEditorFilters_CombineRarityAndCharacterDependency()
+    {
+        BattleCardSO neutralCommon = CreateCard("card.filter.neutral");
+        BattleCardSO dependentRare = CreateCard("card.filter.dependent");
+        SerializedObject neutralData = new(neutralCommon);
+        neutralData.FindProperty("rarity").enumValueIndex =
+            (int)ItemRarity.Common;
+        neutralData.FindProperty("affiliation").enumValueIndex =
+            (int)BattleCardAffiliation.Neutral;
+        neutralData.ApplyModifiedPropertiesWithoutUndo();
+        SerializedObject dependentData = new(dependentRare);
+        dependentData.FindProperty("rarity").enumValueIndex =
+            (int)ItemRarity.Rare;
+        dependentData.FindProperty("affiliation").enumValueIndex =
+            (int)BattleCardAffiliation.CharacterDependent;
+        dependentData.ApplyModifiedPropertiesWithoutUndo();
+
+        Assert.That(
+            BattleCardEditorWindow.MatchesFilters(neutralCommon, 1, 1),
+            Is.True);
+        Assert.That(
+            BattleCardEditorWindow.MatchesFilters(dependentRare, 1, 1),
+            Is.False);
+        Assert.That(
+            BattleCardEditorWindow.MatchesFilters(dependentRare, 3, 2),
+            Is.True);
+        Assert.That(
+            BattleCardEditorWindow.MatchesFilters(neutralCommon, 3, 2),
+            Is.False);
+    }
+
     private BattleCardDeckRules CreateRules(
         int baseDrawCount,
         float redrawCooldown,

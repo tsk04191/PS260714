@@ -6,7 +6,7 @@ public sealed class RecruitBannerDesignerBindingsEditor : Editor
 {
     public override void OnInspectorGUI()
     {
-        DrawDefaultInspector();
+        PS260714EditorText.DrawDefaultInspector(serializedObject);
         RecruitBannerDesignerBindings bindings =
             (RecruitBannerDesignerBindings)target;
         DrawStatus(
@@ -43,7 +43,7 @@ public sealed class RecruitRevealDesignerBindingsEditor : Editor
 {
     public override void OnInspectorGUI()
     {
-        DrawDefaultInspector();
+        PS260714EditorText.DrawDefaultInspector(serializedObject);
         RecruitRevealDesignerBindings bindings =
             (RecruitRevealDesignerBindings)target;
         EditorGUILayout.Space(8f);

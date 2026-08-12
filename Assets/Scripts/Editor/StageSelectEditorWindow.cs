@@ -28,6 +28,7 @@ public sealed class StageSelectEditorWindow : EditorWindow
     private bool _flowExpanded = true;
     private bool _rulesExpanded = true;
     private bool _battleArenaExpanded = true;
+    private bool _battleRewardsExpanded = true;
     private bool _encountersExpanded;
     private bool _presentationExpanded = true;
     private bool _modifiersExpanded;
@@ -309,6 +310,7 @@ public sealed class StageSelectEditorWindow : EditorWindow
             DrawFlowSection();
             DrawRulesSection();
             DrawBattleArenaSection();
+            DrawBattleRewardsSection();
             DrawEncountersSection();
             DrawPresentationSection();
             DrawModifiersSection();
@@ -469,6 +471,34 @@ public sealed class StageSelectEditorWindow : EditorWindow
                 "shield in every battle. The world-space radius controls " +
                 "the authored arena ring, enemy approach radius, ally " +
                 "movement boundary, and the projected shield health UI.",
+                MessageType.Info);
+        }
+        EditorGUILayout.EndFoldoutHeaderGroup();
+    }
+
+    private void DrawBattleRewardsSection()
+    {
+        _battleRewardsExpanded = EditorGUILayout.BeginFoldoutHeaderGroup(
+            _battleRewardsExpanded,
+            "Battle Completion Rewards");
+        if (_battleRewardsExpanded)
+        {
+            DrawProperty(
+                "shieldRecoveryReward",
+                "Default Shield Recovery",
+                true);
+            DrawAssetReferenceArray(
+                "battleCardRewardPool",
+                "Default Card Reward Pool");
+            DrawAssetReferenceArray(
+                "consumableRewardPool",
+                "Default Consumable Reward Pool");
+            EditorGUILayout.HelpBox(
+                "Battle-specific reward pools take priority. Empty " +
+                "battle pools use these dungeon pools; empty dungeon " +
+                "pools use the eligible project catalog. Shield " +
+                "recovery supports a fixed value or a percentage of " +
+                "maximum shield.",
                 MessageType.Info);
         }
         EditorGUILayout.EndFoldoutHeaderGroup();

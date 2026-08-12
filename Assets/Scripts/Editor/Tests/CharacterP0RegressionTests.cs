@@ -558,6 +558,36 @@ public sealed class CharacterP0RegressionTests
     }
 
     [Test]
+    public void CharacterEditor_PermanentModifierUsesCharacterStatChildOnly()
+    {
+        FieldInfo valuesField = typeof(CharacterEditorWindow).GetField(
+            "PassiveStatModifierStatTypeValues",
+            BindingFlags.Static | BindingFlags.NonPublic);
+        FieldInfo optionsField = typeof(CharacterEditorWindow).GetField(
+            "PassiveStatModifierStatTypeOptions",
+            BindingFlags.Static | BindingFlags.NonPublic);
+        Assert.That(valuesField, Is.Not.Null);
+        Assert.That(optionsField, Is.Not.Null);
+
+        int[] values = valuesField.GetValue(null) as int[];
+        string[] options = optionsField.GetValue(null) as string[];
+        Assert.That(values, Is.EqualTo(new[]
+        {
+            (int)StatusEffectStatType.AttackPower,
+            (int)StatusEffectStatType.AttackSpeed,
+        }));
+        Assert.That(options, Is.EqualTo(new[]
+        {
+            "공격력",
+            "공격 속도",
+        }));
+        Assert.That(
+            CharacterPassiveStatModifierRules.IsSupportedCharacterStat(
+                StatusEffectStatType.IncomingDamage),
+            Is.False);
+    }
+
+    [Test]
     public void CharacterSdSprites_UseDefeatAtZeroAndSittingInRest()
     {
         CharacterSO definition = CreateBaseCharacterFixture(
@@ -2260,7 +2290,8 @@ public sealed class CharacterP0RegressionTests
         Assert.That(resource.TryGainCallCount, Is.EqualTo(1));
         Assert.That(
             board.CharacterTargetSelectionCallCount,
-            Is.EqualTo(1));
+            Is.Zero,
+            "Targetless resource gain must not request action targets.");
         Assert.That(board.DamageTargetSnapshots, Is.Empty);
         Assert.That(character.TotalDamageDealt, Is.Zero);
 
@@ -2272,7 +2303,8 @@ public sealed class CharacterP0RegressionTests
         Assert.That(resource.TryGainCallCount, Is.EqualTo(2));
         Assert.That(
             board.CharacterTargetSelectionCallCount,
-            Is.EqualTo(2));
+            Is.Zero,
+            "Targetless resource gain must remain targetless.");
     }
 
     [Test]
@@ -2654,7 +2686,7 @@ public sealed class CharacterP0RegressionTests
     }
 
     [Test]
-    public void ManualCooldownPassive_WaitsForSelectionThenResumes()
+    public void TargetlessCooldownPassive_IgnoresManualSubjectAndExecutes()
     {
         CharacterSO definition = CreateBaseCharacterFixture(
             "ManualCooldownPassiveFixture");
@@ -2683,16 +2715,14 @@ public sealed class CharacterP0RegressionTests
 
         character.TickBattle(0.2f, board);
 
-        Assert.That(board.IsManualTargetSelectionPending, Is.True);
-        Assert.That(resource.Current, Is.Zero);
-        Assert.That(resource.TryGainCallCount, Is.Zero);
-
-        board.CompleteManualEnemyTargets(enemy);
-        character.TickBattle(0.1f, board);
-
         Assert.That(board.IsManualTargetSelectionPending, Is.False);
         Assert.That(resource.Current, Is.EqualTo(1));
         Assert.That(resource.TryGainCallCount, Is.EqualTo(1));
+        Assert.That(
+            board.CharacterTargetSelectionCallCount,
+            Is.Zero,
+            "GainResource does not consume action targets even when the " +
+            "stored subject is Manual.");
     }
 
     [Test]
@@ -6333,6 +6363,51 @@ public sealed class CharacterP0RegressionTests
         Assert.That(
             CharacterLocalization.GetPassiveDescription(character.Data),
             Does.Contain("완료 스테이지"));
+    }
+
+    [Test]
+    public void PassiveStatModifier_IncomingDamageIsRejectedAndIgnored()
+    {
+        CharacterSO definition = CreateBaseCharacterFixture(
+            "UnsupportedIncomingDamagePassiveFixture");
+        SerializedObject serialized = new(definition);
+        SerializedProperty passive = serialized
+            .FindProperty("passiveDefinitions")
+            .GetArrayElementAtIndex(0);
+        SetSections(
+            passive.FindPropertyRelative("sections"),
+            (int)CharacterPassiveSectionType.StatModifier);
+        passive.FindPropertyRelative("effects").ClearArray();
+        SerializedProperty modifiers =
+            passive.FindPropertyRelative("statModifiers");
+        modifiers.arraySize = 1;
+        SerializedProperty modifier = modifiers.GetArrayElementAtIndex(0);
+        modifier.FindPropertyRelative("statType").enumValueIndex =
+            (int)StatusEffectStatType.IncomingDamage;
+        modifier.FindPropertyRelative("mode").enumValueIndex =
+            (int)StatusEffectStatModifierMode.AdditiveRatio;
+        modifier.FindPropertyRelative("baseValue").floatValue = 1f;
+        modifier.FindPropertyRelative("dungeonStageProgressScale")
+            .floatValue = 0f;
+        serialized.ApplyModifiedPropertiesWithoutUndo();
+
+        CharacterDefinitionValidationResult validation =
+            CharacterDefinitionValidator.Validate(definition);
+        Assert.That(validation.IsValid, Is.False);
+        Assert.That(
+            HasDiagnostic(
+                validation,
+                "passive_stat_modifier.stat_unsupported"),
+            Is.True,
+            string.Join("\n", validation.Diagnostics));
+
+        CharacterRuntime character = CreateCharacter(definition);
+        Assert.That(character.TakeDamage(10), Is.EqualTo(10));
+        Assert.That(character.CurrentHealth, Is.EqualTo(90));
+        Assert.That(
+            CharacterLocalization.GetPassiveDescription(character.Data),
+            Does.Not.Contain("받는 피해").And.Not.Contain(
+                "Incoming Damage"));
     }
 
     [Test]

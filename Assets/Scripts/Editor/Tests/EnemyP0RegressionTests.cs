@@ -2846,6 +2846,39 @@ public sealed class DungeonDefinitionRegressionTests
     }
 
     [Test]
+    public void BattleCoreRuntime_ConfigureCanPreserveRunShieldHealth()
+    {
+        BattleCoreRuntime core = new();
+
+        core.Configure(100, true, 37);
+
+        Assert.That(core.MaximumHealth, Is.EqualTo(100));
+        Assert.That(core.CurrentHealth, Is.EqualTo(37));
+        Assert.That(core.IsDestroyed, Is.False);
+    }
+
+    [Test]
+    public void DungeonShieldRecoveryRule_ResolvesFixedAndPercentValues()
+    {
+        DungeonShieldRecoveryRule fixedRule = new();
+        SetRuleField(
+            fixedRule,
+            "amountMode",
+            DungeonShieldRecoveryAmountMode.Fixed);
+        SetRuleField(fixedRule, "amount", 23f);
+        DungeonShieldRecoveryRule percentRule = new();
+        SetRuleField(
+            percentRule,
+            "amountMode",
+            DungeonShieldRecoveryAmountMode.PercentOfMaximum);
+        SetRuleField(percentRule, "amount", 12.5f);
+
+        Assert.That(fixedRule.ResolveAmount(200), Is.EqualTo(23));
+        Assert.That(percentRule.ResolveAmount(200), Is.EqualTo(25));
+        Assert.That(percentRule.ResolveAmount(101), Is.EqualTo(13));
+    }
+
+    [Test]
     public void BattleSetup_LegacyConstructorKeepsGridCapacity()
     {
         List<EnemyRuntime> enemies = new();
@@ -2862,6 +2895,18 @@ public sealed class DungeonDefinitionRegressionTests
 
         Assert.That(setup.Arena.UsesBattleCore, Is.False);
         Assert.That(setup.InitialEnemyCount, Is.EqualTo(9));
+    }
+
+    private static void SetRuleField<T>(
+        DungeonShieldRecoveryRule rule,
+        string fieldName,
+        T value)
+    {
+        FieldInfo field = typeof(DungeonShieldRecoveryRule).GetField(
+            fieldName,
+            BindingFlags.Instance | BindingFlags.NonPublic);
+        Assert.That(field, Is.Not.Null, fieldName);
+        field.SetValue(rule, value);
     }
 
     private static void ConfigureEventNode(

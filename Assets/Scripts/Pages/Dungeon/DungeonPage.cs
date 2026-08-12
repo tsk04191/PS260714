@@ -158,6 +158,8 @@ public class DungeonPage : MonoBehaviour, IPage
     private int _maximumEnergy = BattleManager.DefaultMaximumEnergy;
     private float _energyRechargeDuration =
         DungeonDefinition.DefaultActiveSkillCostRecoveryDuration;
+    private int _dungeonShieldCurrentHealth;
+    private int _dungeonShieldMaximumHealth;
 
     public AudioSource Speaker { get; set; }
     public EDungeonPhase CurrentPhase => flowController != null
@@ -198,6 +200,13 @@ public class DungeonPage : MonoBehaviour, IPage
     public DungeonBoardView Board => board;
     public int MaximumEnergy => _maximumEnergy;
     public float EnergyRechargeDuration => _energyRechargeDuration;
+    public int DungeonShieldCurrentHealth =>
+        Mathf.Clamp(
+            _dungeonShieldCurrentHealth,
+            0,
+            Mathf.Max(0, _dungeonShieldMaximumHealth));
+    public int DungeonShieldMaximumHealth =>
+        Mathf.Max(0, _dungeonShieldMaximumHealth);
     public bool IsStartingCharacterSelectionPending =>
         _startingCharacterSelectionPending;
     public bool IsStartingItemSelectionPending =>
@@ -619,6 +628,9 @@ public class DungeonPage : MonoBehaviour, IPage
             battleCount,
             phases,
             definition.InitialRunCurrency);
+        _dungeonShieldMaximumHealth =
+            definition.BattleShieldMaximumHealth;
+        _dungeonShieldCurrentHealth = _dungeonShieldMaximumHealth;
         RequestDungeonBgm(
             definition,
             EDungeonBgmState.Ready);
@@ -1359,7 +1371,15 @@ public class DungeonPage : MonoBehaviour, IPage
                 .WithCoreMaximumHealth(
                     _session.Definition.BattleShieldMaximumHealth);
         }
-        board.ConfigureArena(arena, setup.Environment);
+        _dungeonShieldMaximumHealth = arena.CoreMaximumHealth;
+        _dungeonShieldCurrentHealth = Mathf.Clamp(
+            _dungeonShieldCurrentHealth,
+            0,
+            _dungeonShieldMaximumHealth);
+        board.ConfigureArena(
+            arena,
+            setup.Environment,
+            _dungeonShieldCurrentHealth);
         board.Initialize(setup.FieldSize, setup.MaximumStackSize);
         ResetBattleItemCooldowns();
         _battleManager.ConfigureActiveSkillResource(
@@ -2025,6 +2045,7 @@ public class DungeonPage : MonoBehaviour, IPage
     private void HandleBattleCompleted()
     {
         battleTab?.Refresh();
+        CaptureDungeonShieldHealth();
         ApplyClearedBattleHealthCost();
         if (_session.Definition != null &&
             _session.Definition.HasTutorial)
@@ -2036,20 +2057,28 @@ public class DungeonPage : MonoBehaviour, IPage
         if (CurrentPhase == EDungeonPhase.Battle && flowController != null &&
             !flowController.IsCompleted)
         {
-            if (flowController.HasNextStep)
-            {
-                _battleRewardPending = true;
-                _session.Pause.Add(EDungeonPauseReason.BattleReward);
-                RequestDungeonBgm(
-                    _session.Definition,
-                    EDungeonBgmState.Ready);
-                ShowBattleRewardOverlay();
-            }
-            else
-            {
-                flowController.TryAdvance();
-            }
+            _battleRewardPending = true;
+            _session.Pause.Add(EDungeonPauseReason.BattleReward);
+            RequestDungeonBgm(
+                _session.Definition,
+                EDungeonBgmState.Ready);
+            ShowBattleRewardOverlay();
         }
+    }
+
+    private void CaptureDungeonShieldHealth()
+    {
+        IBattleObjective objective = board?.Objective;
+        if (objective?.IsActive != true)
+            return;
+
+        _dungeonShieldMaximumHealth = Mathf.Max(
+            1,
+            objective.MaximumHealth);
+        _dungeonShieldCurrentHealth = Mathf.Clamp(
+            objective.CurrentHealth,
+            0,
+            _dungeonShieldMaximumHealth);
     }
 
     private void ApplyClearedBattleHealthCost()
@@ -2131,7 +2160,7 @@ public class DungeonPage : MonoBehaviour, IPage
         RunEnded?.Invoke(_session.Result);
     }
 
-    private void CompleteBattleReward()
+    internal void CompleteBattleReward()
     {
         if (!_battleRewardPending)
             return;
@@ -2140,6 +2169,116 @@ public class DungeonPage : MonoBehaviour, IPage
         _session.Pause.Remove(EDungeonPauseReason.BattleReward);
         HideBattleRewardOverlay();
         flowController?.TryAdvance();
+    }
+
+    public int ResolveBattleShieldRecoveryAmount()
+    {
+        DungeonShieldRecoveryRule rule = ResolveShieldRecoveryRule();
+        return rule?.ResolveAmount(DungeonShieldMaximumHealth) ?? 0;
+    }
+
+    public bool TryRecoverBattleShield()
+    {
+        if (!_battleRewardPending || DungeonShieldMaximumHealth <= 0)
+            return false;
+
+        int amount = ResolveBattleShieldRecoveryAmount();
+        if (amount <= 0)
+            return false;
+
+        int previous = DungeonShieldCurrentHealth;
+        _dungeonShieldCurrentHealth = Mathf.Min(
+            DungeonShieldMaximumHealth,
+            previous + amount);
+        if (board?.Objective is BattleCoreRuntime core)
+            core.Heal(amount);
+        CompleteBattleReward();
+        return true;
+    }
+
+    public IReadOnlyList<BattleCardSO> GetBattleCardRewardCandidates()
+    {
+        BattleSO battle = GetCurrentBattleRewardDefinition();
+        List<BattleCardSO> result = BuildBattleCardRewardCandidates(
+            battle?.CardRewardPool);
+        if (result.Count > 0)
+            return result;
+        result = BuildBattleCardRewardCandidates(
+            _session.Definition?.BattleCardRewardPool);
+        return result.Count > 0
+            ? result
+            : BuildBattleCardRewardCandidates(BattleCardCatalog.GetAll());
+    }
+
+    private List<BattleCardSO> BuildBattleCardRewardCandidates(
+        IReadOnlyList<BattleCardSO> source)
+    {
+        List<BattleCardSO> result = new();
+        HashSet<string> ids = new(StringComparer.Ordinal);
+        if (source != null)
+        {
+            foreach (BattleCardSO card in source)
+            {
+                if (CanAcquireBattleCard(card) &&
+                    ids.Add(card.CardId))
+                {
+                    result.Add(card);
+                }
+            }
+        }
+        return result;
+    }
+
+    public IReadOnlyList<BattleItemSO> GetConsumableRewardCandidates()
+    {
+        BattleSO battle = GetCurrentBattleRewardDefinition();
+        List<BattleItemSO> result = BuildConsumableRewardCandidates(
+            battle?.ConsumableRewardPool);
+        if (result.Count > 0)
+            return result;
+        result = BuildConsumableRewardCandidates(
+            _session.Definition?.ConsumableRewardPool);
+        return result.Count > 0
+            ? result
+            : BuildConsumableRewardCandidates(BattleItemCatalog.GetAll());
+    }
+
+    private List<BattleItemSO> BuildConsumableRewardCandidates(
+        IReadOnlyList<BattleItemSO> source)
+    {
+        List<BattleItemSO> result = new();
+        HashSet<string> ids = new(StringComparer.Ordinal);
+        if (source != null)
+        {
+            foreach (BattleItemSO item in source)
+            {
+                if (item != null && item.IsDisposable &&
+                    CanAcquireBattleItem(item) && ids.Add(item.ItemId))
+                {
+                    result.Add(item);
+                }
+            }
+        }
+        return result;
+    }
+
+    private DungeonShieldRecoveryRule ResolveShieldRecoveryRule()
+    {
+        BattleSO battle = GetCurrentBattleRewardDefinition();
+        return battle != null && battle.OverrideShieldRecoveryReward
+            ? battle.ShieldRecoveryReward
+            : _session.Definition?.ShieldRecoveryReward;
+    }
+
+    private BattleSO GetCurrentBattleRewardDefinition()
+    {
+        int index = Mathf.Max(0, _session.CurrentBattleNumber - 1);
+        if (_session.Definition != null &&
+            _session.Definition.TryGetFixedBattle(index, out BattleSO battle))
+        {
+            return battle;
+        }
+        return firstBattle;
     }
 
     private bool CanUseBattleItem(BattleItemSO item)
@@ -4096,6 +4235,9 @@ public sealed class DungeonEventTab
         EnergyUpgrade,
         BattleItem,
         BattleCard,
+        BattleCardCategory,
+        ShieldRecovery,
+        BattleItemCategory,
     }
 
     private enum EViewMode
@@ -4107,6 +4249,7 @@ public sealed class DungeonEventTab
         StartingItemConfigurationError,
         RunResult,
         RewardSelection,
+        RewardContentSelection,
         ReplacementSelection,
     }
 
@@ -4196,6 +4339,19 @@ public sealed class DungeonEventTab
                 default,
                 null,
                 card);
+        }
+
+        public static RewardOption CreateCategory(ERewardOptionType type)
+        {
+            return new RewardOption(
+                type,
+                -1,
+                -1,
+                default,
+                string.Empty,
+                null,
+                default,
+                null);
         }
     }
 
@@ -4316,6 +4472,14 @@ public sealed class DungeonEventTab
 
         SetPanelVisible(true);
         GenerateRewardOptions();
+        if (_currentRewardOptions.Count == 0)
+        {
+            Debug.LogWarning(
+                "No eligible battle completion reward is configured.");
+            SetPanelVisible(false);
+            _page.CompleteBattleReward();
+            return;
+        }
         _viewMode = EViewMode.RewardSelection;
         RenderRewardSelection();
     }
@@ -4523,43 +4687,48 @@ public sealed class DungeonEventTab
 
     private void GenerateRewardOptions()
     {
+        _currentRewardOptions.Clear();
+        if (_page.GetBattleCardRewardCandidates().Count > 0)
+        {
+            _currentRewardOptions.Add(RewardOption.CreateCategory(
+                ERewardOptionType.BattleCardCategory));
+        }
+        if (_page.ResolveBattleShieldRecoveryAmount() > 0)
+        {
+            _currentRewardOptions.Add(RewardOption.CreateCategory(
+                ERewardOptionType.ShieldRecovery));
+        }
+        if (_page.GetConsumableRewardCandidates().Count > 0)
+        {
+            _currentRewardOptions.Add(RewardOption.CreateCategory(
+                ERewardOptionType.BattleItemCategory));
+        }
+    }
+
+    private void GenerateRewardContentOptions(ERewardOptionType category)
+    {
         int battlePlanIndex = _page.CurrentBattleNumber - 1;
         int rewardSeed = battlePlanIndex >= 0 &&
                          battlePlanIndex < _page.BattlePlans.Count
-            ? _page.BattlePlans[battlePlanIndex].RandomSeed ^ RewardSeedSalt
+            ? _page.BattlePlans[battlePlanIndex].RandomSeed ^
+              RewardSeedSalt ^ (int)category
             : Environment.TickCount;
         System.Random random = new(rewardSeed);
-
         List<RewardOption> candidates = new();
-        foreach (CharacterSO definition in
-                 _page.GetAvailableCharacterRewardDefinitions())
+        if (category == ERewardOptionType.BattleCardCategory)
         {
-            candidates.Add(RewardOption.CreateNewTurret(definition));
-        }
-
-        candidates.Add(RewardOption.CreateEnergyUpgrade(
-            EDungeonEnergyUpgradeType.MaximumEnergy));
-        if (_page.CanApplyEnergyUpgrade(
-                EDungeonEnergyUpgradeType.RechargeSpeed))
-        {
-            candidates.Add(RewardOption.CreateEnergyUpgrade(
-                EDungeonEnergyUpgradeType.RechargeSpeed));
-        }
-
-        if (_page.UsesBattleCards)
-        {
-            foreach (BattleCardSO card in BattleCardCatalog.GetAll())
+            foreach (BattleCardSO card in
+                     _page.GetBattleCardRewardCandidates())
             {
-                if (_page.CanAcquireBattleCard(card))
-                    candidates.Add(RewardOption.CreateBattleCard(card));
+                candidates.Add(RewardOption.CreateBattleCard(card));
             }
         }
-        else
+        else if (category == ERewardOptionType.BattleItemCategory)
         {
-            foreach (BattleItemSO item in BattleItemCatalog.GetAll())
+            foreach (BattleItemSO item in
+                     _page.GetConsumableRewardCandidates())
             {
-                if (item != null && _page.CanAcquireBattleItem(item))
-                    candidates.Add(RewardOption.CreateBattleItem(item));
+                candidates.Add(RewardOption.CreateBattleItem(item));
             }
         }
 
@@ -4589,18 +4758,33 @@ public sealed class DungeonEventTab
         ClearButtons();
         SetRewardCardMode(true);
         RefreshRuntimeLayout();
-        _titleText.text = LocalizationService.Get(
-            LocalizationKeys.UiDungeonRewardTitle);
-        _descriptionText.text = LocalizationService.Get(
-            LocalizationKeys.UiDungeonRewardSummary,
-            LocalizationService.Arg("current", _page.CurrentBattleNumber),
-            LocalizationService.Arg("total", _page.TotalBattleCount),
-            LocalizationService.Arg("scale", _page.CurrentDifficultyScale),
-            LocalizationService.Arg(
-                "next",
-                _page.GetBattleDifficultyScale(
-                    _page.CurrentBattleNumber + 1)),
-            LocalizationService.Arg("count", _currentRewardOptions.Count));
+        bool choosingContent =
+            _viewMode == EViewMode.RewardContentSelection;
+        _titleText.text = LocalizationService.Get(choosingContent
+            ? LocalizationKeys.UiDungeonRewardContentTitle
+            : LocalizationKeys.UiDungeonRewardTitle);
+        _descriptionText.text = choosingContent
+            ? LocalizationService.Get(
+                LocalizationKeys.UiDungeonRewardContentSummary,
+                LocalizationService.Arg(
+                    "count",
+                    _currentRewardOptions.Count))
+            : LocalizationService.Get(
+                LocalizationKeys.UiDungeonRewardSummary,
+                LocalizationService.Arg(
+                    "current",
+                    _page.CurrentBattleNumber),
+                LocalizationService.Arg("total", _page.TotalBattleCount),
+                LocalizationService.Arg(
+                    "scale",
+                    _page.CurrentDifficultyScale),
+                LocalizationService.Arg(
+                    "next",
+                    _page.GetBattleDifficultyScale(
+                        _page.CurrentBattleNumber + 1)),
+                LocalizationService.Arg(
+                    "count",
+                    _currentRewardOptions.Count));
 
         foreach (RewardOption option in _currentRewardOptions)
         {
@@ -4614,6 +4798,59 @@ public sealed class DungeonEventTab
 
     private RewardCardContent GetRewardCardContent(RewardOption option)
     {
+        if (option.Type == ERewardOptionType.BattleCardCategory)
+        {
+            return new RewardCardContent(
+                LocalizationService.Get(
+                    LocalizationKeys.UiDungeonRewardCategoryCard),
+                LocalizationService.Get(
+                    LocalizationKeys.UiDungeonRewardCardSelectTitle),
+                LocalizationService.Get(
+                    LocalizationKeys.UiDungeonRewardCardSelectDescription),
+                LocalizationService.Get(
+                    LocalizationKeys.UiDungeonRewardRunFooter),
+                new Color(0.75f, 0.22f, 0.28f, 1f));
+        }
+
+        if (option.Type == ERewardOptionType.ShieldRecovery)
+        {
+            int amount = _page.ResolveBattleShieldRecoveryAmount();
+            int before = _page.DungeonShieldCurrentHealth;
+            int after = Mathf.Min(
+                _page.DungeonShieldMaximumHealth,
+                before + amount);
+            return new RewardCardContent(
+                LocalizationService.Get(
+                    LocalizationKeys.UiDungeonRewardCategoryShield),
+                LocalizationService.Get(
+                    LocalizationKeys.UiDungeonRewardShieldTitle),
+                LocalizationService.Get(
+                    LocalizationKeys.UiDungeonRewardShieldChange,
+                    LocalizationService.Arg("before", before),
+                    LocalizationService.Arg("after", after),
+                    LocalizationService.Arg(
+                        "maximum",
+                        _page.DungeonShieldMaximumHealth)),
+                LocalizationService.Get(
+                    LocalizationKeys.UiDungeonRewardShieldFooter,
+                    LocalizationService.Arg("amount", amount)),
+                new Color(0.22f, 0.62f, 0.82f, 1f));
+        }
+
+        if (option.Type == ERewardOptionType.BattleItemCategory)
+        {
+            return new RewardCardContent(
+                LocalizationService.Get(
+                    LocalizationKeys.UiDungeonRewardCategoryItem),
+                LocalizationService.Get(
+                    LocalizationKeys.UiDungeonRewardItemSelectTitle),
+                LocalizationService.Get(
+                    LocalizationKeys.UiDungeonRewardItemSelectDescription),
+                LocalizationService.Get(
+                    LocalizationKeys.UiDungeonRewardRunFooter),
+                new Color(0.8f, 0.35f, 0.22f, 1f));
+        }
+
         if (option.Type == ERewardOptionType.EnergyUpgrade)
         {
             bool maximumEnergy = option.EnergyUpgradeType ==
@@ -4681,7 +4918,8 @@ public sealed class DungeonEventTab
             BattleCardSO card = option.BattleCard;
             int acquiredCopies = _page.GetAcquiredBattleCardCount(card);
             return new RewardCardContent(
-                "CARD",
+                LocalizationService.Get(
+                    LocalizationKeys.UiDungeonRewardCategoryCard),
                 card != null
                     ? card.GetLocalizedDisplayName()
                     : string.Empty,
@@ -4689,8 +4927,14 @@ public sealed class DungeonEventTab
                     ? card.GetLocalizedDescription()
                     : string.Empty,
                 card != null
-                    ? $"Cost {card.EnergyCost} / Run copies " +
-                      $"{acquiredCopies + 1}"
+                    ? LocalizationService.Get(
+                        LocalizationKeys.UiDungeonRewardCardFooter,
+                        LocalizationService.Arg(
+                            "cost",
+                            card.EnergyCost),
+                        LocalizationService.Arg(
+                            "count",
+                            acquiredCopies + 1))
                     : string.Empty,
                 new Color(0.75f, 0.22f, 0.28f, 1f));
         }
@@ -4771,6 +5015,21 @@ public sealed class DungeonEventTab
 
     private void SelectRewardOption(RewardOption option)
     {
+        if (option.Type == ERewardOptionType.BattleCardCategory ||
+            option.Type == ERewardOptionType.BattleItemCategory)
+        {
+            GenerateRewardContentOptions(option.Type);
+            _viewMode = EViewMode.RewardContentSelection;
+            RenderRewardSelection();
+            return;
+        }
+
+        if (option.Type == ERewardOptionType.ShieldRecovery)
+        {
+            _page.TryRecoverBattleShield();
+            return;
+        }
+
         if (option.Type == ERewardOptionType.EnergyUpgrade)
         {
             _page.TryApplyEnergyUpgrade(option.EnergyUpgradeType);
@@ -4892,6 +5151,7 @@ public sealed class DungeonEventTab
                 RenderRunResult();
                 break;
             case EViewMode.RewardSelection:
+            case EViewMode.RewardContentSelection:
                 RenderRewardSelection();
                 break;
             case EViewMode.ReplacementSelection:

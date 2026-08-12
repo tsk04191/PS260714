@@ -15,6 +15,38 @@ public enum EDungeonStageSelectVisibility
     Hidden = 1,
 }
 
+public enum DungeonShieldRecoveryAmountMode
+{
+    Fixed = 0,
+    PercentOfMaximum = 1,
+}
+
+[Serializable]
+public sealed class DungeonShieldRecoveryRule
+{
+    [SerializeField] private DungeonShieldRecoveryAmountMode amountMode;
+    [SerializeField, Min(0f)] private float amount = 20f;
+
+    public DungeonShieldRecoveryAmountMode AmountMode => amountMode;
+    public float Amount => amountMode ==
+                           DungeonShieldRecoveryAmountMode.PercentOfMaximum
+        ? Mathf.Clamp(amount, 0f, 100f)
+        : Mathf.Max(0f, amount);
+
+    public int ResolveAmount(int maximumShield)
+    {
+        maximumShield = Mathf.Max(0, maximumShield);
+        if (maximumShield == 0)
+            return 0;
+
+        float resolved = amountMode ==
+                         DungeonShieldRecoveryAmountMode.PercentOfMaximum
+            ? maximumShield * Amount / 100f
+            : Amount;
+        return Mathf.Max(0, Mathf.CeilToInt(resolved));
+    }
+}
+
 [CreateAssetMenu(
     fileName = "DungeonDefinition",
     menuName = "Dungeon/Definition")]
@@ -93,6 +125,21 @@ public sealed class DungeonDefinition : ScriptableObject
         "World-space radius shared by the circular wall, movement bounds, " +
         "enemy approach, and shield health ring.")]
     private float battleArenaRadius = DefaultBattleArenaRadius;
+
+    [Header("Battle Completion Rewards")]
+    [SerializeField]
+    private DungeonShieldRecoveryRule shieldRecoveryReward = new();
+    [SerializeField, Tooltip(
+        "Fallback card reward pool used when the completed BattleSO has " +
+        "no card rewards. Empty uses the eligible card catalog.")]
+    private BattleCardSO[] battleCardRewardPool =
+        Array.Empty<BattleCardSO>();
+    [SerializeField, Tooltip(
+        "Fallback disposable battle-item pool used when the completed " +
+        "BattleSO has no consumable rewards. Empty uses the eligible " +
+        "disposable battle-item catalog.")]
+    private BattleItemSO[] consumableRewardPool =
+        Array.Empty<BattleItemSO>();
 
     [Header("Encounters")]
     [SerializeField] private BattleSO[] fixedBattles =
@@ -218,6 +265,12 @@ public sealed class DungeonDefinition : ScriptableObject
         BattleArenaSetup.NormalizeWorldRadius(battleArenaRadius);
     public int BattleShieldMaximumHealth =>
         Mathf.Max(1, battleShieldMaximumHealth);
+    public DungeonShieldRecoveryRule ShieldRecoveryReward =>
+        shieldRecoveryReward ??= new DungeonShieldRecoveryRule();
+    public IReadOnlyList<BattleCardSO> BattleCardRewardPool =>
+        battleCardRewardPool ?? Array.Empty<BattleCardSO>();
+    public IReadOnlyList<BattleItemSO> ConsumableRewardPool =>
+        consumableRewardPool ?? Array.Empty<BattleItemSO>();
     public DungeonFieldView FieldViewPrefab => fieldViewPrefab;
     public DungeonThemeDefinition Theme => theme;
     public DungeonBgmProfile BgmProfile => bgmProfile;
@@ -550,6 +603,9 @@ public sealed class DungeonDefinition : ScriptableObject
         battleShieldMaximumHealth = Mathf.Max(
             1,
             battleShieldMaximumHealth);
+        shieldRecoveryReward ??= new DungeonShieldRecoveryRule();
+        battleCardRewardPool ??= Array.Empty<BattleCardSO>();
+        consumableRewardPool ??= Array.Empty<BattleItemSO>();
         enemyPoolOverride ??= Array.Empty<EnemySO>();
         modifiers ??= Array.Empty<DungeonModifier>();
     }

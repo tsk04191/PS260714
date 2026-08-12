@@ -2365,13 +2365,15 @@ public static class CharacterDefinitionValidator
             if (!Enum.IsDefined(
                     typeof(StatusEffectStatType),
                     modifier.StatType) ||
-                modifier.StatType == StatusEffectStatType.TargetPriority)
+                !CharacterPassiveStatModifierRules
+                    .IsSupportedCharacterStat(modifier.StatType))
             {
                 AddError(
                     result,
                     "passive_stat_modifier.stat_unsupported",
                     $"{modifierPath}.statType",
-                    $"Unsupported passive stat type '{modifier.StatType}'.");
+                    $"Unsupported passive character stat " +
+                    $"'{modifier.StatType}'.");
             }
             if (!Enum.IsDefined(
                     typeof(StatusEffectStatModifierMode),

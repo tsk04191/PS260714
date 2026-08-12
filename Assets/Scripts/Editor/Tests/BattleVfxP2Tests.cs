@@ -169,6 +169,12 @@ public sealed class BattleVfxP2Tests
                 ((UnityEditor.UIElements.ToolbarButton)
                     uiToolkitToolbar[index]).text,
                 Is.EqualTo(
+                    PS260714EditorText.Tr(
+                        PS260714AssetEditorToolbar.ButtonOrder[index])));
+            Assert.That(
+                ((UnityEditor.UIElements.ToolbarButton)
+                    uiToolkitToolbar[index]).userData,
+                Is.EqualTo(
                     PS260714AssetEditorToolbar.ButtonOrder[index]));
         }
 

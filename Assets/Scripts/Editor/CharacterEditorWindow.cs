@@ -223,6 +223,31 @@ public sealed class CharacterEditorWindow : EditorWindow
         "대상 우선순위 (미지원)"
     };
 
+    private static readonly string[] PassiveStatModifierCategoryOptions =
+    {
+        "능력치"
+    };
+
+    private static readonly string[] PassiveStatModifierStatTypeOptions =
+    {
+        "공격력",
+        "공격 속도"
+    };
+
+    private static readonly int[] PassiveStatModifierStatTypeValues =
+    {
+        (int)StatusEffectStatType.AttackPower,
+        (int)StatusEffectStatType.AttackSpeed
+    };
+
+    private static readonly string[]
+        PassiveStatModifierUnsupportedStatTypeOptions =
+        {
+            "지원하지 않는 값 - 변경 필요",
+            "공격력",
+            "공격 속도"
+        };
+
     private static readonly string[] PassiveStatModifierModeOptions =
     {
         "고정 가산",
@@ -1151,7 +1176,7 @@ public sealed class CharacterEditorWindow : EditorWindow
         {
             GUI.Label(
                 previewRect,
-                "Sprite 없음",
+                new GUIContent("Sprite 없음"),
                 new GUIStyle(EditorStyles.centeredGreyMiniLabel)
                 {
                     alignment = TextAnchor.MiddleCenter,
@@ -1361,8 +1386,9 @@ public sealed class CharacterEditorWindow : EditorWindow
                 preview.y,
                 preview.width - labelOffset - 4f,
                 preview.height),
-            $"공통 등급 스타일 · " +
-            $"{CharacterGradePresentation.GetLabel(grade)}",
+            new GUIContent(
+                $"공통 등급 스타일 · " +
+                $"{CharacterGradePresentation.GetLabel(grade)}"),
             labelStyle);
     }
 
@@ -2387,7 +2413,7 @@ public sealed class CharacterEditorWindow : EditorWindow
                 using (new EditorGUILayout.HorizontalScope())
                 {
                     EditorGUILayout.LabelField(
-                        $"능력치 보정 {index + 1}",
+                        $"상시 보정 {index + 1}",
                         EditorStyles.miniBoldLabel);
                     if (GUILayout.Button(
                             "X",
@@ -2398,18 +2424,47 @@ public sealed class CharacterEditorWindow : EditorWindow
                     }
                 }
 
+                int category = EditorGUILayout.Popup(
+                    "보정 종류",
+                    0,
+                    PassiveStatModifierCategoryOptions);
                 SerializedProperty statType = modifier.FindPropertyRelative(
                     PassiveStatModifierTypePropertyName);
-                DrawAttackEnumPopup(
-                    statType,
-                    "능력치",
-                    StatusContributionStatTypeOptions);
-                if (statType != null && statType.enumValueIndex ==
-                    (int)StatusEffectStatType.TargetPriority)
+                if (category == 0)
                 {
-                    EditorGUILayout.HelpBox(
-                        "대상 우선순위 상시 보정은 현재 지원하지 않습니다.",
-                        MessageType.Error);
+                    using (new EditorGUI.IndentLevelScope())
+                    {
+                        bool hasSupportedStat = statType != null &&
+                            Array.IndexOf(
+                                PassiveStatModifierStatTypeValues,
+                                statType.enumValueIndex) >= 0;
+                        if (hasSupportedStat)
+                        {
+                            DrawMappedEnumPopup(
+                                statType,
+                                "캐릭터 스탯",
+                                PassiveStatModifierStatTypeOptions,
+                                PassiveStatModifierStatTypeValues);
+                        }
+                        else
+                        {
+                            int replacementIndex = EditorGUILayout.Popup(
+                                "캐릭터 스탯",
+                                0,
+                                PassiveStatModifierUnsupportedStatTypeOptions);
+                            if (replacementIndex > 0)
+                            {
+                                statType.enumValueIndex =
+                                    PassiveStatModifierStatTypeValues[
+                                        replacementIndex - 1];
+                            }
+                            EditorGUILayout.HelpBox(
+                                "현재 저장된 캐릭터 스탯은 상시 보정에서 " +
+                                "지원하지 않습니다. 지원되는 캐릭터 스탯으로 " +
+                                "직접 변경해 주세요.",
+                                MessageType.Error);
+                        }
+                    }
                 }
 
                 SerializedProperty mode = modifier.FindPropertyRelative(
@@ -2461,7 +2516,7 @@ public sealed class CharacterEditorWindow : EditorWindow
             GUI.changed = true;
         }
 
-        if (GUILayout.Button("+ 능력치 보정 추가", EditorStyles.miniButton))
+        if (GUILayout.Button("+ 상시 보정 추가", EditorStyles.miniButton))
         {
             int newIndex = modifiers.arraySize;
             modifiers.InsertArrayElementAtIndex(newIndex);
@@ -7181,7 +7236,12 @@ public sealed class CharacterEditorWindow : EditorWindow
                                     : Color.white
                             }
                         };
-                        GUI.Label(cellRect, "T", centerStyle);
+                        GUI.Label(
+                            cellRect,
+                            new GUIContent(
+                                "T",
+                                "Target center cell"),
+                            centerStyle);
                         continue;
                     }
 
@@ -7464,7 +7524,7 @@ internal sealed class CharacterDungeonUpgradeEntryDrawer : PropertyDrawer
     public override void OnGUI(
         Rect position,
         SerializedProperty property,
-        GUIContent label)
+        UnityEngine.GUIContent label)
     {
         EditorGUI.BeginProperty(position, label, property);
 
@@ -7476,14 +7536,14 @@ internal sealed class CharacterDungeonUpgradeEntryDrawer : PropertyDrawer
             EditorGUIUtility.singleLineHeight);
         SerializedProperty upgradeId = property.FindPropertyRelative(
             "upgradeId");
-        GUIContent foldoutLabel = !string.IsNullOrWhiteSpace(
+        UnityEngine.GUIContent foldoutLabel = !string.IsNullOrWhiteSpace(
             upgradeId?.stringValue)
             ? new GUIContent(upgradeId.stringValue)
             : label;
         property.isExpanded = EditorGUI.Foldout(
             foldoutRect,
             property.isExpanded,
-            foldoutLabel,
+            PS260714EditorText.Normalize(foldoutLabel),
             true);
 
         if (property.isExpanded)
@@ -7552,7 +7612,7 @@ internal sealed class CharacterDungeonUpgradeEntryDrawer : PropertyDrawer
 
     public override float GetPropertyHeight(
         SerializedProperty property,
-        GUIContent label)
+        UnityEngine.GUIContent label)
     {
         float height = EditorGUIUtility.singleLineHeight;
         if (!property.isExpanded)

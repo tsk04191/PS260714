@@ -1927,7 +1927,9 @@ internal static class CommonSettingsEditorUtility
                 row.y,
                 row.width - 54f,
                 row.height),
-            $"{CharacterGradePresentation.GetLabel(grade)} · {iconState}",
+            new GUIContent(
+                $"{CharacterGradePresentation.GetLabel(grade)} · " +
+                $"{iconState}"),
             labelStyle);
     }
 

@@ -18,7 +18,7 @@ public sealed class DungeonBattleTabEditor : Editor
 
     public override void OnInspectorGUI()
     {
-        DrawDefaultInspector();
+        PS260714EditorText.DrawDefaultInspector(serializedObject);
         EditorGUILayout.Space(12f);
         EditorGUILayout.LabelField("First Battle Settings", EditorStyles.boldLabel);
 

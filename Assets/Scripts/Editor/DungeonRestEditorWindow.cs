@@ -106,15 +106,13 @@ public sealed class DungeonRestEditorWindow : EditorWindow
         rootVisualElement.Add(_assetToolbar);
 
         Toolbar tools = new();
-        tools.Add(new ToolbarButton(ValidateSelected)
-        {
-            text = "Validate",
-        });
+        ToolbarButton validateButton = new(ValidateSelected);
+        PS260714EditorText.SetText(validateButton, "Validate");
+        tools.Add(validateButton);
         tools.Add(new ToolbarSpacer { flex = true });
-        tools.Add(new ToolbarButton(ApplyToClientScene)
-        {
-            text = "Apply To Client Scene",
-        });
+        ToolbarButton applyButton = new(ApplyToClientScene);
+        PS260714EditorText.SetText(applyButton, "Apply To Client Scene");
+        tools.Add(applyButton);
         rootVisualElement.Add(tools);
     }
 
@@ -142,7 +140,8 @@ public sealed class DungeonRestEditorWindow : EditorWindow
         panel.style.borderLeftWidth = 1f;
         panel.style.borderLeftColor = new Color(0.2f, 0.22f, 0.24f);
 
-        Label title = new("REST INSPECTOR");
+        Label title = new();
+        PS260714EditorText.SetText(title, "REST INSPECTOR");
         title.style.unityFontStyleAndWeight = FontStyle.Bold;
         title.style.paddingLeft = 8f;
         title.style.paddingTop = 8f;
@@ -263,7 +262,7 @@ public sealed class DungeonRestEditorWindow : EditorWindow
         EditorGUI.DrawRect(area, new Color(0.018f, 0.024f, 0.024f));
         if (_selectedRest == null)
         {
-            GUI.Label(area, "Select a RestSO to preview.",
+            GUI.Label(area, new GUIContent("Select a RestSO to preview."),
                 EditorStyles.centeredGreyMiniLabel);
             return;
         }
@@ -316,9 +315,9 @@ public sealed class DungeonRestEditorWindow : EditorWindow
         float left = shade.x + 18f;
         float width = shade.width - 36f;
         GUI.Label(new Rect(left, canvas.y + 20f, width, 42f),
-            _selectedRest.DisplayName, title);
+            new GUIContent(_selectedRest.DisplayName), title);
         GUI.Label(new Rect(left, canvas.y + 66f, width, 86f),
-            _selectedRest.Description, body);
+            new GUIContent(_selectedRest.Description), body);
 
         float y = canvas.y + 170f;
         for (int index = 0; index < _selectedRest.Actions.Count; index++)
@@ -332,7 +331,8 @@ public sealed class DungeonRestEditorWindow : EditorWindow
                     choice.y + 7f,
                     choice.width - 20f,
                     choice.height - 14f),
-                action?.Choice?.Title ?? "INVALID ACTION",
+                new GUIContent(
+                    action?.Choice?.Title ?? "INVALID ACTION"),
                 body);
             y += 66f;
         }
@@ -342,7 +342,7 @@ public sealed class DungeonRestEditorWindow : EditorWindow
                 canvas.yMax - 48f,
                 canvas.width * 0.6f,
                 28f),
-            "PARTY SD PREVIEW · SELECT TARGET",
+            new GUIContent("PARTY SD PREVIEW · SELECT TARGET"),
             body);
     }
 
@@ -397,11 +397,16 @@ public sealed class DungeonRestEditorWindow : EditorWindow
             Selection.activeObject = rest;
             if (_rests.IndexOf(rest) >= 0)
                 _restList?.SelectWithoutNotify(rest);
-            _statusLabel.text = $"Selected {rest.name}.";
+            PS260714EditorText.SetBilingualText(
+                _statusLabel,
+                $"{rest.name} 선택됨.",
+                $"Selected {rest.name}.");
         }
         else if (_statusLabel != null)
         {
-            _statusLabel.text = "Select or create a RestSO.";
+            PS260714EditorText.SetText(
+                _statusLabel,
+                "Select or create a RestSO.");
         }
 
         _assetToolbar?.SetHasSelection(rest != null);
@@ -455,7 +460,10 @@ public sealed class DungeonRestEditorWindow : EditorWindow
         if (_selectedRest == null)
             return;
         PS260714EditorAssetUtility.Save(_selectedRest);
-        _statusLabel.text = $"Saved {_selectedRest.name}.";
+        PS260714EditorText.SetBilingualText(
+            _statusLabel,
+            $"{_selectedRest.name} 저장 완료.",
+            $"Saved {_selectedRest.name}.");
     }
 
     private void DuplicateSelected()
@@ -535,7 +543,10 @@ public sealed class DungeonRestEditorWindow : EditorWindow
 
         _selectedRest = null;
         RefreshAssets(fallback);
-        _statusLabel.text = $"Moved {deletedName} to the system trash.";
+        PS260714EditorText.SetBilingualText(
+            _statusLabel,
+            $"{deletedName}을(를) 시스템 휴지통으로 이동했습니다.",
+            $"Moved {deletedName} to the system trash.");
     }
 
     private void PingSelected()
@@ -551,7 +562,17 @@ public sealed class DungeonRestEditorWindow : EditorWindow
         if (_selectedRest == null)
             return;
         bool valid = _selectedRest.TryValidate(out string error);
-        _statusLabel.text = valid ? "Rest data is valid." : error;
+        if (valid)
+        {
+            PS260714EditorText.SetBilingualText(
+                _statusLabel,
+                "휴식 데이터가 유효합니다.",
+                "Rest data is valid.");
+        }
+        else
+        {
+            PS260714EditorText.SetText(_statusLabel, error);
+        }
         _statusLabel.style.color = valid
             ? new Color(0.45f, 0.9f, 0.55f)
             : new Color(1f, 0.45f, 0.4f);
@@ -564,13 +585,15 @@ public sealed class DungeonRestEditorWindow : EditorWindow
         Save();
         if (!TryApplyToScene(_selectedRest, out string error))
         {
-            _statusLabel.text = error;
+            PS260714EditorText.SetText(_statusLabel, error);
             EditorUtility.DisplayDialog("Apply Rest UI", error, "OK");
             return;
         }
 
-        _statusLabel.text =
-            $"Applied {_selectedRest.name} preview to ClientScene.";
+        PS260714EditorText.SetBilingualText(
+            _statusLabel,
+            $"{_selectedRest.name} 미리보기를 ClientScene에 적용했습니다.",
+            $"Applied {_selectedRest.name} preview to ClientScene.");
     }
 
     internal static bool TryApplyToScene(

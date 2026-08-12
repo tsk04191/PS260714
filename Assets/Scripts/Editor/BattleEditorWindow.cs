@@ -200,6 +200,7 @@ public sealed class BattleEditorWindow : EditorWindow
         DrawGradeRule("Elite", "eliteEnemies", usesFixedCounts);
         DrawGradeRule("Boss", "bossEnemies", usesFixedCounts);
 
+        DrawCompletionRewards();
         DrawSection("Time Limit", "timeLimit");
         DrawSection("Presentation Override", "bgmOverride");
         DrawSection(
@@ -223,6 +224,40 @@ public sealed class BattleEditorWindow : EditorWindow
             }
         }
         }
+    }
+
+    private void DrawCompletionRewards()
+    {
+        EditorGUILayout.Space(8f);
+        EditorGUILayout.LabelField(
+            "Completion Rewards",
+            EditorStyles.boldLabel);
+        SerializedProperty overrideRecovery =
+            _serializedBattle.FindProperty(
+                "overrideShieldRecoveryReward");
+        EditorGUILayout.PropertyField(
+            overrideRecovery,
+            new GUIContent("Override Shield Recovery"));
+        if (overrideRecovery.boolValue)
+        {
+            EditorGUILayout.PropertyField(
+                _serializedBattle.FindProperty("shieldRecoveryReward"),
+                new GUIContent("Shield Recovery"),
+                true);
+        }
+        EditorGUILayout.PropertyField(
+            _serializedBattle.FindProperty("cardRewardPool"),
+            new GUIContent("Card Reward Pool"),
+            true);
+        EditorGUILayout.PropertyField(
+            _serializedBattle.FindProperty("consumableRewardPool"),
+            new GUIContent("Consumable Reward Pool"),
+            true);
+        EditorGUILayout.HelpBox(
+            "Empty battle pools fall back to the dungeon reward pools. " +
+            "Only disposable battle items are offered as consumable " +
+            "rewards.",
+            MessageType.Info);
     }
 
     private void SetBattle(BattleSO battle)

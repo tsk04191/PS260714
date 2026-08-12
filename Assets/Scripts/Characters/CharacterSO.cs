@@ -536,6 +536,16 @@ public enum CharacterPassiveSectionType
     StatModifier = 6
 }
 
+public static class CharacterPassiveStatModifierRules
+{
+    public static bool IsSupportedCharacterStat(
+        StatusEffectStatType statType)
+    {
+        return statType == StatusEffectStatType.AttackPower ||
+               statType == StatusEffectStatType.AttackSpeed;
+    }
+}
+
 [Serializable]
 public sealed class CharacterPassiveStatModifierDefinition
 {

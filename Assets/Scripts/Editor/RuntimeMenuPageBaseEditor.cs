@@ -9,7 +9,7 @@ public sealed class RuntimeMenuPageBaseEditor : Editor
 {
     public override void OnInspectorGUI()
     {
-        DrawDefaultInspector();
+        PS260714EditorText.DrawDefaultInspector(serializedObject);
 
         EditorGUILayout.Space(10f);
         EditorGUILayout.LabelField(

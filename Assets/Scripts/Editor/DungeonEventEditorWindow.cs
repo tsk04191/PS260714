@@ -146,7 +146,10 @@ public sealed class DungeonEventEditorWindow : EditorWindow
         panel.style.borderLeftWidth = 1f;
         panel.style.borderLeftColor = new Color(0.2f, 0.22f, 0.24f);
 
-        _selectionLabel = new Label("EVENT / NODE INSPECTOR");
+        _selectionLabel = new Label();
+        PS260714EditorText.SetText(
+            _selectionLabel,
+            "EVENT / NODE INSPECTOR");
         _selectionLabel.style.unityFontStyleAndWeight = FontStyle.Bold;
         _selectionLabel.style.paddingLeft = 8f;
         _selectionLabel.style.paddingTop = 8f;
@@ -163,7 +166,8 @@ public sealed class DungeonEventEditorWindow : EditorWindow
         string text,
         Action action)
     {
-        ToolbarButton button = new(action) { text = text };
+        ToolbarButton button = new(action);
+        PS260714EditorText.SetText(button, text);
         return button;
     }
 
@@ -321,7 +325,9 @@ public sealed class DungeonEventEditorWindow : EditorWindow
             _selectedNode = null;
             _graph?.Bind(null);
             _preview?.Bind(null);
-            _statusLabel.text = "Select or create an EventSO.";
+            PS260714EditorText.SetText(
+                _statusLabel,
+                "Select or create an EventSO.");
             _assetToolbar?.SetHasSelection(false);
             return;
         }
@@ -353,7 +359,12 @@ public sealed class DungeonEventEditorWindow : EditorWindow
             _nodeTree != null)
         {
             if (_selectionLabel != null)
-                _selectionLabel.text = $"NODE · {node.Title}";
+            {
+                PS260714EditorText.SetBilingualText(
+                    _selectionLabel,
+                    $"노드 · {node.Title}",
+                    $"NODE · {node.Title}");
+            }
             _graph?.SetSelectedNode(node != null ? node.NodeId : null);
             return;
         }
@@ -367,9 +378,19 @@ public sealed class DungeonEventEditorWindow : EditorWindow
             : null;
         if (_selectionLabel != null)
         {
-            _selectionLabel.text = node != null
-                ? $"NODE · {node.Title}"
-                : "EVENT / NODE INSPECTOR";
+            if (node != null)
+            {
+                PS260714EditorText.SetBilingualText(
+                    _selectionLabel,
+                    $"노드 · {node.Title}",
+                    $"NODE · {node.Title}");
+            }
+            else
+            {
+                PS260714EditorText.SetText(
+                    _selectionLabel,
+                    "EVENT / NODE INSPECTOR");
+            }
         }
         _inspector?.MarkDirtyRepaint();
         _graph?.SetSelectedNode(node != null ? node.NodeId : null);
@@ -424,7 +445,10 @@ public sealed class DungeonEventEditorWindow : EditorWindow
         if (_selectedEvent == null)
             return;
         PS260714EditorAssetUtility.Save(_selectedEvent);
-        _statusLabel.text = $"Saved {_selectedEvent.name}.";
+        PS260714EditorText.SetBilingualText(
+            _statusLabel,
+            $"{_selectedEvent.name} 저장 완료.",
+            $"Saved {_selectedEvent.name}.");
     }
 
     private void DuplicateSelected()
@@ -465,9 +489,14 @@ public sealed class DungeonEventEditorWindow : EditorWindow
         }
 
         RefreshAssets(duplicate);
-        _statusLabel.text = duplicate != null
-            ? $"Duplicated {_selectedEvent.name}."
-            : "Event duplication failed.";
+        PS260714EditorText.SetBilingualText(
+            _statusLabel,
+            duplicate != null
+                ? $"{_selectedEvent.name} 복제 완료."
+                : "이벤트 복제 실패.",
+            duplicate != null
+                ? $"Duplicated {_selectedEvent.name}."
+                : "Event duplication failed.");
     }
 
     private void BeginRename()
@@ -503,8 +532,11 @@ public sealed class DungeonEventEditorWindow : EditorWindow
 
         CancelRename();
         RefreshAssets(_selectedEvent);
-        _statusLabel.text =
-            $"Renamed asset to {(requested ?? string.Empty).Trim()}.";
+        string renamed = (requested ?? string.Empty).Trim();
+        PS260714EditorText.SetBilingualText(
+            _statusLabel,
+            $"에셋 이름을 {renamed}(으)로 변경했습니다.",
+            $"Renamed asset to {renamed}.");
     }
 
     private void DeleteSelected()
@@ -526,7 +558,7 @@ public sealed class DungeonEventEditorWindow : EditorWindow
             RebuildSelectedTrees();
             if (!string.IsNullOrWhiteSpace(error))
             {
-                _statusLabel.text = error;
+                PS260714EditorText.SetText(_statusLabel, error);
                 EditorUtility.DisplayDialog(
                     "Delete Dungeon Event",
                     error,
@@ -539,7 +571,10 @@ public sealed class DungeonEventEditorWindow : EditorWindow
         _selectedEvent = null;
         _selectedNode = null;
         RefreshAssets(fallback);
-        _statusLabel.text = $"Moved {deletedName} to the system trash.";
+        PS260714EditorText.SetBilingualText(
+            _statusLabel,
+            $"{deletedName}을(를) 시스템 휴지통으로 이동했습니다.",
+            $"Moved {deletedName} to the system trash.");
     }
 
     private void PingSelected()
@@ -578,7 +613,17 @@ public sealed class DungeonEventEditorWindow : EditorWindow
             return;
 
         bool valid = _selectedEvent.TryValidate(out string error);
-        _statusLabel.text = valid ? "Graph is valid." : error;
+        if (valid)
+        {
+            PS260714EditorText.SetBilingualText(
+                _statusLabel,
+                "그래프가 유효합니다.",
+                "Graph is valid.");
+        }
+        else
+        {
+            PS260714EditorText.SetText(_statusLabel, error);
+        }
         _statusLabel.style.color = valid
             ? new Color(0.45f, 0.9f, 0.55f)
             : new Color(1f, 0.45f, 0.4f);
@@ -643,8 +688,10 @@ public sealed class DungeonEventEditorWindow : EditorWindow
         {
             if (entries.arraySize == 1)
             {
-                _statusLabel.text =
-                    "An event graph must keep at least one entry choice.";
+                PS260714EditorText.SetBilingualText(
+                    _statusLabel,
+                    "이벤트 그래프에는 시작 선택지가 하나 이상 필요합니다.",
+                    "An event graph must keep at least one entry choice.");
                 return;
             }
         }
@@ -1394,6 +1441,11 @@ public sealed class DungeonEventEditorWindow : EditorWindow
                 Label entry = new(graph._event.IsEntryChoice(node.NodeId)
                     ? "ENTRY"
                     : "CHOICE");
+                PS260714EditorText.SetText(
+                    entry,
+                    graph._event.IsEntryChoice(node.NodeId)
+                        ? "ENTRY"
+                        : "CHOICE");
                 entry.style.fontSize = 10f;
                 entry.style.color = graph._event.IsEntryChoice(node.NodeId)
                     ? new Color(0.45f, 1f, 0.75f)
@@ -1407,6 +1459,8 @@ public sealed class DungeonEventEditorWindow : EditorWindow
                 title.style.fontSize = 14f;
                 title.style.marginTop = 4f;
                 title.style.whiteSpace = WhiteSpace.Normal;
+                title.tooltip = PS260714EditorText.BuildTooltip(
+                    title.text);
                 Add(title);
 
                 Label summary = new(
@@ -1415,6 +1469,9 @@ public sealed class DungeonEventEditorWindow : EditorWindow
                     (node.EndsEvent
                         ? "END EVENT"
                         : $"NEXT {node.NextChoiceNodeIds.Count}"));
+                summary.text = PS260714EditorText.Tr(summary.text);
+                summary.tooltip = PS260714EditorText.BuildTooltip(
+                    summary.text);
                 summary.style.fontSize = 11f;
                 summary.style.color = new Color(0.72f, 0.77f, 0.74f);
                 summary.style.marginTop = 10f;
@@ -1427,7 +1484,8 @@ public sealed class DungeonEventEditorWindow : EditorWindow
 
                 VisualElement output = CreatePort("▶", true);
                 output.style.right = -12f;
-                output.tooltip = "Drag to another node's left port.";
+                output.tooltip = PS260714EditorText.Tr(
+                    "Drag to another node's left port.");
                 output.RegisterCallback<PointerDownEvent>(evt =>
                 {
                     if (evt.button != 0)
@@ -1459,7 +1517,8 @@ public sealed class DungeonEventEditorWindow : EditorWindow
 
             private static VisualElement CreatePort(string text, bool output)
             {
-                Label port = new(text);
+                Label port = new();
+                PS260714EditorText.SetText(port, text);
                 port.style.position = Position.Absolute;
                 port.style.top = NodeHeight * 0.5f - 12f;
                 port.style.width = 24f;
@@ -1529,6 +1588,9 @@ public sealed class DungeonEventEditorWindow : EditorWindow
             frame.Add(content);
 
             Label previewLabel = new("1920 × 1080 PREVIEW");
+            PS260714EditorText.SetText(
+                previewLabel,
+                "1920 × 1080 PREVIEW");
             previewLabel.style.fontSize = 10f;
             previewLabel.style.color = new Color(0.45f, 0.8f, 0.75f);
             content.Add(previewLabel);
@@ -1559,8 +1621,12 @@ public sealed class DungeonEventEditorWindow : EditorWindow
             if (dungeonEvent == null)
             {
                 _banner.image = null;
-                _title.text = "NO EVENT SELECTED";
+                PS260714EditorText.SetText(
+                    _title,
+                    "NO EVENT SELECTED");
                 _description.text = string.Empty;
+                _description.tooltip = PS260714EditorText.BuildTooltip(
+                    PS260714EditorText.Tr("Event Description"));
                 return;
             }
 
@@ -1569,7 +1635,12 @@ public sealed class DungeonEventEditorWindow : EditorWindow
                 ? Color.white
                 : new Color(0.12f, 0.17f, 0.16f);
             _title.text = dungeonEvent.DisplayName;
+            _title.tooltip = PS260714EditorText.BuildTooltip(_title.text);
             _description.text = dungeonEvent.Description;
+            _description.tooltip = PS260714EditorText.BuildTooltip(
+                string.IsNullOrWhiteSpace(_description.text)
+                    ? PS260714EditorText.Tr("Event Description")
+                    : _description.text);
 
             List<DungeonEventChoiceNodeDefinition> entries = new();
             dungeonEvent.GetEntryChoices(entries);
@@ -1580,6 +1651,8 @@ public sealed class DungeonEventEditorWindow : EditorWindow
                     (string.IsNullOrWhiteSpace(node.Description)
                         ? string.Empty
                         : "\n" + node.Description));
+                choice.tooltip = PS260714EditorText.BuildTooltip(
+                    choice.text);
                 choice.style.whiteSpace = WhiteSpace.Normal;
                 choice.style.paddingLeft = 14f;
                 choice.style.paddingRight = 14f;

@@ -139,7 +139,7 @@ internal static class PS260714AssetEditorList
         bool toggled = GUI.Toggle(
             rowRect,
             selected,
-            GUIContent.none,
+            new GUIContent(string.Empty, content.tooltip),
             GUI.skin.button);
 
         Rect labelRect = new(
@@ -547,7 +547,8 @@ internal sealed class PS260714UIToolkitAssetToolbar : Toolbar
             false);
         Add(new ToolbarSpacer { flex = true });
 
-        StatusLabel = new Label(initialStatus);
+        StatusLabel = new Label();
+        PS260714EditorText.SetText(StatusLabel, initialStatus);
         StatusLabel.style.marginLeft = 8f;
         StatusLabel.style.minWidth = 180f;
         Add(StatusLabel);
@@ -570,7 +571,7 @@ internal sealed class PS260714UIToolkitAssetToolbar : Toolbar
         {
             ToolbarButton button = _selectionButtons[index];
             bool ping = string.Equals(
-                button.text,
+                button.userData as string,
                 PS260714AssetEditorToolbar.ButtonOrder[5],
                 StringComparison.Ordinal);
             button.SetEnabled(hasSelection && (editable || ping));
@@ -587,7 +588,13 @@ internal sealed class PS260714UIToolkitAssetToolbar : Toolbar
         Action action,
         bool requiresSelection)
     {
-        ToolbarButton button = new(action) { text = text };
+        ToolbarButton button = new(action)
+        {
+            text = PS260714EditorText.Tr(text),
+            tooltip = PS260714EditorText.BuildTooltip(
+                PS260714EditorText.Tr(text)),
+            userData = text,
+        };
         Add(button);
         if (requiresSelection)
             _selectionButtons.Add(button);
@@ -629,7 +636,8 @@ internal sealed class PS260714UIToolkitAssetList<T> : VisualElement
         style.borderRightWidth = 1f;
         style.borderRightColor = new Color(0.2f, 0.22f, 0.24f);
 
-        Label headerLabel = new(header);
+        Label headerLabel = new();
+        PS260714EditorText.SetText(headerLabel, header);
         headerLabel.style.unityFontStyleAndWeight = FontStyle.Bold;
         headerLabel.style.paddingLeft = 8f;
         headerLabel.style.paddingTop = 8f;
@@ -637,6 +645,8 @@ internal sealed class PS260714UIToolkitAssetList<T> : VisualElement
         Add(headerLabel);
 
         _searchField = new ToolbarSearchField();
+        _searchField.tooltip = PS260714EditorText.BuildTooltip(
+            PS260714EditorText.Tr("Search"));
         _searchField.style.marginLeft = 4f;
         _searchField.style.marginRight = 4f;
         _searchField.style.marginBottom = 4f;
@@ -659,6 +669,8 @@ internal sealed class PS260714UIToolkitAssetList<T> : VisualElement
         Add(_list);
 
         _countLabel = new Label("0 / 0");
+        _countLabel.tooltip = PS260714EditorText.Tr(
+            "Shows the visible asset count and total asset count.");
         _countLabel.style.unityTextAlign = TextAnchor.MiddleCenter;
         _countLabel.style.color = new Color(0.55f, 0.58f, 0.6f);
         _countLabel.style.paddingTop = 3f;
@@ -740,7 +752,7 @@ internal sealed class PS260714UIToolkitAssetList<T> : VisualElement
             : null;
         element.Q<Label>("title").text = item != null
             ? _title(item)
-            : "Missing Asset";
+            : PS260714EditorText.Tr("Missing Asset");
         Label detail = element.Q<Label>("detail");
         string detailText = item != null ? _detail?.Invoke(item) : null;
         detail.text = detailText ?? string.Empty;
@@ -780,6 +792,8 @@ internal sealed class PS260714UIToolkitRenameRow : VisualElement
         style.display = DisplayStyle.None;
 
         Field = new TextField();
+        Field.tooltip = PS260714EditorText.BuildTooltip(
+            PS260714EditorText.Tr("Asset Name"));
         Field.style.flexGrow = 1f;
         Field.RegisterCallback<KeyDownEvent>(evt =>
         {
@@ -796,8 +810,12 @@ internal sealed class PS260714UIToolkitRenameRow : VisualElement
             }
         });
         Add(Field);
-        Add(new Button(apply) { text = "Apply" });
-        Add(new Button(cancel) { text = "Cancel" });
+        Button applyButton = new(apply);
+        PS260714EditorText.SetText(applyButton, "Apply");
+        Add(applyButton);
+        Button cancelButton = new(cancel);
+        PS260714EditorText.SetText(cancelButton, "Cancel");
+        Add(cancelButton);
     }
 
     internal void Show(UnityEngine.Object asset)

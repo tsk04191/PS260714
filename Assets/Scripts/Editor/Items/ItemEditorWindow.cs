@@ -310,7 +310,7 @@ public sealed class ItemEditorWindow : EditorWindow
         {
             GUI.Label(
                 previewRect,
-                fallbackLabel,
+                new GUIContent(fallbackLabel),
                 EditorStyles.centeredGreyMiniLabel);
             return;
         }

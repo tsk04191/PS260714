@@ -1293,13 +1293,15 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
 
     public void ConfigureArena(
         BattleArenaSetup setup,
-        BattleEnvironmentSetup environment = null)
+        BattleEnvironmentSetup environment = null,
+        int currentCoreHealth = -1)
     {
         _arenaSetup = setup ?? BattleArenaSetup.Legacy;
         _environmentSetup = environment ?? BattleEnvironmentSetup.Default;
         _battleCore.Configure(
             _arenaSetup.CoreMaximumHealth,
-            _arenaSetup.UsesBattleCore);
+            _arenaSetup.UsesBattleCore,
+            currentCoreHealth);
         worldBattleCoreGauge?.SetArenaRadius(
             _arenaSetup.UsesBattleCore
                 ? _arenaSetup.WorldRadius

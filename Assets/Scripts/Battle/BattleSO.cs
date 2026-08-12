@@ -92,6 +92,22 @@ public sealed class BattleSO : ScriptableObject
     [SerializeField, Min(0.1f)] private float spawnInterval = 4f;
     [SerializeField] private EEnemyCompositionMode compositionMode;
 
+    [Header("Completion Rewards")]
+    [SerializeField, Tooltip(
+        "When enabled, this battle's shield recovery replaces the " +
+        "dungeon default.")]
+    private bool overrideShieldRecoveryReward;
+    [SerializeField]
+    private DungeonShieldRecoveryRule shieldRecoveryReward = new();
+    [SerializeField, Tooltip(
+        "Card choices for this battle. Empty falls back to the dungeon " +
+        "card reward pool.")]
+    private List<BattleCardSO> cardRewardPool = new();
+    [SerializeField, Tooltip(
+        "Disposable battle-item choices for this battle. Empty falls " +
+        "back to the dungeon consumable reward pool.")]
+    private List<BattleItemSO> consumableRewardPool = new();
+
     [Header("Grade Composition")]
     [SerializeField] private BattleEnemyGradeRule normalEnemies =
         new(EEnemyGrade.Normal, 20, 70f);
@@ -144,6 +160,14 @@ public sealed class BattleSO : ScriptableObject
     public int RandomHealthBonus => randomHealthBonus;
     public float SpawnInterval => TimePrecision.Normalize(spawnInterval, 0.1f);
     public EEnemyCompositionMode CompositionMode => compositionMode;
+    public bool OverrideShieldRecoveryReward =>
+        overrideShieldRecoveryReward;
+    public DungeonShieldRecoveryRule ShieldRecoveryReward =>
+        shieldRecoveryReward ??= new DungeonShieldRecoveryRule();
+    public IReadOnlyList<BattleCardSO> CardRewardPool =>
+        cardRewardPool ??= new List<BattleCardSO>();
+    public IReadOnlyList<BattleItemSO> ConsumableRewardPool =>
+        consumableRewardPool ??= new List<BattleItemSO>();
     public float TimeLimit => TimePrecision.Normalize(timeLimit, 1f);
     public AudioClip BgmOverride => bgmOverride;
     public Sprite EnvironmentBackdrop => environmentBackdrop;
@@ -204,6 +228,9 @@ public sealed class BattleSO : ScriptableObject
         randomHealthBonus = Mathf.Max(0, randomHealthBonus);
         spawnInterval = TimePrecision.Normalize(spawnInterval, 0.1f);
         timeLimit = TimePrecision.Normalize(timeLimit, 1f);
+        shieldRecoveryReward ??= new DungeonShieldRecoveryRule();
+        cardRewardPool ??= new List<BattleCardSO>();
+        consumableRewardPool ??= new List<BattleItemSO>();
         EnsureRules();
     }
 

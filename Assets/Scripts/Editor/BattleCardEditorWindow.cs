@@ -9,6 +9,21 @@ public sealed class BattleCardEditorWindow : EditorWindow
 
     private const string AssetFolder = "Assets/Resources/Cards";
     private const string RenameControlName = "BattleCardAssetRenameField";
+    private static readonly string[] RarityFilterLabels =
+    {
+        "All Rarities",
+        "Common",
+        "Uncommon",
+        "Rare",
+        "Epic",
+        "Legendary",
+    };
+    private static readonly string[] AffiliationFilterLabels =
+    {
+        "All Affiliations",
+        "Neutral",
+        "Character-bound",
+    };
 
     private readonly List<BattleCardSO> cards = new();
     private BattleCardSO selected;
@@ -16,6 +31,8 @@ public sealed class BattleCardEditorWindow : EditorWindow
     private Vector2 listScroll;
     private Vector2 detailScroll;
     private string search = string.Empty;
+    private int rarityFilter;
+    private int affiliationFilter;
     private string renameText = string.Empty;
     private bool renaming;
     private bool focusRename;
@@ -128,11 +145,24 @@ public sealed class BattleCardEditorWindow : EditorWindow
                    GUILayout.Width(PS260714AssetEditorList.Width)))
         {
             search = PS260714AssetEditorList.DrawSearchField(search);
+            rarityFilter = EditorGUILayout.Popup(
+                "Rarity",
+                rarityFilter,
+                RarityFilterLabels);
+            affiliationFilter = EditorGUILayout.Popup(
+                "Affiliation",
+                affiliationFilter,
+                AffiliationFilterLabels);
             listScroll = EditorGUILayout.BeginScrollView(listScroll);
             int visible = 0;
             foreach (BattleCardSO card in cards)
             {
-                if (card == null || !MatchesSearch(card))
+                if (card == null ||
+                    !MatchesSearch(card) ||
+                    !MatchesFilters(
+                        card,
+                        rarityFilter,
+                        affiliationFilter))
                     continue;
                 visible++;
                 if (PS260714AssetEditorList.DrawAssetRow(
@@ -589,6 +619,26 @@ public sealed class BattleCardEditorWindow : EditorWindow
                Contains(card.CardId, query) ||
                Contains(card.GetLocalizedDisplayName(), query) ||
                Contains(card.Affiliation.ToString(), query);
+    }
+
+    internal static bool MatchesFilters(
+        BattleCardSO card,
+        int rarityFilterIndex,
+        int affiliationFilterIndex)
+    {
+        if (card == null)
+            return false;
+
+        bool matchesRarity = rarityFilterIndex <= 0 ||
+                             card.Rarity ==
+                             (ItemRarity)(rarityFilterIndex - 1);
+        bool matchesAffiliation = affiliationFilterIndex switch
+        {
+            1 => card.Affiliation == BattleCardAffiliation.Neutral,
+            2 => card.Affiliation != BattleCardAffiliation.Neutral,
+            _ => true,
+        };
+        return matchesRarity && matchesAffiliation;
     }
 
     private static bool Contains(string value, string query)

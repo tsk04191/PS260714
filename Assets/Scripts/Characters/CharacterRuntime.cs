@@ -4524,7 +4524,10 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
                 foreach (CharacterPassiveStatModifierDefinition modifier in
                          passive.StatModifiers)
                 {
-                    if (modifier == null || modifier.StatType != statType)
+                    if (modifier == null ||
+                        !CharacterPassiveStatModifierRules
+                            .IsSupportedCharacterStat(modifier.StatType) ||
+                        modifier.StatType != statType)
                         continue;
 
                     accumulator.Add(

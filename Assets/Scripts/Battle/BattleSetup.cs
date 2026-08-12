@@ -172,11 +172,18 @@ public sealed class BattleCoreRuntime : IBattleObjective
     public event Action<int, int> HealthChanged;
     public event Action Destroyed;
 
-    public void Configure(int maximumHealth, bool active)
+    public void Configure(
+        int maximumHealth,
+        bool active,
+        int currentHealth = -1)
     {
         IsActive = active;
         MaximumHealth = active ? Mathf.Max(1, maximumHealth) : 0;
-        CurrentHealth = MaximumHealth;
+        CurrentHealth = active
+            ? currentHealth < 0
+                ? MaximumHealth
+                : Mathf.Clamp(currentHealth, 0, MaximumHealth)
+            : 0;
         HealthChanged?.Invoke(CurrentHealth, MaximumHealth);
     }
 

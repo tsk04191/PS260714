@@ -14,6 +14,41 @@ public sealed class LocalizationEditorTests
         "Assets/Resources/Localization/LocalizationFontCatalog.asset";
 
     [Test]
+    public void EditorText_KoreanEditorUsesKoreanAndOtherEditorsUseEnglish()
+    {
+        Assert.That(
+            PS260714EditorText.TranslateForLanguage(
+                "Permanent Stat Modifier",
+                true),
+            Is.EqualTo("상시 능력치 보정"));
+        Assert.That(
+            PS260714EditorText.TranslateForLanguage(
+                "상시 능력치 보정",
+                false),
+            Is.EqualTo("Permanent Stat Modifier"));
+    }
+
+    [Test]
+    public void EditorText_UnknownKoreanDoesNotLeakIntoEnglishEditor()
+    {
+        string translated = PS260714EditorText.TranslateForLanguage(
+            "알 수 없는 편집기 항목",
+            false);
+
+        Assert.That(translated, Is.Not.Empty);
+        Assert.That(translated, Does.Not.Match("[가-힣]"));
+    }
+
+    [Test]
+    public void EditorContent_AddsTooltipWhenMissing()
+    {
+        GUIContent content = new("Save");
+
+        Assert.That(content.text, Is.Not.Empty);
+        Assert.That(content.tooltip, Is.Not.Empty);
+    }
+
+    [Test]
     public void ApplyStyle_WrapsSelectionAndKeepsContentSelected()
     {
         LocalizationMarkupEditResult result =

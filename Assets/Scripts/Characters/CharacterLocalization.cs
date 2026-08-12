@@ -1678,6 +1678,16 @@ public static class CharacterLocalization
             if (builder.Length > 0)
                 builder.Append(" / ");
 
+            if (!CharacterPassiveStatModifierRules
+                    .IsSupportedCharacterStat(modifier.StatType))
+            {
+                builder.Append(
+                    UsesKoreanLocale
+                        ? "지원하지 않는 캐릭터 스탯"
+                        : "Unsupported Character Stat");
+                continue;
+            }
+
             string statName = FormatStatusStatType(modifier.StatType);
             string modeName = modifier.Mode switch
             {

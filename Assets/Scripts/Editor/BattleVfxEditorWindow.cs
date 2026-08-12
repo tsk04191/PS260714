@@ -462,7 +462,8 @@ public sealed class BattleVfxEditorWindow : EditorWindow
         EditorGUI.DrawRect(headerRect, new Color(0.12f, 0.12f, 0.12f));
         GUI.Label(
             headerRect,
-            $"0.00초                              {timelineLength:0.00}초",
+            new GUIContent(
+                $"0.00초                              {timelineLength:0.00}초"),
             EditorStyles.centeredGreyMiniLabel);
 
         for (int index = 0; index < clips.arraySize; index++)
@@ -497,7 +498,7 @@ public sealed class BattleVfxEditorWindow : EditorWindow
                     : new Color(0.25f, 0.45f, 0.7f));
             GUI.Label(
                 rowRect,
-                $"{index + 1}",
+                new GUIContent($"{index + 1}"),
                 EditorStyles.miniLabel);
             if (Event.current.type == EventType.MouseDown &&
                 rowRect.Contains(Event.current.mousePosition))

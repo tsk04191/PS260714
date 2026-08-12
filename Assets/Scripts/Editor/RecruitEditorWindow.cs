@@ -786,7 +786,8 @@ public sealed class RecruitEditorWindow : EditorWindow
             GUILayout.ExpandWidth(true));
         GUI.Box(
             dropArea,
-            "여기에 여러 CharacterSO / ItemDefinitionSO 드래그",
+            new GUIContent(
+                "여기에 여러 CharacterSO / ItemDefinitionSO 드래그"),
             EditorStyles.helpBox);
         Event current = Event.current;
         if (!dropArea.Contains(current.mousePosition) ||
@@ -2158,7 +2159,9 @@ public sealed class RecruitEditorWindow : EditorWindow
                 preview.y,
                 preview.width - labelOffset - 4f,
                 preview.height),
-            $"공통 팔레트 · {CharacterGradePresentation.GetLabel(grade)}",
+            new GUIContent(
+                $"공통 팔레트 · " +
+                $"{CharacterGradePresentation.GetLabel(grade)}"),
             labelStyle);
     }
 

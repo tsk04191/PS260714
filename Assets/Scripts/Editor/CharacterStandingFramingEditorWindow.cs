@@ -190,11 +190,11 @@ public sealed class CharacterStandingFramingEditorWindow : EditorWindow
 
         GUI.Label(
             new Rect(sourceColumn.x, sourceColumn.y, columnWidth, labelHeight),
-            "원본 일러스트 / HUD 노출 영역",
+            new GUIContent("원본 일러스트 / HUD 노출 영역"),
             EditorStyles.boldLabel);
         GUI.Label(
             new Rect(hudColumn.x, hudColumn.y, columnWidth, labelHeight),
-            "CharacterInfo 마스크 결과",
+            new GUIContent("CharacterInfo 마스크 결과"),
             EditorStyles.boldLabel);
 
         Rect sourceBounds = new(
@@ -250,7 +250,7 @@ public sealed class CharacterStandingFramingEditorWindow : EditorWindow
         {
             GUI.Label(
                 viewport,
-                "Standing Sprite 없음",
+                new GUIContent("Standing Sprite 없음"),
                 EditorStyles.centeredGreyMiniLabel);
             DrawBorder(viewport, new Color(0.2f, 0.9f, 0.9f, 1f), 2f);
             return;

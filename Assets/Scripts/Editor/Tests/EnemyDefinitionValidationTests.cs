@@ -875,6 +875,36 @@ public sealed class AbilityDefinitionContractTests
     }
 
     [Test]
+    public void CharacterNoneSubject_ProjectsToInheritedTargets()
+    {
+        CharacterSkillDefinition skill = new();
+        SetField(skill, "actionId", "skill.inherited_target_test");
+        SetField(
+            skill,
+            "sections",
+            new List<CharacterSkillSectionType>
+            {
+                CharacterSkillSectionType.Subject,
+                CharacterSkillSectionType.Ability,
+            });
+        SetField(skill, "subject", CharacterAttackSubject.None);
+        SetField(
+            skill,
+            "effects",
+            new List<CharacterEffectDefinition> { new() });
+        skill.Validate();
+
+        Assert.That(
+            skill.Targeting.SelectionMode,
+            Is.EqualTo(BattleAbilitySelectionMode.Inherit));
+        Assert.That(skill.Targeting.HasTarget, Is.True);
+        Assert.That(
+            AbilityDefinitionValidator.TryValidate(skill, out string error),
+            Is.True,
+            error);
+    }
+
+    [Test]
     public void CharacterAttackAndPassive_UseSkillTargetAreaEffectContract()
     {
         CharacterAttackDefinition attack = new();
