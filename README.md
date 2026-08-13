@@ -7,9 +7,9 @@ Unity 프로젝트에서 사용하는 C# 스크립트를 공유하고 버전 관
 
 이 저장소는 의도적으로 다음 파일만 관리합니다.
 
-- `Assets/Scripts` 아래의 C# 스크립트
+- `Assets/10_Scripts` 아래의 C# 스크립트
 - 스크립트 GUID를 유지하는 데 필요한 관련 `.meta` 파일
-- `Assets/LocalizationSource`의 로컬라이제이션 원본 CSV와 관련 `.meta` 파일
+- `Assets/11_LocalizationSource`의 로컬라이제이션 원본 CSV와 관련 `.meta` 파일
 - 저장소 사용 방법을 설명하는 문서와 Git 설정
 
 씬, 프리팹, ScriptableObject 데이터, 이미지, 오디오, 애니메이션,
@@ -20,7 +20,7 @@ Unity 프로젝트에서 사용하는 C# 스크립트를 공유하고 버전 관
 ## 사용 방법
 
 1. 별도로 준비된 Unity 프로젝트를 엽니다.
-2. 이 저장소의 `Assets/Scripts`를 프로젝트의 동일한 경로에 배치합니다.
+2. 이 저장소의 `Assets/10_Scripts`를 프로젝트의 동일한 경로에 배치합니다.
 3. `.meta` 파일을 함께 유지해 기존 씬과 프리팹의 스크립트 참조 GUID가
    변경되지 않도록 합니다.
 4. 씬과 에셋을 포함한 전체 프로젝트 백업은 이 저장소와 별도로
@@ -29,6 +29,24 @@ Unity 프로젝트에서 사용하는 C# 스크립트를 공유하고 버전 관
 Unity가 생성하는 `Library`, `Temp`, IDE 프로젝트 파일과 로컬 에셋은 Git
 관리 대상이 아닙니다. 로컬에서 생성된 `.csproj`를 이용한 빌드는 코드
 검증 용도이며, 새로 복제한 이 저장소 단독으로 실행되는 빌드는 아닙니다.
+
+## 폴더 관리 규칙
+
+- `Assets/00~09_*`는 로컬 전용 영역입니다. 현재 플러그인, 그래픽,
+  오디오, VFX, 씬, 설정, 런타임 에셋, 프리팹, 복구 자료를 분리해 두며
+  Git에 커밋하지 않습니다.
+- `Assets/10~19_*`는 Git 관리 후보 영역입니다. 현재 허용된 폴더는
+  C#과 관련 `.meta`만 담는 `10_Scripts`, 로컬라이제이션 원본 CSV와
+  관련 `.meta`만 담는 `11_LocalizationSource`입니다.
+- 폴더는 역할과 기능을 기준으로 분류하고, `Assets` 아래 번호 폴더부터
+  최대 5단계의 폴더 계층을 사용합니다. 외부 플러그인과 에셋 팩의 내부
+  구조는 공급자 업데이트 호환성을 위해 이 깊이 규칙의 예외로 둡니다.
+- Unity 예약 폴더 이름은 기능이 유지되도록 그대로 사용합니다.
+  런타임 로드 에셋은 `Assets/07_Runtime/Resources`, 에디터 전용 코드는
+  `10_Scripts` 내부의 `Editor` 폴더에 둡니다.
+- 새 번호 폴더를 만들었다고 자동으로 Git 대상이 되지 않습니다.
+  저장소 범위를 늘리려면 이 문서와 `.gitignore` 허용 목록을 함께
+  변경하고, 씬·프리팹·ScriptableObject가 포함되지 않았는지 확인합니다.
 
 ## 개발 환경
 
@@ -43,12 +61,12 @@ Unity가 생성하는 `Library`, `Temp`, IDE 프로젝트 파일과 로컬 에�
 프로젝트 전용 로컬라이제이션 기능으로 관리합니다. 빌드에서는 CSV를 직접
 읽지 않고 에디터에서 생성한 C# 테이블을 사용합니다.
 
-- `Assets/LocalizationSource/locales.csv`는 언어 코드, 표시 이름, 대체 언어,
+- `Assets/11_LocalizationSource/locales.csv`는 언어 코드, 표시 이름, 대체 언어,
   기본 글꼴 역할을 정의합니다.
-- `Assets/LocalizationSource/strings.csv`는 `key`, `context`, `font_role`,
+- `Assets/11_LocalizationSource/strings.csv`는 `key`, `context`, `font_role`,
   `note` 뒤에 언어별 열을 두어 문구를 정의합니다. 파일은 UTF-8/RFC 4180
   형식이며 쉼표, 따옴표, 여러 줄을 포함한 값은 CSV 규칙대로 인용합니다.
-- `Assets/Scripts/Localization/Generated` 아래의 `*.g.cs`는 CSV에서 자동
+- `Assets/10_Scripts/Localization/Generated` 아래의 `*.g.cs`는 CSV에서 자동
   생성되는 런타임 테이블과 키 상수입니다. 직접 수정하지 않습니다.
 
 Unity 메뉴의 `Tools/PS260714/Localization Editor`에서 Strings와 Locales를
@@ -83,7 +101,7 @@ OS 글꼴을 동적으로 찾습니다.
 
 Font/Markup Catalog는 Unity 에셋 참조를 담으므로 이 스크립트 전용 저장소에는
 포함하지 않습니다. `Localization Editor`의 Font & Markup 탭에서 로컬 에셋을
-만들면 `Assets/Resources/Localization`에 저장되어 런타임에 자동으로 로드됩니다.
+만들면 `Assets/07_Runtime/Resources/Localization`에 저장되어 런타임에 자동으로 로드됩니다.
 씬의 `LocalizationFontResolver`에 직접 지정한 카탈로그는 이 기본값을 덮어씁니다.
 해당 카탈로그와 TMP Font/Sprite Asset은 씬·프리팹 등과 함께 별도 백업해야 합니다.
 

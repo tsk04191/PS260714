@@ -4,7 +4,7 @@
 >
 > 기준 버전: Unity 6000.3.11f1
 >
-> 분석 범위: `Assets/Scripts`, `Assets/Resources`, `Assets/LocalizationSource`, `Assets/Scenes/ClientScene.unity`
+> 분석 범위: `Assets/10_Scripts`, `Assets/07_Runtime/Resources`, `Assets/11_LocalizationSource`, `Assets/05_Scenes/ClientScene.unity`
 
 ## 1. 프로젝트 요약
 
@@ -576,19 +576,19 @@ Character, Enemy, Item, Status Effect 에디터는 공통적으로 검색, 새 �
 
 ## 22. 주요 코드 위치
 
-- 앱 루트: `Assets/Scripts/GameManager.cs`
-- 데이터 루트: `Assets/Scripts/Utils/Data/DataManager.cs`
-- 저장: `Assets/Scripts/Characters/CharacterData.cs`, `Assets/Scripts/Items/InventoryData.cs`, `Assets/Scripts/Attendance/AttendanceData.cs`
-- 출석: `Assets/Scripts/Attendance`, `Assets/Scripts/Pages/MainPage.cs`
-- 전투 관리자: `Assets/Scripts/Battle/BattleManager.cs`
-- 전투 계약/효과: `Assets/Scripts/Battle/BattleContracts.cs`, `Assets/Scripts/Core/Effects`
-- 던전 오케스트레이션: `Assets/Scripts/Pages/Dungeon/DungeonPage.cs`
-- 보드: `Assets/Scripts/Pages/Dungeon/DungeonBoardView.cs`
-- 캐릭터: `Assets/Scripts/Characters/CharacterSO.cs`, `CharacterRuntime.cs`
-- 적: `Assets/Scripts/Enemies/EnemySO.cs`, `EnemyRuntime.cs`, `EnemyAbilityDefinition.cs`
-- 아이템: `Assets/Scripts/Items`
-- 상태효과: `Assets/Scripts/StatusEffects/StatusEffectSO.cs`
-- 모집: `Assets/Scripts/Pages/RecruitBannerView.cs`, `MainSubPage.cs`
-- 로컬리제이션: `Assets/Scripts/Localization`, `Assets/LocalizationSource`
-- 제작 도구: `Assets/Scripts/Editor`
-- 테스트: `Assets/Scripts/Editor/Tests`, `Assets/Scripts/Tests`
+- 앱 루트: `Assets/10_Scripts/GameManager.cs`
+- 데이터 루트: `Assets/10_Scripts/Infrastructure/Data/DataManager.cs`
+- 저장: `Assets/10_Scripts/Characters/CharacterData.cs`, `Assets/10_Scripts/Items/InventoryData.cs`, `Assets/10_Scripts/Attendance/AttendanceData.cs`
+- 출석: `Assets/10_Scripts/Attendance`, `Assets/10_Scripts/UI/MainPage.cs`
+- 전투 관리자: `Assets/10_Scripts/Battle/BattleManager.cs`
+- 전투 계약/효과: `Assets/10_Scripts/Battle/BattleContracts.cs`, `Assets/10_Scripts/Core/Effects`
+- 던전 오케스트레이션: `Assets/10_Scripts/Run/DungeonPage.cs`
+- 보드: `Assets/10_Scripts/Run/DungeonBoardView.cs`
+- 캐릭터: `Assets/10_Scripts/Characters/CharacterSO.cs`, `CharacterRuntime.cs`
+- 적: `Assets/10_Scripts/Enemies/EnemySO.cs`, `EnemyRuntime.cs`, `EnemyAbilityDefinition.cs`
+- 아이템: `Assets/10_Scripts/Items`
+- 상태효과: `Assets/10_Scripts/StatusEffects/StatusEffectSO.cs`
+- 모집: `Assets/10_Scripts/UI/RecruitBannerView.cs`, `MainSubPage.cs`
+- 로컬리제이션: `Assets/10_Scripts/Localization`, `Assets/11_LocalizationSource`
+- 제작 도구: `Assets/10_Scripts/Editor`
+- 테스트: `Assets/10_Scripts/Tests/Editor`, `Assets/10_Scripts/Tests`
