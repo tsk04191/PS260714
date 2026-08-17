@@ -4,6 +4,7 @@ using System.Reflection;
 using NUnit.Framework;
 using UnityEditor;
 using UnityEngine;
+using static TestReflection;
 
 public sealed class StatusEffectEditorTests
 {
@@ -929,29 +930,6 @@ public sealed class BattleEffectCoreTests
                 Is.EqualTo(expected[index]),
                 $"trigger[{index}]");
         }
-    }
-
-    private static List<T> GetPrivateList<T>(
-        object target,
-        string fieldName)
-    {
-        FieldInfo field = target.GetType().GetField(
-            fieldName,
-            BindingFlags.Instance | BindingFlags.NonPublic);
-        Assert.That(field, Is.Not.Null, fieldName);
-        return field.GetValue(target) as List<T>;
-    }
-
-    private static void SetPrivateField(
-        object target,
-        string fieldName,
-        object value)
-    {
-        FieldInfo field = target.GetType().GetField(
-            fieldName,
-            BindingFlags.Instance | BindingFlags.NonPublic);
-        Assert.That(field, Is.Not.Null, fieldName);
-        field.SetValue(target, value);
     }
 
     private sealed class FakeBattleCharacter : IBattleCharacter

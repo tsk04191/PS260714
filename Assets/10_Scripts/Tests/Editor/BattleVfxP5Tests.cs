@@ -1,7 +1,7 @@
 using System.Collections.Generic;
-using System.Reflection;
 using NUnit.Framework;
 using UnityEngine;
+using static TestReflection;
 
 public sealed class BattleVfxP5Tests
 {
@@ -335,15 +335,4 @@ public sealed class BattleVfxP5Tests
             delaySeconds: delaySeconds);
     }
 
-    private static void SetField(
-        object target,
-        string fieldName,
-        object value)
-    {
-        FieldInfo field = target.GetType().GetField(
-            fieldName,
-            BindingFlags.Instance | BindingFlags.NonPublic);
-        Assert.That(field, Is.Not.Null, $"Missing field: {fieldName}");
-        field.SetValue(target, value);
-    }
 }

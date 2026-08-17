@@ -57,7 +57,8 @@ public static class BattleItemUseExecutor
                             target,
                             effect.RuntimeDuration,
                             effect.Interval,
-                            Mathf.Max(1, effect.Amount)),
+                            Mathf.Max(1, effect.Amount),
+                            BattleAbilityUser.ForBattleItem(resource)),
                     BattleItemEffectType.FixedDamage =>
                         board.TryDamageEnemy(target, effect.Amount) > 0,
                     _ => false,
@@ -101,7 +102,7 @@ public static class BattleItemUseExecutor
                     CharacterTargetFaction.Ally,
                     Array.Empty<EnemyRuntime>(),
                     new IBattleCharacter[] { turret },
-                    turret.CurrentAttackPower,
+                    0f,
                     item.StatusEffectsLastUntilBattleEnd);
             return TryExecuteUnifiedAbility(item, context);
         }

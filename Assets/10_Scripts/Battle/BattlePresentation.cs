@@ -829,9 +829,7 @@ public sealed class BattlePresentationDispatcher : IDisposable
         if (!eventData.IsValid)
             return;
 
-        BattleStatusTarget source = eventData.Source != null
-            ? BattleStatusTarget.FromAlly(eventData.Source)
-            : default;
+        BattleStatusTarget source = eventData.SourceTarget;
         switch (eventData.Trigger)
         {
             case StatusEffectLifecycleTrigger.OnApply:

@@ -9,7 +9,7 @@ public sealed class StageSelectEditorWindow : EditorWindow
 {
     public const string MenuPath = PS260714EditorMenu.StageSelectEditor;
 
-    private const string AssetFolder = "Assets/07_Runtime/Resources/Dungeons";
+    private const string AssetFolder = "Assets/06_Runtime/Resources/Dungeons";
     private const string RenameControlName = "StageAssetRenameField";
     private const float SquareRatioTolerance = 0.01f;
 
@@ -1057,9 +1057,9 @@ public sealed class StageSelectEditorWindow : EditorWindow
 
     private static void EnsureAssetFolder()
     {
-        if (!AssetDatabase.IsValidFolder("Assets/07_Runtime/Resources"))
+        if (!AssetDatabase.IsValidFolder("Assets/06_Runtime/Resources"))
             AssetDatabase.CreateFolder("Assets", "Resources");
         if (!AssetDatabase.IsValidFolder(AssetFolder))
-            AssetDatabase.CreateFolder("Assets/07_Runtime/Resources", "Dungeons");
+            AssetDatabase.CreateFolder("Assets/06_Runtime/Resources", "Dungeons");
     }
 }

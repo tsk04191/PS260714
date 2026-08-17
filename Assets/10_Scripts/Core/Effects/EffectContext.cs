@@ -182,9 +182,9 @@ public static class BattleEffectRules
                     error = "Damage effect uses an unsupported damage type.";
                     return false;
                 }
-                if (!scaling.HasNonZeroTerm)
+                if (!scaling.HasPositiveTerm)
                 {
-                    error = "Damage effect requires a non-zero amount.";
+                    error = "Damage effect requires a positive amount term.";
                     return false;
                 }
                 break;
@@ -217,10 +217,10 @@ public static class BattleEffectRules
                 break;
 
             case BattleEffectType.GainResource:
-                if (!scaling.HasNonZeroTerm ||
+                if (!scaling.HasPositiveTerm ||
                     scaling.HasTargetDependentTerm)
                 {
-                    error = "Resource gain requires a non-zero, " +
+                    error = "Resource gain requires a positive, " +
                             "target-independent amount.";
                     return false;
                 }
@@ -239,10 +239,10 @@ public static class BattleEffectRules
 
             case BattleEffectType.Heal:
             case BattleEffectType.Shield:
-                if (!scaling.HasNonZeroTerm)
+                if (!scaling.HasPositiveTerm)
                 {
                     error = $"{effect.BattleEffectType} requires a " +
-                            "non-zero amount.";
+                            "positive amount term.";
                     return false;
                 }
                 break;
@@ -1105,21 +1105,112 @@ public enum BattleEffectOriginKind
     BattleCard = 7
 }
 
+public enum BattleAbilityUserRole
+{
+    Character = 0,
+    Enemy = 1,
+    BattleItem = 2,
+    CommonCard = 3,
+    StatusEffect = 4,
+    BattleLifecycle = 5
+}
+
+/// <summary>
+/// Identifies the actor or system that owns an effect. The user is distinct
+/// from the selected target, so a battle item or common card never inherits a
+/// target character's modifiers by accident.
+/// </summary>
+public readonly struct BattleAbilityUser
+{
+    public BattleAbilityUserRole Role { get; }
+    public BattleStatusTarget Unit { get; }
+    public float AttackPower { get; }
+    public IActiveSkillResource Resource { get; }
+    public bool IsCharacter => Role == BattleAbilityUserRole.Character;
+    public bool HasUnit => Unit.IsValid;
+
+    internal BattleAbilityUser(
+        BattleAbilityUserRole role,
+        BattleStatusTarget unit,
+        float attackPower,
+        IActiveSkillResource resource)
+    {
+        Role = role;
+        Unit = unit;
+        AttackPower = float.IsNaN(attackPower) ||
+                      float.IsInfinity(attackPower)
+            ? 0f
+            : Mathf.Max(0f, attackPower);
+        Resource = resource;
+    }
+
+    public static BattleAbilityUser FromCharacter(
+        IBattleCharacter character,
+        IActiveSkillResource resource = null)
+    {
+        return new BattleAbilityUser(
+            BattleAbilityUserRole.Character,
+            BattleStatusTarget.FromAlly(character),
+            character?.CurrentAttackPower ?? 0f,
+            resource);
+    }
+
+    public static BattleAbilityUser FromEnemy(EnemyRuntime enemy)
+    {
+        return new BattleAbilityUser(
+            BattleAbilityUserRole.Enemy,
+            BattleStatusTarget.FromEnemy(enemy),
+            enemy?.CurrentAttackPower ?? 0f,
+            null);
+    }
+
+    public static BattleAbilityUser ForBattleItem(
+        IActiveSkillResource resource = null)
+    {
+        return new BattleAbilityUser(
+            BattleAbilityUserRole.BattleItem,
+            default,
+            0f,
+            resource);
+    }
+
+    public static BattleAbilityUser ForCommonCard(
+        IActiveSkillResource resource = null)
+    {
+        return new BattleAbilityUser(
+            BattleAbilityUserRole.CommonCard,
+            default,
+            0f,
+            resource);
+    }
+
+    public static BattleAbilityUser ForStatusEffect()
+    {
+        return new BattleAbilityUser(
+            BattleAbilityUserRole.StatusEffect,
+            default,
+            0f,
+            null);
+    }
+}
+
 public readonly struct BattleEffectContext
 {
     private readonly EffectContext _characterContext;
 
     public BattleEffectOriginKind OriginKind { get; }
-    public BattleStatusTarget SourceTarget { get; }
+    public BattleAbilityUser User { get; }
+    public BattleStatusTarget SourceTarget => User.Unit;
     public BattleStatusTarget Target => _characterContext.Target;
     public BattleStatusTarget Holder => Target;
     public IBattleCharacter Source => _characterContext.Source;
     public IBattleBoard Board => _characterContext.Board;
-    public IActiveSkillResource Resource => _characterContext.Resource;
+    public IActiveSkillResource Resource => User.Resource ??
+                                             _characterContext.Resource;
     public IBattleCardDrawService CardDrawService { get; }
     public CharacterTargetFaction TargetFaction =>
         _characterContext.TargetFaction;
-    public float SourceAttackPower => _characterContext.SourceAttackPower;
+    public float SourceAttackPower => User.AttackPower;
     public int SourceCurrentHealth =>
         _characterContext.SourceCurrentHealth;
     public int SourceMaximumHealth =>
@@ -1156,7 +1247,7 @@ public readonly struct BattleEffectContext
     private BattleEffectContext(
         EffectContext characterContext,
         BattleEffectOriginKind originKind,
-        BattleStatusTarget sourceTarget,
+        BattleAbilityUser user,
         int previousStacks,
         int currentStacks,
         int occurrenceCount,
@@ -1165,7 +1256,7 @@ public readonly struct BattleEffectContext
     {
         _characterContext = characterContext;
         OriginKind = originKind;
-        SourceTarget = sourceTarget;
+        User = user;
         PreviousStacks = Math.Max(0, previousStacks);
         CurrentStacks = Math.Max(0, currentStacks);
         OccurrenceCount = Math.Max(1, occurrenceCount);
@@ -1177,10 +1268,15 @@ public readonly struct BattleEffectContext
     public static BattleEffectContext FromCharacter(
         EffectContext context)
     {
+        BattleAbilityUser user = new(
+            BattleAbilityUserRole.Character,
+            context.SourceTarget,
+            context.SourceAttackPower,
+            context.Resource);
         return new BattleEffectContext(
             context,
             ToOriginKind(context.ActionKind),
-            context.SourceTarget,
+            user,
             0,
             0,
             1,
@@ -1194,10 +1290,20 @@ public readonly struct BattleEffectContext
         CharacterTargetFaction targetFaction,
         IReadOnlyList<EnemyRuntime> enemyTargets,
         IReadOnlyList<IBattleCharacter> playerCharacterTargets,
-        float sourceAttackPower = 0f)
+        float sourceAttackPower = -1f)
     {
         BattleStatusTarget sourceTarget =
             BattleStatusTarget.FromEnemy(source);
+        BattleAbilityUser user = BattleAbilityUser.FromEnemy(source);
+        if (sourceAttackPower >= 0f &&
+            !Mathf.Approximately(sourceAttackPower, user.AttackPower))
+        {
+            user = new BattleAbilityUser(
+                BattleAbilityUserRole.Enemy,
+                sourceTarget,
+                sourceAttackPower,
+                null);
+        }
         EffectContext context = new(
             sourceTarget,
             board,
@@ -1206,11 +1312,11 @@ public readonly struct BattleEffectContext
             targetFaction,
             enemyTargets,
             playerCharacterTargets,
-            sourceAttackPower);
+            user.AttackPower);
         return new BattleEffectContext(
             context,
             BattleEffectOriginKind.EnemyAbility,
-            sourceTarget,
+            user,
             0,
             0,
             1,
@@ -1228,19 +1334,20 @@ public readonly struct BattleEffectContext
         float sourceAttackPower = 0f,
         bool statusEffectsLastUntilBattleEnd = false)
     {
+        BattleAbilityUser user = BattleAbilityUser.ForBattleItem(resource);
         EffectContext context = new(
-            selectedTarget,
+            user.Unit,
             board,
             resource,
             CharacterActionKind.Skill,
             targetFaction,
             enemyTargets,
             allyTargets,
-            sourceAttackPower);
+            user.AttackPower);
         return new BattleEffectContext(
             context,
             BattleEffectOriginKind.BattleItem,
-            selectedTarget,
+            user,
             0,
             0,
             1,
@@ -1256,23 +1363,25 @@ public readonly struct BattleEffectContext
         IReadOnlyList<EnemyRuntime> enemyTargets,
         IReadOnlyList<IBattleCharacter> allyTargets,
         float sourceAttackPower = 0f,
-        IBattleCardDrawService cardDrawService = null)
+        IBattleCardDrawService cardDrawService = null,
+        bool usesCharacterUser = true)
     {
-        BattleStatusTarget sourceTarget =
-            BattleStatusTarget.FromAlly(source);
+        BattleAbilityUser user = usesCharacterUser
+            ? BattleAbilityUser.FromCharacter(source, resource)
+            : BattleAbilityUser.ForCommonCard(resource);
         EffectContext context = new(
-            sourceTarget,
+            user.Unit,
             board,
             resource,
             CharacterActionKind.Skill,
             targetFaction,
             enemyTargets,
             allyTargets,
-            sourceAttackPower);
+            user.AttackPower);
         return new BattleEffectContext(
             context,
             BattleEffectOriginKind.BattleCard,
-            sourceTarget,
+            user,
             0,
             0,
             1,
@@ -1294,7 +1403,32 @@ public readonly struct BattleEffectContext
         return new BattleEffectContext(
             context,
             originKind,
-            default,
+            originKind switch
+            {
+                BattleEffectOriginKind.BattleItem =>
+                    BattleAbilityUser.ForBattleItem(),
+                BattleEffectOriginKind.BattleCard =>
+                    BattleAbilityUser.ForCommonCard(),
+                BattleEffectOriginKind.StatusEffect =>
+                    BattleAbilityUser.ForStatusEffect(),
+                BattleEffectOriginKind.EnemyAbility =>
+                    new BattleAbilityUser(
+                        BattleAbilityUserRole.Enemy,
+                        default,
+                        sourceAttackPower,
+                        null),
+                BattleEffectOriginKind.BattleLifecycle =>
+                    new BattleAbilityUser(
+                        BattleAbilityUserRole.BattleLifecycle,
+                        default,
+                        sourceAttackPower,
+                        null),
+                _ => new BattleAbilityUser(
+                    BattleAbilityUserRole.Character,
+                    default,
+                    sourceAttackPower,
+                    null)
+            },
             0,
             0,
             1);
@@ -1302,9 +1436,8 @@ public readonly struct BattleEffectContext
 
     public static BattleEffectContext ForStatus(
         BattleStatusTarget holder,
-        BattleStatusTarget sourceTarget,
+        BattleAbilityUser user,
         IBattleBoard board,
-        float sourceAttackPower,
         int previousStacks,
         int currentStacks,
         int occurrenceCount = 1,
@@ -1319,16 +1452,16 @@ public readonly struct BattleEffectContext
                 ? new[] { holder.Ally }
                 : Array.Empty<IBattleCharacter>();
         EffectContext context = new(
-            sourceTarget,
+            user.Unit,
             board,
-            resource,
+            user.Resource ?? resource,
             CharacterActionKind.Passive,
             holder.IsValid
                 ? holder.Faction
                 : CharacterTargetFaction.Enemy,
             enemyTargets,
             allyTargets,
-            sourceAttackPower);
+            user.AttackPower);
         if (holder.Enemy != null)
             context = context.BindEnemyTarget(holder.Enemy, null);
         else if (holder.Ally != null)
@@ -1337,12 +1470,49 @@ public readonly struct BattleEffectContext
         return new BattleEffectContext(
             context,
             BattleEffectOriginKind.StatusEffect,
-            sourceTarget,
+            user,
             previousStacks,
             currentStacks,
             occurrenceCount,
             false,
             ResolveCardDrawService(board));
+    }
+
+    public static BattleEffectContext ForStatus(
+        BattleStatusTarget holder,
+        BattleStatusTarget sourceTarget,
+        IBattleBoard board,
+        float sourceAttackPower,
+        int previousStacks,
+        int currentStacks,
+        int occurrenceCount = 1,
+        IActiveSkillResource resource = null)
+    {
+        BattleAbilityUser user = sourceTarget.Ally != null
+            ? new BattleAbilityUser(
+                BattleAbilityUserRole.Character,
+                sourceTarget,
+                sourceAttackPower,
+                resource)
+            : sourceTarget.Enemy != null
+                ? new BattleAbilityUser(
+                    BattleAbilityUserRole.Enemy,
+                    sourceTarget,
+                    sourceAttackPower,
+                    resource)
+                : new BattleAbilityUser(
+                    BattleAbilityUserRole.StatusEffect,
+                    default,
+                    sourceAttackPower,
+                    resource);
+        return ForStatus(
+            holder,
+            user,
+            board,
+            previousStacks,
+            currentStacks,
+            occurrenceCount,
+            resource);
     }
 
     public BattleEffectContext SnapshotSourceStatus(
@@ -1393,7 +1563,7 @@ public readonly struct BattleEffectContext
         return new BattleEffectContext(
             _characterContext,
             OriginKind,
-            SourceTarget,
+            User,
             previousStacks,
             currentStacks,
             occurrenceCount,
@@ -1406,7 +1576,7 @@ public readonly struct BattleEffectContext
         return new BattleEffectContext(
             context,
             OriginKind,
-            SourceTarget,
+            User,
             PreviousStacks,
             CurrentStacks,
             OccurrenceCount,

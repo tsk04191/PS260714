@@ -5,14 +5,15 @@ using NUnit.Framework;
 using UnityEditor;
 using UnityEngine;
 using UnityEngine.UI;
+using static TestReflection;
 
 public sealed class EnemyP0RegressionTests
 {
-    private const string EnemyAssetFolder = "Assets/07_Runtime/Resources/Enemies/";
+    private const string EnemyAssetFolder = "Assets/06_Runtime/Resources/Enemies/";
     private const string FireStatusPath =
-        "Assets/07_Runtime/Resources/StatusEffects/Fire.asset";
+        "Assets/06_Runtime/Resources/StatusEffects/Fire.asset";
     private const string StunStatusPath =
-        "Assets/07_Runtime/Resources/StatusEffects/Stun.asset";
+        "Assets/06_Runtime/Resources/StatusEffects/Stun.asset";
 
     private static readonly BindingFlags InstanceNonPublic =
         BindingFlags.Instance | BindingFlags.NonPublic;
@@ -1817,17 +1818,6 @@ public sealed class EnemyP0RegressionTests
         return effect;
     }
 
-    private static List<T> GetPrivateList<T>(
-        object target,
-        string fieldName)
-    {
-        FieldInfo field = target.GetType().GetField(
-            fieldName,
-            InstanceNonPublic);
-        Assert.That(field, Is.Not.Null, $"Missing field '{fieldName}'.");
-        return (List<T>)field.GetValue(target);
-    }
-
     private StatusEffectSO CreateStatusForConditionScope(
         string statusId,
         StatusEffectAlignment alignment)
@@ -1858,18 +1848,6 @@ public sealed class EnemyP0RegressionTests
         return (bool)method.Invoke(
             null,
             new object[] { condition, hasStatus, activeStatuses });
-    }
-
-    private static void SetPrivateField(
-        object target,
-        string fieldName,
-        object value)
-    {
-        FieldInfo field = target.GetType().GetField(
-            fieldName,
-            InstanceNonPublic);
-        Assert.That(field, Is.Not.Null, $"Missing field '{fieldName}'.");
-        field.SetValue(target, value);
     }
 
     private static void SetPrivateProperty(
@@ -2067,7 +2045,7 @@ public sealed class EnemyP0RegressionTests
         }
 
         public bool TryApplyCharacterStatus(
-            IBattleCharacter source,
+            BattleAbilityUser user,
             IReadOnlyList<EnemyRuntime> targets,
             StatusEffectSO statusEffect,
             float duration,
@@ -2079,7 +2057,7 @@ public sealed class EnemyP0RegressionTests
         }
 
         public bool TryApplyAlliedCharacterStatus(
-            IBattleCharacter source,
+            BattleAbilityUser user,
             IReadOnlyList<IBattleCharacter> targets,
             StatusEffectSO statusEffect,
             float duration,
@@ -2282,9 +2260,9 @@ public sealed class EnemyP0RegressionTests
 public sealed class DungeonDefinitionRegressionTests
 {
     private const string FreeBattlePath =
-        "Assets/07_Runtime/Resources/Dungeons/FreeBattle.asset";
+        "Assets/06_Runtime/Resources/Dungeons/FreeBattle.asset";
     private const string TestFieldPath =
-        "Assets/07_Runtime/Resources/Dungeons/TestField.asset";
+        "Assets/06_Runtime/Resources/Dungeons/TestField.asset";
 
     [Test]
     public void FreeBattle_DoesNotUseTutorialBattleSetup()

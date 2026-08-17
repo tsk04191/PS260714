@@ -9,7 +9,7 @@ using UnityEngine.UI;
 
 public sealed class DynamicUiScenePreviewTests
 {
-    private const string ScenePath = "Assets/05_Scenes/ClientScene.unity";
+    private const string ScenePath = "Assets/04_Scenes/ClientScene.unity";
 
     [Test]
     public void RestEditorPreview_FitsFullSixteenByNineFrameWithoutCrop()
@@ -28,6 +28,10 @@ public sealed class DynamicUiScenePreviewTests
         DungeonRestSO rest = ScriptableObject.CreateInstance<DungeonRestSO>();
         try
         {
+            Assert.That(
+                rest.ApplyRestSchemaMigration(
+                    new List<DungeonRoomChoiceDefinition>()),
+                Is.True);
             Assert.That(rest.TryValidate(out string error), Is.True, error);
             Assert.That(rest.BaseActionCount, Is.EqualTo(1));
             Assert.That(rest.Actions.Count, Is.EqualTo(3));
@@ -71,7 +75,7 @@ public sealed class DynamicUiScenePreviewTests
                     Is.EqualTo($"grpAttendanceReward{index + 1:00}"));
                 AssertPrefabPath(
                     cells[index].gameObject,
-                    "Assets/07_Runtime/Resources/Presentation/" +
+                    "Assets/06_Runtime/Resources/Presentation/" +
                     "AttendanceRewardCell.prefab");
             }
         }
@@ -95,7 +99,7 @@ public sealed class DynamicUiScenePreviewTests
                     .Find("btnCodexCard_0")?.gameObject;
                 AssertPrefabPath(
                     preview,
-                    "Assets/07_Runtime/Resources/Presentation/CodexCard.prefab");
+                    "Assets/06_Runtime/Resources/Presentation/CodexCard.prefab");
             }
 
             OperatorRosterDesignerSettings roster =
@@ -104,7 +108,7 @@ public sealed class DynamicUiScenePreviewTests
                 roster.transform.Find(
                     "scrRosterList/vptRosterList/grpRosterCardContent/" +
                     "btnOperatorCard_0")?.gameObject,
-                "Assets/07_Runtime/Resources/Presentation/OperatorRosterCard.prefab");
+                "Assets/06_Runtime/Resources/Presentation/OperatorRosterCard.prefab");
 
             OperatorDetailDesignerSettings detail =
                 FindOne<OperatorDetailDesignerSettings>(scene);
@@ -112,12 +116,12 @@ public sealed class DynamicUiScenePreviewTests
                 detail.transform.Find(
                     "grpOperatorDetailRight/grpOperatorPassives/" +
                     "grpPassiveIconRoot/grpPassiveIcon_0")?.gameObject,
-                "Assets/07_Runtime/Resources/Presentation/OperatorAbilityIcon.prefab");
+                "Assets/06_Runtime/Resources/Presentation/OperatorAbilityIcon.prefab");
             AssertPrefabPath(
                 detail.transform.Find(
                     "grpOperatorDetailRight/grpOperatorSkills/" +
                     "grpSkillIconRoot/grpSkillIcon_0")?.gameObject,
-                "Assets/07_Runtime/Resources/Presentation/OperatorAbilityIcon.prefab");
+                "Assets/06_Runtime/Resources/Presentation/OperatorAbilityIcon.prefab");
 
             AssertCharacterInfoPreview(scene);
             AssertDungeonItemPreviews(scene);
@@ -145,7 +149,7 @@ public sealed class DynamicUiScenePreviewTests
         Assert.That(characters.Length, Is.EqualTo(1));
         AssertPrefabPath(
             characters[0].gameObject,
-            "Assets/07_Runtime/Resources/Presentation/CharacterInfo.prefab");
+            "Assets/06_Runtime/Resources/Presentation/CharacterInfo.prefab");
 
         SerializedObject characterSerialized = new(characters[0]);
         Image standingImage = characterSerialized.FindProperty("standingImage")
@@ -171,7 +175,7 @@ public sealed class DynamicUiScenePreviewTests
         Assert.That(buffs.Length, Is.EqualTo(1));
         AssertPrefabPath(
             buffs[0].gameObject,
-            "Assets/07_Runtime/Resources/Presentation/CharacterBuffIcon.prefab");
+            "Assets/06_Runtime/Resources/Presentation/CharacterBuffIcon.prefab");
     }
 
     private static void AssertDungeonItemPreviews(Scene scene)
@@ -185,7 +189,7 @@ public sealed class DynamicUiScenePreviewTests
             Assert.That(cards.Length, Is.EqualTo(1));
             AssertPrefabPath(
                 cards[0].gameObject,
-                "Assets/07_Runtime/Resources/Presentation/BattleItemCard.prefab");
+                "Assets/06_Runtime/Resources/Presentation/BattleItemCard.prefab");
         }
 
         foreach (DungeonSpawnQueueView queue in
@@ -204,7 +208,7 @@ public sealed class DynamicUiScenePreviewTests
             Assert.That(items.Length, Is.EqualTo(1));
             AssertPrefabPath(
                 items[0].gameObject,
-                "Assets/08_Prefabs/UI/Dungeon/DungeonSpawnQueueItem.prefab");
+                "Assets/07_Prefabs/UI/Dungeon/DungeonSpawnQueueItem.prefab");
         }
 
     }
@@ -226,7 +230,7 @@ public sealed class DynamicUiScenePreviewTests
             Assert.That(buttons.Length, Is.EqualTo(1));
             AssertPrefabPath(
                 buttons[0].gameObject,
-                "Assets/07_Runtime/Resources/Presentation/DungeonChoiceButton.prefab");
+                "Assets/06_Runtime/Resources/Presentation/DungeonChoiceButton.prefab");
         }
 
         DungeonRewardCardView[] rewards = FindTransforms(
@@ -239,7 +243,7 @@ public sealed class DynamicUiScenePreviewTests
         {
             AssertPrefabPath(
                 reward.gameObject,
-                "Assets/07_Runtime/Resources/Presentation/DungeonRewardCard.prefab");
+                "Assets/06_Runtime/Resources/Presentation/DungeonRewardCard.prefab");
         }
 
         DungeonStartingItemSlotView[] startingItems = FindTransforms(
@@ -250,7 +254,7 @@ public sealed class DynamicUiScenePreviewTests
         Assert.That(startingItems.Length, Is.EqualTo(1));
         AssertPrefabPath(
             startingItems[0].gameObject,
-            "Assets/07_Runtime/Resources/Presentation/" +
+            "Assets/06_Runtime/Resources/Presentation/" +
             "DungeonStartingItemSlot.prefab");
     }
 
@@ -270,7 +274,7 @@ public sealed class DynamicUiScenePreviewTests
         Assert.That(previews.Length, Is.EqualTo(1));
         AssertPrefabPath(
             previews[0].gameObject,
-            "Assets/07_Runtime/Resources/Presentation/" +
+            "Assets/06_Runtime/Resources/Presentation/" +
             "DungeonRestCharacterSd.prefab");
         Assert.That(
             previews[0].GetComponent<Button>(),
@@ -285,7 +289,7 @@ public sealed class DynamicUiScenePreviewTests
         Assert.That(
             AssetDatabase.GetAssetPath(prefab),
             Is.EqualTo(
-                "Assets/07_Runtime/Resources/Presentation/" +
+                "Assets/06_Runtime/Resources/Presentation/" +
                 "DungeonRestCharacterSd.prefab"));
     }
 

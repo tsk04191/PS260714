@@ -9,7 +9,7 @@ public sealed class StatusEffectEditorWindow : EditorWindow
 {
     public const string MenuPath = PS260714EditorMenu.StatusEffectEditor;
 
-    private const string AssetFolder = "Assets/07_Runtime/Resources/StatusEffects";
+    private const string AssetFolder = "Assets/06_Runtime/Resources/StatusEffects";
     private const string RenameControlName = "StatusEffectRenameField";
     private static readonly string[] AlignmentOptions =
     {

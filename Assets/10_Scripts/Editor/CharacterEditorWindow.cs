@@ -8,7 +8,7 @@ public sealed class CharacterEditorWindow : EditorWindow
 {
     public const string MenuPath = PS260714EditorMenu.CharacterEditor;
 
-    private const string CharacterFolder = "Assets/07_Runtime/Resources/Characters";
+    private const string CharacterFolder = "Assets/06_Runtime/Resources/Characters";
     private const string PassiveDefinitionsPropertyName = "passiveDefinitions";
     private const string PassiveSectionsPropertyName = "sections";
     private const string PassiveMotionModePropertyName = "motionMode";
@@ -6932,25 +6932,6 @@ public sealed class CharacterEditorWindow : EditorWindow
             descriptionKey.stringValue = string.Empty;
     }
 
-    private static string GetDungeonUpgradeLabel(
-        CharacterDungeonUpgradeType type)
-    {
-        return type switch
-        {
-            CharacterDungeonUpgradeType.AttackPower => "1. 공격력 +0.5",
-            CharacterDungeonUpgradeType.Speed => "2. 속도 -0.1s",
-            CharacterDungeonUpgradeType.PassiveDamage =>
-                "3. 패시브 피해량 +0.5",
-            CharacterDungeonUpgradeType.AttackDamage =>
-                "4. 공격 피해량 +0.5 (고정)",
-            CharacterDungeonUpgradeType.SkillDamage =>
-                "5. 기술 피해량 +1 (고정)",
-            CharacterDungeonUpgradeType.SkillCostReduction =>
-                "6. 기술 코스트 감소 -1",
-            _ => type.ToString()
-        };
-    }
-
     private bool MatchesSearch(CharacterSO character)
     {
         if (string.IsNullOrWhiteSpace(_searchText))
@@ -7707,7 +7688,7 @@ internal sealed class CharacterDungeonUpgradeEntryDrawer : PropertyDrawer
 
 internal static class CharacterModifierIdMigration
 {
-    private const string CharacterFolder = "Assets/07_Runtime/Resources/Characters";
+    private const string CharacterFolder = "Assets/06_Runtime/Resources/Characters";
 
     [MenuItem(
         PS260714EditorMenu.MigrateCharacterModifierIds,

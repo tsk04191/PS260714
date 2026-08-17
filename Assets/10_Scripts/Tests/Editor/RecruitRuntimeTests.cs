@@ -3,6 +3,7 @@ using System.Reflection;
 using NUnit.Framework;
 using UnityEditor;
 using UnityEngine;
+using static TestReflection;
 
 public sealed class RecruitRuntimeTests
 {
@@ -482,21 +483,6 @@ public sealed class RecruitRuntimeTests
         SerializedObject serialized = new(item);
         serialized.FindProperty("itemId").stringValue = itemId;
         serialized.ApplyModifiedPropertiesWithoutUndo();
-    }
-
-    private static void SetPrivateField(
-        object target,
-        string fieldName,
-        object value)
-    {
-        FieldInfo field = target.GetType().GetField(
-            fieldName,
-            BindingFlags.Instance | BindingFlags.NonPublic);
-        Assert.That(
-            field,
-            Is.Not.Null,
-            $"Field '{fieldName}' was not found.");
-        field.SetValue(target, value);
     }
 
     private static void RestorePlayerPrefs(

@@ -9,6 +9,7 @@ using UnityEngine;
 using UnityEngine.EventSystems;
 using UnityEngine.TestTools;
 using UnityEngine.UI;
+using static TestReflection;
 
 public sealed class CharacterP0RegressionTests
 {
@@ -17,21 +18,21 @@ public sealed class CharacterP0RegressionTests
     private const string AislingAssetPath =
         "fixture:previous-target-status";
     private const string IsoldeAssetPath =
-        "Assets/07_Runtime/Resources/Characters/2_Isolde.asset";
+        "Assets/06_Runtime/Resources/Characters/2_Isolde.asset";
     private const string CalistaAssetPath =
-        "Assets/07_Runtime/Resources/Characters/2_Calista.asset";
+        "Assets/06_Runtime/Resources/Characters/2_Calista.asset";
     private const string EmergencyKitAssetPath =
-        "Assets/07_Runtime/Resources/StatusEffects/EmergencyKit.asset";
+        "Assets/06_Runtime/Resources/StatusEffects/EmergencyKit.asset";
     private const string FireAssetPath =
-        "Assets/07_Runtime/Resources/StatusEffects/Fire.asset";
+        "Assets/06_Runtime/Resources/StatusEffects/Fire.asset";
     private const string OpeningAssetPath =
-        "Assets/07_Runtime/Resources/StatusEffects/Opening.asset";
+        "Assets/06_Runtime/Resources/StatusEffects/Opening.asset";
     private const string ComboAssetPath =
-        "Assets/07_Runtime/Resources/StatusEffects/Combo.asset";
+        "Assets/06_Runtime/Resources/StatusEffects/Combo.asset";
     private const string StarPowderAssetPath =
-        "Assets/07_Runtime/Resources/StatusEffects/StarPowder.asset";
+        "Assets/06_Runtime/Resources/StatusEffects/StarPowder.asset";
     private const string StunAssetPath =
-        "Assets/07_Runtime/Resources/StatusEffects/Stun.asset";
+        "Assets/06_Runtime/Resources/StatusEffects/Stun.asset";
 
     private readonly List<CharacterRuntime> _characters = new();
     private readonly List<UnityEngine.Object> _createdObjects = new();
@@ -1039,7 +1040,7 @@ public sealed class CharacterP0RegressionTests
     public void CodexCard_IsDesignerEditablePrefab()
     {
         const string prefabPath =
-            "Assets/07_Runtime/Resources/Presentation/CodexCard.prefab";
+            "Assets/06_Runtime/Resources/Presentation/CodexCard.prefab";
         GameObject prefab = AssetDatabase.LoadAssetAtPath<GameObject>(
             prefabPath);
 
@@ -1578,7 +1579,7 @@ public sealed class CharacterP0RegressionTests
             Is.EqualTo(CharacterPassiveMotionMode.PlayPassiveMotion));
 
         StatusEffectSO ready = LoadAsset<StatusEffectSO>(
-            "Assets/07_Runtime/Resources/StatusEffects/Ready_4.asset");
+            "Assets/06_Runtime/Resources/StatusEffects/Ready_4.asset");
         CharacterRuntime calista = CreateCharacter(definition);
         FakeBattleBoard board = new()
         {
@@ -7900,29 +7901,6 @@ public sealed class CharacterP0RegressionTests
         return status;
     }
 
-    private static void SetPrivateField(
-        object target,
-        string fieldName,
-        object value)
-    {
-        FieldInfo field = target.GetType().GetField(
-            fieldName,
-            BindingFlags.Instance | BindingFlags.NonPublic);
-        Assert.That(field, Is.Not.Null, $"Missing field '{fieldName}'.");
-        field.SetValue(target, value);
-    }
-
-    private static T GetPrivateField<T>(
-        object target,
-        string fieldName)
-    {
-        FieldInfo field = target.GetType().GetField(
-            fieldName,
-            BindingFlags.Instance | BindingFlags.NonPublic);
-        Assert.That(field, Is.Not.Null, $"Missing field '{fieldName}'.");
-        return (T)field.GetValue(target);
-    }
-
     private DungeonPage CreateTutorialDungeonPageForBattleResult()
     {
         DungeonTutorialDefinition tutorial =
@@ -10357,7 +10335,7 @@ public sealed class CharacterP0RegressionTests
         }
 
         public bool TryApplyCharacterStatus(
-            IBattleCharacter source,
+            BattleAbilityUser user,
             IReadOnlyList<EnemyRuntime> targets,
             StatusEffectSO statusEffect,
             float duration,
@@ -10391,7 +10369,7 @@ public sealed class CharacterP0RegressionTests
                     statusEffect,
                     duration,
                     Mathf.Max(1, Mathf.RoundToInt(stacks)),
-                    source,
+                    user.Unit.Ally,
                     tickInterval);
             }
 
@@ -10399,7 +10377,7 @@ public sealed class CharacterP0RegressionTests
         }
 
         public bool TryApplyAlliedCharacterStatus(
-            IBattleCharacter source,
+            BattleAbilityUser user,
             IReadOnlyList<IBattleCharacter> targets,
             StatusEffectSO statusEffect,
             float duration,
@@ -10417,7 +10395,7 @@ public sealed class CharacterP0RegressionTests
                         statusEffect,
                         duration,
                         Mathf.Max(1, Mathf.RoundToInt(stacks)),
-                        source);
+                        user.Unit.Ally);
                 }
             }
 

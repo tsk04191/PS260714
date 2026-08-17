@@ -10,7 +10,7 @@ namespace PS260714.Localization.Editor
     public sealed class LocalizationEditorWindow : EditorWindow
     {
         private const string ResourcesDirectory =
-            "Assets/07_Runtime/Resources";
+            "Assets/06_Runtime/Resources";
         private const string CatalogDirectory =
             ResourcesDirectory + "/Localization";
         private const string FontCatalogPath =

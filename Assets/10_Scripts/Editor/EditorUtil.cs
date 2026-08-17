@@ -907,7 +907,7 @@ internal static class PS260714SafeAssetDelete
                 continue;
             if (asset is ItemDefinitionSO && string.Equals(
                     candidatePath,
-                    "Assets/07_Runtime/Resources/ItemCatalog.asset",
+                    "Assets/06_Runtime/Resources/ItemCatalog.asset",
                     StringComparison.OrdinalIgnoreCase))
             {
                 continue;

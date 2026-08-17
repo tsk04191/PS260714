@@ -9,9 +9,9 @@ using UnityEngine;
 public sealed class LocalizationEditorTests
 {
     private const string MarkupCatalogPath =
-        "Assets/07_Runtime/Resources/Localization/LocalizationMarkupCatalog.asset";
+        "Assets/06_Runtime/Resources/Localization/LocalizationMarkupCatalog.asset";
     private const string FontCatalogPath =
-        "Assets/07_Runtime/Resources/Localization/LocalizationFontCatalog.asset";
+        "Assets/06_Runtime/Resources/Localization/LocalizationFontCatalog.asset";
 
     [Test]
     public void EditorText_KoreanEditorUsesKoreanAndOtherEditorsUseEnglish()

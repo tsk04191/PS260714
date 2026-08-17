@@ -76,8 +76,6 @@ public sealed class StageSelectPage : RuntimeMenuPageBase
         LocalizationKeys.UiStageSelectTitle;
     protected override string PageDescriptionLocalizationKey =>
         LocalizationKeys.UiStageSelectDescription;
-    protected override Vector2 PanelSize => new(1680f, 860f);
-    protected override bool RequiresSavedDesignerUiAtRuntime => true;
 
     public override void Open(PageOpenMode mode = PageOpenMode.Fresh)
     {

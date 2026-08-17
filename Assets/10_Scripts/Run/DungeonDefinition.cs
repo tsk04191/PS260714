@@ -242,10 +242,10 @@ public sealed class DungeonDefinition : ScriptableObject
     public bool SelectStartingCharacter => selectStartingCharacter;
     public bool SelectStartingItems => selectStartingItems;
     public DungeonStartingItemRule StartingItemRule =>
-        startingItemRule ??= new DungeonStartingItemRule();
+        startingItemRule ?? new DungeonStartingItemRule();
     public bool UseBattleCards => useBattleCards;
     public BattleCardDeckRules BattleCardDeckRules =>
-        battleCardDeckRules ??= new BattleCardDeckRules();
+        battleCardDeckRules ?? new BattleCardDeckRules();
     public bool UseIntroBattleBalance => useIntroBattleBalance;
     public bool UsesTutorialBattleSetup =>
         HasTutorial && useIntroBattleBalance;
@@ -266,7 +266,7 @@ public sealed class DungeonDefinition : ScriptableObject
     public int BattleShieldMaximumHealth =>
         Mathf.Max(1, battleShieldMaximumHealth);
     public DungeonShieldRecoveryRule ShieldRecoveryReward =>
-        shieldRecoveryReward ??= new DungeonShieldRecoveryRule();
+        shieldRecoveryReward ?? new DungeonShieldRecoveryRule();
     public IReadOnlyList<BattleCardSO> BattleCardRewardPool =>
         battleCardRewardPool ?? Array.Empty<BattleCardSO>();
     public IReadOnlyList<BattleItemSO> ConsumableRewardPool =>
@@ -276,8 +276,10 @@ public sealed class DungeonDefinition : ScriptableObject
     public DungeonBgmProfile BgmProfile => bgmProfile;
     public DungeonTutorialDefinition Tutorial => tutorial;
     public bool HasTutorial => tutorial != null;
-    public IReadOnlyList<DungeonModifier> Modifiers => modifiers;
-    public IReadOnlyList<EnemySO> EnemyPoolOverride => enemyPoolOverride;
+    public IReadOnlyList<DungeonModifier> Modifiers =>
+        modifiers ?? Array.Empty<DungeonModifier>();
+    public IReadOnlyList<EnemySO> EnemyPoolOverride =>
+        enemyPoolOverride ?? Array.Empty<EnemySO>();
 
     public int ResolveClearedBattleHealthCost(int difficultyScale)
     {
@@ -398,6 +400,20 @@ public sealed class DungeonDefinition : ScriptableObject
         if (string.IsNullOrWhiteSpace(dungeonId))
         {
             error = "Dungeon id is required.";
+            return false;
+        }
+        if (contentVersion < 1 || minimumBattleCount < 1 ||
+            maximumBattleCount < minimumBattleCount ||
+            initialRunCurrency < 0 ||
+            float.IsNaN(activeSkillCostRecoveryDuration) ||
+            float.IsInfinity(activeSkillCostRecoveryDuration) ||
+            activeSkillCostRecoveryDuration <= 0f ||
+            clearedBattleHealthCost < AutomaticClearedBattleHealthCost ||
+            float.IsNaN(battleArenaRadius) ||
+            float.IsInfinity(battleArenaRadius) ||
+            battleArenaRadius <= 0f || battleShieldMaximumHealth < 1)
+        {
+            error = "Dungeon version, battle counts, or battle values are invalid.";
             return false;
         }
         if (IsListedInStageSelect &&
@@ -565,48 +581,5 @@ public sealed class DungeonDefinition : ScriptableObject
 
     private void OnValidate()
     {
-        dungeonId = string.IsNullOrWhiteSpace(dungeonId)
-            ? name.Trim().ToLowerInvariant().Replace(' ', '_')
-            : dungeonId.Trim();
-        contentVersion = Mathf.Max(1, contentVersion);
-        titleLocalizationKey =
-            (titleLocalizationKey ?? string.Empty).Trim();
-        fallbackTitle = (fallbackTitle ?? string.Empty).Trim();
-        minimumBattleCount = Mathf.Max(1, minimumBattleCount);
-        maximumBattleCount = Mathf.Max(
-            minimumBattleCount,
-            maximumBattleCount);
-        startingItemRule ??= new DungeonStartingItemRule();
-        battleCardDeckRules ??= new BattleCardDeckRules();
-        battleCardDeckRules.Validate();
-        fixedBattles ??= Array.Empty<BattleSO>();
-        fixedEvents ??= Array.Empty<DungeonEventSO>();
-        fixedRests ??= Array.Empty<DungeonRestSO>();
-        fixedShops ??= Array.Empty<DungeonShopSO>();
-        roomPattern ??= Array.Empty<EDungeonPhase>();
-        initialRunCurrency = Mathf.Max(0, initialRunCurrency);
-        if (float.IsNaN(activeSkillCostRecoveryDuration) ||
-            float.IsInfinity(activeSkillCostRecoveryDuration) ||
-            activeSkillCostRecoveryDuration <= 0f)
-        {
-            activeSkillCostRecoveryDuration =
-                DefaultActiveSkillCostRecoveryDuration;
-        }
-        activeSkillCostRecoveryDuration = TimePrecision.Normalize(
-            activeSkillCostRecoveryDuration,
-            TimePrecision.Step);
-        clearedBattleHealthCost = Mathf.Max(
-            AutomaticClearedBattleHealthCost,
-            clearedBattleHealthCost);
-        battleArenaRadius = BattleArenaSetup.NormalizeWorldRadius(
-            battleArenaRadius);
-        battleShieldMaximumHealth = Mathf.Max(
-            1,
-            battleShieldMaximumHealth);
-        shieldRecoveryReward ??= new DungeonShieldRecoveryRule();
-        battleCardRewardPool ??= Array.Empty<BattleCardSO>();
-        consumableRewardPool ??= Array.Empty<BattleItemSO>();
-        enemyPoolOverride ??= Array.Empty<EnemySO>();
-        modifiers ??= Array.Empty<DungeonModifier>();
     }
 }

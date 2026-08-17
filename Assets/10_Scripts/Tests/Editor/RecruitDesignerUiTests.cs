@@ -1,9 +1,9 @@
 using System.Linq;
-using System.Reflection;
 using NUnit.Framework;
 using UnityEditor.SceneManagement;
 using UnityEngine;
 using UnityEngine.SceneManagement;
+using static TestReflection;
 
 public sealed class RecruitDesignerUiTests
 {
@@ -145,7 +145,7 @@ public sealed class RecruitDesignerUiTests
 
     private static Scene OpenClientScene(out bool opened)
     {
-        const string path = "Assets/05_Scenes/ClientScene.unity";
+        const string path = "Assets/04_Scenes/ClientScene.unity";
         Scene scene = SceneManager.GetSceneByPath(path);
         opened = !scene.IsValid() || !scene.isLoaded;
         return opened
@@ -161,15 +161,4 @@ public sealed class RecruitDesignerUiTests
             .FirstOrDefault(page => page.IsRecruitPage);
     }
 
-    private static void SetPrivateField(
-        object target,
-        string fieldName,
-        object value)
-    {
-        FieldInfo field = target.GetType().GetField(
-            fieldName,
-            BindingFlags.Instance | BindingFlags.NonPublic);
-        Assert.That(field, Is.Not.Null);
-        field.SetValue(target, value);
-    }
 }

@@ -2692,14 +2692,14 @@ public static class CharacterDefinitionValidator
             IsFinite(effect.TargetStatusStacksScale);
         if (!validScalingMode || !validTerms ||
             !effect.AmountScaling.IsFinite ||
-            !effect.AmountScaling.HasNonZeroTerm)
+            !effect.AmountScaling.HasPositiveTerm)
         {
             AddError(
                 result,
                 invalidCode,
                 $"{effectPath}.damageAmount",
                 $"{valueName} scaling must contain at least one finite, " +
-                "non-zero term. Base, attack power, and current resource " +
+                "positive term. Base, attack power, and current resource " +
                 "terms must remain non-negative.");
         }
 
@@ -3016,66 +3016,6 @@ public static class CharacterDefinitionValidator
                 $"{path}.statusRemovalRatio",
                 "Status removal ratio must be finite and greater than zero " +
                 "and no greater than one.");
-        }
-    }
-
-    private static void ValidateAreaOffsets(
-        CharacterTargetFaction? targetFaction,
-        IReadOnlyList<CharacterTargetAreaOffset> areaOffsets,
-        string actionPath,
-        CharacterDefinitionValidationResult result)
-    {
-        if (areaOffsets == null || areaOffsets.Count == 0)
-            return;
-
-        if (targetFaction == CharacterTargetFaction.Ally)
-        {
-            AddWarning(
-                result,
-                "ability.ally_area_ignored",
-                $"{actionPath}.areaOffsets",
-                "Area offsets are currently applied only to enemy targets.");
-        }
-
-        int maximumRadius = DungeonBoardView.MaximumGridSize / 2;
-        HashSet<Vector2Int> seen = new();
-        for (int index = 0; index < areaOffsets.Count; index++)
-        {
-            CharacterTargetAreaOffset offset = areaOffsets[index];
-            string path = $"{actionPath}.areaOffsets[{index}]";
-            if (offset == null)
-            {
-                AddError(
-                    result,
-                    "ability.area_offset_null",
-                    path,
-                    "Area offset is null.");
-                continue;
-            }
-
-            if (!offset.IsValid(maximumRadius))
-            {
-                AddError(
-                    result,
-                    "ability.area_offset_invalid",
-                    path,
-                    "Area offset must be non-zero and inside the supported " +
-                    "grid radius.");
-                continue;
-            }
-
-            Vector2Int coordinate = new(
-                offset.RowOffset,
-                offset.ColumnOffset);
-            if (!seen.Add(coordinate))
-            {
-                AddError(
-                    result,
-                    "ability.area_offset_duplicate",
-                    path,
-                    $"Area offset ({coordinate.x}, {coordinate.y}) is " +
-                    "duplicated.");
-            }
         }
     }
 

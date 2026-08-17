@@ -52,6 +52,13 @@ public static class EnemyLocalization
     public static string GetAbilityDescription(
         EnemyAbilityDefinition definition)
     {
+        return GetAbilityDescription(null, definition);
+    }
+
+    public static string GetAbilityDescription(
+        EnemySO owner,
+        EnemyAbilityDefinition definition)
+    {
         if (definition == null)
             return string.Empty;
 
@@ -59,7 +66,9 @@ public static class EnemyLocalization
             definition.DescriptionLocalizationKey)
             ? LocalizationService.Get(
                 definition.DescriptionLocalizationKey,
-                BattleAbilityLocalizationArguments.Build(definition))
+                BattleAbilityLocalizationArguments.Build(
+                    definition,
+                    owner?.AttackPower))
             : definition.FallbackDescription;
     }
 
@@ -167,6 +176,7 @@ public static class EnemyLocalization
             }
 
             if (TryFormatKnownAbility(
+                    definition,
                     ability,
                     out string knownDescription))
             {
@@ -175,7 +185,7 @@ public static class EnemyLocalization
             }
 
             string genericDescription =
-                FormatGenericAbility(ability);
+                FormatGenericAbility(definition, ability);
             if (!string.IsNullOrWhiteSpace(genericDescription))
                 descriptions.Add(genericDescription);
         }
@@ -187,6 +197,7 @@ public static class EnemyLocalization
     }
 
     private static bool TryFormatKnownAbility(
+        EnemySO owner,
         EnemyAbilityDefinition ability,
         out string description)
     {
@@ -223,7 +234,10 @@ public static class EnemyLocalization
                         ability.Cooldown),
                     LocalizationService.Arg(
                         "power",
-                        heal.DamageAmount));
+                        heal.AmountScaling.EvaluateBattle(
+                            BattleEffectContext.ForPreview(
+                                BattleEffectOriginKind.EnemyAbility,
+                                owner?.AttackPower ?? 0f))));
                 return true;
 
             case EnemyAbilityIds.DisableHighestDamage:
@@ -312,10 +326,11 @@ public static class EnemyLocalization
     }
 
     private static string FormatGenericAbility(
+        EnemySO owner,
         EnemyAbilityDefinition ability)
     {
         string name = GetAbilityName(ability);
-        string description = GetAbilityDescription(ability);
+        string description = GetAbilityDescription(owner, ability);
         if (string.IsNullOrWhiteSpace(name))
             return description;
         if (string.IsNullOrWhiteSpace(description))

@@ -276,6 +276,26 @@ public static class EnemyDefinitionValidator
                 "Circular approach speed must be finite and greater than zero.");
         }
 
+        if (definition.AuthoredCombatStatSchemaVersion !=
+            EnemySO.CurrentCombatStatSchemaVersion)
+        {
+            AddError(
+                result,
+                "enemy.combat_stat_schema_outdated",
+                "combatStatSchemaVersion",
+                "Run Tools/PS260714/Migrations/Migrate Enemy Attack Power.");
+        }
+
+        if (!IsFinite(definition.AuthoredAttackPower) ||
+            definition.AuthoredAttackPower <= 0f)
+        {
+            AddError(
+                result,
+                "enemy.attack_power_invalid",
+                "attackPower",
+                "Attack power must be finite and greater than zero.");
+        }
+
         if (definition.AuthoredCoreAttackDamage <= 0)
         {
             AddError(

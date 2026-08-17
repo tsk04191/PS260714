@@ -265,7 +265,7 @@ public interface IDungeonRestActionProvider
 
 public sealed partial class DungeonRestSO : DungeonRoomSO
 {
-    private const int CurrentRestSchemaVersion = 1;
+    public const int CurrentRestSchemaVersion = 1;
 
     [SerializeField, HideInInspector] private int restSchemaVersion;
     [BoxGroup("Rest Rules", Order = 100)]
@@ -282,6 +282,7 @@ public sealed partial class DungeonRestSO : DungeonRoomSO
         CreateDefaultActions();
 
     public int BaseActionCount => Mathf.Max(1, baseActionCount);
+    public int RestSchemaVersion => restSchemaVersion;
     public IReadOnlyList<DungeonRestActionDefinition> Actions =>
         actions ?? Array.Empty<DungeonRestActionDefinition>();
 
@@ -298,39 +299,47 @@ public sealed partial class DungeonRestSO : DungeonRoomSO
         };
     }
 
-    private void EnsureRestSchema(
+    public bool ApplyRestSchemaMigration(
         IReadOnlyList<DungeonRoomChoiceDefinition> legacyChoices)
     {
-        if (restSchemaVersion <= 0)
+        if (restSchemaVersion == CurrentRestSchemaVersion)
+            return false;
+
+        if (legacyChoices != null && legacyChoices.Count > 0)
         {
-            if (legacyChoices != null && legacyChoices.Count > 0)
+            actions = new DungeonRestActionDefinition[
+                legacyChoices.Count];
+            for (int index = 0; index < legacyChoices.Count; index++)
             {
-                actions = new DungeonRestActionDefinition[
-                    legacyChoices.Count];
-                for (int index = 0; index < legacyChoices.Count; index++)
-                {
-                    actions[index] =
-                        DungeonRestActionDefinition.FromLegacy(
-                            legacyChoices[index]);
-                }
+                actions[index] = DungeonRestActionDefinition.FromLegacy(
+                    legacyChoices[index]);
             }
-            else if (actions == null || actions.Length == 0)
-            {
-                actions = CreateDefaultActions();
-            }
-
-            restSchemaVersion = CurrentRestSchemaVersion;
         }
-
+        else if (actions == null || actions.Length == 0)
+        {
+            actions = CreateDefaultActions();
+        }
         baseActionCount = Mathf.Max(1, baseActionCount);
         actions ??= CreateDefaultActions();
+        restSchemaVersion = CurrentRestSchemaVersion;
+        return true;
     }
 
     private bool TryValidateRest(
         IReadOnlyList<DungeonRoomChoiceDefinition> legacyChoices,
         out string error)
     {
-        EnsureRestSchema(legacyChoices);
+        if (restSchemaVersion != CurrentRestSchemaVersion)
+        {
+            error = "Rest schema is outdated. Run Tools/PS260714/" +
+                    "Migrations/Migrate Rest Schema.";
+            return false;
+        }
+        if (baseActionCount <= 0)
+        {
+            error = "Rest base action count must be positive.";
+            return false;
+        }
         if (actions == null || actions.Length == 0)
         {
             error = "Rest requires at least one action.";

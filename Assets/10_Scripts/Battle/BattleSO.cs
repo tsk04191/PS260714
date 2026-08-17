@@ -163,11 +163,13 @@ public sealed class BattleSO : ScriptableObject
     public bool OverrideShieldRecoveryReward =>
         overrideShieldRecoveryReward;
     public DungeonShieldRecoveryRule ShieldRecoveryReward =>
-        shieldRecoveryReward ??= new DungeonShieldRecoveryRule();
+        shieldRecoveryReward ?? new DungeonShieldRecoveryRule();
     public IReadOnlyList<BattleCardSO> CardRewardPool =>
-        cardRewardPool ??= new List<BattleCardSO>();
+        cardRewardPool ?? (IReadOnlyList<BattleCardSO>)
+            Array.Empty<BattleCardSO>();
     public IReadOnlyList<BattleItemSO> ConsumableRewardPool =>
-        consumableRewardPool ??= new List<BattleItemSO>();
+        consumableRewardPool ?? (IReadOnlyList<BattleItemSO>)
+            Array.Empty<BattleItemSO>();
     public float TimeLimit => TimePrecision.Normalize(timeLimit, 1f);
     public AudioClip BgmOverride => bgmOverride;
     public Sprite EnvironmentBackdrop => environmentBackdrop;
@@ -180,11 +182,12 @@ public sealed class BattleSO : ScriptableObject
 
     public IReadOnlyList<EnemySO> GetAllEnemyDefinitions()
     {
-        EnsureRules();
         List<EnemySO> definitions = new();
         HashSet<EnemySO> uniqueDefinitions = new();
         foreach (BattleEnemyGradeRule rule in GetRules())
         {
+            if (rule?.EnemyPool == null)
+                continue;
             foreach (EnemySO definition in rule.EnemyPool)
             {
                 if (definition != null && uniqueDefinitions.Add(definition))
@@ -197,57 +200,41 @@ public sealed class BattleSO : ScriptableObject
 
     private void OnValidate()
     {
-        battleId = string.IsNullOrWhiteSpace(battleId)
-            ? name.ToLowerInvariant().Replace(' ', '_')
-            : battleId.Trim();
-        displayName = string.IsNullOrWhiteSpace(displayName)
-            ? name.ToUpperInvariant()
-            : displayName.Trim();
-        difficultyPercent = Mathf.Clamp(difficultyPercent, 0, 100);
-        fieldSize = Mathf.Clamp(
-            fieldSize,
-            DungeonBoardView.MinimumGridSize,
-            DungeonBoardView.MaximumGridSize);
-        maximumStackSize = Mathf.Clamp(maximumStackSize, 1, 20);
-        coreMaximumHealth = Mathf.Max(1, coreMaximumHealth);
-        circularLaneCount = Mathf.Clamp(circularLaneCount, 4, 64);
-        wallRadiusNormalized = Mathf.Clamp(
-            wallRadiusNormalized,
-            0.12f,
-            0.4f);
-        spawnRadiusNormalized = Mathf.Clamp(
-            spawnRadiusNormalized,
-            wallRadiusNormalized + 0.05f,
-            0.5f);
-        environmentCameraFov = Mathf.Clamp(
-            environmentCameraFov,
-            25f,
-            65f);
-        totalEnemyCount = Mathf.Max(1, totalEnemyCount);
-        minimumEnemyHealth = Mathf.Max(1, minimumEnemyHealth);
-        randomHealthBonus = Mathf.Max(0, randomHealthBonus);
-        spawnInterval = TimePrecision.Normalize(spawnInterval, 0.1f);
-        timeLimit = TimePrecision.Normalize(timeLimit, 1f);
-        shieldRecoveryReward ??= new DungeonShieldRecoveryRule();
-        cardRewardPool ??= new List<BattleCardSO>();
-        consumableRewardPool ??= new List<BattleItemSO>();
-        EnsureRules();
     }
 
     public bool TryGetGradeCounts(
         out BattleEnemyGradeCounts counts,
         out string error)
     {
-        EnsureRules();
         BattleEnemyGradeRule[] rules = GetRules();
+        EEnemyGrade[] expectedGrades =
+        {
+            EEnemyGrade.Normal,
+            EEnemyGrade.Special,
+            EEnemyGrade.Elite,
+            EEnemyGrade.Boss,
+        };
         int[] resolvedCounts = new int[rules.Length];
+        for (int index = 0; index < rules.Length; index++)
+        {
+            BattleEnemyGradeRule rule = rules[index];
+            if (rule == null || rule.Grade != expectedGrades[index] ||
+                rule.Count < 0 || float.IsNaN(rule.Ratio) ||
+                float.IsInfinity(rule.Ratio) || rule.Ratio < 0f ||
+                rule.EnemyPool == null || rule.DetailedEnemies == null)
+            {
+                counts = default;
+                error = $"{expectedGrades[index]} grade rule is invalid.";
+                return false;
+            }
+        }
 
         if (compositionMode == EEnemyCompositionMode.FixedCount)
         {
-            int total = 0;
+            long total = 0;
             for (int index = 0; index < rules.Length; index++)
             {
-                resolvedCounts[index] = Mathf.Max(0, rules[index].Count);
+                resolvedCounts[index] = rules[index].Count;
                 total += resolvedCounts[index];
             }
 
@@ -295,6 +282,21 @@ public sealed class BattleSO : ScriptableObject
 
     public bool TryValidate(out string error)
     {
+        if (string.IsNullOrWhiteSpace(battleId) ||
+            string.IsNullOrWhiteSpace(displayName) ||
+            difficultyPercent < 0 || difficultyPercent > 100 ||
+            fieldSize < DungeonBoardView.MinimumGridSize ||
+            fieldSize > DungeonBoardView.MaximumGridSize ||
+            maximumStackSize < 1 || maximumStackSize > 20 ||
+            totalEnemyCount < 1 || minimumEnemyHealth < 1 ||
+            randomHealthBonus < 0 || spawnInterval <= 0f ||
+            float.IsNaN(spawnInterval) ||
+            float.IsInfinity(spawnInterval) || timeLimit <= 0f ||
+            float.IsNaN(timeLimit) || float.IsInfinity(timeLimit))
+        {
+            error = "Battle identity, bounds, or timing values are invalid.";
+            return false;
+        }
         if (!TryGetGradeCounts(out BattleEnemyGradeCounts counts, out error))
             return false;
 
@@ -358,7 +360,9 @@ public sealed class BattleSO : ScriptableObject
                     return false;
                 }
 
-                detailedCount += Mathf.Max(0, detail.Count);
+                detailedCount = BattleValueMath.SaturatingAddNonNegative(
+                    detailedCount,
+                    detail.Count);
             }
 
             if (detailedCount > gradeCount)
@@ -404,7 +408,9 @@ public sealed class BattleSO : ScriptableObject
             {
                 detailedDefinitions.Add(detail.Enemy);
                 int exactCount = Mathf.Max(0, detail.Count);
-                detailedCount += exactCount;
+                detailedCount = BattleValueMath.SaturatingAddNonNegative(
+                    detailedCount,
+                    exactCount);
                 for (int index = 0; index < exactCount; index++)
                     AddEnemyRuntime(enemies, detail.Enemy, random);
             }
@@ -500,18 +506,6 @@ public sealed class BattleSO : ScriptableObject
 
         error = string.Empty;
         return true;
-    }
-
-    private void EnsureRules()
-    {
-        normalEnemies ??= new BattleEnemyGradeRule(EEnemyGrade.Normal, 20, 70f);
-        specialEnemies ??= new BattleEnemyGradeRule(EEnemyGrade.Special, 0, 20f);
-        eliteEnemies ??= new BattleEnemyGradeRule(EEnemyGrade.Elite, 0, 8f);
-        bossEnemies ??= new BattleEnemyGradeRule(EEnemyGrade.Boss, 0, 2f);
-        normalEnemies.ValidateValues(EEnemyGrade.Normal);
-        specialEnemies.ValidateValues(EEnemyGrade.Special);
-        eliteEnemies.ValidateValues(EEnemyGrade.Elite);
-        bossEnemies.ValidateValues(EEnemyGrade.Boss);
     }
 
     private BattleEnemyGradeRule[] GetRules()

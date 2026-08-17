@@ -3,6 +3,15 @@ using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.Serialization;
 
+public static class BattleValueMath
+{
+    public static int SaturatingAddNonNegative(int left, int right)
+    {
+        long sum = (long)Math.Max(0, left) + Math.Max(0, right);
+        return sum >= int.MaxValue ? int.MaxValue : (int)sum;
+    }
+}
+
 public interface IActiveSkillResource
 {
     int Current { get; }
@@ -22,6 +31,33 @@ public interface IBattleCardDrawService
 public interface IBattleCardDrawServiceProvider
 {
     IBattleCardDrawService CardDrawService { get; }
+}
+
+public enum BattleAbilityModifierValueKind
+{
+    EffectAmount = 0,
+    StatusDuration = 1,
+    StatusStacks = 2
+}
+
+/// <summary>
+/// Resolves modifiers for a specific ability-user role. Relics and other
+/// battle-wide systems can implement this service without pretending that an
+/// item, common card, or enemy is a player character.
+/// </summary>
+public interface IBattleAbilityUserModifierService
+{
+    float Resolve(
+        BattleAbilityUser user,
+        BattleEffectOriginKind originKind,
+        IBattleEffectDefinition effect,
+        BattleAbilityModifierValueKind valueKind,
+        float baseValue);
+}
+
+public interface IBattleAbilityUserModifierServiceProvider
+{
+    IBattleAbilityUserModifierService AbilityUserModifierService { get; }
 }
 
 public readonly struct BattleEffectResult
@@ -46,7 +82,9 @@ public readonly struct BattleEffectResult
         return new BattleEffectResult(
             Attempted || other.Attempted,
             Succeeded || other.Succeeded,
-            DamageDealt + other.DamageDealt);
+            BattleValueMath.SaturatingAddNonNegative(
+                DamageDealt,
+                other.DamageDealt));
     }
 
     public static BattleEffectResult Combine(
@@ -145,6 +183,8 @@ public static class BattleEffectExecutor
     {
         if (effects == null || effects.Count == 0)
             return default;
+
+        sourceData = context.User.IsCharacter ? sourceData : null;
 
         PreparedEffect[] prepared = new PreparedEffect[effects.Count];
         bool hasPreparedEffect = false;
@@ -283,6 +323,8 @@ public static class BattleEffectExecutor
         if (!IsUsable(effect))
             return default;
 
+        sourceData = context.User.IsCharacter ? sourceData : null;
+
         amountMultiplier = Mathf.Max(1, amountMultiplier);
         BattleEffectContext effectContext =
             context.SnapshotSourceStatus(
@@ -324,6 +366,12 @@ public static class BattleEffectExecutor
                         actionId,
                         effectId)
                     : effect.StatusDuration;
+                duration = ResolveUserModifier(
+                    effectContext,
+                    effect,
+                    BattleAbilityModifierValueKind.StatusDuration,
+                    duration,
+                    allowPositiveInfinity: true);
                 if (effectContext.StatusEffectsLastUntilBattleEnd)
                     duration = float.PositiveInfinity;
                 float resolvedStacks = sourceData != null
@@ -333,19 +381,24 @@ public static class BattleEffectExecutor
                         actionId,
                         effectId)
                     : effect.StatusStacks;
+                resolvedStacks = ResolveUserModifier(
+                    effectContext,
+                    effect,
+                    BattleAbilityModifierValueKind.StatusStacks,
+                    resolvedStacks);
                 float stacks = Mathf.Min(
                     float.MaxValue,
                     resolvedStacks * amountMultiplier);
                 bool changed = effectContext.TargetFaction ==
                                CharacterTargetFaction.Ally
                     ? effectContext.Board.TryApplyAlliedCharacterStatus(
-                        effectContext.Source,
+                        effectContext.User,
                         effectContext.AllyTargets,
                         effect.StatusEffect,
                         duration,
                         stacks)
                     : effectContext.Board.TryApplyCharacterStatus(
-                        effectContext.Source,
+                        effectContext.User,
                         effectContext.EnemyTargets,
                         effect.StatusEffect,
                         duration,
@@ -690,13 +743,15 @@ public static class BattleEffectExecutor
                 if (groupedTargets.Count > 0 &&
                     snapshot.Amount != groupedDamage)
                 {
-                    totalDamage += ApplyDamageGroup(
+                    totalDamage = BattleValueMath.SaturatingAddNonNegative(
+                        totalDamage,
+                        ApplyDamageGroup(
                         context,
                         effect,
                         groupedTargets,
                         groupedDamage,
                         showAttackRange,
-                        fallback);
+                        fallback));
                     groupedTargets.Clear();
                 }
 
@@ -705,13 +760,15 @@ public static class BattleEffectExecutor
             }
             if (groupedTargets.Count > 0)
             {
-                totalDamage += ApplyDamageGroup(
+                totalDamage = BattleValueMath.SaturatingAddNonNegative(
+                    totalDamage,
+                    ApplyDamageGroup(
                     context,
                     effect,
                     groupedTargets,
                     groupedDamage,
                     showAttackRange,
-                    fallback);
+                    fallback));
             }
 
             return new BattleEffectResult(
@@ -801,8 +858,8 @@ public static class BattleEffectExecutor
                 continue;
 
             attempted = true;
-            totalDamage += Mathf.Max(
-                0,
+            totalDamage = BattleValueMath.SaturatingAddNonNegative(
+                totalDamage,
                 snapshot.Target.TakeDamage(snapshot.Amount));
         }
 
@@ -909,7 +966,7 @@ public static class BattleEffectExecutor
                     continue;
 
                 attempted = true;
-                totalChanged += shield
+                int changed = shield
                     ? context.Board.TryGrantShieldToAlliedCharacters(
                         context.Source,
                         new[] { target },
@@ -918,6 +975,9 @@ public static class BattleEffectExecutor
                         context.Source,
                         new[] { target },
                         amount);
+                totalChanged = BattleValueMath.SaturatingAddNonNegative(
+                    totalChanged,
+                    changed);
             }
         }
         else
@@ -941,7 +1001,7 @@ public static class BattleEffectExecutor
                     continue;
 
                 attempted = true;
-                totalChanged += shield
+                int changed = shield
                     ? context.Board.TryGrantShieldToCharacterTargets(
                         context.Source,
                         new[] { target },
@@ -952,6 +1012,9 @@ public static class BattleEffectExecutor
                         new[] { target },
                         amount,
                         showAttackRange);
+                totalChanged = BattleValueMath.SaturatingAddNonNegative(
+                    totalChanged,
+                    changed);
             }
         }
 
@@ -1002,11 +1065,48 @@ public static class BattleEffectExecutor
                 actionId,
                 effectId);
         }
+        value = ResolveUserModifier(
+            context,
+            effect,
+            BattleAbilityModifierValueKind.EffectAmount,
+            (float)Math.Min(float.MaxValue, value));
         if (double.IsNaN(value) || value <= 0d)
             return 0;
         if (double.IsInfinity(value) || value >= int.MaxValue)
             return int.MaxValue;
         return Mathf.Max(0, Mathf.RoundToInt((float)value));
+    }
+
+    private static float ResolveUserModifier(
+        BattleEffectContext context,
+        IBattleEffectDefinition effect,
+        BattleAbilityModifierValueKind valueKind,
+        float baseValue,
+        bool allowPositiveInfinity = false)
+    {
+        if (allowPositiveInfinity && float.IsPositiveInfinity(baseValue))
+            return baseValue;
+        if (float.IsNaN(baseValue) || float.IsInfinity(baseValue))
+            return 0f;
+
+        IBattleAbilityUserModifierService service =
+            (context.Board as
+                IBattleAbilityUserModifierServiceProvider)?
+            .AbilityUserModifierService;
+        if (service == null)
+            return Mathf.Max(0f, baseValue);
+
+        float resolved = service.Resolve(
+            context.User,
+            context.OriginKind,
+            effect,
+            valueKind,
+            baseValue);
+        if (allowPositiveInfinity && float.IsPositiveInfinity(resolved))
+            return resolved;
+        return float.IsNaN(resolved) || float.IsInfinity(resolved)
+            ? 0f
+            : Mathf.Max(0f, resolved);
     }
 
     private static CharacterActionKind ResolveActionKind(
@@ -1139,11 +1239,6 @@ public static class BattleEffectExecutor
                    CharacterDamageAmountMode.Ratio;
     }
 
-    private static int SaturatingMultiply(int left, int right)
-    {
-        long value = (long)Mathf.Max(0, left) * Mathf.Max(0, right);
-        return value >= int.MaxValue ? int.MaxValue : (int)value;
-    }
 }
 
 public readonly struct BattleStatusTarget
@@ -1214,7 +1309,9 @@ public readonly struct BattleStatusTarget
 public readonly struct BattleStatusAppliedEvent
 {
     public BattleStatusTarget Target { get; }
-    public IBattleCharacter Source { get; }
+    public BattleAbilityUser User { get; }
+    public BattleStatusTarget SourceTarget => User.Unit;
+    public IBattleCharacter Source => User.Unit.Ally;
     public StatusEffectSO StatusEffect { get; }
     public int PreviousStacks { get; }
     public int CurrentStacks { get; }
@@ -1227,13 +1324,30 @@ public readonly struct BattleStatusAppliedEvent
         StatusEffectSO statusEffect,
         int previousStacks,
         int currentStacks,
-        IBattleCharacter source = null)
+        BattleAbilityUser user)
     {
         Target = target;
-        Source = source;
+        User = user;
         StatusEffect = statusEffect;
         PreviousStacks = Mathf.Max(0, previousStacks);
         CurrentStacks = Mathf.Max(0, currentStacks);
+    }
+
+    public BattleStatusAppliedEvent(
+        BattleStatusTarget target,
+        StatusEffectSO statusEffect,
+        int previousStacks,
+        int currentStacks,
+        IBattleCharacter source = null)
+        : this(
+            target,
+            statusEffect,
+            previousStacks,
+            currentStacks,
+            source != null
+                ? BattleAbilityUser.FromCharacter(source)
+                : default)
+    {
     }
 }
 
@@ -1251,7 +1365,9 @@ public readonly struct BattleStatusSnapshot
     public StatusEffectSO Definition { get; }
     public int StackCount { get; }
     public float RemainingDuration { get; }
-    public IBattleCharacter ActiveSource { get; }
+    public BattleAbilityUser ActiveUser { get; }
+    public BattleStatusTarget ActiveSourceTarget => ActiveUser.Unit;
+    public IBattleCharacter ActiveSource => ActiveUser.Unit.Ally;
     public bool IsValid => Definition != null && StackCount > 0;
     public bool IsPermanent =>
         IsValid &&
@@ -1262,11 +1378,11 @@ public readonly struct BattleStatusSnapshot
         StatusEffectSO definition,
         int stackCount,
         float remainingDuration,
-        IBattleCharacter activeSource = null)
+        BattleAbilityUser activeUser)
     {
         Definition = definition;
         StackCount = Mathf.Max(0, stackCount);
-        ActiveSource = StackCount > 0 ? activeSource : null;
+        ActiveUser = StackCount > 0 ? activeUser : default;
         if (StackCount == 0)
         {
             RemainingDuration = 0f;
@@ -1284,6 +1400,21 @@ public readonly struct BattleStatusSnapshot
                     ? 0f
                     : Mathf.Max(0f, remainingDuration);
         }
+    }
+
+    public BattleStatusSnapshot(
+        StatusEffectSO definition,
+        int stackCount,
+        float remainingDuration,
+        IBattleCharacter activeSource = null)
+        : this(
+            definition,
+            stackCount,
+            remainingDuration,
+            activeSource != null
+                ? BattleAbilityUser.FromCharacter(activeSource)
+                : default)
+    {
     }
 }
 
@@ -1909,7 +2040,7 @@ public interface IBattleBoard
         IReadOnlyList<IBattleCharacter> targets,
         int amount);
     bool TryApplyCharacterStatus(
-        IBattleCharacter source,
+        BattleAbilityUser user,
         IReadOnlyList<EnemyRuntime> targets,
         StatusEffectSO statusEffect,
         float duration,
@@ -1917,7 +2048,7 @@ public interface IBattleBoard
         float tickInterval,
         bool showAttackRange);
     bool TryApplyAlliedCharacterStatus(
-        IBattleCharacter source,
+        BattleAbilityUser user,
         IReadOnlyList<IBattleCharacter> targets,
         StatusEffectSO statusEffect,
         float duration,
@@ -1933,6 +2064,49 @@ public interface IBattleBoard
         IReadOnlyList<IBattleCharacter> targets,
         CharacterStatusRemovalSelection removalSelection,
         CharacterStatusRemovalAmount removalAmount);
+}
+
+public static class BattleBoardStatusExtensions
+{
+    public static bool TryApplyCharacterStatus(
+        this IBattleBoard board,
+        IBattleCharacter source,
+        IReadOnlyList<EnemyRuntime> targets,
+        StatusEffectSO statusEffect,
+        float duration,
+        float stacks,
+        float tickInterval,
+        bool showAttackRange)
+    {
+        return board != null && board.TryApplyCharacterStatus(
+            source != null
+                ? BattleAbilityUser.FromCharacter(source)
+                : BattleAbilityUser.ForStatusEffect(),
+            targets,
+            statusEffect,
+            duration,
+            stacks,
+            tickInterval,
+            showAttackRange);
+    }
+
+    public static bool TryApplyAlliedCharacterStatus(
+        this IBattleBoard board,
+        IBattleCharacter source,
+        IReadOnlyList<IBattleCharacter> targets,
+        StatusEffectSO statusEffect,
+        float duration,
+        float stacks)
+    {
+        return board != null && board.TryApplyAlliedCharacterStatus(
+            source != null
+                ? BattleAbilityUser.FromCharacter(source)
+                : BattleAbilityUser.ForStatusEffect(),
+            targets,
+            statusEffect,
+            duration,
+            stacks);
+    }
 }
 
 public interface IBattleCharacter

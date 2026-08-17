@@ -13,6 +13,7 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
     IBattleVfxTargetResolver,
     IBattleManualTargetSelectionService,
     IBattleCardDrawServiceProvider,
+    IBattleAbilityUserModifierServiceProvider,
     IBattleObjectiveProvider
 {
     private const int MaximumStatusEventsPerDispatch = 128;
@@ -616,6 +617,7 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
     private readonly HashSet<EnemyRuntime> _worldEnemySync = new();
     private Func<EnemyRuntime, bool> _itemTargetHandler;
     private IBattleCardDrawService _cardDrawService;
+    private IBattleAbilityUserModifierService _abilityUserModifierService;
     private BattleManualTargetSelectionRequest _manualTargetRequest;
     private readonly List<EnemyRuntime> _manualEnemyTargets = new();
     private readonly List<IBattleCharacter> _manualAllyTargets = new();
@@ -693,6 +695,8 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
         : GridSize * GridSize;
     public IBattleObjective Objective => _battleCore;
     public IBattleCardDrawService CardDrawService => _cardDrawService;
+    public IBattleAbilityUserModifierService AbilityUserModifierService =>
+        _abilityUserModifierService;
     public int LivingEnemyCount
     {
         get
@@ -704,7 +708,9 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
             {
                 DungeonBoardSlot tile = _tiles[index];
                 if (tile != null)
-                    count += tile.StackCount;
+                    count = BattleValueMath.SaturatingAddNonNegative(
+                        count,
+                        tile.StackCount);
             }
 
             return count;
@@ -963,10 +969,16 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
         _cardDrawService = cardDrawService;
     }
 
+    public void BindAbilityUserModifierService(
+        IBattleAbilityUserModifierService modifierService)
+    {
+        _abilityUserModifierService = modifierService;
+    }
+
     public bool TryBeginManualTargetSelection(
         BattleManualTargetSelectionRequest request)
     {
-        if (request == null || request.Source == null ||
+        if (request == null ||
             request.RequiredCount <= 0 ||
             (request.UsesWorldArea && !UsesWorldPresentation) ||
             IsManualTargetSelectionPending)
@@ -1632,6 +1644,7 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
 
     private void RegisterPlacement(PendingEnemyPlacement pending)
     {
+        pending.Enemy.BindBattleBoard(this);
         EnemyPlacement placement = new(
             pending.Enemy,
             pending.Anchor,
@@ -1671,6 +1684,7 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
         }
 
         _enemyPlacements.Remove(enemy);
+        enemy.BindBattleBoard(null);
         _circularEnemyStates.Remove(enemy);
         RemoveWorldEnemyView(enemy);
 
@@ -1797,12 +1811,27 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
         float tickInterval,
         int tickDamage)
     {
+        return TryApplyFireToEnemy(
+            enemy,
+            duration,
+            tickInterval,
+            tickDamage,
+            BattleAbilityUser.ForStatusEffect());
+    }
+
+    public bool TryApplyFireToEnemy(
+        EnemyRuntime enemy,
+        float duration,
+        float tickInterval,
+        int tickDamage,
+        BattleAbilityUser user)
+    {
         if (!TryFindEnemyTile(enemy, out DungeonBoardSlot tile))
             return false;
 
         bool applied = TryApplyFireStatus(
             tile,
-            null,
+            user,
             duration,
             tickInterval,
             tickDamage);
@@ -2310,11 +2339,13 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
                 continue;
             }
 
-            totalDamage += TryDamageTile(
-                tile,
-                damage,
-                damageType,
-                source);
+            totalDamage = BattleValueMath.SaturatingAddNonNegative(
+                totalDamage,
+                TryDamageTile(
+                    tile,
+                    damage,
+                    damageType,
+                    source));
         }
 
         return totalDamage;
@@ -2342,7 +2373,9 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
 
             if (showAttackRange)
                 tile.ShowTargetArea();
-            totalHealed += tile.TryHealTop(amount);
+            totalHealed = BattleValueMath.SaturatingAddNonNegative(
+                totalHealed,
+                tile.TryHealTop(amount));
         }
 
         return totalHealed;
@@ -2361,7 +2394,11 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
         foreach (IBattleCharacter target in targets)
         {
             if (target != null && uniqueTargets.Add(target))
-                totalHealed += target.Heal(amount);
+            {
+                totalHealed = BattleValueMath.SaturatingAddNonNegative(
+                    totalHealed,
+                    target.Heal(amount));
+            }
         }
 
         return totalHealed;
@@ -2389,7 +2426,9 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
 
             if (showAttackRange)
                 tile.ShowTargetArea();
-            totalGranted += tile.TryGrantShieldTop(amount);
+            totalGranted = BattleValueMath.SaturatingAddNonNegative(
+                totalGranted,
+                tile.TryGrantShieldTop(amount));
         }
 
         return totalGranted;
@@ -2408,14 +2447,18 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
         foreach (IBattleCharacter target in targets)
         {
             if (target != null && uniqueTargets.Add(target))
-                totalGranted += target.GainShield(amount);
+            {
+                totalGranted = BattleValueMath.SaturatingAddNonNegative(
+                    totalGranted,
+                    target.GainShield(amount));
+            }
         }
 
         return totalGranted;
     }
 
     public bool TryApplyCharacterStatus(
-        IBattleCharacter source,
+        BattleAbilityUser user,
         IReadOnlyList<EnemyRuntime> targets,
         StatusEffectSO statusEffect,
         float duration,
@@ -2458,7 +2501,7 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
                 statusEffect,
                 effectiveDuration,
                 stackCount,
-                source,
+                user,
                 tickInterval,
                 TryDamageTile);
             if (targetApplied)
@@ -2468,7 +2511,7 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
                     statusEffect,
                     previousStacks,
                     enemy.GetStatusStackCount(statusEffect),
-                    source));
+                    user));
             }
             if (targetApplied && showAttackRange &&
                 ReferenceEquals(tile.TopEnemy, enemy))
@@ -2480,7 +2523,7 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
     }
 
     public bool TryApplyAlliedCharacterStatus(
-        IBattleCharacter source,
+        BattleAbilityUser user,
         IReadOnlyList<IBattleCharacter> targets,
         StatusEffectSO statusEffect,
         float duration,
@@ -2500,11 +2543,17 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
             if (target == null || !uniqueTargets.Add(target))
                 continue;
 
-            applied |= target.ApplyStatusEffect(
-                statusEffect,
-                duration,
-                stackCount,
-                source);
+            applied |= target is CharacterRuntime runtime
+                ? runtime.ApplyStatusEffect(
+                    statusEffect,
+                    duration,
+                    stackCount,
+                    user)
+                : target.ApplyStatusEffect(
+                    statusEffect,
+                    duration,
+                    stackCount,
+                    user.Unit.Ally);
         }
 
         return applied;
@@ -2572,7 +2621,7 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
 
     private bool TryApplyFireStatus(
         DungeonBoardSlot tile,
-        IBattleCharacter source,
+        BattleAbilityUser user,
         float duration,
         float tickInterval,
         int tickDamage)
@@ -2585,11 +2634,12 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
         StatusEffectSO fire =
             StatusEffectDefinitionCatalog.FindById(StatusEffectIds.Fire);
         int previousStacks = enemy?.GetStatusStackCount(fire) ?? 0;
-        bool applied = tile.TryApplyFireToTop(
-            source,
+        bool applied = fire != null && tile.TryApplyStatusToTop(
+            fire,
             duration,
-            tickInterval,
             tickDamage,
+            user,
+            tickInterval,
             TryDamageTile);
         if (applied && enemy != null)
         {
@@ -2598,7 +2648,7 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
                 fire,
                 previousStacks,
                 enemy.GetStatusStackCount(fire),
-                source));
+                user));
         }
         return applied;
     }
@@ -3416,7 +3466,9 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
             return total;
 
         foreach (BattleStatusSnapshot status in statuses)
-            total += Mathf.Max(0, status.StackCount);
+            total = BattleValueMath.SaturatingAddNonNegative(
+                total,
+                status.StackCount);
         return total;
     }
 
@@ -3598,6 +3650,8 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
     public void ClearAllStacks()
     {
         UnbindAllPresentationEnemies();
+        foreach (EnemyRuntime enemy in _enemyPlacements.Keys)
+            enemy?.BindBattleBoard(null);
         foreach (DungeonBoardSlot tile in _exclusiveOccupants.Keys)
         {
             if (tile != null)
@@ -5549,99 +5603,5 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
             return;
 
         EnemyClicked?.Invoke(enemy);
-    }
-}
-
-public sealed class BattleAreaPreviewView
-{
-    private readonly GameObject _root;
-    private readonly DungeonBattleAreaPreviewPrefabView _view;
-
-    public BattleAreaPreviewView(GameObject prefab, Transform parent)
-    {
-        _root = prefab != null && parent != null
-            ? UnityEngine.Object.Instantiate(prefab, parent)
-            : null;
-        if (_root != null)
-            SetLayerRecursively(_root, parent.gameObject.layer);
-        _view = _root != null
-            ? _root.GetComponent<DungeonBattleAreaPreviewPrefabView>()
-            : null;
-        if (_view == null || !_view.HasRequiredReferences)
-        {
-            Debug.LogError(
-                "Dungeon battle area preview prefab references are incomplete.",
-                _root);
-        }
-        _view?.Hide();
-    }
-
-    private static void SetLayerRecursively(GameObject target, int layer)
-    {
-        target.layer = layer;
-        foreach (Transform child in target.transform)
-            SetLayerRecursively(child.gameObject, layer);
-    }
-
-    public void Show(
-        Vector2 origin,
-        Vector2 direction,
-        BattleAreaDefinition definition)
-    {
-        _view?.Show(origin, direction, definition);
-    }
-
-    public void Hide()
-    {
-        _view?.Hide();
-    }
-
-    public void Dispose()
-    {
-        if (_root != null)
-            UnityEngine.Object.Destroy(_root);
-    }
-}
-
-public static class DungeonWorldSpawnGeometry
-{
-    public static float ResolveSpawnLineRadius(
-        IReadOnlyList<Vector2> viewportGroundCorners,
-        float padding)
-    {
-        float radius = 0f;
-        if (viewportGroundCorners?.Count >= 4)
-        {
-            float bottomWidth = Vector2.Distance(
-                viewportGroundCorners[0],
-                viewportGroundCorners[2]);
-            float topWidth = Vector2.Distance(
-                viewportGroundCorners[1],
-                viewportGroundCorners[3]);
-            int leftIndex = topWidth >= bottomWidth ? 1 : 0;
-            int rightIndex = topWidth >= bottomWidth ? 3 : 2;
-            radius = Mathf.Max(
-                viewportGroundCorners[leftIndex].magnitude,
-                viewportGroundCorners[rightIndex].magnitude);
-        }
-        else if (viewportGroundCorners != null)
-        {
-            for (int index = 0;
-                 index < viewportGroundCorners.Count;
-                 index++)
-            {
-                radius = Mathf.Max(
-                    radius,
-                    viewportGroundCorners[index].magnitude);
-            }
-        }
-
-        return radius + Mathf.Max(0f, padding);
-    }
-
-    public static Vector2 DirectionFromUnitSample(float sample)
-    {
-        float angle = Mathf.Clamp01(sample) * Mathf.PI * 2f;
-        return new Vector2(Mathf.Cos(angle), Mathf.Sin(angle));
     }
 }

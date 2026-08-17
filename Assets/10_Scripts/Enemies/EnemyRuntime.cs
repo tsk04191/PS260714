@@ -15,8 +15,15 @@ public sealed class EnemyRuntime
     private readonly Queue<BattleStatusChangedEvent> _statusChangeQueue =
         new();
     private readonly List<EnemyAbilityRuntimeState> _abilityStates = new();
+    private IBattleBoard _boundBattleBoard;
     private int _statusMutationDepth;
     private bool _dispatchingStatusChanges;
+    internal IBattleBoard BoundBattleBoard => _boundBattleBoard;
+
+    internal void BindBattleBoard(IBattleBoard board)
+    {
+        _boundBattleBoard = board;
+    }
 
     public EnemySO Definition { get; }
     public EEnemyGrade Grade => Definition.Grade;
@@ -69,6 +76,7 @@ public sealed class EnemyRuntime
     }
     public float SpawnIntervalMultiplier => Definition.SpawnIntervalMultiplier;
     public float ApproachSpeed => Definition.ApproachSpeed;
+    public float CurrentAttackPower => Definition.AttackPower;
     public int CoreAttackDamage => Definition.CoreAttackDamage;
     public float CoreAttackInterval => Definition.CoreAttackInterval;
     public float AbilityCooldownRemaining
@@ -304,7 +312,9 @@ public sealed class EnemyRuntime
             fire,
             duration,
             tickDamage,
-            source,
+            source != null
+                ? BattleAbilityUser.FromCharacter(source)
+                : BattleAbilityUser.ForStatusEffect(),
             tickInterval);
     }
 
@@ -317,7 +327,7 @@ public sealed class EnemyRuntime
             definition,
             duration,
             stacks,
-            null,
+            BattleAbilityUser.ForStatusEffect(),
             definition != null ? definition.TickInterval : 0f);
     }
 
@@ -332,7 +342,9 @@ public sealed class EnemyRuntime
             definition,
             duration,
             stacks,
-            source,
+            source != null
+                ? BattleAbilityUser.FromCharacter(source)
+                : BattleAbilityUser.ForStatusEffect(),
             tickInterval,
             null);
     }
@@ -345,6 +357,41 @@ public sealed class EnemyRuntime
         float tickInterval,
         Func<int, IBattleCharacter, bool> applyDamage)
     {
+        return ApplyStatusEffect(
+            definition,
+            duration,
+            stacks,
+            source != null
+                ? BattleAbilityUser.FromCharacter(source)
+                : BattleAbilityUser.ForStatusEffect(),
+            tickInterval,
+            applyDamage);
+    }
+
+    internal bool ApplyStatusEffect(
+        StatusEffectSO definition,
+        float duration,
+        int stacks,
+        BattleAbilityUser user,
+        float tickInterval)
+    {
+        return ApplyStatusEffect(
+            definition,
+            duration,
+            stacks,
+            user,
+            tickInterval,
+            null);
+    }
+
+    internal bool ApplyStatusEffect(
+        StatusEffectSO definition,
+        float duration,
+        int stacks,
+        BattleAbilityUser user,
+        float tickInterval,
+        Func<int, IBattleCharacter, bool> applyDamage)
+    {
         BeginStatusMutation();
         try
         {
@@ -352,7 +399,7 @@ public sealed class EnemyRuntime
                 definition,
                 duration,
                 stacks,
-                source,
+                user,
                 tickInterval,
                 applyDamage);
         }
@@ -366,7 +413,7 @@ public sealed class EnemyRuntime
         StatusEffectSO definition,
         float duration,
         int stacks,
-        IBattleCharacter source,
+        BattleAbilityUser user,
         float tickInterval,
         Func<int, IBattleCharacter, bool> applyDamage)
     {
@@ -402,7 +449,7 @@ public sealed class EnemyRuntime
             stacks,
             remainingDuration,
             tickInterval,
-            source);
+            user);
         if (!mutation.Succeeded && !state.HasStacks)
             _statusEffects.Remove(definition.StatusId);
         if (!mutation.Succeeded)
@@ -419,7 +466,7 @@ public sealed class EnemyRuntime
             StatusEffectOperationTrigger.OnApply,
             mutation.CurrentStacks,
             1,
-            mutation.Source,
+            mutation.User,
             applyDamage);
         if (continueExecution && mutation.StackChanged)
         {
@@ -428,7 +475,7 @@ public sealed class EnemyRuntime
                 StatusEffectOperationTrigger.OnStackChanged,
                 mutation.CurrentStacks,
                 1,
-                mutation.Source,
+                mutation.User,
                 applyDamage);
         }
 
@@ -659,11 +706,13 @@ public sealed class EnemyRuntime
         int removed = 0;
         for (int index = 0; index < selectedCount; index++)
         {
-            removed += RemoveStatusEffect(
-                candidates[index],
-                removalAmount,
-                applyDamage,
-                out bool continueExecution);
+            removed = BattleValueMath.SaturatingAddNonNegative(
+                removed,
+                RemoveStatusEffect(
+                    candidates[index],
+                    removalAmount,
+                    applyDamage,
+                    out bool continueExecution));
             if (!continueExecution)
                 break;
         }
@@ -766,7 +815,7 @@ public sealed class EnemyRuntime
             StatusEffectOperationTrigger.OnStackChanged,
             mutation.CurrentStacks,
             1,
-            mutation.Source,
+            mutation.User,
             applyDamage);
         if (continueExecution && mutation.CurrentStacks == 0)
         {
@@ -775,7 +824,7 @@ public sealed class EnemyRuntime
                 StatusEffectOperationTrigger.OnRemove,
                 mutation.CurrentStacks,
                 1,
-                mutation.Source,
+                mutation.User,
                 applyDamage);
         }
 
@@ -822,13 +871,13 @@ public sealed class EnemyRuntime
                             state.Definition,
                             activeBatch.Stacks,
                             activeBatch.RemainingDuration,
-                            activeBatch.Source),
+                            activeBatch.User),
                         tickCount);
                 StatusLifecycle?.Invoke(tick);
                 BattleEffectResult triggerResult =
                     StatusEffectTriggerExecutor.Execute(
                         tick,
-                        null,
+                        _boundBattleBoard,
                         applyDamage);
                 if (triggerResult.Attempted &&
                     !triggerResult.Succeeded)
@@ -840,7 +889,7 @@ public sealed class EnemyRuntime
                         StatusEffectOperationTrigger.OnTick,
                         activeBatch.Stacks,
                         tickCount,
-                        activeBatch.Source,
+                        activeBatch.User,
                         applyDamage))
                 {
                     return false;
@@ -898,7 +947,7 @@ public sealed class EnemyRuntime
             StatusEffectOperationTrigger.OnStackChanged,
             mutation.CurrentStacks,
             1,
-            mutation.Source,
+            mutation.User,
             applyDamage);
         if (!continueExecution || mutation.CurrentStacks > 0)
             return continueExecution;
@@ -908,7 +957,7 @@ public sealed class EnemyRuntime
             StatusEffectOperationTrigger.OnExpire,
             mutation.CurrentStacks,
             1,
-            mutation.Source,
+            mutation.User,
             applyDamage);
     }
 
@@ -917,7 +966,7 @@ public sealed class EnemyRuntime
         StatusEffectOperationTrigger trigger,
         int eventStacks,
         int occurrenceCount,
-        IBattleCharacter source,
+        BattleAbilityUser user,
         Func<int, IBattleCharacter, bool> applyDamage)
     {
         IReadOnlyList<StatusEffectOperationDefinition> operations =
@@ -944,7 +993,7 @@ public sealed class EnemyRuntime
                 occurrenceCount);
             if (damage <= 0 || applyDamage == null)
                 continue;
-            if (!applyDamage(damage, source))
+            if (!applyDamage(damage, user.Unit.Ally))
                 return false;
         }
 
@@ -981,7 +1030,9 @@ public sealed class EnemyRuntime
                 state.Definition,
                 state.StackCount,
                 state.RemainingDuration,
-                state.ActiveBatch?.Source)
+                state.ActiveBatch != null
+                    ? state.ActiveBatch.User
+                    : default)
             : default;
     }
 
@@ -1042,7 +1093,9 @@ public sealed class EnemyRuntime
                          StatusEffectLifecycleResolver.Resolve(eventData))
                 {
                     StatusLifecycle?.Invoke(lifecycleEvent);
-                    StatusEffectTriggerExecutor.Execute(lifecycleEvent);
+                    StatusEffectTriggerExecutor.Execute(
+                        lifecycleEvent,
+                        _boundBattleBoard);
                 }
             }
         }

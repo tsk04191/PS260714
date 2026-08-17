@@ -133,7 +133,9 @@ public sealed class DungeonBoardSlot
             fire,
             duration,
             tickDamage,
-            source,
+            source != null
+                ? BattleAbilityUser.FromCharacter(source)
+                : BattleAbilityUser.ForStatusEffect(),
             tickInterval,
             applyDamage);
     }
@@ -149,7 +151,9 @@ public sealed class DungeonBoardSlot
             statusEffect,
             duration,
             stacks,
-            source,
+            source != null
+                ? BattleAbilityUser.FromCharacter(source)
+                : BattleAbilityUser.ForStatusEffect(),
             tickInterval,
             null);
     }
@@ -158,7 +162,7 @@ public sealed class DungeonBoardSlot
         StatusEffectSO statusEffect,
         float duration,
         int stacks,
-        IBattleCharacter source,
+        BattleAbilityUser user,
         float tickInterval,
         Func<DungeonBoardSlot, int, IBattleCharacter, int> applyDamage)
     {
@@ -170,7 +174,7 @@ public sealed class DungeonBoardSlot
             statusEffect,
             duration,
             stacks,
-            source,
+            user,
             tickInterval,
             CreateStatusDamageCallback(target, applyDamage));
     }

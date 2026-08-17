@@ -93,7 +93,7 @@ public sealed class CharacterGradeTests
                     CharacterGrade.Grade2);
             CharacterRoleSO role = AssetDatabase.LoadAssetAtPath<
                 CharacterRoleSO>(
-                "Assets/07_Runtime/Resources/Presentation/Roles/RoleScout.asset");
+                "Assets/06_Runtime/Resources/Presentation/Roles/RoleScout.asset");
             Assert.That(role, Is.Not.Null);
             Assert.That(role.IconSprite, Is.Not.Null);
             Transform content = roster.Find(
@@ -241,7 +241,7 @@ public sealed class CharacterGradeTests
             Assert.That(toggleSource, Is.Not.Null);
             Assert.That(
                 AssetDatabase.GetAssetPath(toggleSource),
-                Is.EqualTo("Assets/08_Prefabs/UI/Util/btnToggle.prefab"));
+                Is.EqualTo("Assets/07_Prefabs/UI/Util/btnToggle.prefab"));
             toggleController.OnClick();
             Assert.That(toggleController.Value, Is.False);
             Assert.That(toggleRequest, Is.False);
@@ -462,7 +462,7 @@ public sealed class CharacterGradeTests
                 Is.Not.Null);
 
             GameObject rewardCard = AssetDatabase.LoadAssetAtPath<GameObject>(
-                "Assets/07_Runtime/Resources/Presentation/DungeonRewardCard.prefab");
+                "Assets/06_Runtime/Resources/Presentation/DungeonRewardCard.prefab");
             Assert.That(rewardCard, Is.Not.Null);
             Assert.That(
                 rewardCard.GetComponent<DungeonRewardCardHoverView>(),
@@ -481,7 +481,7 @@ public sealed class CharacterGradeTests
 
     private static Scene OpenClientScene(out bool opened)
     {
-        const string path = "Assets/05_Scenes/ClientScene.unity";
+        const string path = "Assets/04_Scenes/ClientScene.unity";
         Scene scene = SceneManager.GetSceneByPath(path);
         opened = !scene.IsValid() || !scene.isLoaded;
         return opened
@@ -802,7 +802,7 @@ public sealed class CharacterRoleTests
     {
         CharacterArchetypeSO exploration =
             AssetDatabase.LoadAssetAtPath<CharacterArchetypeSO>(
-                "Assets/07_Runtime/Resources/Presentation/Archetypes/" +
+                "Assets/06_Runtime/Resources/Presentation/Archetypes/" +
                 "RoleExploration.asset");
 
         Assert.That(exploration, Is.Not.Null);

@@ -42,7 +42,6 @@ public sealed class MainPage : RuntimeMenuPageBase
         LocalizationKeys.UiMainTitle;
     protected override string PageDescriptionLocalizationKey =>
         LocalizationKeys.UiMainDescription;
-    protected override Vector2 PanelSize => new(620f, 820f);
 
     protected override void BuildButtons()
     {

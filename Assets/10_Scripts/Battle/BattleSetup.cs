@@ -230,7 +230,9 @@ public readonly struct BattleEnemyGradeCounts
     public int Special { get; }
     public int Elite { get; }
     public int Boss { get; }
-    public int Total => Normal + Special + Elite + Boss;
+    public int Total => BattleValueMath.SaturatingAddNonNegative(
+        BattleValueMath.SaturatingAddNonNegative(Normal, Special),
+        BattleValueMath.SaturatingAddNonNegative(Elite, Boss));
 
     public BattleEnemyGradeCounts(
         int normal,

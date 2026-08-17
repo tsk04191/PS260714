@@ -9,9 +9,9 @@ using UnityEngine;
 public sealed class CharacterDefinitionValidationTests
 {
     private const string FireStatusPath =
-        "Assets/07_Runtime/Resources/StatusEffects/Fire.asset";
+        "Assets/06_Runtime/Resources/StatusEffects/Fire.asset";
     private const string PoisonStatusPath =
-        "Assets/07_Runtime/Resources/StatusEffects/Poison.asset";
+        "Assets/06_Runtime/Resources/StatusEffects/Poison.asset";
 
     private readonly List<UnityEngine.Object> _createdObjects = new();
 

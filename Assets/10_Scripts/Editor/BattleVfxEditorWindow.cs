@@ -10,7 +10,7 @@ public sealed class BattleVfxEditorWindow : EditorWindow
     public const string ValidateMenuPath =
         PS260714EditorMenu.ValidateBattleVfx;
 
-    private const string AssetFolder = "Assets/07_Runtime/Resources/BattleVfx";
+    private const string AssetFolder = "Assets/06_Runtime/Resources/BattleVfx";
     private const string RenameControlName = "BattleVfxRenameField";
     private const float GridPreviewSize = 220f;
     private const int VfxGridDimension = 10;

@@ -9,17 +9,17 @@ using UnityEngine.UI;
 
 public static class DynamicUiScenePreviewInstaller
 {
-    private const string ScenePath = "Assets/05_Scenes/ClientScene.unity";
+    private const string ScenePath = "Assets/04_Scenes/ClientScene.unity";
     private const string AttendanceCellPath =
-        "Assets/07_Runtime/Resources/Presentation/AttendanceRewardCell.prefab";
+        "Assets/06_Runtime/Resources/Presentation/AttendanceRewardCell.prefab";
     private const string BuffIconPath =
-        "Assets/07_Runtime/Resources/Presentation/CharacterBuffIcon.prefab";
+        "Assets/06_Runtime/Resources/Presentation/CharacterBuffIcon.prefab";
     private const string OperatorRosterCardPath =
-        "Assets/07_Runtime/Resources/Presentation/OperatorRosterCard.prefab";
+        "Assets/06_Runtime/Resources/Presentation/OperatorRosterCard.prefab";
     private const string RestCharacterSdPath =
-        "Assets/07_Runtime/Resources/Presentation/DungeonRestCharacterSd.prefab";
+        "Assets/06_Runtime/Resources/Presentation/DungeonRestCharacterSd.prefab";
     private const string TogglePath =
-        "Assets/08_Prefabs/UI/Util/btnToggle.prefab";
+        "Assets/07_Prefabs/UI/Util/btnToggle.prefab";
 
     [MenuItem(
         PS260714EditorMenu.InstallDynamicUiPreviews,

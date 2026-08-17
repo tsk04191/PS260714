@@ -36,6 +36,12 @@ public sealed class DungeonRoomConditionDefinition
 
     public bool TryValidate(out string error)
     {
+        if (!Enum.IsDefined(typeof(EDungeonRoomConditionType), conditionType) ||
+            amount < 0)
+        {
+            error = "Room condition type or amount is invalid.";
+            return false;
+        }
         if ((conditionType == EDungeonRoomConditionType.OwnsBattleItem ||
              conditionType == EDungeonRoomConditionType.DoesNotOwnBattleItem) &&
             battleItem == null)
@@ -64,6 +70,11 @@ public sealed class DungeonRoomEffectDefinition
 
     public bool TryValidate(out string error)
     {
+        if (!Enum.IsDefined(typeof(EDungeonRoomEffectType), effectType))
+        {
+            error = "Room effect type is invalid.";
+            return false;
+        }
         if (effectType == EDungeonRoomEffectType.BattleItem &&
             battleItem == null)
         {
@@ -154,30 +165,32 @@ public class DungeonRoomChoiceDefinition : IRunAbilityDefinition
             return false;
         }
 
-        conditions ??= Array.Empty<DungeonRoomConditionDefinition>();
-        effects ??= Array.Empty<DungeonRoomEffectDefinition>();
-        for (int index = 0; index < conditions.Length; index++)
+        IReadOnlyList<DungeonRoomConditionDefinition> authoredConditions =
+            conditions ?? Array.Empty<DungeonRoomConditionDefinition>();
+        IReadOnlyList<DungeonRoomEffectDefinition> authoredEffects =
+            effects ?? Array.Empty<DungeonRoomEffectDefinition>();
+        for (int index = 0; index < authoredConditions.Count; index++)
         {
-            if (conditions[index] == null)
+            if (authoredConditions[index] == null)
             {
                 error = $"Choice '{choiceId}' condition {index + 1} is null.";
                 return false;
             }
-            if (!conditions[index].TryValidate(out error))
+            if (!authoredConditions[index].TryValidate(out error))
             {
                 error = $"Choice '{choiceId}' condition {index + 1}: {error}";
                 return false;
             }
         }
 
-        for (int index = 0; index < effects.Length; index++)
+        for (int index = 0; index < authoredEffects.Count; index++)
         {
-            if (effects[index] == null)
+            if (authoredEffects[index] == null)
             {
                 error = $"Choice '{choiceId}' effect {index + 1} is null.";
                 return false;
             }
-            if (!effects[index].TryValidate(out error))
+            if (!authoredEffects[index].TryValidate(out error))
             {
                 error = $"Choice '{choiceId}' effect {index + 1}: {error}";
                 return false;
@@ -244,14 +257,15 @@ public sealed class DungeonEventChoiceNodeDefinition :
             return false;
         }
 
-        nextChoiceNodeIds ??= Array.Empty<string>();
-        if (endsEvent && nextChoiceNodeIds.Length > 0)
+        IReadOnlyList<string> nextIdsAuthored =
+            nextChoiceNodeIds ?? Array.Empty<string>();
+        if (endsEvent && nextIdsAuthored.Count > 0)
         {
             error = $"Node '{NodeId}' cannot end the event and have next " +
                     "choices at the same time.";
             return false;
         }
-        if (!endsEvent && nextChoiceNodeIds.Length == 0)
+        if (!endsEvent && nextIdsAuthored.Count == 0)
         {
             error = $"Node '{NodeId}' requires a next choice or must end " +
                     "the event.";
@@ -259,9 +273,9 @@ public sealed class DungeonEventChoiceNodeDefinition :
         }
 
         HashSet<string> nextIds = new(StringComparer.Ordinal);
-        for (int index = 0; index < nextChoiceNodeIds.Length; index++)
+        for (int index = 0; index < nextIdsAuthored.Count; index++)
         {
-            string nextId = (nextChoiceNodeIds[index] ?? string.Empty).Trim();
+            string nextId = (nextIdsAuthored[index] ?? string.Empty).Trim();
             if (string.IsNullOrEmpty(nextId))
             {
                 error = $"Node '{NodeId}' has an empty next choice id.";
@@ -338,20 +352,6 @@ public abstract class DungeonRoomSO : ScriptableObject
     }
 
     protected abstract bool TryValidateRoom(out string error);
-
-    protected void ValidateBaseFields()
-    {
-        roomId = string.IsNullOrWhiteSpace(roomId)
-            ? name.Trim().ToLowerInvariant().Replace(' ', '_')
-            : roomId.Trim();
-        displayName = string.IsNullOrWhiteSpace(displayName)
-            ? name.ToUpperInvariant()
-            : displayName.Trim();
-        titleLocalizationKey = (titleLocalizationKey ?? string.Empty).Trim();
-        descriptionLocalizationKey =
-            (descriptionLocalizationKey ?? string.Empty).Trim();
-        fallbackDescription = (fallbackDescription ?? string.Empty).Trim();
-    }
 
     private static string ResolveText(string key, string fallback)
     {
@@ -475,9 +475,6 @@ public sealed class DungeonEventSO : DungeonRoomSO
 
     private void OnValidate()
     {
-        ValidateBaseFields();
-        choices ??= Array.Empty<DungeonEventChoiceNodeDefinition>();
-        entryChoiceNodeIds ??= Array.Empty<string>();
     }
 
     internal static bool ValidateChoices(
@@ -684,9 +681,6 @@ public sealed partial class DungeonRestSO : DungeonRoomSO
 
     private void OnValidate()
     {
-        ValidateBaseFields();
-        choices ??= Array.Empty<DungeonRoomChoiceDefinition>();
-        EnsureRestSchema(choices);
     }
 }
 
@@ -707,7 +701,5 @@ public sealed partial class DungeonShopSO : DungeonRoomSO
 
     private void OnValidate()
     {
-        ValidateBaseFields();
-        products ??= Array.Empty<DungeonRoomChoiceDefinition>();
     }
 }

@@ -7,7 +7,7 @@ public sealed class BattleCardEditorWindow : EditorWindow
 {
     public const string MenuPath = PS260714EditorMenu.BattleCardEditor;
 
-    private const string AssetFolder = "Assets/07_Runtime/Resources/Cards";
+    private const string AssetFolder = "Assets/06_Runtime/Resources/Cards";
     private const string RenameControlName = "BattleCardAssetRenameField";
     private static readonly string[] RarityFilterLabels =
     {
@@ -397,7 +397,7 @@ public sealed class BattleCardEditorWindow : EditorWindow
         }
 
         if (selected != null &&
-            !AbilityDefinitionValidator.TryValidate(
+            !BattleCardDefinitionValidator.TryValidate(
                 selected,
                 out string abilityError))
         {
@@ -704,8 +704,8 @@ public sealed class BattleCardEditorWindow : EditorWindow
     {
         if (AssetDatabase.IsValidFolder(AssetFolder))
             return;
-        if (!AssetDatabase.IsValidFolder("Assets/07_Runtime/Resources"))
+        if (!AssetDatabase.IsValidFolder("Assets/06_Runtime/Resources"))
             AssetDatabase.CreateFolder("Assets", "Resources");
-        AssetDatabase.CreateFolder("Assets/07_Runtime/Resources", "Cards");
+        AssetDatabase.CreateFolder("Assets/06_Runtime/Resources", "Cards");
     }
 }

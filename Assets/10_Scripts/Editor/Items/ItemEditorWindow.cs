@@ -9,7 +9,7 @@ public sealed class ItemEditorWindow : EditorWindow
 {
     public const string MenuPath = PS260714EditorMenu.ItemEditor;
 
-    private const string AssetRoot = "Assets/07_Runtime/Resources/Items";
+    private const string AssetRoot = "Assets/06_Runtime/Resources/Items";
     private const string RenameControlName = "ItemAssetRenameField";
 
     private static readonly string[] CategoryLabels =
@@ -1081,7 +1081,7 @@ public sealed class ItemEditorWindow : EditorWindow
     private static void EnsureAssetFolder(string childFolder)
     {
         EnsureFolder("Assets", "Resources");
-        EnsureFolder("Assets/07_Runtime/Resources", "Items");
+        EnsureFolder("Assets/06_Runtime/Resources", "Items");
         EnsureFolder(AssetRoot, childFolder);
     }
 

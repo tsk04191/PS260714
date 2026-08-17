@@ -354,7 +354,9 @@ public readonly struct StatusEffectLifecycleEvent
     public StatusEffectSO Definition { get; }
     public StatusEffectLifecycleTrigger Trigger { get; }
     public BattleStatusTarget Target { get; }
-    public IBattleCharacter Source { get; }
+    public BattleAbilityUser User { get; }
+    public BattleStatusTarget SourceTarget => User.Unit;
+    public IBattleCharacter Source => User.Unit.Ally;
     public int PreviousStacks { get; }
     public int CurrentStacks { get; }
     public int OccurrenceCount { get; }
@@ -373,7 +375,7 @@ public readonly struct StatusEffectLifecycleEvent
         StatusEffectSO definition,
         StatusEffectLifecycleTrigger trigger,
         BattleStatusTarget target,
-        IBattleCharacter source,
+        BattleAbilityUser user,
         int previousStacks,
         int currentStacks,
         int occurrenceCount = 1)
@@ -381,27 +383,43 @@ public readonly struct StatusEffectLifecycleEvent
         Definition = definition;
         Trigger = trigger;
         Target = target;
-        Source = source;
+        User = user;
         PreviousStacks = Mathf.Max(0, previousStacks);
         CurrentStacks = Mathf.Max(0, currentStacks);
         OccurrenceCount = Mathf.Max(1, occurrenceCount);
     }
 
+    public StatusEffectLifecycleEvent(
+        StatusEffectSO definition,
+        StatusEffectLifecycleTrigger trigger,
+        BattleStatusTarget target,
+        IBattleCharacter source,
+        int previousStacks,
+        int currentStacks,
+        int occurrenceCount = 1)
+        : this(
+            definition,
+            trigger,
+            target,
+            source != null
+                ? BattleAbilityUser.FromCharacter(source)
+                : BattleAbilityUser.ForStatusEffect(),
+            previousStacks,
+            currentStacks,
+            occurrenceCount)
+    {
+    }
+
     public BattleEffectContext CreateEffectContext(IBattleBoard board)
     {
-        CharacterRuntime sourceRuntime = Source as CharacterRuntime;
-        BattleStatusTarget sourceTarget = Source != null
-            ? BattleStatusTarget.FromAlly(Source)
-            : default;
         return BattleEffectContext.ForStatus(
             Target,
-            sourceTarget,
+            User,
             board,
-            Source?.CurrentAttackPower ?? 0f,
             PreviousStacks,
             CurrentStacks,
             OccurrenceCount,
-            sourceRuntime?.ActiveSkillResource);
+            User.Resource);
     }
 }
 
@@ -437,48 +455,49 @@ public static class StatusEffectLifecycleResolver
             return Array.Empty<StatusEffectLifecycleEvent>();
 
         List<StatusEffectLifecycleEvent> events = new(2);
-        IBattleCharacter source =
-            change.Current.ActiveSource ??
-            change.Previous.ActiveSource;
+        BattleAbilityUser user = change.Current.ActiveUser.HasUnit ||
+                                 change.Current.ActiveUser.Role != default
+            ? change.Current.ActiveUser
+            : change.Previous.ActiveUser;
         switch (change.ChangeType)
         {
             case BattleStatusChangeType.Applied:
                 Add(
                     events,
                     change,
-                    source,
+                    user,
                     StatusEffectLifecycleTrigger.OnApply);
-                AddStackChange(events, change, source);
+                AddStackChange(events, change, user);
                 break;
 
             case BattleStatusChangeType.Reapplied:
                 Add(
                     events,
                     change,
-                    source,
+                    user,
                     StatusEffectLifecycleTrigger.OnReapply);
-                AddStackChange(events, change, source);
+                AddStackChange(events, change, user);
                 break;
 
             case BattleStatusChangeType.StackChanged:
-                AddStackChange(events, change, source);
+                AddStackChange(events, change, user);
                 break;
 
             case BattleStatusChangeType.Expired:
-                AddStackChange(events, change, source);
+                AddStackChange(events, change, user);
                 Add(
                     events,
                     change,
-                    source,
+                    user,
                     StatusEffectLifecycleTrigger.OnExpire);
                 break;
 
             case BattleStatusChangeType.Removed:
-                AddStackChange(events, change, source);
+                AddStackChange(events, change, user);
                 Add(
                     events,
                     change,
-                    source,
+                    user,
                     StatusEffectLifecycleTrigger.OnRemove);
                 break;
         }
@@ -500,7 +519,7 @@ public static class StatusEffectLifecycleResolver
             snapshot.Definition,
             StatusEffectLifecycleTrigger.OnTick,
             target,
-            snapshot.ActiveSource,
+            snapshot.ActiveUser,
             snapshot.StackCount,
             snapshot.StackCount,
             occurrenceCount);
@@ -539,7 +558,7 @@ public static class StatusEffectLifecycleResolver
     private static void AddStackChange(
         ICollection<StatusEffectLifecycleEvent> events,
         BattleStatusChangedEvent change,
-        IBattleCharacter source)
+        BattleAbilityUser user)
     {
         if (change.PreviousStacks == change.CurrentStacks)
             return;
@@ -547,21 +566,21 @@ public static class StatusEffectLifecycleResolver
         Add(
             events,
             change,
-            source,
+            user,
             StatusEffectLifecycleTrigger.OnStackChanged);
     }
 
     private static void Add(
         ICollection<StatusEffectLifecycleEvent> events,
         BattleStatusChangedEvent change,
-        IBattleCharacter source,
+        BattleAbilityUser user,
         StatusEffectLifecycleTrigger trigger)
     {
         events.Add(new StatusEffectLifecycleEvent(
             change.StatusEffect,
             trigger,
             change.Target,
-            source,
+            user,
             change.PreviousStacks,
             change.CurrentStacks));
     }
@@ -579,8 +598,9 @@ public static class StatusEffectTriggerExecutor
             return default;
 
         CharacterRuntime sourceRuntime =
-            eventData.Source as CharacterRuntime;
-        board ??= sourceRuntime?.BoundBattleBoard;
+            eventData.SourceTarget.Ally as CharacterRuntime;
+        board ??= sourceRuntime?.BoundBattleBoard ??
+                  eventData.SourceTarget.Enemy?.BoundBattleBoard;
         BattleEffectContext context =
             eventData.CreateEffectContext(board);
         IReadOnlyList<StatusEffectTriggerInvocation> invocations =
@@ -638,13 +658,13 @@ internal sealed class StatusEffectRuntimeBatch
     public float RemainingDuration { get; set; }
     public float TotalDuration { get; }
     public float TickInterval { get; }
-    public IBattleCharacter Source { get; }
+    public BattleAbilityUser User { get; }
 
     public StatusEffectRuntimeBatch(
         int stacks,
         float remainingDuration,
         float tickInterval,
-        IBattleCharacter source,
+        BattleAbilityUser user,
         float totalDuration = -1f)
     {
         Stacks = Mathf.Max(1, stacks);
@@ -655,7 +675,7 @@ internal sealed class StatusEffectRuntimeBatch
         TickInterval = TimePrecision.Normalize(
             tickInterval,
             TimePrecision.Step);
-        Source = source;
+        User = user;
     }
 }
 
@@ -664,7 +684,7 @@ internal readonly struct StatusEffectRuntimeMutation
     public bool Succeeded { get; }
     public int PreviousStacks { get; }
     public int CurrentStacks { get; }
-    public IBattleCharacter Source { get; }
+    public BattleAbilityUser User { get; }
     public bool StackChanged => PreviousStacks != CurrentStacks;
     public int RemovedStacks => Mathf.Max(0, PreviousStacks - CurrentStacks);
 
@@ -672,12 +692,12 @@ internal readonly struct StatusEffectRuntimeMutation
         bool succeeded,
         int previousStacks,
         int currentStacks,
-        IBattleCharacter source)
+        BattleAbilityUser user)
     {
         Succeeded = succeeded;
         PreviousStacks = Mathf.Max(0, previousStacks);
         CurrentStacks = Mathf.Max(0, currentStacks);
-        Source = source;
+        User = user;
     }
 }
 
@@ -720,7 +740,11 @@ internal sealed class StatusEffectRuntimeState
         {
             int total = 0;
             foreach (StatusEffectRuntimeBatch batch in _batches)
-                total += Mathf.Max(0, batch.Stacks);
+            {
+                total = BattleValueMath.SaturatingAddNonNegative(
+                    total,
+                    batch?.Stacks ?? 0);
+            }
             return total;
         }
     }
@@ -766,7 +790,7 @@ internal sealed class StatusEffectRuntimeState
         int stacks,
         float remainingDuration,
         float tickInterval,
-        IBattleCharacter source)
+        BattleAbilityUser user)
     {
         int previousTotalStacks = StackCount;
         stacks = ClampIncomingStacks(stacks);
@@ -775,12 +799,12 @@ internal sealed class StatusEffectRuntimeState
 
         if (!HasStacks)
         {
-            AddBatch(stacks, remainingDuration, tickInterval, source);
+            AddBatch(stacks, remainingDuration, tickInterval, user);
             return new StatusEffectRuntimeMutation(
                 true,
                 previousTotalStacks,
                 StackCount,
-                source);
+                user);
         }
 
         if (Definition.StackMode ==
@@ -797,12 +821,12 @@ internal sealed class StatusEffectRuntimeState
                 addedStacks,
                 remainingDuration,
                 tickInterval,
-                source);
+                user);
             return new StatusEffectRuntimeMutation(
                 true,
                 previousTotalStacks,
                 StackCount,
-                source);
+                user);
         }
 
         StatusEffectRuntimeBatch active = ActiveBatch;
@@ -841,13 +865,13 @@ internal sealed class StatusEffectRuntimeState
             nextStacks,
             nextDuration,
             tickInterval,
-            source,
+            user,
             nextTotalDuration);
         return new StatusEffectRuntimeMutation(
             true,
             previousTotalStacks,
             StackCount,
-            source);
+            user);
     }
 
     public StatusEffectRuntimeMutation RemoveStacks(int removalCount)
@@ -862,7 +886,7 @@ internal sealed class StatusEffectRuntimeState
         if (remaining <= 0)
             return default;
 
-        IBattleCharacter source = null;
+        BattleAbilityUser user = default;
         bool sourceCaptured = false;
         while (remaining > 0 && _batches.Count > 0)
         {
@@ -870,7 +894,7 @@ internal sealed class StatusEffectRuntimeState
             StatusEffectRuntimeBatch batch = _batches[batchIndex];
             if (!sourceCaptured)
             {
-                source = batch.Source;
+                user = batch.User;
                 sourceCaptured = true;
             }
             if (batch.Stacks <= remaining)
@@ -890,7 +914,7 @@ internal sealed class StatusEffectRuntimeState
             true,
             available,
             StackCount,
-            source);
+            user);
     }
 
     public float AdvanceActiveDuration(float deltaTime)
@@ -946,7 +970,7 @@ internal sealed class StatusEffectRuntimeState
         }
 
         int previousStacks = StackCount;
-        IBattleCharacter source = active.Source;
+        BattleAbilityUser user = active.User;
         _batches.RemoveAt(0);
         if (!HasStacks)
             _tickElapsed = 0f;
@@ -954,21 +978,21 @@ internal sealed class StatusEffectRuntimeState
             true,
             previousStacks,
             StackCount,
-            source);
+            user);
     }
 
     private void AddBatch(
         int stacks,
         float remainingDuration,
         float tickInterval,
-        IBattleCharacter source,
+        BattleAbilityUser user,
         float totalDuration = -1f)
     {
         _batches.Add(new StatusEffectRuntimeBatch(
             stacks,
             remainingDuration,
             tickInterval,
-            source,
+            user,
             totalDuration));
     }
 

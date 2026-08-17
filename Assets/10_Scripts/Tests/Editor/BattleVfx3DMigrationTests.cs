@@ -5,11 +5,11 @@ using UnityEngine;
 public sealed class BattleVfx3DMigrationTests
 {
     private const string FireStatusPath =
-        "Assets/07_Runtime/Resources/StatusEffects/Fire.asset";
+        "Assets/06_Runtime/Resources/StatusEffects/Fire.asset";
     private const string DungeonTilePath =
-        "Assets/08_Prefabs/UI/Dungeon/DungeonTile.prefab";
+        "Assets/07_Prefabs/UI/Dungeon/DungeonTile.prefab";
     private const string AreaPreviewPath =
-        "Assets/07_Runtime/Resources/Presentation/DungeonWorld/" +
+        "Assets/06_Runtime/Resources/Presentation/DungeonWorld/" +
         "DungeonBattleAreaPreview.prefab";
 
     [Test]
@@ -53,17 +53,17 @@ public sealed class BattleVfx3DMigrationTests
             Is.Null);
         Assert.That(
             AssetDatabase.LoadAssetAtPath<RuntimeAnimatorController>(
-                "Assets/04_VFX/Animations/Battle/FireStatus/" +
+                "Assets/02_Visual/VFX/Animations/Battle/FireStatus/" +
                 "FireStatus.controller"),
             Is.Null);
         Assert.That(
             AssetDatabase.LoadAssetAtPath<AnimationClip>(
-                "Assets/04_VFX/Animations/Battle/FireStatus/" +
+                "Assets/02_Visual/VFX/Animations/Battle/FireStatus/" +
                 "FireStatusHidden.anim"),
             Is.Null);
         Assert.That(
             AssetDatabase.LoadAssetAtPath<AnimationClip>(
-                "Assets/04_VFX/Animations/Battle/FireStatus/" +
+                "Assets/02_Visual/VFX/Animations/Battle/FireStatus/" +
                 "FireStatusLoop.anim"),
             Is.Null);
     }

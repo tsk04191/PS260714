@@ -13,6 +13,7 @@ public sealed class EnemySO : ScriptableObject,
     IBattlePresentationUnitDefinition,
     IBattleAbilityProvider
 {
+    public const int CurrentCombatStatSchemaVersion = 1;
     public const int MaximumFootprintSize = 9;
 
     [Header("Identity")]
@@ -44,6 +45,9 @@ public sealed class EnemySO : ScriptableObject,
     [SerializeField, Min(0.01f), Tooltip(
         "Normalized radial distance travelled per second in circular battles.")]
     private float approachSpeed = 0.08f;
+    [SerializeField, HideInInspector]
+    private int combatStatSchemaVersion;
+    [SerializeField, Min(0.1f)] private float attackPower = 5f;
     [SerializeField, Min(1)] private int coreAttackDamage = 5;
     [SerializeField, Min(0.1f)] private float coreAttackInterval = 2f;
     [SerializeField, Min(0f), Tooltip("0 uses the default threat for this enemy type.")]
@@ -83,6 +87,9 @@ public sealed class EnemySO : ScriptableObject,
     public float SpawnIntervalMultiplier =>
         TimePrecision.Normalize(spawnIntervalMultiplier, 0.1f);
     public float ApproachSpeed => Mathf.Max(0.01f, approachSpeed);
+    public float AttackPower => combatStatSchemaVersion > 0
+        ? Mathf.Max(0.1f, attackPower)
+        : CoreAttackDamage;
     public int CoreAttackDamage => Mathf.Max(1, coreAttackDamage);
     public float CoreAttackInterval => TimePrecision.Normalize(
         coreAttackInterval,
@@ -123,6 +130,9 @@ public sealed class EnemySO : ScriptableObject,
     internal int AuthoredInitialArmor => initialArmor;
     internal int AuthoredInitialShield => initialShield;
     internal float AuthoredApproachSpeed => approachSpeed;
+    internal int AuthoredCombatStatSchemaVersion =>
+        combatStatSchemaVersion;
+    internal float AuthoredAttackPower => attackPower;
     internal int AuthoredCoreAttackDamage => coreAttackDamage;
     internal float AuthoredCoreAttackInterval => coreAttackInterval;
     internal int AuthoredUnlockDifficulty => unlockDifficulty;
@@ -176,6 +186,8 @@ public sealed class EnemySO : ScriptableObject,
         initialArmor = 0;
         initialShield = 0;
         spawnIntervalMultiplier = 1f;
+        combatStatSchemaVersion = CurrentCombatStatSchemaVersion;
+        attackPower = coreAttackDamage;
         threatCost = 0f;
         unlockDifficulty = -1;
         footprintWidth = 1;

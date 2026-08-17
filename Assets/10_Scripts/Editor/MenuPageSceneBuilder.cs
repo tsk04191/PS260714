@@ -7,7 +7,7 @@ using UnityEngine.UI;
 
 public static class MenuPageSceneBuilder
 {
-    private const string ClientScenePath = "Assets/05_Scenes/ClientScene.unity";
+    private const string ClientScenePath = "Assets/04_Scenes/ClientScene.unity";
 
     [MenuItem(
         PS260714EditorMenu.ValidateDesignerUi,
@@ -20,7 +20,7 @@ public static class MenuPageSceneBuilder
             scene.path != ClientScenePath)
         {
             Debug.LogWarning(
-                "Open Assets/05_Scenes/ClientScene.unity before validating UI.");
+                "Open Assets/04_Scenes/ClientScene.unity before validating UI.");
             return;
         }
 

@@ -495,7 +495,10 @@ public sealed class BattleManager : MonoBehaviour, IActiveSkillResource
                     queueSource,
                     remainingQueueCount);
                 _spawnQueue.RemoveRange(queueIndex, spawnCount);
-                _spawnedEnemyCount += spawnCount;
+                _spawnedEnemyCount =
+                    BattleValueMath.SaturatingAddNonNegative(
+                        _spawnedEnemyCount,
+                        spawnCount);
                 ResetSpawnTimerForNextEnemy();
                 _boardFull = false;
                 NotifyQueueAndTimerChanged();

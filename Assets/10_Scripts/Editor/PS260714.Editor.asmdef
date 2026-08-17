@@ -1,0 +1,20 @@
+{
+  "name": "PS260714.Editor",
+  "rootNamespace": "",
+  "references": [
+    "PS260714.Runtime",
+    "Unity.TextMeshPro",
+    "UnityEngine.UI"
+  ],
+  "includePlatforms": [
+    "Editor"
+  ],
+  "excludePlatforms": [],
+  "allowUnsafeCode": false,
+  "overrideReferences": false,
+  "autoReferenced": true,
+  "precompiledReferences": [],
+  "defineConstraints": [],
+  "versionDefines": [],
+  "noEngineReferences": false
+}

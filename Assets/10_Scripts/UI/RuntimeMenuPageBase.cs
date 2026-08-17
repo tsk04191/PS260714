@@ -27,16 +27,13 @@ public abstract class RuntimeMenuPageBase : MonoBehaviour, IPage
     [SerializeField, HideInInspector] private int _designerLayoutVersion;
 
     private bool _initialized;
-    private bool _localeEventBound;
+    private bool _localizationEventsBound;
     private ResponsivePanelFitter _designerPanelFitter;
 
     protected abstract string PageTitle { get; }
     protected virtual string PageDescription => string.Empty;
     protected virtual string PageTitleLocalizationKey => string.Empty;
     protected virtual string PageDescriptionLocalizationKey => string.Empty;
-    protected virtual Vector2 PanelSize => new(520f, 560f);
-    protected virtual bool FillAvailableSpace => false;
-    protected virtual bool RequiresSavedDesignerUiAtRuntime => false;
     protected RectTransform RuntimeRoot => _runtimeRoot;
     protected RectTransform PanelRoot => _panel;
     protected RectTransform ButtonRoot => _buttonRoot;
@@ -46,13 +43,13 @@ public abstract class RuntimeMenuPageBase : MonoBehaviour, IPage
 
     protected virtual void Awake()
     {
-        BindLocaleEvent();
+        BindLocalizationEvents();
         Init();
     }
 
     protected virtual void OnDestroy()
     {
-        UnbindLocaleEvent();
+        UnbindLocalizationEvents();
     }
 
     protected virtual void OnRectTransformDimensionsChange()
@@ -90,18 +87,8 @@ public abstract class RuntimeMenuPageBase : MonoBehaviour, IPage
 
     protected abstract void BuildButtons();
 
-    protected Button CreateMenuButton(string label, Action action)
+    protected virtual void OnLocalizationChanged()
     {
-        if (_buttonRoot == null)
-            return null;
-
-        string objectName = $"btn{label.Replace(" ", string.Empty)}";
-        return CreateStyledButton(
-            _buttonRoot,
-            objectName,
-            label,
-            action,
-            72f);
     }
 
     protected Button CreateLocalizedMenuButton(
@@ -179,16 +166,6 @@ public abstract class RuntimeMenuPageBase : MonoBehaviour, IPage
         }
         text.text = content;
         return text;
-    }
-
-    protected Button CreateOverlayMenuButton(string label, Action action)
-    {
-        string objectName = $"btn{label.Replace(" ", string.Empty)}Overlay";
-        return CreateOverlayMenuButtonCore(
-            objectName,
-            label,
-            null,
-            action);
     }
 
     protected Button CreateLocalizedOverlayMenuButton(
@@ -324,13 +301,6 @@ public abstract class RuntimeMenuPageBase : MonoBehaviour, IPage
         UnityEditor.EditorUtility.SetDirty(this);
     }
 
-    public void RebuildEditorPreview()
-    {
-        Debug.LogError(
-            $"{name}: fixed UI rebuilding is disabled. Edit the saved " +
-            "scene hierarchy directly.",
-            this);
-    }
 #endif
 
     private void RefreshLayout()
@@ -341,27 +311,31 @@ public abstract class RuntimeMenuPageBase : MonoBehaviour, IPage
         _designerPanelFitter?.RefreshLayout();
     }
 
-    private void BindLocaleEvent()
+    private void BindLocalizationEvents()
     {
-        if (_localeEventBound)
+        if (_localizationEventsBound)
             return;
 
-        LocalizationService.LocaleChanged += HandleLocaleChanged;
-        _localeEventBound = true;
+        LocalizationService.LocaleChanged += HandleLocalizationChanged;
+        LocalizationService.FontChanged += HandleLocalizationChanged;
+        _localizationEventsBound = true;
     }
 
-    private void UnbindLocaleEvent()
+    private void UnbindLocalizationEvents()
     {
-        if (!_localeEventBound)
+        if (!_localizationEventsBound)
             return;
 
-        LocalizationService.LocaleChanged -= HandleLocaleChanged;
-        _localeEventBound = false;
+        LocalizationService.LocaleChanged -= HandleLocalizationChanged;
+        LocalizationService.FontChanged -= HandleLocalizationChanged;
+        _localizationEventsBound = false;
     }
 
-    private void HandleLocaleChanged(string unusedLocale)
+    private void HandleLocalizationChanged(string unusedValue)
     {
         RefreshPageLocalization();
+        if (isActiveAndEnabled)
+            OnLocalizationChanged();
     }
 
     private void RefreshPageLocalization()
@@ -393,56 +367,19 @@ public abstract class RuntimeMenuPageBase : MonoBehaviour, IPage
         text.text = LocalizationService.Get(localizationKey);
     }
 
-    protected static TextMeshProUGUI CreateText(
-        Transform parent,
-        string objectName,
-        float fontSize,
-        float preferredHeight,
-        bool createObject)
+    protected static bool ContainsIgnoreCase(string value, string query)
     {
-        Transform target = createObject
-            ? parent?.Find(objectName)
-            : parent;
-        TextMeshProUGUI text = target != null
-            ? target.GetComponent<TextMeshProUGUI>()
-            : null;
-        if (text == null)
-        {
-            Debug.LogError(
-                $"Fixed text '{objectName}' is missing from the " +
-                "authored UI hierarchy.",
-                parent);
-        }
-        return text;
+        return !string.IsNullOrEmpty(value) &&
+               value.IndexOf(
+                   query,
+                   StringComparison.OrdinalIgnoreCase) >= 0;
     }
 
-    protected static void SyncIndexedChildren(
-        Transform parent,
-        string objectNamePrefix,
-        int activeCount)
-    {
-        if (parent == null || string.IsNullOrEmpty(objectNamePrefix))
-            return;
+    protected static bool IsKoreanLocale =>
+        LocalizationService.CurrentLocale?.StartsWith(
+            "ko",
+            StringComparison.OrdinalIgnoreCase) == true;
 
-        activeCount = Mathf.Max(0, activeCount);
-        for (int childIndex = 0; childIndex < parent.childCount; childIndex++)
-        {
-            Transform child = parent.GetChild(childIndex);
-            if (child == null ||
-                !child.name.StartsWith(
-                    objectNamePrefix,
-                    StringComparison.Ordinal))
-            {
-                continue;
-            }
-
-            string suffix = child.name.Substring(objectNamePrefix.Length);
-            if (!int.TryParse(suffix, out int index))
-                continue;
-
-            child.gameObject.SetActive(index >= 0 && index < activeCount);
-        }
-    }
 }
 
 public readonly struct CodexBrowserItemModel

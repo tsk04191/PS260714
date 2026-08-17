@@ -4,6 +4,7 @@ using NUnit.Framework;
 using UnityEditor;
 using UnityEngine;
 using UnityEngine.Audio;
+using static TestReflection;
 
 public sealed class BattleVfxCompositeTimelineTests
 {
@@ -646,7 +647,7 @@ public sealed class BattleVfxCompositeTimelineTests
     private static AudioMixerGroup LoadSfxMixerGroup()
     {
         AudioMixer mixer = AssetDatabase.LoadAssetAtPath<AudioMixer>(
-            "Assets/06_Settings/MainAudioMixer.mixer");
+            "Assets/05_Settings/MainAudioMixer.mixer");
         if (mixer == null)
         {
             Assert.Ignore(
@@ -659,17 +660,6 @@ public sealed class BattleVfxCompositeTimelineTests
         return groups[0];
     }
 
-    private static void SetField(
-        object target,
-        string fieldName,
-        object value)
-    {
-        FieldInfo field = target.GetType().GetField(
-            fieldName,
-            BindingFlags.Instance | BindingFlags.NonPublic);
-        Assert.That(field, Is.Not.Null, $"Missing field: {fieldName}");
-        field.SetValue(target, value);
-    }
 }
 
 public sealed class PageBgmTests

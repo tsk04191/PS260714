@@ -88,7 +88,8 @@ public sealed class BattleCardSO : ScriptableObject,
     public BattleCardAffiliation Affiliation => affiliation;
     public CharacterSO OwnerCharacter => ownerCharacter;
     public IReadOnlyList<CharacterSO> RequiredCharacters =>
-        requiredCharacters ??= new List<CharacterSO>();
+        requiredCharacters ?? (IReadOnlyList<CharacterSO>)
+            Array.Empty<CharacterSO>();
     public BattleCardRequirementMatchMode RequirementMode => requirementMode;
     public BattleCardSourcePolicy SourcePolicy => sourcePolicy;
     public int EnergyCost => Mathf.Max(0, energyCost);
@@ -102,9 +103,10 @@ public sealed class BattleCardSO : ScriptableObject,
         ? Mathf.Max(0, targetCount)
         : Mathf.Max(1, targetCount);
     public BattleAreaDefinition AreaDefinition =>
-        areaDefinition ??= new BattleAreaDefinition();
+        areaDefinition ?? new BattleAreaDefinition();
     public IReadOnlyList<CharacterEffectDefinition> AbilityEffects =>
-        abilityEffects ??= new List<CharacterEffectDefinition>();
+        abilityEffects ?? (IReadOnlyList<CharacterEffectDefinition>)
+            Array.Empty<CharacterEffectDefinition>();
 
     public string AbilityId => CardId;
     public AbilityExecutionDomain ExecutionDomain =>
@@ -253,6 +255,69 @@ public sealed class BattleCardSO : ScriptableObject,
 
 }
 
+public static class BattleCardDefinitionValidator
+{
+    public static bool TryValidate(BattleCardSO card, out string error)
+    {
+        if (card == null)
+        {
+            error = "Battle card is null.";
+            return false;
+        }
+        if (!AbilityDefinitionValidator.TryValidate(card, out error))
+            return false;
+        if (card.Affiliation != BattleCardAffiliation.Neutral)
+            return true;
+
+        if (card.OwnerCharacter != null ||
+            card.RequiredCharacters.Count > 0 ||
+            card.SourcePolicy != BattleCardSourcePolicy.FirstAvailableCharacter)
+        {
+            error = "A neutral common card cannot declare a character " +
+                    "owner, requirement, or source policy.";
+            return false;
+        }
+        if (card.AreaDefinition.UsesWorldArea &&
+            card.AreaDefinition.OriginMode == CharacterAreaOriginMode.Caster)
+        {
+            error = "A neutral common card must place world areas from a " +
+                    "designated pointer point.";
+            return false;
+        }
+
+        foreach (IBattleEffectDefinition effect in card.BattleEffects)
+        {
+            ScalingValue scaling = effect.AmountScaling;
+            if (effect.BattleTargetMode == BattleEffectTargetMode.Source ||
+                effect.BattleEffectType == BattleEffectType.SpendHealth ||
+                (UsesAmountScaling(effect.BattleEffectType) &&
+                 (scaling.SourceAttackPowerScale != 0f ||
+                  scaling.SourceCurrentHealthScale != 0f ||
+                  scaling.SourceMaximumHealthScale != 0f ||
+                  scaling.SourceStatusStacksScale != 0f)))
+            {
+                error = "A neutral common card cannot use character-only " +
+                        "source targeting or source-unit scaling.";
+                return false;
+            }
+        }
+
+        error = string.Empty;
+        return true;
+    }
+
+    private static bool UsesAmountScaling(BattleEffectType type)
+    {
+        return type == BattleEffectType.Damage ||
+               type == BattleEffectType.GainResource ||
+               type == BattleEffectType.SpendResource ||
+               type == BattleEffectType.Heal ||
+               type == BattleEffectType.SpendHealth ||
+               type == BattleEffectType.Shield ||
+               type == BattleEffectType.CardDraw;
+    }
+}
+
 [Serializable]
 public sealed class BattleCardDeckEntry
 {
@@ -394,7 +459,7 @@ public static class BattleCardCatalog
                         "A null battle card was excluded from the catalog.");
                     continue;
                 }
-                if (!AbilityDefinitionValidator.TryValidate(
+                if (!BattleCardDefinitionValidator.TryValidate(
                         card,
                         out string error))
                 {

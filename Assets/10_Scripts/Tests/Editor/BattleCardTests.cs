@@ -4,6 +4,7 @@ using NUnit.Framework;
 using PS260714.Localization;
 using UnityEditor;
 using UnityEngine;
+using static TestReflection;
 
 public sealed class BattleCardTests
 {
@@ -677,12 +678,4 @@ public sealed class BattleCardTests
         serialized.ApplyModifiedPropertiesWithoutUndo();
     }
 
-    private static void SetField<T>(object target, string fieldName, T value)
-    {
-        FieldInfo field = target.GetType().GetField(
-            fieldName,
-            BindingFlags.Instance | BindingFlags.NonPublic);
-        Assert.That(field, Is.Not.Null, fieldName);
-        field.SetValue(target, value);
-    }
 }

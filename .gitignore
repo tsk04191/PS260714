@@ -15,6 +15,7 @@
 /Assets/10_Scripts/**
 !/Assets/10_Scripts/**/
 !/Assets/10_Scripts/**/*.cs
+!/Assets/10_Scripts/**/*.asmdef
 !/Assets/10_Scripts/**/*.meta
 
 # Localization source data only. Generated C# remains under 10_Scripts.

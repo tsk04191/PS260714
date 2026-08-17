@@ -8,7 +8,7 @@ using UnityEngine.SceneManagement;
 
 public sealed class DesignerUiBuildValidator : IPreprocessBuildWithReport
 {
-    private const string ClientScenePath = "Assets/05_Scenes/ClientScene.unity";
+    private const string ClientScenePath = "Assets/04_Scenes/ClientScene.unity";
 
     public int callbackOrder => 50;
 

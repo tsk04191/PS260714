@@ -75,8 +75,6 @@ public sealed class CharacterCodexPage : RuntimeMenuPageBase
         LocalizationKeys.CodexCharacterTitle;
     protected override string PageDescriptionLocalizationKey =>
         LocalizationKeys.CodexCharacterDescription;
-    protected override Vector2 PanelSize => new(1220f, 900f);
-    protected override bool FillAvailableSpace => true;
 
     public void PrepareOpen(
         string characterId,
@@ -734,18 +732,16 @@ public sealed class CharacterCodexPage : RuntimeMenuPageBase
 
     private void OnEnable()
     {
-        LocalizationService.LocaleChanged += HandleLocaleChanged;
         BindCharacterCollection(DataManager.Current?.CharacterDatas);
         RefreshLocalizedView();
     }
 
     private void OnDisable()
     {
-        LocalizationService.LocaleChanged -= HandleLocaleChanged;
         BindCharacterCollection(null);
     }
 
-    private void HandleLocaleChanged(string unusedLocale)
+    protected override void OnLocalizationChanged()
     {
         RefreshLocalizedView();
     }
@@ -802,14 +798,6 @@ public sealed class CharacterCodexPage : RuntimeMenuPageBase
         NavigateTo(destination, PageOpenMode.Resume);
     }
 
-    private static bool ContainsIgnoreCase(string source, string value)
-    {
-        return !string.IsNullOrEmpty(source) &&
-               source.IndexOf(
-                   value,
-                   StringComparison.OrdinalIgnoreCase) >= 0;
-    }
-
     private static void SetTextPreferredHeight(
         TextMeshProUGUI text,
         float preferredHeight)
@@ -854,10 +842,6 @@ public sealed class CharacterCodexPage : RuntimeMenuPageBase
             : new Color(0.12f, 0.15f, 0.13f, 0.65f);
     }
 
-    private static bool IsKoreanLocale =>
-        LocalizationService.CurrentLocale?.StartsWith(
-            "ko",
-            StringComparison.OrdinalIgnoreCase) == true;
 }
 
 public readonly struct OperatorStatModel

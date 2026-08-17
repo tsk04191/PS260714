@@ -1,8 +1,8 @@
 using System;
 using System.Collections.Generic;
-using System.Reflection;
 using NUnit.Framework;
 using UnityEngine;
+using static TestReflection;
 
 public sealed class BattleVfxP4Tests
 {
@@ -273,18 +273,6 @@ public sealed class BattleVfxP4Tests
         GameObject gameObject = new("DungeonBoard", typeof(RectTransform));
         _createdObjects.Add(gameObject);
         return gameObject.AddComponent<DungeonBoardView>();
-    }
-
-    private static void SetField(
-        object target,
-        string fieldName,
-        object value)
-    {
-        FieldInfo field = target.GetType().GetField(
-            fieldName,
-            BindingFlags.Instance | BindingFlags.NonPublic);
-        Assert.That(field, Is.Not.Null, $"Missing field: {fieldName}");
-        field.SetValue(target, value);
     }
 
     private sealed class RecordingSink : IBattleVfxRequestSink

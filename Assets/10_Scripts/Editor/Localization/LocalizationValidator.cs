@@ -553,7 +553,7 @@ namespace PS260714.Localization.Editor
 
             LocalizationMarkupCatalog catalog =
                 AssetDatabase.LoadAssetAtPath<LocalizationMarkupCatalog>(
-                    "Assets/07_Runtime/Resources/Localization/" +
+                    "Assets/06_Runtime/Resources/Localization/" +
                     "LocalizationMarkupCatalog.asset");
             foreach (string iconId in usedIcons.OrderBy(id => id))
             {

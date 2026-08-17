@@ -377,6 +377,25 @@ public sealed class BattleItemSO : ItemDefinitionSO,
             return false;
         }
 
+        ScalingValue scaling = effect.AmountScaling;
+        bool usesAmountScaling = effect.Type == CharacterEffectType.Damage ||
+            effect.Type == CharacterEffectType.GainResource ||
+            effect.Type == CharacterEffectType.SpendResource ||
+            effect.Type == CharacterEffectType.Heal ||
+            effect.Type == CharacterEffectType.SpendHealth ||
+            effect.Type == CharacterEffectType.Shield ||
+            effect.Type == CharacterEffectType.CardDraw;
+        if (effect.TargetMode == CharacterEffectTargetMode.Source ||
+            effect.Type == CharacterEffectType.SpendHealth ||
+            (usesAmountScaling &&
+             (scaling.SourceAttackPowerScale != 0f ||
+              scaling.SourceCurrentHealthScale != 0f ||
+              scaling.SourceMaximumHealthScale != 0f ||
+              scaling.SourceStatusStacksScale != 0f)))
+        {
+            return false;
+        }
+
         bool usesTargets = BattleEffectRules.RequiresTargets(
             effect.BattleEffectType);
         CharacterTargetFaction targetFaction = targetType ==
@@ -384,11 +403,6 @@ public sealed class BattleItemSO : ItemDefinitionSO,
             ? CharacterTargetFaction.Enemy
             : CharacterTargetFaction.Ally;
         if (usesTargets && effect.TargetMode ==
-            CharacterEffectTargetMode.Source)
-        {
-            targetFaction = CharacterTargetFaction.Ally;
-        }
-        else if (usesTargets && effect.TargetMode ==
                  CharacterEffectTargetMode.FreshSelection)
         {
             // Enemy-targeted items have no allied character source for the

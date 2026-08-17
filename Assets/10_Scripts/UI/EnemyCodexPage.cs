@@ -85,8 +85,6 @@ public sealed class EnemyCodexPage : RuntimeMenuPageBase
         LocalizationKeys.CodexEnemyTitle);
     protected override string PageDescription =>
         LocalizationService.Get(LocalizationKeys.CodexEnemyDescription);
-    protected override Vector2 PanelSize => new(1220f, 860f);
-    protected override bool FillAvailableSpace => true;
 
     protected override void BuildButtons()
     {
@@ -454,23 +452,10 @@ public sealed class EnemyCodexPage : RuntimeMenuPageBase
 
     private void OnEnable()
     {
-        LocalizationService.LocaleChanged += HandleLocaleChanged;
-        LocalizationService.FontChanged += HandleFontChanged;
         RefreshLocalizedView();
     }
 
-    private void OnDisable()
-    {
-        LocalizationService.LocaleChanged -= HandleLocaleChanged;
-        LocalizationService.FontChanged -= HandleFontChanged;
-    }
-
-    private void HandleLocaleChanged(string unusedLocale)
-    {
-        RefreshLocalizedView();
-    }
-
-    private void HandleFontChanged(string unusedFontId)
+    protected override void OnLocalizationChanged()
     {
         RefreshLocalizedView();
     }
@@ -538,19 +523,6 @@ public sealed class EnemyCodexPage : RuntimeMenuPageBase
     {
         NavigateTo(codexPage, PageOpenMode.Resume);
     }
-
-    private static bool ContainsIgnoreCase(string source, string value)
-    {
-        return !string.IsNullOrEmpty(source) &&
-               source.IndexOf(
-                   value,
-                   StringComparison.OrdinalIgnoreCase) >= 0;
-    }
-
-    private static bool IsKoreanLocale =>
-        LocalizationService.CurrentLocale?.StartsWith(
-            "ko",
-            StringComparison.OrdinalIgnoreCase) == true;
 
     private static Color GetGradeColor(EEnemyGrade grade)
     {

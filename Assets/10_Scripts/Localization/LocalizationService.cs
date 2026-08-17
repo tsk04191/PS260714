@@ -655,6 +655,14 @@ namespace PS260714.Localization
                     continue;
 
                 float amount = effect.AmountScaling.FixedAmount;
+                if (sourceAttackPower.HasValue &&
+                    !effect.AmountScaling.HasTargetDependentTerm)
+                {
+                    amount = effect.AmountScaling.EvaluateBattle(
+                        BattleEffectContext.ForPreview(
+                            ability.OriginKind,
+                            sourceAttackPower.Value));
+                }
                 if (!addedAmount)
                 {
                     Add(arguments, "amount", amount);

@@ -5,9 +5,9 @@ using UnityEngine;
 
 public static class ItemAssetBootstrap
 {
-    private const string ItemRoot = "Assets/07_Runtime/Resources/Items";
+    private const string ItemRoot = "Assets/06_Runtime/Resources/Items";
     private const string CatalogPath =
-        "Assets/07_Runtime/Resources/ItemCatalog.asset";
+        "Assets/06_Runtime/Resources/ItemCatalog.asset";
     [MenuItem(
         PS260714EditorMenu.MigrateBattleItemUsage,
         false,

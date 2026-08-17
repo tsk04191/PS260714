@@ -255,20 +255,6 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
         }
     }
 
-    private readonly struct TargetDamageSnapshot
-    {
-        public EnemyRuntime Target { get; }
-        public int Damage { get; }
-
-        public TargetDamageSnapshot(
-            EnemyRuntime target,
-            int damage)
-        {
-            Target = target;
-            Damage = Mathf.Max(0, damage);
-        }
-    }
-
     [SerializeField] private CharacterSO original;
     [SerializeField] private TextMeshProUGUI nameText;
     [SerializeField] private TextMeshProUGUI attackText;
@@ -1056,7 +1042,9 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
 
     public void RecordDamageDealt(int damage)
     {
-        TotalDamageDealt += Mathf.Max(0, damage);
+        TotalDamageDealt = BattleValueMath.SaturatingAddNonNegative(
+            TotalDamageDealt,
+            damage);
     }
 
     public void DisableFor(float duration)
@@ -1080,7 +1068,7 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
             definition,
             duration,
             stacks,
-            null);
+            BattleAbilityUser.ForStatusEffect());
     }
 
     public bool ApplyStatusEffect(
@@ -1088,6 +1076,21 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
         float duration,
         int stacks,
         IBattleCharacter source)
+    {
+        return ApplyStatusEffect(
+            definition,
+            duration,
+            stacks,
+            source != null
+                ? BattleAbilityUser.FromCharacter(source)
+                : BattleAbilityUser.ForStatusEffect());
+    }
+
+    public bool ApplyStatusEffect(
+        StatusEffectSO definition,
+        float duration,
+        int stacks,
+        BattleAbilityUser user)
     {
         if (definition == null || !definition.CanTargetAlly || stacks <= 0 ||
             string.IsNullOrWhiteSpace(definition.StatusId))
@@ -1120,7 +1123,7 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
             stacks,
             remainingDuration,
             definition.TickInterval,
-            source);
+            user);
         if (!mutation.Succeeded)
         {
             if (!state.HasStacks)
@@ -1147,7 +1150,7 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
                 definition,
                 previousStacks,
                 currentStacks,
-                source);
+                user);
         }
         return true;
     }
@@ -1223,9 +1226,11 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
         int removed = 0;
         for (int index = 0; index < selectedCount; index++)
         {
-            removed += RemoveSingleStatusEffect(
-                candidates[index],
-                removalAmount);
+            removed = BattleValueMath.SaturatingAddNonNegative(
+                removed,
+                RemoveSingleStatusEffect(
+                    candidates[index],
+                    removalAmount));
         }
 
         return removed;
@@ -1393,7 +1398,7 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
                             state.Definition,
                             activeBatch.Stacks,
                             activeBatch.RemainingDuration,
-                            activeBatch.Source),
+                            activeBatch.User),
                         tickCount);
                 StatusLifecycle?.Invoke(tick);
                 StatusEffectTriggerExecutor.Execute(tick, _board);
@@ -1436,7 +1441,9 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
                 state.Definition,
                 state.StackCount,
                 state.RemainingDuration,
-                state.ActiveBatch?.Source)
+                state.ActiveBatch != null
+                    ? state.ActiveBatch.User
+                    : default)
             : default;
     }
 
@@ -1606,14 +1613,14 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
         StatusEffectSO definition,
         int previousStacks,
         int currentStacks,
-        IBattleCharacter source)
+        BattleAbilityUser user)
     {
         _board?.NotifyStatusApplied(new BattleStatusAppliedEvent(
             BattleStatusTarget.FromAlly(this),
             definition,
             previousStacks,
             currentStacks,
-            source));
+            user));
     }
 
     private void NotifyStatusChanged(
@@ -2102,7 +2109,9 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
                                 actionDefinition.ActionId),
                             actionDefinition.StatusRemovalSelection,
                             actionDefinition.StatusRemovalAmount);
-                totalDamage += effectResult.DamageDealt;
+                totalDamage = BattleValueMath.SaturatingAddNonNegative(
+                    totalDamage,
+                    effectResult.DamageDealt);
                 previousAttempted = effectResult.Attempted;
                 previousSucceeded = effectResult.Succeeded;
                 previousTargets = action.SelectedTargets;
@@ -2498,7 +2507,9 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
                 }
             }
 
-            totalDamage += effectResult.DamageDealt;
+            totalDamage = BattleValueMath.SaturatingAddNonNegative(
+                totalDamage,
+                effectResult.DamageDealt);
             previousAttempted = effectResult.Attempted;
             previousSucceeded = effectResult.Succeeded;
             previousTargets = effectResult.Attempted ? targets : default;
@@ -2663,7 +2674,9 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
                 actionCondition,
                 selectedTargets,
                 out int damageDealt);
-            totalDamage += damageDealt;
+            totalDamage = BattleValueMath.SaturatingAddNonNegative(
+                totalDamage,
+                damageDealt);
             shouldPlayPassiveMotion |=
                 succeeded && definition.ShouldPlayPassiveMotion;
         }
@@ -2718,7 +2731,9 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
                 actionCondition,
                 _lastAttackTargets,
                 out int damageDealt);
-            totalDamage += damageDealt;
+            totalDamage = BattleValueMath.SaturatingAddNonNegative(
+                totalDamage,
+                damageDealt);
             shouldPlayPassiveMotion |=
                 succeeded && definition.ShouldPlayPassiveMotion;
         }
@@ -2814,7 +2829,9 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
                 actionCondition,
                 default,
                 out int damageDealt);
-            totalDamage += damageDealt;
+            totalDamage = BattleValueMath.SaturatingAddNonNegative(
+                totalDamage,
+                damageDealt);
             shouldPlayPassiveMotion |=
                 succeeded && definition.ShouldPlayPassiveMotion;
         }
@@ -2882,7 +2899,9 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
                 actionCondition,
                 CreateStatusEventTargets(eventData.Target),
                 out int damageDealt);
-            totalDamage += damageDealt;
+            totalDamage = BattleValueMath.SaturatingAddNonNegative(
+                totalDamage,
+                damageDealt);
             shouldPlayPassiveMotion |=
                 succeeded && definition.ShouldPlayPassiveMotion;
         }
@@ -2923,7 +2942,9 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
                 actionCondition,
                 default,
                 out int damageDealt);
-            totalDamage += damageDealt;
+            totalDamage = BattleValueMath.SaturatingAddNonNegative(
+                totalDamage,
+                damageDealt);
             shouldPlayPassiveMotion |=
                 succeeded && definition.ShouldPlayPassiveMotion;
         }
@@ -3633,13 +3654,17 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
         {
             return targets.Faction == CharacterTargetFaction.Ally
                 ? board.TryApplyAlliedCharacterStatus(
-                    this,
+                    BattleAbilityUser.FromCharacter(
+                        this,
+                        _activeSkillResource),
                     targets.AllyTargets,
                     appliedStatusEffect,
                     statusDuration,
                     statusStacks)
                 : board.TryApplyCharacterStatus(
-                    this,
+                    BattleAbilityUser.FromCharacter(
+                        this,
+                        _activeSkillResource),
                     targets.EnemyTargets,
                     appliedStatusEffect,
                     statusDuration,
@@ -3879,238 +3904,6 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
             actionId);
     }
 
-    private BattleEffectResult ExecuteHeal(
-        EffectContext context,
-        CharacterEffectDefinition effect,
-        bool showAttackRange)
-    {
-        if (!effect.AmountScaling.HasTargetDependentTerm)
-        {
-            int amount = Data.CalculateEffectAmount(effect, context);
-            if (amount <= 0)
-                return default;
-
-            int healed = context.TargetFaction ==
-                         CharacterTargetFaction.Ally
-                ? context.Board.TryHealAlliedCharacters(
-                    context.Source,
-                    context.AllyTargets,
-                    amount)
-                : context.Board.TryHealCharacterTargets(
-                    context.Source,
-                    context.EnemyTargets,
-                    amount,
-                    showAttackRange);
-            return new BattleEffectResult(true, healed > 0);
-        }
-
-        bool attempted = false;
-        int totalHealed = 0;
-        if (context.TargetFaction == CharacterTargetFaction.Ally)
-        {
-            HashSet<IBattleCharacter> uniqueTargets = new();
-            foreach (IBattleCharacter target in context.AllyTargets)
-            {
-                if (target == null || !uniqueTargets.Add(target))
-                    continue;
-
-                EffectContext targetContext = context.BindAllyTarget(
-                    target,
-                    effect.TargetStatusScalingEffect);
-                int amount = Data.CalculateEffectAmount(
-                    effect,
-                    targetContext);
-                if (amount <= 0)
-                    continue;
-
-                attempted = true;
-                totalHealed += context.Board.TryHealAlliedCharacters(
-                    context.Source,
-                    new[] { target },
-                    amount);
-            }
-        }
-        else
-        {
-            HashSet<EnemyRuntime> uniqueTargets = new();
-            foreach (EnemyRuntime target in context.EnemyTargets)
-            {
-                if (target == null || !uniqueTargets.Add(target))
-                    continue;
-
-                EffectContext targetContext = context.BindEnemyTarget(
-                    target,
-                    effect.TargetStatusScalingEffect);
-                int amount = Data.CalculateEffectAmount(
-                    effect,
-                    targetContext);
-                if (amount <= 0)
-                    continue;
-
-                attempted = true;
-                totalHealed += context.Board.TryHealCharacterTargets(
-                    context.Source,
-                    new[] { target },
-                    amount,
-                    showAttackRange);
-            }
-        }
-
-        return new BattleEffectResult(
-            attempted,
-            totalHealed > 0);
-    }
-
-    private BattleEffectResult ExecuteShield(
-        EffectContext context,
-        CharacterEffectDefinition effect,
-        bool showAttackRange)
-    {
-        if (!effect.AmountScaling.HasTargetDependentTerm)
-        {
-            int amount = Data.CalculateEffectAmount(effect, context);
-            if (amount <= 0)
-                return default;
-
-            int granted = context.TargetFaction ==
-                          CharacterTargetFaction.Ally
-                ? context.Board.TryGrantShieldToAlliedCharacters(
-                    context.Source,
-                    context.AllyTargets,
-                    amount)
-                : context.Board.TryGrantShieldToCharacterTargets(
-                    context.Source,
-                    context.EnemyTargets,
-                    amount,
-                    showAttackRange);
-            return new BattleEffectResult(true, granted > 0);
-        }
-
-        bool attempted = false;
-        int totalGranted = 0;
-        if (context.TargetFaction == CharacterTargetFaction.Ally)
-        {
-            HashSet<IBattleCharacter> uniqueTargets = new();
-            foreach (IBattleCharacter target in context.AllyTargets)
-            {
-                if (target == null || !uniqueTargets.Add(target))
-                    continue;
-
-                EffectContext targetContext = context.BindAllyTarget(
-                    target,
-                    effect.TargetStatusScalingEffect);
-                int amount = Data.CalculateEffectAmount(
-                    effect,
-                    targetContext);
-                if (amount <= 0)
-                    continue;
-
-                attempted = true;
-                totalGranted +=
-                    context.Board.TryGrantShieldToAlliedCharacters(
-                        context.Source,
-                        new[] { target },
-                        amount);
-            }
-        }
-        else
-        {
-            HashSet<EnemyRuntime> uniqueTargets = new();
-            foreach (EnemyRuntime target in context.EnemyTargets)
-            {
-                if (target == null || !uniqueTargets.Add(target))
-                    continue;
-
-                EffectContext targetContext = context.BindEnemyTarget(
-                    target,
-                    effect.TargetStatusScalingEffect);
-                int amount = Data.CalculateEffectAmount(
-                    effect,
-                    targetContext);
-                if (amount <= 0)
-                    continue;
-
-                attempted = true;
-                totalGranted +=
-                    context.Board.TryGrantShieldToCharacterTargets(
-                        context.Source,
-                        new[] { target },
-                        amount,
-                        showAttackRange);
-            }
-        }
-
-        return new BattleEffectResult(
-            attempted,
-            totalGranted > 0);
-    }
-
-    private BattleEffectResult ExecuteTargetScaledDamage(
-        EffectContext context,
-        CharacterEffectDefinition effect,
-        bool showAttackRange)
-    {
-        List<TargetDamageSnapshot> snapshots = new(
-            context.EnemyTargets.Count);
-        HashSet<EnemyRuntime> uniqueTargets = new();
-        foreach (EnemyRuntime target in context.EnemyTargets)
-        {
-            if (target == null || !uniqueTargets.Add(target))
-                continue;
-
-            EffectContext targetContext = context.BindEnemyTarget(
-                target,
-                effect.TargetStatusScalingEffect);
-            snapshots.Add(new TargetDamageSnapshot(
-                target,
-                Data.CalculateEffectDamage(effect, targetContext)));
-        }
-
-        if (snapshots.Count == 0)
-            return default;
-
-        int totalDamageDealt = 0;
-        int groupedDamage = 0;
-        List<EnemyRuntime> groupedTargets = new();
-        foreach (TargetDamageSnapshot snapshot in snapshots)
-        {
-            if (snapshot.Damage <= 0)
-                continue;
-
-            if (groupedTargets.Count > 0 &&
-                snapshot.Damage != groupedDamage)
-            {
-                totalDamageDealt +=
-                    context.Board.TryDamageCharacterTargets(
-                        context.Source,
-                        groupedTargets,
-                        groupedDamage,
-                        effect.DamageType,
-                        showAttackRange);
-                groupedTargets.Clear();
-            }
-
-            groupedDamage = snapshot.Damage;
-            groupedTargets.Add(snapshot.Target);
-        }
-
-        if (groupedTargets.Count > 0)
-        {
-            totalDamageDealt +=
-                context.Board.TryDamageCharacterTargets(
-                    context.Source,
-                    groupedTargets,
-                    groupedDamage,
-                    effect.DamageType,
-                    showAttackRange);
-        }
-
-        return new BattleEffectResult(
-            true,
-            totalDamageDealt > 0,
-            totalDamageDealt);
-    }
-
     private bool HasUsableExplicitEffects(
         IReadOnlyList<CharacterEffectDefinition> effects,
         CharacterActionKind actionKind)
@@ -4233,7 +4026,7 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
                            CharacterEffectTargetMode.Source &&
                        IsDirectDamageType(effect.DamageType) &&
                        effect.DamageScaling.IsFinite &&
-                       effect.DamageScaling.HasNonZeroTerm;
+                       effect.DamageScaling.HasPositiveTerm;
             case CharacterEffectType.ApplyStatus:
                 return effect.StatusEffect != null &&
                        (effect.TargetMode !=
@@ -4267,7 +4060,7 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
                 return true;
             case CharacterEffectType.GainResource:
                 return effect.AmountScaling.IsFinite &&
-                       effect.AmountScaling.HasNonZeroTerm;
+                       effect.AmountScaling.HasPositiveTerm;
             case CharacterEffectType.SpendResource:
                 return effect.AmountMode ==
                            CharacterDamageAmountMode.Fixed &&
@@ -4281,10 +4074,10 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
                        effect.TargetStatusStacksScale == 0f;
             case CharacterEffectType.Heal:
                 return effect.AmountScaling.IsFinite &&
-                       effect.AmountScaling.HasNonZeroTerm;
+                       effect.AmountScaling.HasPositiveTerm;
             case CharacterEffectType.Shield:
                 return effect.AmountScaling.IsFinite &&
-                       effect.AmountScaling.HasNonZeroTerm;
+                       effect.AmountScaling.HasPositiveTerm;
             case CharacterEffectType.SpendHealth:
                 return effect.AmountMode ==
                            CharacterDamageAmountMode.Fixed &&

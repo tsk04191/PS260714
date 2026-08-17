@@ -1604,21 +1604,21 @@ internal static class CommonSettingsEditorUtility
     private const string CommonDefAssetPath =
         "Assets/10_Scripts/Infrastructure/CommonDef.cs";
     private const string GradePaletteAssetPath =
-        "Assets/07_Runtime/Resources/" +
+        "Assets/06_Runtime/Resources/" +
         CommonDef.CharacterGradePaletteResourcePath +
         ".asset";
     private const string RoleCatalogAssetPath =
-        "Assets/07_Runtime/Resources/" +
+        "Assets/06_Runtime/Resources/" +
         CommonDef.CharacterRoleCatalogResourcePath +
         ".asset";
     private const string DungeonHudPresentationAssetPath =
-        "Assets/07_Runtime/Resources/" +
+        "Assets/06_Runtime/Resources/" +
         CommonDef.DungeonHudPresentationResourcePath +
         ".asset";
     private const string RoleAssetFolder =
-        "Assets/07_Runtime/Resources/Presentation/Roles";
+        "Assets/06_Runtime/Resources/Presentation/Roles";
     private const string ArchetypeAssetFolder =
-        "Assets/07_Runtime/Resources/Presentation/Archetypes";
+        "Assets/06_Runtime/Resources/Presentation/Archetypes";
 
     public static CharacterGradePaletteSO LoadGradePalette()
     {
@@ -1639,7 +1639,7 @@ internal static class CommonSettingsEditorUtility
         if (existing != null)
             return existing;
 
-        EnsureFolder("Assets/07_Runtime/Resources/Presentation");
+        EnsureFolder("Assets/06_Runtime/Resources/Presentation");
         DungeonHudPresentationSO settings =
             ScriptableObject.CreateInstance<DungeonHudPresentationSO>();
         AssetDatabase.CreateAsset(settings, DungeonHudPresentationAssetPath);
@@ -1655,7 +1655,7 @@ internal static class CommonSettingsEditorUtility
         if (existing != null)
             return existing;
 
-        EnsureFolder("Assets/07_Runtime/Resources/Presentation");
+        EnsureFolder("Assets/06_Runtime/Resources/Presentation");
         CharacterGradePaletteSO palette =
             ScriptableObject.CreateInstance<CharacterGradePaletteSO>();
         AssetDatabase.CreateAsset(palette, GradePaletteAssetPath);
@@ -1677,7 +1677,7 @@ internal static class CommonSettingsEditorUtility
         if (existing != null)
             return existing;
 
-        EnsureFolder("Assets/07_Runtime/Resources/Presentation");
+        EnsureFolder("Assets/06_Runtime/Resources/Presentation");
         CharacterRoleCatalogSO catalog =
             ScriptableObject.CreateInstance<CharacterRoleCatalogSO>();
         AssetDatabase.CreateAsset(catalog, RoleCatalogAssetPath);

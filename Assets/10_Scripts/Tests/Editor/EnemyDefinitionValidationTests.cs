@@ -5,6 +5,7 @@ using NUnit.Framework;
 using PS260714.Localization;
 using UnityEditor;
 using UnityEngine;
+using static TestReflection;
 
 public sealed class EnemyDefinitionValidationTests
 {
@@ -26,7 +27,7 @@ public sealed class EnemyDefinitionValidationTests
     {
         string[] guids = AssetDatabase.FindAssets(
             "t:EnemySO",
-            new[] { "Assets/07_Runtime/Resources/Enemies" });
+            new[] { "Assets/06_Runtime/Resources/Enemies" });
         List<EnemySO> definitions = new();
         foreach (string guid in guids)
         {
@@ -696,6 +697,8 @@ public sealed class EnemyDefinitionValidationTests
         serialized.FindProperty("enemyId").stringValue =
             enemyId ?? Guid.NewGuid().ToString("N");
         serialized.FindProperty("displayName").stringValue = "TEST ENEMY";
+        serialized.FindProperty("combatStatSchemaVersion").intValue =
+            EnemySO.CurrentCombatStatSchemaVersion;
         serialized.ApplyModifiedPropertiesWithoutUndo();
         return definition;
     }
@@ -703,7 +706,7 @@ public sealed class EnemyDefinitionValidationTests
     private EnemySO CreateAssetClone(string assetName)
     {
         EnemySO source = AssetDatabase.LoadAssetAtPath<EnemySO>(
-            $"Assets/07_Runtime/Resources/Enemies/{assetName}.asset");
+            $"Assets/06_Runtime/Resources/Enemies/{assetName}.asset");
         Assert.That(
             source,
             Is.Not.Null,
@@ -811,18 +814,6 @@ public sealed class EnemyDefinitionValidationTests
             BindingFlags.Instance | BindingFlags.NonPublic);
         Assert.That(method, Is.Not.Null);
         method.Invoke(definition, null);
-    }
-
-    private static void SetPrivateField(
-        object target,
-        string fieldName,
-        object value)
-    {
-        FieldInfo field = target.GetType().GetField(
-            fieldName,
-            BindingFlags.Instance | BindingFlags.NonPublic);
-        Assert.That(field, Is.Not.Null, $"Missing field '{fieldName}'.");
-        field.SetValue(target, value);
     }
 
     private static bool HasCode(
@@ -1270,26 +1261,4 @@ public sealed class AbilityDefinitionContractTests
         return area;
     }
 
-    private static void SetField(
-        object target,
-        string fieldName,
-        object value)
-    {
-        Type type = target.GetType();
-        while (type != null)
-        {
-            FieldInfo field = type.GetField(
-                fieldName,
-                BindingFlags.Instance | BindingFlags.NonPublic);
-            if (field != null)
-            {
-                field.SetValue(target, value);
-                return;
-            }
-            type = type.BaseType;
-        }
-
-        Assert.Fail(
-            $"Missing field '{fieldName}' on {target.GetType().Name}.");
-    }
 }

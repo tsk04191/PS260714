@@ -7,7 +7,7 @@ public sealed class EnemyEditorWindow : EditorWindow
 {
     public const string MenuPath = PS260714EditorMenu.EnemyEditor;
 
-    private const string AssetFolder = "Assets/07_Runtime/Resources/Enemies";
+    private const string AssetFolder = "Assets/06_Runtime/Resources/Enemies";
     private const string RenameControlName = "EnemyAssetRenameField";
     private readonly List<EnemySO> _definitions = new();
 
@@ -400,6 +400,7 @@ public sealed class EnemyEditorWindow : EditorWindow
                 "Circular Defense",
                 EditorStyles.boldLabel);
             DrawProperty("approachSpeed", "Approach Speed");
+            DrawProperty("attackPower", "Attack Power");
             DrawProperty("coreAttackDamage", "Core Attack Damage");
             DrawProperty("coreAttackInterval", "Core Attack Interval");
             DrawProperty("threatCost", "Threat Cost (0 = Type Default)");
@@ -891,7 +892,8 @@ public sealed class EnemyEditorWindow : EditorWindow
                 }
                 BattleAbilityEditorGUI.DrawEffectList(
                     operation.FindPropertyRelative("effects"),
-                    owner);
+                    owner,
+                    (owner as EnemySO)?.AttackPower);
             }
         }
 
@@ -1128,94 +1130,6 @@ public sealed class EnemyEditorWindow : EditorWindow
         BattleAbilityEditorGUI.AddDefaultEffect(effects);
     }
 
-    private static void AddEffect(SerializedProperty effects)
-    {
-        if (effects == null)
-            return;
-
-        int index = effects.arraySize;
-        effects.InsertArrayElementAtIndex(index);
-        SerializedProperty effect =
-            effects.GetArrayElementAtIndex(index);
-        effect.isExpanded = true;
-        SetEnum(
-            effect,
-            "type",
-            (int)CharacterEffectType.Damage);
-        SetEnum(
-            effect,
-            "targetMode",
-            (int)CharacterEffectTargetMode.InheritAction);
-        SetEnum(
-            effect,
-            "preconditionFailurePolicy",
-            (int)CharacterEffectPreconditionFailurePolicy.AbortAction);
-        SetEnum(
-            effect,
-            "failurePolicy",
-            (int)CharacterEffectFailurePolicy.Continue);
-        SetEnum(
-            effect,
-            "damageType",
-            (int)CharacterAttackDamageType.Physical);
-        SetEnum(
-            effect,
-            "damageAmountMode",
-            (int)CharacterDamageAmountMode.Fixed);
-        SetFloat(effect, "damageAmount", 1f);
-        SetFloat(effect, "sourceResourceScale", 0f);
-        SetFloat(effect, "sourceCurrentHealthScale", 0f);
-        SetFloat(effect, "sourceMaxHealthScale", 0f);
-        SetFloat(effect, "targetCurrentHealthScale", 0f);
-        SetFloat(effect, "targetMaxHealthScale", 0f);
-        SetObject(effect, "sourceStatusScalingEffect", null);
-        SetFloat(effect, "sourceStatusStacksScale", 0f);
-        SetObject(effect, "targetStatusScalingEffect", null);
-        SetFloat(effect, "targetStatusStacksScale", 0f);
-        SetFloat(effect, "statusDuration", 1f);
-        SetFloat(effect, "statusStacks", 1f);
-        SetObject(effect, "statusEffect", null);
-        SetEnum(
-            effect,
-            "statusRemovalTarget",
-            (int)CharacterStatusRemovalTarget.Single);
-        SetEnum(
-            effect,
-            "statusRemovalAmountMode",
-            (int)CharacterStatusRemovalAmountMode.FixedStacks);
-        SetInt(effect, "statusRemovalCount", 0);
-        SetFloat(effect, "statusRemovalRatio", 0.5f);
-        SetObject(effect, "castVfxCue", null);
-        SetObject(effect, "projectileVfxCue", null);
-        SetObject(effect, "impactVfxCue", null);
-
-        SerializedProperty selector =
-            effect.FindPropertyRelative("targetSelector");
-        if (selector != null)
-        {
-            SetEnum(
-                selector,
-                "targetFaction",
-                (int)CharacterTargetFaction.Enemy);
-            SetEnum(
-                selector,
-                "subject",
-                (int)CharacterAttackSubject.Random);
-            SetEnum(
-                selector,
-                "subjectMetric",
-                (int)CharacterAttackSubjectMetric.Health);
-            SetInt(selector, "subjectCount", 1);
-            SetEnum(
-                selector,
-                "conditionMatchMode",
-                (int)CharacterConditionMatchMode.All);
-            selector.FindPropertyRelative(
-                "numericConditions")?.ClearArray();
-            selector.FindPropertyRelative("areaOffsets")?.ClearArray();
-        }
-    }
-
     private static string CreateUniqueAbilityId(
         SerializedProperty abilities)
     {
@@ -1425,6 +1339,14 @@ public sealed class EnemyEditorWindow : EditorWindow
         EnsureAssetFolder();
         EnemySO definition = CreateInstance<EnemySO>();
         definition.RegenerateEnemyId();
+        SerializedObject serialized = new(definition);
+        serialized.FindProperty("combatStatSchemaVersion").intValue =
+            EnemySO.CurrentCombatStatSchemaVersion;
+        serialized.FindProperty("attackPower").floatValue =
+            Mathf.Max(
+                0.1f,
+                serialized.FindProperty("coreAttackDamage").intValue);
+        serialized.ApplyModifiedPropertiesWithoutUndo();
 
         string path = AssetDatabase.GenerateUniqueAssetPath(
             AssetFolder + "/Enemy.asset");
@@ -1531,9 +1453,9 @@ public sealed class EnemyEditorWindow : EditorWindow
 
     private static void EnsureAssetFolder()
     {
-        if (!AssetDatabase.IsValidFolder("Assets/07_Runtime/Resources"))
+        if (!AssetDatabase.IsValidFolder("Assets/06_Runtime/Resources"))
             AssetDatabase.CreateFolder("Assets", "Resources");
         if (!AssetDatabase.IsValidFolder(AssetFolder))
-            AssetDatabase.CreateFolder("Assets/07_Runtime/Resources", "Enemies");
+            AssetDatabase.CreateFolder("Assets/06_Runtime/Resources", "Enemies");
     }
 }

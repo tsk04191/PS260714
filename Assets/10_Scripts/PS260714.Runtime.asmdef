@@ -1,0 +1,18 @@
+{
+  "name": "PS260714.Runtime",
+  "rootNamespace": "",
+  "references": [
+    "Unity.TextMeshPro",
+    "UnityEngine.UI",
+    "UniTask"
+  ],
+  "includePlatforms": [],
+  "excludePlatforms": [],
+  "allowUnsafeCode": false,
+  "overrideReferences": false,
+  "precompiledReferences": [],
+  "autoReferenced": true,
+  "defineConstraints": [],
+  "versionDefines": [],
+  "noEngineReferences": false
+}

@@ -8,7 +8,7 @@ public sealed class BattleEditorWindow : EditorWindow
 {
     public const string MenuPath = PS260714EditorMenu.BattleEditor;
 
-    private const string AssetFolder = "Assets/07_Runtime/Resources/Battles";
+    private const string AssetFolder = "Assets/06_Runtime/Resources/Battles";
     private const string RenameControlName = "BattleAssetRenameField";
 
     private readonly List<BattleSO> _battles = new();
@@ -468,10 +468,10 @@ public sealed class BattleEditorWindow : EditorWindow
 
     private static void EnsureAssetFolder()
     {
-        if (!AssetDatabase.IsValidFolder("Assets/07_Runtime/Resources"))
+        if (!AssetDatabase.IsValidFolder("Assets/06_Runtime/Resources"))
             AssetDatabase.CreateFolder("Assets", "Resources");
         if (!AssetDatabase.IsValidFolder(AssetFolder))
-            AssetDatabase.CreateFolder("Assets/07_Runtime/Resources", "Battles");
+            AssetDatabase.CreateFolder("Assets/06_Runtime/Resources", "Battles");
     }
 
     private void DrawSection(string title, params string[] propertyNames)

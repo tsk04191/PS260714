@@ -66,7 +66,6 @@ public class GameManager : MonoBehaviour
                 "The default lobby representative must be a " +
                 "CharacterSO marked as initially owned.",
                 this);
-            defaultLobbyRepresentative = null;
         }
     }
 

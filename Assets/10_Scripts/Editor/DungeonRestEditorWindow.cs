@@ -16,9 +16,9 @@ public sealed class DungeonRestEditorWindow : EditorWindow
 {
     public const string MenuPath = PS260714EditorMenu.RestEditor;
 
-    private const string ClientScenePath = "Assets/05_Scenes/ClientScene.unity";
+    private const string ClientScenePath = "Assets/04_Scenes/ClientScene.unity";
     private const string RestSdPrefabPath =
-        "Assets/07_Runtime/Resources/Presentation/DungeonRestCharacterSd.prefab";
+        "Assets/06_Runtime/Resources/Presentation/DungeonRestCharacterSd.prefab";
     private const float InspectorWidth = 470f;
     private const float InspectorLabelWidth = 160f;
     private const float PreviewAspect = 16f / 9f;
@@ -448,6 +448,8 @@ public sealed class DungeonRestEditorWindow : EditorWindow
             CreateUniqueRoomId(
                 rest.name.Replace(' ', '_').ToLowerInvariant());
         serialized.FindProperty("displayName").stringValue = rest.name;
+        serialized.FindProperty("restSchemaVersion").intValue =
+            DungeonRestSO.CurrentRestSchemaVersion;
         serialized.ApplyModifiedPropertiesWithoutUndo();
         AssetDatabase.CreateAsset(rest, path);
         AssetDatabase.SaveAssets();

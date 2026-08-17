@@ -52,7 +52,6 @@ public sealed class MainSubPage : RuntimeMenuPageBase
         OperatorRosterSortCriterion.Name;
     private bool _rosterDescending;
     private bool _rosterEventsBound;
-    private bool _recruitLocaleEventBound;
     private bool _recruitRevealInProgress;
     private string _lastRecruitResultMessage = string.Empty;
 #if UNITY_EDITOR
@@ -103,15 +102,6 @@ public sealed class MainSubPage : RuntimeMenuPageBase
         EMainSubPageType.Storage => LocalizationKeys.UiStorageDescription,
         _ => string.Empty
     };
-
-    protected override Vector2 PanelSize => pageType == EMainSubPageType.Base
-        ? new Vector2(680f, 840f)
-        : new Vector2(680f, 720f);
-    protected override bool FillAvailableSpace =>
-        pageType == EMainSubPageType.Roster ||
-        pageType == EMainSubPageType.Recruit;
-    protected override bool RequiresSavedDesignerUiAtRuntime =>
-        pageType == EMainSubPageType.Recruit;
 
     protected override void BuildButtons()
     {
@@ -858,28 +848,11 @@ public sealed class MainSubPage : RuntimeMenuPageBase
             StringComparison.Ordinal);
     }
 
-    private static bool ContainsIgnoreCase(
-        string value,
-        string query)
-    {
-        return !string.IsNullOrEmpty(value) &&
-               value.IndexOf(
-               query,
-               StringComparison.OrdinalIgnoreCase) >= 0;
-    }
-
-    private static bool IsKoreanLocale =>
-        LocalizationService.CurrentLocale?.StartsWith(
-            "ko",
-            StringComparison.OrdinalIgnoreCase) == true;
-
     private void BindRosterEvents()
     {
         if (_rosterEventsBound)
             return;
 
-        LocalizationService.LocaleChanged +=
-            HandleRosterLocaleChanged;
         BindCharacterCollection(
             DataManager.Current?.CharacterDatas);
         _rosterEventsBound = true;
@@ -890,8 +863,6 @@ public sealed class MainSubPage : RuntimeMenuPageBase
         if (!_rosterEventsBound)
             return;
 
-        LocalizationService.LocaleChanged -=
-            HandleRosterLocaleChanged;
         BindCharacterCollection(null);
         _rosterEventsBound = false;
     }
@@ -920,33 +891,14 @@ public sealed class MainSubPage : RuntimeMenuPageBase
         }
     }
 
-    private void HandleRosterLocaleChanged(string unusedLocale)
-    {
-        RefreshRosterBrowser();
-    }
-
     private void BindRecruitEvents()
     {
-        if (!_recruitLocaleEventBound)
-        {
-            LocalizationService.LocaleChanged +=
-                HandleRecruitLocaleChanged;
-            _recruitLocaleEventBound = true;
-        }
-
         BindRecruitInventory(
             DataManager.Current?.InventoryDatas);
     }
 
     private void UnbindRecruitEvents()
     {
-        if (_recruitLocaleEventBound)
-        {
-            LocalizationService.LocaleChanged -=
-                HandleRecruitLocaleChanged;
-            _recruitLocaleEventBound = false;
-        }
-
         BindRecruitInventory(null);
     }
 
@@ -977,9 +929,12 @@ public sealed class MainSubPage : RuntimeMenuPageBase
             RefreshRecruitBannerView();
     }
 
-    private void HandleRecruitLocaleChanged(string unusedLocale)
+    protected override void OnLocalizationChanged()
     {
-        RefreshRecruitBannerView();
+        if (pageType == EMainSubPageType.Roster)
+            RefreshRosterBrowser();
+        else if (pageType == EMainSubPageType.Recruit)
+            RefreshRecruitBannerView();
     }
 
     private void HandleCharacterProgressChanged(
