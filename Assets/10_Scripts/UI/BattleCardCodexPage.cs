@@ -12,7 +12,8 @@ public enum EBattleCardCodexCategory
 }
 
 [DisallowMultipleComponent]
-public sealed class BattleCardCodexPage : RuntimeMenuPageBase
+public sealed class BattleCardCodexPage : RuntimeMenuPageBase,
+    IPageLoadingTarget
 {
     [Header("Page Navigation")]
     [SerializeField] private GameObject codexPage;
@@ -47,6 +48,11 @@ public sealed class BattleCardCodexPage : RuntimeMenuPageBase
                 LocalizationKeys.CodexSkillDescription)
             : LocalizationService.Get(
                 LocalizationKeys.CodexItemDescription);
+
+    public bool RequiresLoading(PageOpenMode mode)
+    {
+        return !IsInitialized || _browser == null;
+    }
 
 
     protected override void BuildButtons()

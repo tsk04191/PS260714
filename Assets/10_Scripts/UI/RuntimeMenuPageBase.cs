@@ -37,6 +37,7 @@ public abstract class RuntimeMenuPageBase : MonoBehaviour, IPage
     protected RectTransform RuntimeRoot => _runtimeRoot;
     protected RectTransform PanelRoot => _panel;
     protected RectTransform ButtonRoot => _buttonRoot;
+    protected bool IsInitialized => _initialized;
     public bool HasDesignerLayout => _designerLayoutVersion > 0;
 
     public AudioSource Speaker { get; set; }

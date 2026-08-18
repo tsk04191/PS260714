@@ -48,6 +48,8 @@ public sealed class DesignerUiBuildValidator : IPreprocessBuildWithReport
                         issues.Add(error);
                 }
             }
+
+            issues.AddRange(LoadingPageInstaller.ValidateScene(scene));
         }
         finally
         {

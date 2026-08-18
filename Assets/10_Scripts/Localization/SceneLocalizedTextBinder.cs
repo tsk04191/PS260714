@@ -106,6 +106,9 @@ namespace PS260714.Localization
             // on the next locale change.
             if (text.GetComponentInParent<RuntimeMenuPageBase>(true) != null ||
                 text.GetComponentInParent<SettingPage>(true) != null ||
+                text.GetComponentInParent<PracticeBattlePanelView>(
+                    true) != null ||
+                text.GetComponentInParent<LoadingPage>(true) != null ||
                 text.GetComponentInParent<CharacterRuntime>(true) != null ||
                 text.GetComponentInParent<EnemyCard>(true) != null ||
                 text.GetComponentInParent<DungeonSpawnQueueItemView>(true) != null ||

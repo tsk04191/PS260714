@@ -382,10 +382,16 @@ public sealed class StatusEffectEditorTests
         Assert.That(
             prioritiesByPath,
             Does.Not.ContainKey("PS260714/UI/Apply Main Lobby Layout"));
-        Assert.That(prioritiesByPath.Count, Is.EqualTo(22));
+        Assert.That(prioritiesByPath.Count, Is.EqualTo(24));
         Assert.That(
             prioritiesByPath["PS260714/UI/Install Practice Battle UI"],
             Is.EqualTo(117));
+        Assert.That(
+            prioritiesByPath["PS260714/UI/Install Dungeon Select UI"],
+            Is.EqualTo(118));
+        Assert.That(
+            prioritiesByPath["PS260714/UI/Install Loading Page"],
+            Is.EqualTo(119));
 
         HashSet<int> uniquePriorities = new();
         foreach (KeyValuePair<string, int> menu in prioritiesByPath)

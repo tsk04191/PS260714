@@ -196,6 +196,11 @@ public sealed class PracticeBattlePanelView : MonoBehaviour
         bool visible = _controller?.IsPracticeBattle == true;
         if (!visible)
             DisableDebugVisualization(_controller);
+        if (collapseButton != null &&
+            collapseButton.gameObject.activeSelf != visible)
+        {
+            collapseButton.gameObject.SetActive(visible);
+        }
         if (gameObject.activeSelf != visible)
             gameObject.SetActive(visible);
         if (!visible)
@@ -215,7 +220,8 @@ public sealed class PracticeBattlePanelView : MonoBehaviour
         }
 
         panelBody.SetActive(!_collapsed);
-        collapseText.text = _collapsed ? "<" : ">";
+        collapseText.text = LocalizationService.Get(
+            LocalizationKeys.UiPracticeControl);
         charactersButton.interactable =
             _category != PracticeBattleCatalogCategory.Characters;
         enemiesButton.interactable =
@@ -474,9 +480,10 @@ public sealed class PracticeBattlePanelView : MonoBehaviour
         if (_controller?.IsPracticeBattle != true)
             return;
 
-        _controller.TrySetDebugVisualization(
-            !_controller.IsDebugVisualizationEnabled);
-        RefreshDebugControl();
+        bool target = !_controller.IsDebugVisualizationEnabled;
+        _controller.TrySetDebugVisualization(target);
+        RefreshDebugControl(
+            _controller.IsDebugVisualizationEnabled);
     }
 
     private void ResetPractice()
@@ -525,7 +532,17 @@ public sealed class PracticeBattlePanelView : MonoBehaviour
         bool available = _controller?.IsPracticeBattle == true;
         bool enabled = available &&
                        _controller.IsDebugVisualizationEnabled;
+        RefreshDebugControl(enabled);
+    }
+
+    private void RefreshDebugControl(bool enabled)
+    {
+        bool available = _controller?.IsPracticeBattle == true;
         debugButton.interactable = available;
+        LocalizedText fixedLocalization =
+            debugButtonText.GetComponent<LocalizedText>();
+        if (fixedLocalization != null && fixedLocalization.enabled)
+            fixedLocalization.enabled = false;
         debugButtonText.text = enabled
             ? ResolveText(
                 LocalizationKeys.UiPracticeDebugOff,

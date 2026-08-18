@@ -168,6 +168,7 @@ public sealed class DungeonBattleTab : MonoBehaviour
         UnbindBattleEvents();
         UnbindLocalizationEvents();
         practiceBattlePanel?.BindController(null);
+        SetSpawnQueueVisible(true);
         _itemHandView?.Teardown();
         battleCoreGaugeView?.SetVisible(false);
         _battleManager = null;
@@ -186,7 +187,13 @@ public sealed class DungeonBattleTab : MonoBehaviour
             return false;
         }
 
-        return practiceBattlePanel.BindController(controller);
+        bool bound = practiceBattlePanel.BindController(controller);
+        if (bound)
+        {
+            SetSpawnQueueVisible(
+                controller?.IsPracticeBattle != true);
+        }
+        return bound;
     }
 
     public void Refresh()
@@ -456,7 +463,8 @@ public sealed class DungeonBattleTab : MonoBehaviour
 
     private void RefreshSpawnQueue()
     {
-        if (spawnQueueView == null)
+        if (spawnQueueView == null ||
+            !spawnQueueView.gameObject.activeInHierarchy)
             return;
 
         IReadOnlyList<EnemyRuntime> enemies = _battleManager != null
@@ -468,7 +476,8 @@ public sealed class DungeonBattleTab : MonoBehaviour
 
     private void RefreshSpawnTimer()
     {
-        if (spawnQueueView == null)
+        if (spawnQueueView == null ||
+            !spawnQueueView.gameObject.activeInHierarchy)
             return;
 
         spawnQueueView.RefreshTimer(
@@ -476,6 +485,15 @@ public sealed class DungeonBattleTab : MonoBehaviour
             _battleManager != null ? _battleManager.SpawnInterval : 0f,
             _battleManager != null ? _battleManager.PendingEnemyCount : 0,
             _battleManager != null && _battleManager.IsBoardFull);
+    }
+
+    private void SetSpawnQueueVisible(bool visible)
+    {
+        if (spawnQueueView != null &&
+            spawnQueueView.gameObject.activeSelf != visible)
+        {
+            spawnQueueView.gameObject.SetActive(visible);
+        }
     }
 
     private void RefreshTimeControls()

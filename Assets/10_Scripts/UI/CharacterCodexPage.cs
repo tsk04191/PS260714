@@ -6,7 +6,8 @@ using UnityEngine;
 using UnityEngine.UI;
 
 [DisallowMultipleComponent]
-public sealed class CharacterCodexPage : RuntimeMenuPageBase
+public sealed class CharacterCodexPage : RuntimeMenuPageBase,
+    IPageLoadingTarget
 {
     private readonly struct CharacterCodexEntry
     {
@@ -91,6 +92,11 @@ public sealed class CharacterCodexPage : RuntimeMenuPageBase
             RefreshOperatorDetail();
             ApplyPresentationMode();
         }
+    }
+
+    public bool RequiresLoading(PageOpenMode mode)
+    {
+        return !IsInitialized || _browser == null;
     }
 
     protected override void BuildButtons()

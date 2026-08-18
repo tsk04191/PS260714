@@ -85,12 +85,29 @@ ui.attendance.claim_success,출석 수령 성공 안내,body,,{reward} 수령 �
 ui.currency.soft,재화 이름,body,,인게임 크레딧,CREDITS
 ui.currency.free,재화 이름,body,,무료 크레딧,FREE CREDIT
 ui.currency.paid,재화 이름,body,,유료 크레딧,PAID CREDIT
-ui.stage_select.title,스테이지 선택 페이지 제목,title,,던전 스테이지,DUNGEON STAGE
-ui.stage_select.description,스테이지 선택 페이지 설명,body,,스테이지를 선택하세요.,SELECT A STAGE
-ui.stage_select.tutorial_field,스테이지 선택 버튼,body,,0 스테이지 · 튜토리얼 필드,STAGE 0 · TUTORIAL FIELD
+ui.stage_select.title,스테이지 선택 페이지 제목,title,,던전 선택,DUNGEON SELECT
+ui.stage_select.description,스테이지 선택 페이지 설명,body,,던전 분류를 선택하세요.,SELECT A DUNGEON CATEGORY
+ui.stage_select.tutorial_field,스테이지 선택 버튼,body,,튜토리얼 필드,TUTORIAL FIELD
 ui.stage_select.practice_battle,스테이지 선택 버튼,body,,연습 전투,PRACTICE BATTLE
-ui.stage_select.free_battle,스테이지 선택 버튼,body,,자유 전투,FREE BATTLE
+ui.stage_select.free_battle,스테이지 선택 버튼,body,,무제한,UNLIMITED RUN
+ui.stage_select.tutorial_field.description,던전 상세 설명,body,,기본 조작과 전투 흐름을 단계별로 익힙니다.,Learn the controls and battle flow step by step.
+ui.stage_select.practice_battle.description,던전 상세 설명,body,,시간과 승패 제한 없이 캐릭터·적·카드를 자유롭게 시험합니다.,Freely test characters enemies and cards without a time limit or automatic result.
+ui.stage_select.free_battle.description,던전 상세 설명,body,,제한 없이 반복해서 도전하는 기본 던전 모드입니다.,The standard unrestricted dungeon mode for repeated runs.
+ui.dungeon_select.title,던전 선택 페이지 제목,title,,던전 선택,DUNGEON SELECT
+ui.dungeon_select.description,던전 선택 페이지 설명,body,,플레이할 던전 분류를 선택하세요.,SELECT A CATEGORY TO PLAY
+ui.dungeon_select.category.debug_room,던전 대분류 제목,title,,디버그 룸,DEBUG ROOM
+ui.dungeon_select.category.debug_room.description,던전 대분류 설명,body,,튜토리얼과 연습 전투로 전투 시스템을 익히고 시험합니다.,Learn and test the battle system through tutorial and practice modes.
+ui.dungeon_select.category.free,던전 대분류 제목,title,,자유,FREE
+ui.dungeon_select.category.free.description,던전 대분류 설명,body,,무제한 던전 모드에 진입합니다.,Enter the unrestricted dungeon mode.
+ui.dungeon_select.enter,던전 입장 버튼,body,,던전 입장,ENTER DUNGEON
+ui.dungeon_select.cleared,던전 진행 상태,body,,클리어 {count}회,CLEARED {count}
+ui.dungeon_select.not_cleared,던전 진행 상태,body,,미클리어,NOT CLEARED
+ui.dungeon_select.no_progress,던전 진행 상태,body,,진행도 저장 없음,NO PROGRESS SAVE
+ui.dungeon_select.battle_count,던전 규칙,body,,전투 {minimum}~{maximum}회,{minimum}-{maximum} BATTLES
+ui.dungeon_select.practice_rules,던전 규칙,body,,시간 제한 없음 · 보상 없음 · 진행도 저장 없음,NO TIME LIMIT · NO REWARDS · NO PROGRESS SAVE
+ui.dungeon_select.standard_rules,던전 규칙,body,,캐릭터 선택 · 아이템 · 보상,CHARACTER SELECTION · ITEMS · REWARDS
 ui.practice.title,연습 전투 패널 제목,title,,연습 전투,PRACTICE
+ui.practice.control,연습 전투 컨트롤 패널 열기 버튼,body,,컨트롤,CONTROL
 ui.practice.characters,연습 전투 패널 탭,body,,캐릭터,CHARACTERS
 ui.practice.enemies,연습 전투 패널 탭,body,,적,ENEMIES
 ui.practice.cards,연습 전투 패널 탭,body,,카드,CARDS
@@ -115,6 +132,7 @@ ui.practice.board_full,연습 전투 오류 안내,body,,적 배치 공간이 �
 ui.practice.selection_pending,연습 전투 오류 안내,body,,진행 중인 대상 선택을 먼저 완료하세요,COMPLETE THE ACTIVE TARGET SELECTION FIRST
 ui.practice.debug_on,연습 전투 디버그 표시 조작,body,,디버그 표시 켜기,DEBUG ON
 ui.practice.debug_off,연습 전투 디버그 표시 조작,body,,디버그 표시 끄기,DEBUG OFF
+ui.loading.preparing,공용 로딩 안내,body,,콘텐츠 준비 중,PREPARING CONTENT
 ui.tutorial.choice,튜토리얼 안내,body,,첫 번째 선택지를 눌러 전투에 배치할 캐릭터를 선택하세요.,PRESS THE FIRST CHOICE TO SELECT THE CHARACTER TO DEPLOY
 ui.tutorial.field,튜토리얼 안내,body,,필드는 적이 배치되고 캐릭터가 공격하는 전투 공간입니다.,THE FIELD IS WHERE ENEMIES ARE PLACED AND CHARACTERS ATTACK
 ui.tutorial.queue,튜토리얼 안내,body,,대기열에는 앞으로 필드에 등장할 적이 순서대로 표시됩니다.,THE QUEUE SHOWS THE ENEMIES THAT WILL ENTER THE FIELD IN ORDER

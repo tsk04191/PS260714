@@ -29,6 +29,17 @@ public static class PageControl
             return;
         }
 
+        if (pageTo is IPageLoadingTarget loadingTarget &&
+            loadingTarget.RequiresLoading(mode) &&
+            LoadingPage.TryBeginTransition(() =>
+            {
+                pageFrom.Close();
+                OpenPage(pagTo, pageTo, mode);
+            }))
+        {
+            return;
+        }
+
         pageFrom.Close();
         OpenPage(pagTo, pageTo, mode);
     }

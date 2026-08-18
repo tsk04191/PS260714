@@ -1,5 +1,6 @@
 using System.Linq;
 using NUnit.Framework;
+using PS260714.Localization;
 using TMPro;
 using UnityEditor;
 using UnityEditor.SceneManagement;
@@ -9,38 +10,6 @@ using UnityEngine.UI;
 
 public sealed class PracticeBattleUiInstallerTests
 {
-    [Test]
-    public void ExistingStageNodeUpgrade_PreservesAuthoredCoverColor()
-    {
-        GameObject node = new(
-            "btnStage_existing",
-            typeof(RectTransform));
-        DungeonDefinition definition =
-            ScriptableObject.CreateInstance<DungeonDefinition>();
-        try
-        {
-            GameObject coverObject = CreateChild(
-                node.transform,
-                "imgStageCover");
-            Image cover = coverObject.AddComponent<Image>();
-            Color authoredColor = Color.white;
-            cover.color = authoredColor;
-
-            PracticeBattleUiInstaller.InitializeStageNode(
-                node.transform,
-                definition,
-                0,
-                false);
-
-            Assert.That(cover.color, Is.EqualTo(authoredColor));
-        }
-        finally
-        {
-            Object.DestroyImmediate(definition);
-            Object.DestroyImmediate(node);
-        }
-    }
-
     [Test]
     public void ClientScene_PracticeDebugUiIsSerializedAndNonBlocking()
     {
@@ -65,6 +34,45 @@ public sealed class PracticeBattleUiInstallerTests
             PracticeBattlePanelView panel = tab.PracticeBattlePanel;
             Assert.That(panel, Is.Not.Null);
             SerializedObject panelSerialized = new(panel);
+            Button controlButton = panelSerialized
+                .FindProperty("collapseButton")
+                .objectReferenceValue as Button;
+            TextMeshProUGUI controlText = panelSerialized
+                .FindProperty("collapseText")
+                .objectReferenceValue as TextMeshProUGUI;
+            SerializedObject tabSerialized = new(tab);
+            Button pauseButton = tabSerialized.FindProperty("pauseButton")
+                .objectReferenceValue as Button;
+            Assert.That(controlButton, Is.Not.Null);
+            Assert.That(controlText, Is.Not.Null);
+            Assert.That(pauseButton, Is.Not.Null);
+            Assert.That(
+                controlButton.name,
+                Is.EqualTo(
+                    PracticeBattleUiInstaller.PracticeControlButtonName));
+            Assert.That(controlButton.gameObject.activeSelf, Is.False);
+            Assert.That(
+                controlButton.transform.parent,
+                Is.SameAs(pauseButton.transform.parent));
+            RectTransform controlRect =
+                controlButton.transform as RectTransform;
+            RectTransform pauseRect = pauseButton.transform as RectTransform;
+            Assert.That(controlRect.sizeDelta, Is.EqualTo(pauseRect.sizeDelta));
+            Assert.That(controlRect.anchorMin, Is.EqualTo(pauseRect.anchorMin));
+            Assert.That(controlRect.anchorMax, Is.EqualTo(pauseRect.anchorMax));
+            Assert.That(controlRect.pivot, Is.EqualTo(pauseRect.pivot));
+            Assert.That(
+                controlRect.anchoredPosition.y,
+                Is.EqualTo(pauseRect.anchoredPosition.y));
+            Assert.That(
+                controlRect.anchoredPosition.x,
+                Is.LessThan(pauseRect.anchoredPosition.x));
+            LocalizedText controlLocalization =
+                controlText.GetComponent<LocalizedText>();
+            Assert.That(controlLocalization, Is.Not.Null);
+            Assert.That(
+                controlLocalization.Key,
+                Is.EqualTo(LocalizationKeys.UiPracticeControl));
             Button debugButton = panelSerialized.FindProperty("debugButton")
                 .objectReferenceValue as Button;
             TextMeshProUGUI debugText = panelSerialized
@@ -79,6 +87,25 @@ public sealed class PracticeBattleUiInstallerTests
             Assert.That(
                 debugText.transform.IsChildOf(debugButton.transform),
                 Is.True);
+            Assert.That(
+                debugText.GetComponent<LocalizedText>(),
+                Is.Null,
+                "The debug label is a runtime action label and must not " +
+                "be overwritten by a fixed localization component.");
+            RectTransform panelRect = panel.transform as RectTransform;
+            Assert.That(panelRect.anchorMin, Is.EqualTo(new Vector2(1f, 0f)));
+            Assert.That(panelRect.anchorMax, Is.EqualTo(Vector2.one));
+            Assert.That(
+                panelRect.offsetMin,
+                Is.EqualTo(new Vector2(
+                    -PracticeBattleUiInstaller.PracticePanelRightMargin -
+                    PracticeBattleUiInstaller.PracticePanelWidth,
+                    PracticeBattleUiInstaller.PracticePanelBottomInset)));
+            Assert.That(
+                panelRect.offsetMax,
+                Is.EqualTo(new Vector2(
+                    -PracticeBattleUiInstaller.PracticePanelRightMargin,
+                    -PracticeBattleUiInstaller.PracticePanelTopInset)));
 
             DungeonBoardView board = FindOne<DungeonBoardView>(scene);
             Assert.That(board, Is.Not.Null);
@@ -171,6 +198,7 @@ public sealed class PracticeBattleUiInstallerTests
             Assert.That(debugButton, Is.Not.Null);
             Assert.That(debugText, Is.Not.Null);
             Assert.That(debugText.raycastTarget, Is.False);
+            Assert.That(debugText.GetComponent<LocalizedText>(), Is.Null);
 
             SerializedObject serialized = new(panel);
             Assert.That(
@@ -185,11 +213,17 @@ public sealed class PracticeBattleUiInstallerTests
                 markerRect.anchoredPosition,
                 Is.EqualTo(new Vector2(37f, -19f)));
 
+            LocalizedText staleLocalization =
+                debugText.gameObject.AddComponent<LocalizedText>();
+            staleLocalization.SetKey(
+                LocalizationKeys.UiPracticeDebugOn,
+                false);
             int childCount = header.transform.childCount;
             PracticeBattleUiInstaller.UpgradePracticePanelDebugControls(
                 panel);
 
             Assert.That(header.transform.childCount, Is.EqualTo(childCount));
+            Assert.That(debugText.GetComponent<LocalizedText>(), Is.Null);
             Assert.That(
                 header.transform.Find(
                     PracticeBattleUiInstaller.PracticeDebugButtonName),

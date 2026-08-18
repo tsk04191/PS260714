@@ -27,13 +27,14 @@ public sealed class PracticeBattleUiTests
     {
         PracticeBattlePanelView panel = CreatePanel(
             out RectTransform content,
-            out _,
+            out Button controlButton,
             out _,
             out _);
         FakePracticeController standard = new(false);
 
         Assert.That(panel.BindController(standard), Is.True);
         Assert.That(panel.gameObject.activeSelf, Is.False);
+        Assert.That(controlButton.gameObject.activeSelf, Is.False);
 
         CharacterSO character = CreateCharacter("practice.hero", "Hero");
         EnemySO enemy = CreateEnemy("practice.enemy", "Enemy");
@@ -46,6 +47,12 @@ public sealed class PracticeBattleUiTests
 
         Assert.That(panel.BindController(practice), Is.True);
         Assert.That(panel.gameObject.activeSelf, Is.True);
+        Assert.That(controlButton.gameObject.activeSelf, Is.True);
+        Assert.That(
+            GetField<TextMeshProUGUI>(panel, "collapseText").text,
+            Is.EqualTo(ResolveLocalizedOrFallback(
+                LocalizationKeys.UiPracticeControl,
+                "CONTROL")));
         Assert.That(panel.ActiveCategory,
             Is.EqualTo(PracticeBattleCatalogCategory.Characters));
         Assert.That(panel.VisibleCatalogItemCount, Is.EqualTo(1));
@@ -72,6 +79,42 @@ public sealed class PracticeBattleUiTests
         Assert.That(panel.VisibleCatalogItemCount, Is.EqualTo(1));
         ClickOnlyCatalogItem(content);
         Assert.That(practice.LastCard, Is.SameAs(card));
+    }
+
+    [Test]
+    public void DungeonBattleTab_HidesQueueOnlyWhilePracticeIsBound()
+    {
+        GameObject tabRoot = CreateRoot(
+            "PracticeBattleUiTests_DungeonBattleTab");
+        DungeonBattleTab tab = tabRoot.AddComponent<DungeonBattleTab>();
+        GameObject queueRoot = CreateChild(tabRoot.transform, "Queue");
+        DungeonSpawnQueueView queue =
+            queueRoot.AddComponent<DungeonSpawnQueueView>();
+        PracticeBattlePanelView panel = CreatePanel(
+            out _,
+            out _,
+            out _,
+            out _);
+        panel.transform.SetParent(tabRoot.transform, false);
+        SetField(tab, "spawnQueueView", queue);
+        SetField(tab, "practiceBattlePanel", panel);
+
+        Assert.That(
+            tab.BindPracticeBattleController(new FakePracticeController(true)),
+            Is.True);
+        Assert.That(queue.gameObject.activeSelf, Is.False);
+
+        Assert.That(
+            tab.BindPracticeBattleController(new FakePracticeController(false)),
+            Is.True);
+        Assert.That(queue.gameObject.activeSelf, Is.True);
+
+        Assert.That(
+            tab.BindPracticeBattleController(new FakePracticeController(true)),
+            Is.True);
+        Assert.That(queue.gameObject.activeSelf, Is.False);
+        tab.Teardown();
+        Assert.That(queue.gameObject.activeSelf, Is.True);
     }
 
     [Test]
@@ -147,12 +190,18 @@ public sealed class PracticeBattleUiTests
         TextMeshProUGUI debugText = GetField<TextMeshProUGUI>(
             panel,
             "debugButtonText");
+        LocalizedText staleLocalization =
+            debugText.gameObject.AddComponent<LocalizedText>();
+        staleLocalization.SetKey(
+            LocalizationKeys.UiPracticeDebugOn,
+            false);
         FakePracticeController practice = new(true);
         int changedCount = 0;
         practice.Changed += () => changedCount++;
 
         Assert.That(panel.BindController(practice), Is.True);
         InvokeMethod(panel, "OnEnable");
+        Assert.That(staleLocalization.enabled, Is.False);
         Assert.That(debugText.text, Is.EqualTo(ResolveLocalizedOrFallback(
             LocalizationKeys.UiPracticeDebugOn,
             "DEBUG ON")));
@@ -162,6 +211,10 @@ public sealed class PracticeBattleUiTests
         Assert.That(practice.IsDebugVisualizationEnabled, Is.True);
         Assert.That(practice.DebugVisualizationSetCallCount, Is.EqualTo(1));
         Assert.That(changedCount, Is.EqualTo(1));
+        Assert.That(debugText.text, Is.EqualTo(ResolveLocalizedOrFallback(
+            LocalizationKeys.UiPracticeDebugOff,
+            "DEBUG OFF")));
+        practice.NotifyChanged();
         Assert.That(debugText.text, Is.EqualTo(ResolveLocalizedOrFallback(
             LocalizationKeys.UiPracticeDebugOff,
             "DEBUG OFF")));
@@ -215,6 +268,39 @@ public sealed class PracticeBattleUiTests
         Assert.That(debugText.text, Is.EqualTo(ResolveLocalizedOrFallback(
             LocalizationKeys.UiPracticeDebugOn,
             "DEBUG ON")));
+    }
+
+    [Test]
+    public void SceneLocalizationBinder_DoesNotCaptureDebugActionLabel()
+    {
+        PracticeBattlePanelView panel = CreatePanel(
+            out _,
+            out _,
+            out _,
+            out _);
+        FakePracticeController practice = new(true);
+        Assert.That(panel.BindController(practice), Is.True);
+
+        TextMeshProUGUI debugText = GetField<TextMeshProUGUI>(
+            panel,
+            "debugButtonText");
+        Assert.That(debugText.text, Is.EqualTo(ResolveLocalizedOrFallback(
+            LocalizationKeys.UiPracticeDebugOn,
+            "DEBUG ON")));
+
+        SceneLocalizedTextBinder binder =
+            panel.gameObject.AddComponent<SceneLocalizedTextBinder>();
+        binder.BindHierarchy();
+
+        Assert.That(debugText.GetComponent<LocalizedText>(), Is.Null);
+        Button debugButton = GetField<Button>(panel, "debugButton");
+        InvokeMethod(panel, "OnEnable");
+        debugButton.onClick.Invoke();
+        binder.BindHierarchy();
+        Assert.That(debugText.text, Is.EqualTo(ResolveLocalizedOrFallback(
+            LocalizationKeys.UiPracticeDebugOff,
+            "DEBUG OFF")));
+        Assert.That(debugText.GetComponent<LocalizedText>(), Is.Null);
     }
 
     [Test]

@@ -46,6 +46,7 @@ public static class MenuPageSceneBuilder
     private static List<string> CollectDesignerUiIssues(Scene scene)
     {
         List<string> issues = new();
+        issues.AddRange(LoadingPageInstaller.ValidateScene(scene));
         GameObject layClient = FindSceneObject(scene, "layClient");
         if (layClient == null)
         {

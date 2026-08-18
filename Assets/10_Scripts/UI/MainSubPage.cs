@@ -24,7 +24,7 @@ public enum OperatorRosterSortCriterion
 }
 
 [DisallowMultipleComponent]
-public sealed class MainSubPage : RuntimeMenuPageBase
+public sealed class MainSubPage : RuntimeMenuPageBase, IPageLoadingTarget
 {
     [SerializeField] private EMainSubPageType pageType;
     [Header("Page Navigation")]
@@ -59,6 +59,13 @@ public sealed class MainSubPage : RuntimeMenuPageBase
 #endif
 
     public bool IsRecruitPage => pageType == EMainSubPageType.Recruit;
+
+    public bool RequiresLoading(PageOpenMode mode)
+    {
+        return !IsInitialized &&
+               (pageType == EMainSubPageType.Roster ||
+                pageType == EMainSubPageType.Recruit);
+    }
 
     protected override string PageTitle => pageType switch
     {

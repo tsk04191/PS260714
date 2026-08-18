@@ -6,7 +6,8 @@ using UnityEngine;
 using UnityEngine.UI;
 
 [DisallowMultipleComponent]
-public sealed class EnemyCodexPage : RuntimeMenuPageBase
+public sealed class EnemyCodexPage : RuntimeMenuPageBase,
+    IPageLoadingTarget
 {
     private readonly struct EnemyCodexEntry
     {
@@ -85,6 +86,11 @@ public sealed class EnemyCodexPage : RuntimeMenuPageBase
         LocalizationKeys.CodexEnemyTitle);
     protected override string PageDescription =>
         LocalizationService.Get(LocalizationKeys.CodexEnemyDescription);
+
+    public bool RequiresLoading(PageOpenMode mode)
+    {
+        return !IsInitialized || _browser == null;
+    }
 
     protected override void BuildButtons()
     {

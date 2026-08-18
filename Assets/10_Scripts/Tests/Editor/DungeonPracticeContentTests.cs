@@ -11,17 +11,23 @@ public sealed class DungeonPracticeContentTests
         "Assets/06_Runtime/Resources/Dungeons/PracticeBattle.asset";
     private const string FreeBattlePath =
         "Assets/06_Runtime/Resources/Dungeons/FreeBattle.asset";
+    private const string DebugRoomPath =
+        "Assets/06_Runtime/Resources/DungeonCategories/DebugRoom.asset";
+    private const string FreeCategoryPath =
+        "Assets/06_Runtime/Resources/DungeonCategories/Free.asset";
 
     [SetUp]
     public void SetUp()
     {
         DungeonDefinitionCatalog.Invalidate();
+        DungeonCategoryCatalog.Invalidate();
     }
 
     [TearDown]
     public void TearDown()
     {
         DungeonDefinitionCatalog.Invalidate();
+        DungeonCategoryCatalog.Invalidate();
     }
 
     [Test]
@@ -36,6 +42,7 @@ public sealed class DungeonPracticeContentTests
             Is.EqualTo(DungeonDefinitionCatalog.TutorialFieldId));
         Assert.That(tutorial.RunMode, Is.EqualTo(EDungeonRunMode.Standard));
         Assert.That(tutorial.StageOrder, Is.EqualTo(1));
+        Assert.That(tutorial.FallbackTitle, Is.EqualTo("TUTORIAL FIELD"));
         Assert.That(
             tutorial.TitleLocalizationKey,
             Is.EqualTo(LocalizationKeys.UiStageSelectTutorialField));
@@ -60,6 +67,14 @@ public sealed class DungeonPracticeContentTests
 
         Assert.That(freeBattle.RunMode, Is.EqualTo(EDungeonRunMode.Standard));
         Assert.That(freeBattle.StageOrder, Is.EqualTo(2));
+        Assert.That(freeBattle.FallbackTitle, Is.EqualTo("UNLIMITED RUN"));
+        Assert.That(freeBattle.DescriptionLocalizationKey, Is.Not.Empty);
+        AssertFullScreenArtwork(tutorial.StageCoverSprite);
+        AssertFullScreenArtwork(practice.StageCoverSprite);
+        AssertFullScreenArtwork(freeBattle.StageCoverSprite);
+        Assert.That(tutorial.StageCoverFraming.TryValidate(out _), Is.True);
+        Assert.That(practice.StageBackdropFraming.TryValidate(out _), Is.True);
+        Assert.That(freeBattle.StageCoverFraming.TryValidate(out _), Is.True);
         Assert.That(tutorial.TryValidate(out string tutorialError),
             Is.True,
             tutorialError);
@@ -69,6 +84,40 @@ public sealed class DungeonPracticeContentTests
         Assert.That(freeBattle.TryValidate(out string freeBattleError),
             Is.True,
             freeBattleError);
+    }
+
+    [Test]
+    public void Categories_GroupDebugUtilitiesAndUnlimitedMode()
+    {
+        DungeonCategorySO debugRoom = LoadCategory(DebugRoomPath);
+        DungeonCategorySO free = LoadCategory(FreeCategoryPath);
+
+        Assert.That(debugRoom.CategoryId, Is.EqualTo("debug_room"));
+        Assert.That(debugRoom.DisplayOrder, Is.Zero);
+        Assert.That(
+            debugRoom.ResolveDungeons()
+                .Select(definition => definition.DungeonId),
+            Is.EqualTo(new[]
+            {
+                DungeonDefinitionCatalog.TutorialFieldId,
+                DungeonDefinitionCatalog.PracticeBattleId,
+            }));
+
+        Assert.That(free.CategoryId, Is.EqualTo("free"));
+        Assert.That(free.DisplayOrder, Is.EqualTo(1));
+        Assert.That(free.CategoryMode, Is.EqualTo(EDungeonCategoryMode.Explicit));
+        AssertFullScreenArtwork(debugRoom.CardSprite);
+        AssertFullScreenArtwork(debugRoom.BackdropSprite);
+        AssertFullScreenArtwork(free.CardSprite);
+        Assert.That(debugRoom.CardFraming.TryValidate(out _), Is.True);
+        Assert.That(free.BackdropFraming.TryValidate(out _), Is.True);
+        Assert.That(
+            free.ResolveDungeons()
+                .Select(definition => definition.DungeonId),
+            Is.EqualTo(new[] { DungeonDefinitionCatalog.FreeBattleId }));
+        Assert.That(debugRoom.TryValidate(out string debugError), Is.True,
+            debugError);
+        Assert.That(free.TryValidate(out string freeError), Is.True, freeError);
     }
 
     [Test]
@@ -158,5 +207,21 @@ public sealed class DungeonPracticeContentTests
             AssetDatabase.LoadAssetAtPath<DungeonDefinition>(path);
         Assert.That(definition, Is.Not.Null, path);
         return definition;
+    }
+
+    private static DungeonCategorySO LoadCategory(string path)
+    {
+        DungeonCategorySO category =
+            AssetDatabase.LoadAssetAtPath<DungeonCategorySO>(path);
+        Assert.That(category, Is.Not.Null, path);
+        return category;
+    }
+
+    private static void AssertFullScreenArtwork(UnityEngine.Sprite sprite)
+    {
+        Assert.That(sprite, Is.Not.Null);
+        Assert.That(
+            sprite.rect.width / sprite.rect.height,
+            Is.EqualTo(16f / 9f).Within(0.01f));
     }
 }

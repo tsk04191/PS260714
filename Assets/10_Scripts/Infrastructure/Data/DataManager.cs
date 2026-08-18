@@ -1,3 +1,4 @@
+using System.Collections;
 using System.Collections.Generic;
 using PS260714.Localization;
 using UnityEngine;
@@ -53,7 +54,7 @@ public class DataManager : MonoBehaviour
         LocalizationFontResolver.RefreshAllClientText();
     }
 
-    void Start()
+    IEnumerator Start()
     {
         SetEventManager(GameManager.Instance.Events);
 
@@ -64,6 +65,11 @@ public class DataManager : MonoBehaviour
         AttendanceDatas ??= new AttendanceData();
         DungeonProgressDatas ??= new DungeonProgressData();
         RebuildAttendanceService();
+
+        // Keep the serialized loading page visible for one rendered frame.
+        // Persistent character data is already available from Awake so
+        // CharacterRuntime initialization order remains unchanged.
+        yield return null;
 
         LoadAll(loadCharacters: false);
         SaveALL();

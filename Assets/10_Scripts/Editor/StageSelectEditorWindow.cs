@@ -11,7 +11,8 @@ public sealed class StageSelectEditorWindow : EditorWindow
 
     private const string AssetFolder = "Assets/06_Runtime/Resources/Dungeons";
     private const string RenameControlName = "StageAssetRenameField";
-    private const float SquareRatioTolerance = 0.01f;
+    private const float FullScreenAspectRatio = 16f / 9f;
+    private const float AspectRatioTolerance = 0.02f;
 
     private readonly List<DungeonDefinition> _definitions = new();
     private DungeonDefinition _selected;
@@ -354,14 +355,29 @@ public sealed class StageSelectEditorWindow : EditorWindow
                 "Title Localization Key");
             PS260714LocalizationKeyField.DrawLoadError();
             DrawProperty("fallbackTitle", "Fallback Title");
-            DrawProperty("stageCoverSprite", "Square Stage Banner");
+            PS260714LocalizationKeyField.Draw(
+                _serialized.FindProperty("descriptionLocalizationKey"),
+                "Description Localization Key");
+            PS260714LocalizationKeyField.DrawLoadError();
+            DrawProperty("fallbackDescription", "Fallback Description");
+            UiArtworkFramingEditorGUI.Draw(
+                _serialized.FindProperty("stageCoverSprite"),
+                _serialized.FindProperty("stageCoverFraming"),
+                "Detail Cover Framing",
+                DungeonSelectArtworkLayout.DetailCoverViewportSize);
+            EditorGUILayout.Space(6f);
+            UiArtworkFramingEditorGUI.Draw(
+                _serialized.FindProperty("stageBackdropSprite"),
+                _serialized.FindProperty("stageBackdropFraming"),
+                "Full-Screen Backdrop Framing",
+                DungeonSelectArtworkLayout.FullScreenViewportSize);
 
             EditorGUILayout.HelpBox(
-                "The stage banner is displayed in a fixed 1:1 square " +
-                "frame (320 x 320 by default). Square source sprites are " +
-                "recommended.",
+                "Stage artwork uses a 16:9 source. The detail-cover preview " +
+                "matches the actual 1156 x 340 viewport, while the backdrop " +
+                "preview matches the 1920 x 1080 viewport. Both use the " +
+                "same authored focus and zoom as runtime.",
                 MessageType.Info);
-            DrawSquareBannerPreview();
         }
         EditorGUILayout.EndFoldoutHeaderGroup();
     }
@@ -577,37 +593,16 @@ public sealed class StageSelectEditorWindow : EditorWindow
             }
 
             Sprite banner = _selected.StageCoverSprite;
-            if (banner != null && !IsSquare(banner.rect))
+            if (banner != null && !IsFullScreenAspect(banner.rect))
             {
                 EditorGUILayout.HelpBox(
                     $"Banner source is {banner.rect.width:0} x " +
-                    $"{banner.rect.height:0}. The UI frame is square, but " +
-                    "a square source avoids empty space.",
+                    $"{banner.rect.height:0}. The authored source should " +
+                    "use the 16:9 full-screen cover format.",
                     MessageType.Warning);
             }
         }
         EditorGUILayout.EndFoldoutHeaderGroup();
-    }
-
-    private void DrawSquareBannerPreview()
-    {
-        Sprite sprite = _selected != null
-            ? _selected.StageCoverSprite
-            : null;
-        if (sprite == null)
-            return;
-
-        Rect preview = GUILayoutUtility.GetRect(
-            180f,
-            180f,
-            GUILayout.ExpandWidth(false));
-        Texture previewTexture =
-            AssetPreview.GetAssetPreview(sprite) ?? sprite.texture;
-        EditorGUI.DrawPreviewTexture(
-            preview,
-            previewTexture,
-            null,
-            ScaleMode.ScaleToFit);
     }
 
     private void DrawProperty(
@@ -981,12 +976,12 @@ public sealed class StageSelectEditorWindow : EditorWindow
         return false;
     }
 
-    private static bool IsSquare(Rect rect)
+    private static bool IsFullScreenAspect(Rect rect)
     {
         if (rect.width <= 0f || rect.height <= 0f)
             return false;
-        return Mathf.Abs(rect.width / rect.height - 1f) <=
-               SquareRatioTolerance;
+        return Mathf.Abs(rect.width / rect.height - FullScreenAspectRatio) <=
+               AspectRatioTolerance;
     }
 
     private void FindStageSelectPage()

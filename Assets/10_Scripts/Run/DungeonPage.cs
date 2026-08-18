@@ -30,7 +30,7 @@ public readonly struct DungeonBattlePlan
     }
 }
 
-public partial class DungeonPage : MonoBehaviour, IPage
+public partial class DungeonPage : MonoBehaviour, IPage, IPageLoadingTarget
 {
     internal const int EnemyRosterBaselineHealth = 20;
     public const int MaximumPartySize = 4;
@@ -613,6 +613,11 @@ public partial class DungeonPage : MonoBehaviour, IPage
     {
         PrepareDungeon(DungeonDefinitionCatalog.Get(
             DungeonDefinitionCatalog.TutorialFieldId));
+    }
+
+    public bool RequiresLoading(PageOpenMode mode)
+    {
+        return !_initialized || mode == PageOpenMode.Fresh;
     }
 
     public void PreparePracticeBattle()

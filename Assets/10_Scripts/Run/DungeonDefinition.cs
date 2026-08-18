@@ -81,7 +81,12 @@ public sealed class DungeonDefinition : ScriptableObject
     [SerializeField] private int stageOrder;
     [SerializeField] private string titleLocalizationKey;
     [SerializeField] private string fallbackTitle;
+    [SerializeField] private string descriptionLocalizationKey;
+    [SerializeField, TextArea(2, 5)] private string fallbackDescription;
     [SerializeField] private Sprite stageCoverSprite;
+    [SerializeField] private UiArtworkFraming stageCoverFraming = new();
+    [SerializeField] private Sprite stageBackdropSprite;
+    [SerializeField] private UiArtworkFraming stageBackdropFraming = new();
 
     [Header("Flow")]
     [SerializeField, Min(1)] private int minimumBattleCount = 5;
@@ -209,6 +214,10 @@ public sealed class DungeonDefinition : ScriptableObject
     public bool IsListedInStageSelect =>
         stageSelectVisibility == EDungeonStageSelectVisibility.Listed;
     public int StageOrder => stageOrder;
+    public int MinimumBattleCount => Mathf.Max(1, minimumBattleCount);
+    public int MaximumBattleCount => Mathf.Max(
+        MinimumBattleCount,
+        maximumBattleCount);
     public string TitleLocalizationKey
     {
         get
@@ -250,7 +259,7 @@ public sealed class DungeonDefinition : ScriptableObject
                     DungeonDefinitionCatalog.TutorialFieldId,
                     StringComparison.OrdinalIgnoreCase))
             {
-                return "STAGE 0 · TUTORIAL FIELD";
+                return "TUTORIAL FIELD";
             }
             if (string.Equals(
                     DungeonId,
@@ -264,18 +273,31 @@ public sealed class DungeonDefinition : ScriptableObject
                     DungeonDefinitionCatalog.FreeBattleId,
                     StringComparison.OrdinalIgnoreCase))
             {
-                return "FREE BATTLE";
+                return "UNLIMITED RUN";
             }
             return !string.IsNullOrWhiteSpace(DungeonId)
                 ? DungeonId
                 : name;
         }
     }
+    public string DescriptionLocalizationKey =>
+        (descriptionLocalizationKey ?? string.Empty).Trim();
+    public string FallbackDescription =>
+        (fallbackDescription ?? string.Empty).Trim();
     public Sprite StageCoverSprite => stageCoverSprite != null
         ? stageCoverSprite
         : theme != null
             ? theme.BackgroundSprite
             : null;
+    public UiArtworkFraming StageCoverFraming =>
+        stageCoverFraming ?? new UiArtworkFraming();
+    public Sprite StageBackdropSprite => stageBackdropSprite != null
+        ? stageBackdropSprite
+        : theme != null && theme.BackgroundSprite != null
+            ? theme.BackgroundSprite
+            : StageCoverSprite;
+    public UiArtworkFraming StageBackdropFraming =>
+        stageBackdropFraming ?? StageCoverFraming;
     public bool SelectStartingCharacter => selectStartingCharacter;
     public bool SelectStartingItems => selectStartingItems;
     public DungeonStartingItemRule StartingItemRule =>
@@ -471,6 +493,23 @@ public sealed class DungeonDefinition : ScriptableObject
             error = "A listed dungeon requires a stage-select title.";
             return false;
         }
+        if (IsListedInStageSelect &&
+            string.IsNullOrWhiteSpace(DescriptionLocalizationKey) &&
+            string.IsNullOrWhiteSpace(FallbackDescription))
+        {
+            error = "A listed dungeon requires a stage-select description.";
+            return false;
+        }
+        if (!StageCoverFraming.TryValidate(out error))
+        {
+            error = "Dungeon stage-cover framing is invalid: " + error;
+            return false;
+        }
+        if (!StageBackdropFraming.TryValidate(out error))
+        {
+            error = "Dungeon stage-backdrop framing is invalid: " + error;
+            return false;
+        }
         if (IsPractice &&
             (minimumBattleCount != 1 || maximumBattleCount != 1 ||
              insertEventBetweenBattles || selectStartingCharacter ||
@@ -632,10 +671,20 @@ public sealed class DungeonDefinition : ScriptableObject
                 ? LocalizationKeys.UiStageSelectPracticeBattle
                 : LocalizationKeys.UiStageSelectFreeBattle;
         definition.fallbackTitle = tutorialStage
-            ? "STAGE 0 · TUTORIAL FIELD"
+            ? "TUTORIAL FIELD"
             : practiceStage
                 ? "PRACTICE BATTLE"
-                : "FREE BATTLE";
+                : "UNLIMITED RUN";
+        definition.descriptionLocalizationKey = tutorialStage
+            ? "ui.stage_select.tutorial_field.description"
+            : practiceStage
+                ? "ui.stage_select.practice_battle.description"
+                : "ui.stage_select.free_battle.description";
+        definition.fallbackDescription = tutorialStage
+            ? "Learn the basic dungeon and battle flow."
+            : practiceStage
+                ? "Test characters, enemies, and cards without limits."
+                : "Enter an unrestricted dungeon run.";
         definition.minimumBattleCount = tutorialStage || practiceStage ? 1 : 5;
         definition.maximumBattleCount = tutorialStage || practiceStage ? 1 : 8;
         definition.insertEventBetweenBattles =

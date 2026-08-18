@@ -15,29 +15,22 @@ public static class PracticeBattleUiInstaller
     internal const string CatalogItemPrefabPath =
         "Assets/07_Prefabs/UI/Practice/btnPracticeCatalogItem.prefab";
     internal const string PracticeToolsRootName = "grpPracticeTools";
+    internal const string PracticeControlButtonName = "btnPracticeControl";
     internal const string PracticeDebugButtonName = "btnPracticeDebug";
     internal const string PracticeDebugOverlayName =
         "grpPracticeDebugVisualization";
-    internal const string PracticeStageNodeName =
-        "btnStage_practice_battle";
-    internal const string TutorialPracticeConnectorName =
-        "imgStageConnector_tutorial_field_practice_battle";
-    internal const string PracticeFreeConnectorName =
-        "imgStageConnector_practice_battle_free_battle";
-
-    private const string StageContentPath =
-        "grpRuntimeMenuPage/grpMenuPanel/grpMenuButtons/" +
-        "scrStageTrack/vptStageTrack/grpStageContent";
-    private const string LegacyTutorialNodeName = "btnStage_test_field";
+    internal const float PracticePanelWidth = 420f;
+    internal const float PracticePanelRightMargin = 22f;
+    internal const float PracticePanelTopInset = 96f;
+    internal const float PracticePanelBottomInset = 72f;
     private const string LegacyTutorialButtonName = "btnSTAGE0TESTFIELD";
     private const string TutorialButtonName = "btnSTAGE0TUTORIALFIELD";
     private const string LegacyTutorialLocalizationKey =
         "ui.stage_select.test_field";
-    private const string StageNodePrefix = "btnStage_";
-    private const string ConnectorPrefix = "imgStageConnector_";
 
     private static readonly Color PanelColor =
         new(0.035f, 0.05f, 0.043f, 0.96f);
+    private const float PracticeControlButtonGap = 12f;
     private static readonly Color HeaderColor =
         new(0.08f, 0.14f, 0.105f, 0.98f);
     private static readonly Color ButtonColor =
@@ -71,7 +64,7 @@ public static class PracticeBattleUiInstaller
         itemPrefab = LoadCatalogItemPrefab();
         Require(itemPrefab, "Practice catalog item prefab");
         MigrateLegacyTutorialReferences(scene);
-        InstallStageSelectTrack(scene);
+        DungeonSelectUiInstaller.InstallIntoScene(scene);
         InstallPracticePanel(scene, itemPrefab);
         InstallPracticeDebugOverlay(scene);
 
@@ -91,8 +84,8 @@ public static class PracticeBattleUiInstaller
         }
         AssetDatabase.SaveAssets();
         Debug.Log(
-            "Installed serialized practice battle UI and stage node in " +
-            "ClientScene.");
+            "Installed serialized practice battle UI and verified the " +
+            "two-level Dungeon Select UI in ClientScene.");
     }
 
     public static void InstallFromCommandLine()
@@ -158,6 +151,24 @@ public static class PracticeBattleUiInstaller
                     issues.Add(
                         "Practice tools are not right-anchored.");
                 }
+                if (panel.transform is RectTransform panelRect &&
+                    !HasExpectedPracticePanelRect(panelRect))
+                {
+                    issues.Add(
+                        "Practice tools do not use the compact HUD-safe " +
+                        "layout.");
+                }
+                TextMeshProUGUI debugText = new SerializedObject(panel)
+                    .FindProperty("debugButtonText")
+                    ?.objectReferenceValue as TextMeshProUGUI;
+                if (debugText != null &&
+                    debugText.GetComponent<LocalizedText>() != null)
+                {
+                    issues.Add(
+                        "Practice debug action label must be controlled " +
+                        "dynamically.");
+                }
+                ValidatePracticeControlButton(tab, panel, issues);
             }
         }
 
@@ -171,26 +182,10 @@ public static class PracticeBattleUiInstaller
 
         ValidatePracticeDebugOverlay(scene, issues);
 
-        StageSelectPage stagePage = FindOne<StageSelectPage>(scene);
-        Transform content = stagePage != null
-            ? stagePage.transform.Find(StageContentPath)
-            : null;
-        if (content == null)
-        {
-            issues.Add("Stage Select content hierarchy is missing.");
-        }
-        else
-        {
-            if (content.Find(PracticeStageNodeName) == null)
-                issues.Add("practice_battle stage node is missing.");
-            if (content.Find(TutorialPracticeConnectorName + "/imgLine") ==
-                null)
-            {
-                issues.Add("Tutorial-to-practice connector is missing.");
-            }
-            if (content.Find(PracticeFreeConnectorName + "/imgLine") == null)
-                issues.Add("Practice-to-free connector is missing.");
-        }
+        IReadOnlyList<string> dungeonSelectIssues =
+            DungeonSelectUiInstaller.ValidateScene(scene);
+        for (int index = 0; index < dungeonSelectIssues.Count; index++)
+            issues.Add(dungeonSelectIssues[index]);
 
         foreach (GameObject root in scene.GetRootGameObjects())
         {
@@ -211,6 +206,82 @@ public static class PracticeBattleUiInstaller
         }
 
         return issues;
+    }
+
+    private static void ValidatePracticeControlButton(
+        DungeonBattleTab tab,
+        PracticeBattlePanelView panel,
+        ICollection<string> issues)
+    {
+        SerializedObject tabSerialized = new(tab);
+        Button pauseButton = tabSerialized.FindProperty("pauseButton")
+            ?.objectReferenceValue as Button;
+        SerializedObject panelSerialized = new(panel);
+        Button controlButton = panelSerialized
+            .FindProperty("collapseButton")?.objectReferenceValue as Button;
+        TextMeshProUGUI controlText = panelSerialized
+            .FindProperty("collapseText")?.objectReferenceValue as
+                TextMeshProUGUI;
+        if (pauseButton == null || controlButton == null ||
+            controlText == null)
+        {
+            issues.Add("Practice control or pause button is unbound.");
+            return;
+        }
+        if (!string.Equals(
+                controlButton.name,
+                PracticeControlButtonName,
+                StringComparison.Ordinal))
+        {
+            issues.Add("Practice control button name is not standardized.");
+        }
+        if (!ReferenceEquals(
+                controlButton.transform.parent,
+                pauseButton.transform.parent))
+        {
+            issues.Add("Practice control button is not beside pause.");
+            return;
+        }
+        if (controlButton.gameObject.activeSelf)
+        {
+            issues.Add("Practice control button must be hidden by default.");
+        }
+
+        RectTransform pauseRect = pauseButton.transform as RectTransform;
+        RectTransform controlRect = controlButton.transform as RectTransform;
+        if (pauseRect == null || controlRect == null)
+        {
+            issues.Add("Practice control button RectTransform is missing.");
+            return;
+        }
+        float expectedX = pauseRect.anchoredPosition.x -
+                          Mathf.Abs(pauseRect.sizeDelta.x) -
+                          PracticeControlButtonGap;
+        if (controlRect.anchorMin != pauseRect.anchorMin ||
+            controlRect.anchorMax != pauseRect.anchorMax ||
+            controlRect.pivot != pauseRect.pivot ||
+            controlRect.sizeDelta != pauseRect.sizeDelta ||
+            !Mathf.Approximately(
+                controlRect.anchoredPosition.x,
+                expectedX) ||
+            !Mathf.Approximately(
+                controlRect.anchoredPosition.y,
+                pauseRect.anchoredPosition.y))
+        {
+            issues.Add(
+                "Practice control button does not match the pause button " +
+                "size and placement.");
+        }
+
+        LocalizedText localized = controlText.GetComponent<LocalizedText>();
+        if (localized == null || !string.Equals(
+                localized.Key,
+                LocalizationKeys.UiPracticeControl,
+                StringComparison.Ordinal))
+        {
+            issues.Add(
+                "Practice control button localization is missing.");
+        }
     }
 
     private static void MigrateLegacyTutorialReferences(Scene scene)
@@ -383,6 +454,9 @@ public static class PracticeBattleUiInstaller
             : null;
         if (existingPanel != null)
         {
+            ApplyPracticePanelRect(
+                existingPanel.transform as RectTransform);
+            UpgradePracticeControlButton(tab, existingPanel);
             UpgradePracticePanelDebugControls(existingPanel);
             if (!existingPanel.HasDesignerReferences)
             {
@@ -404,13 +478,7 @@ public static class PracticeBattleUiInstaller
             tab.transform);
         root.SetActive(false);
         RectTransform rootRect = root.transform as RectTransform;
-        SetRect(
-            rootRect,
-            new Vector2(1f, 0f),
-            new Vector2(1f, 1f),
-            new Vector2(1f, 0.5f),
-            new Vector2(-22f, 0f),
-            new Vector2(500f, -76f));
+        ApplyPracticePanelRect(rootRect);
 
         GameObject body = CreateRectObject("grpPracticePanel", root.transform);
         SetStretch(body.transform as RectTransform, 0f, 0f, 0f, 0f);
@@ -749,8 +817,87 @@ public static class PracticeBattleUiInstaller
         SetReference(serialized, "debugButton", debug);
         SetReference(serialized, "debugButtonText", debugText);
         serialized.ApplyModifiedPropertiesWithoutUndo();
+        UpgradePracticeControlButton(tab, panel);
         BindPanelToTab(tab, panel);
         root.SetActive(false);
+    }
+
+    internal static void UpgradePracticeControlButton(
+        DungeonBattleTab tab,
+        PracticeBattlePanelView panel)
+    {
+        Require(tab, "DungeonBattleTab");
+        Require(panel, "PracticeBattlePanelView");
+
+        SerializedObject tabSerialized = new(tab);
+        Button pauseButton = tabSerialized.FindProperty("pauseButton")
+            ?.objectReferenceValue as Button;
+        Require(pauseButton, "DungeonBattleTab pauseButton");
+        RectTransform pauseRect = pauseButton.transform as RectTransform;
+        Require(pauseRect, "DungeonBattleTab pauseButton RectTransform");
+
+        SerializedObject panelSerialized = new(panel);
+        panelSerialized.UpdateIfRequiredOrScript();
+        SerializedProperty buttonProperty =
+            panelSerialized.FindProperty("collapseButton");
+        SerializedProperty textProperty =
+            panelSerialized.FindProperty("collapseText");
+        if (buttonProperty == null || textProperty == null)
+        {
+            throw new InvalidOperationException(
+                "PracticeBattlePanelView control fields are missing.");
+        }
+
+        Button button = buttonProperty.objectReferenceValue as Button;
+        TextMeshProUGUI text =
+            textProperty.objectReferenceValue as TextMeshProUGUI;
+        if (button == null && text != null)
+            button = text.GetComponentInParent<Button>();
+        Require(button, "Practice battle control Button");
+        if (text == null)
+        {
+            text = button.GetComponentInChildren<TextMeshProUGUI>(true);
+            Require(text, "Practice battle control label");
+        }
+
+        button.name = PracticeControlButtonName;
+        button.transform.SetParent(pauseButton.transform.parent, false);
+        SetLayerRecursively(button.gameObject, pauseButton.gameObject.layer);
+
+        RectTransform buttonRect = button.transform as RectTransform;
+        Require(buttonRect, "Practice battle control RectTransform");
+        buttonRect.anchorMin = pauseRect.anchorMin;
+        buttonRect.anchorMax = pauseRect.anchorMax;
+        buttonRect.pivot = pauseRect.pivot;
+        buttonRect.sizeDelta = pauseRect.sizeDelta;
+        buttonRect.anchoredPosition = new Vector2(
+            pauseRect.anchoredPosition.x -
+            Mathf.Abs(pauseRect.sizeDelta.x) -
+            PracticeControlButtonGap,
+            pauseRect.anchoredPosition.y);
+        buttonRect.localRotation = pauseRect.localRotation;
+        buttonRect.localScale = pauseRect.localScale;
+        button.transform.SetSiblingIndex(pauseButton.transform.GetSiblingIndex());
+
+        CopyButtonPresentation(pauseButton, button);
+        TextMeshProUGUI pauseLabel = pauseButton
+            .GetComponentInChildren<TextMeshProUGUI>(true);
+        if (pauseLabel != null)
+            CopyTextPresentation(pauseLabel, text);
+        text.text = "CONTROL";
+        LocalizedText localized = text.GetComponent<LocalizedText>();
+        if (localized == null)
+            localized = text.gameObject.AddComponent<LocalizedText>();
+        localized.SetKey(LocalizationKeys.UiPracticeControl, false);
+        button.gameObject.SetActive(false);
+
+        buttonProperty.objectReferenceValue = button;
+        textProperty.objectReferenceValue = text;
+        panelSerialized.ApplyModifiedPropertiesWithoutUndo();
+        EditorUtility.SetDirty(button);
+        EditorUtility.SetDirty(text);
+        EditorUtility.SetDirty(localized);
+        EditorUtility.SetDirty(panel);
     }
 
     internal static void UpgradePracticePanelDebugControls(
@@ -811,10 +958,54 @@ public static class PracticeBattleUiInstaller
             Require(text, PracticeDebugButtonName + " label");
         }
 
+        LocalizedText localized = text.GetComponent<LocalizedText>();
+        if (localized != null)
+            UnityEngine.Object.DestroyImmediate(localized);
+
         buttonProperty.objectReferenceValue = button;
         textProperty.objectReferenceValue = text;
         serialized.ApplyModifiedPropertiesWithoutUndo();
         EditorUtility.SetDirty(panel);
+    }
+
+    private static void ApplyPracticePanelRect(RectTransform rect)
+    {
+        Require(rect, "Practice tools RectTransform");
+        rect.anchorMin = new Vector2(1f, 0f);
+        rect.anchorMax = Vector2.one;
+        rect.pivot = new Vector2(1f, 0.5f);
+        rect.offsetMin = new Vector2(
+            -PracticePanelRightMargin - PracticePanelWidth,
+            PracticePanelBottomInset);
+        rect.offsetMax = new Vector2(
+            -PracticePanelRightMargin,
+            -PracticePanelTopInset);
+    }
+
+    private static bool HasExpectedPracticePanelRect(RectTransform rect)
+    {
+        if (rect == null)
+            return false;
+
+        return Approximately(rect.anchorMin, new Vector2(1f, 0f)) &&
+               Approximately(rect.anchorMax, Vector2.one) &&
+               Approximately(rect.pivot, new Vector2(1f, 0.5f)) &&
+               Approximately(
+                   rect.offsetMin,
+                   new Vector2(
+                       -PracticePanelRightMargin - PracticePanelWidth,
+                       PracticePanelBottomInset)) &&
+               Approximately(
+                   rect.offsetMax,
+                   new Vector2(
+                       -PracticePanelRightMargin,
+                       -PracticePanelTopInset));
+    }
+
+    private static bool Approximately(Vector2 left, Vector2 right)
+    {
+        return Mathf.Approximately(left.x, right.x) &&
+               Mathf.Approximately(left.y, right.y);
     }
 
     private static void InstallPracticeDebugOverlay(Scene scene)
@@ -1002,141 +1193,6 @@ public static class PracticeBattleUiInstaller
         }
     }
 
-    private static void InstallStageSelectTrack(Scene scene)
-    {
-        StageSelectPage page = FindOne<StageSelectPage>(scene);
-        Require(page, "StageSelectPage");
-        Transform content = page.transform.Find(StageContentPath);
-        Require(content, "Stage Select content");
-
-        Transform legacyTutorial = content.Find(LegacyTutorialNodeName);
-        if (legacyTutorial != null &&
-            content.Find("btnStage_tutorial_field") == null)
-        {
-            legacyTutorial.name = "btnStage_tutorial_field";
-        }
-
-        GameObject nodeTemplate = FindFirstDirectChild(
-            content,
-            StageNodePrefix);
-        GameObject connectorTemplate = FindFirstDirectChild(
-            content,
-            ConnectorPrefix);
-        Require(nodeTemplate, "Stage node template");
-        Require(connectorTemplate, "Stage connector template");
-
-        DungeonDefinitionCatalog.Invalidate();
-        IReadOnlyList<DungeonDefinition> definitions =
-            DungeonDefinitionCatalog.GetStageSelectDefinitions();
-        HashSet<string> expectedConnectors =
-            new(StringComparer.Ordinal);
-        List<Transform> ordered = new();
-        int numberedStageIndex = 0;
-        for (int index = 0; index < definitions.Count; index++)
-        {
-            DungeonDefinition definition = definitions[index];
-            string nodeName = StageNodePrefix + definition.DungeonId;
-            Transform node = content.Find(nodeName);
-            bool created = node == null;
-            if (created)
-            {
-                GameObject clone = UnityEngine.Object.Instantiate(
-                    nodeTemplate,
-                    content,
-                    false);
-                clone.name = nodeName;
-                node = clone.transform;
-            }
-            InitializeStageNode(
-                node,
-                definition,
-                definition.IsPractice
-                    ? numberedStageIndex
-                    : numberedStageIndex++,
-                created);
-
-            if (index > 0)
-            {
-                DungeonDefinition previous = definitions[index - 1];
-                string connectorName = ConnectorPrefix +
-                                       previous.DungeonId + "_" +
-                                       definition.DungeonId;
-                expectedConnectors.Add(connectorName);
-                Transform connector = content.Find(connectorName);
-                if (connector == null)
-                {
-                    GameObject clone = UnityEngine.Object.Instantiate(
-                        connectorTemplate,
-                        content,
-                        false);
-                    clone.name = connectorName;
-                    connector = clone.transform;
-                }
-                ordered.Add(connector);
-            }
-            ordered.Add(node);
-        }
-
-        for (int index = content.childCount - 1; index >= 0; index--)
-        {
-            Transform child = content.GetChild(index);
-            if (child.name.StartsWith(
-                    ConnectorPrefix,
-                    StringComparison.Ordinal) &&
-                !expectedConnectors.Contains(child.name))
-            {
-                UnityEngine.Object.DestroyImmediate(child.gameObject);
-            }
-        }
-
-        for (int index = 0; index < ordered.Count; index++)
-            ordered[index].SetSiblingIndex(index);
-
-        if (!page.ValidateEditorUi(out string error))
-        {
-            throw new InvalidOperationException(
-                "Stage Select UI validation failed: " + error);
-        }
-    }
-
-    internal static void InitializeStageNode(
-        Transform node,
-        DungeonDefinition definition,
-        int index,
-        bool applyCoverPresentation)
-    {
-        Image cover = node.Find("imgStageCover")?.GetComponent<Image>();
-        if (cover != null && applyCoverPresentation)
-        {
-            cover.sprite = definition.StageCoverSprite;
-            cover.color = cover.sprite != null
-                ? Color.white
-                : new Color(0.12f, 0.17f, 0.145f, 1f);
-        }
-
-        TextMeshProUGUI title = node.Find(
-                "grpStageTitleBanner/txtStageTitle")
-            ?.GetComponent<TextMeshProUGUI>() ??
-            node.Find("txtStageTitle")?.GetComponent<TextMeshProUGUI>();
-        if (title != null)
-        {
-            title.text = definition.FallbackTitle;
-            LocalizedText localized = title.GetComponent<LocalizedText>();
-            localized?.SetKey(definition.TitleLocalizationKey, false);
-        }
-
-        TextMeshProUGUI sequence = node.Find(
-                "grpStageTitleBanner/txtStageSequence")
-            ?.GetComponent<TextMeshProUGUI>();
-        if (sequence != null)
-        {
-            sequence.text = definition.IsPractice
-                ? "PRACTICE"
-                : $"STAGE {index}";
-        }
-        node.gameObject.SetActive(true);
-    }
-
     private static TMP_InputField CreateSearchField(Transform parent)
     {
         GameObject root = CreateRectObject("inpPracticeSearch", parent);
@@ -1320,6 +1376,89 @@ public static class PracticeBattleUiInstaller
         button.colors = colors;
     }
 
+    private static void CopyButtonPresentation(Button source, Button target)
+    {
+        target.transition = source.transition;
+        target.colors = source.colors;
+        target.spriteState = source.spriteState;
+        target.animationTriggers = source.animationTriggers;
+        target.navigation = source.navigation;
+
+        Image sourceImage = source.targetGraphic as Image ??
+                            source.GetComponent<Image>();
+        Image targetImage = target.targetGraphic as Image ??
+                            target.GetComponent<Image>();
+        if (sourceImage != null && targetImage != null)
+        {
+            targetImage.color = sourceImage.color;
+            targetImage.material = sourceImage.material;
+            targetImage.sprite = sourceImage.sprite;
+            targetImage.type = sourceImage.type;
+            targetImage.preserveAspect = sourceImage.preserveAspect;
+            targetImage.fillCenter = sourceImage.fillCenter;
+            targetImage.fillMethod = sourceImage.fillMethod;
+            targetImage.fillAmount = sourceImage.fillAmount;
+            targetImage.fillClockwise = sourceImage.fillClockwise;
+            targetImage.fillOrigin = sourceImage.fillOrigin;
+            targetImage.useSpriteMesh = sourceImage.useSpriteMesh;
+            targetImage.pixelsPerUnitMultiplier =
+                sourceImage.pixelsPerUnitMultiplier;
+            target.targetGraphic = targetImage;
+        }
+
+        Outline sourceOutline = source.GetComponent<Outline>();
+        Outline targetOutline = target.GetComponent<Outline>();
+        if (sourceOutline != null)
+        {
+            if (targetOutline == null)
+                targetOutline = target.gameObject.AddComponent<Outline>();
+            targetOutline.effectColor = sourceOutline.effectColor;
+            targetOutline.effectDistance = sourceOutline.effectDistance;
+            targetOutline.useGraphicAlpha = sourceOutline.useGraphicAlpha;
+        }
+        else if (targetOutline != null)
+        {
+            UnityEngine.Object.DestroyImmediate(targetOutline);
+        }
+    }
+
+    private static void CopyTextPresentation(
+        TextMeshProUGUI source,
+        TextMeshProUGUI target)
+    {
+        target.font = source.font;
+        target.fontSharedMaterial = source.fontSharedMaterial;
+        target.fontSize = source.fontSize;
+        target.fontStyle = source.fontStyle;
+        target.alignment = source.alignment;
+        target.color = source.color;
+        target.textWrappingMode = source.textWrappingMode;
+        target.overflowMode = source.overflowMode;
+        target.margin = source.margin;
+        target.raycastTarget = false;
+
+        RectTransform sourceRect = source.rectTransform;
+        RectTransform targetRect = target.rectTransform;
+        targetRect.anchorMin = sourceRect.anchorMin;
+        targetRect.anchorMax = sourceRect.anchorMax;
+        targetRect.pivot = sourceRect.pivot;
+        targetRect.anchoredPosition = sourceRect.anchoredPosition;
+        targetRect.sizeDelta = sourceRect.sizeDelta;
+        targetRect.localRotation = sourceRect.localRotation;
+        targetRect.localScale = sourceRect.localScale;
+    }
+
+    private static void SetLayerRecursively(GameObject root, int layer)
+    {
+        root.layer = layer;
+        for (int index = 0; index < root.transform.childCount; index++)
+        {
+            SetLayerRecursively(
+                root.transform.GetChild(index).gameObject,
+                layer);
+        }
+    }
+
     private static Image CreateImage(
         string name,
         Transform parent,
@@ -1447,21 +1586,6 @@ public static class PracticeBattleUiInstaller
             property.GetArrayElementAtIndex(index).objectReferenceValue =
                 values[index];
         }
-    }
-
-    private static GameObject FindFirstDirectChild(
-        Transform parent,
-        string prefix)
-    {
-        if (parent == null)
-            return null;
-        for (int index = 0; index < parent.childCount; index++)
-        {
-            Transform child = parent.GetChild(index);
-            if (child.name.StartsWith(prefix, StringComparison.Ordinal))
-                return child.gameObject;
-        }
-        return null;
     }
 
     private static T FindOne<T>(Scene scene) where T : Component
