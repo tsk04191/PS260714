@@ -145,8 +145,13 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
     {
         public float ApproachProgress;
         public float AttackTimeRemaining;
+        // Kept as zero-valued compatibility projections for older tooling.
         public int SectorIndex;
         public int LayerIndex;
+        public Vector2 ApproachDirection;
+        public Vector2 TargetPosition;
+        public int ContactDepth;
+        public EnemyRuntime Blocker;
         public Vector2 ResolvedPosition;
         public float CurrentRadius;
         public float TargetRadius;
@@ -154,29 +159,136 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
         public int StableOrder;
         public bool WasWithinCoreRange;
         public bool HasContactedCore;
-        public Vector2 SpawnDirection { get; set; }
+        // Retained for serialized/reflection compatibility with the previous
+        // contact-topology implementation. The crowd movement path does not
+        // populate or consume these lists.
+        public readonly List<EnemyRuntime> PotentialBlockers = new();
+        public readonly List<EnemyRuntime> CollisionNeighbors = new();
+        public Vector2 SpawnDirection
+        {
+            get => ApproachDirection;
+            set => ApproachDirection = value.sqrMagnitude > 0.0001f
+                ? value.normalized
+                : Vector2.up;
+        }
 
         public CircularEnemyState(
             float attackInterval,
-            int sectorIndex,
-            int layerIndex,
-            Vector2 spawnDirection,
+            Vector2 approachDirection,
             float spawnRadius,
-            float targetRadius,
+            Vector2 targetPosition,
             float defenseLineRadius,
-            int stableOrder)
+            int stableOrder,
+            int contactDepth,
+            EnemyRuntime blocker)
         {
             AttackTimeRemaining = Mathf.Max(0.1f, attackInterval);
-            SectorIndex = Mathf.Max(0, sectorIndex);
-            LayerIndex = Mathf.Max(0, layerIndex);
-            SpawnDirection = spawnDirection.sqrMagnitude > 0.0001f
-                ? spawnDirection.normalized
+            ApproachDirection = approachDirection.sqrMagnitude > 0.0001f
+                ? approachDirection.normalized
                 : Vector2.up;
             CurrentRadius = Mathf.Max(0f, spawnRadius);
-            TargetRadius = Mathf.Max(0f, targetRadius);
+            TargetPosition = targetPosition;
+            TargetRadius = Mathf.Max(0f, targetPosition.magnitude);
             DefenseLineRadius = Mathf.Max(0f, defenseLineRadius);
-            ResolvedPosition = SpawnDirection * CurrentRadius;
+            ResolvedPosition = ApproachDirection * CurrentRadius;
             StableOrder = Mathf.Max(0, stableOrder);
+            ContactDepth = Mathf.Max(0, contactDepth);
+            LayerIndex = ContactDepth;
+            Blocker = blocker;
+        }
+    }
+
+    private readonly struct PendingFormationReservation
+    {
+        public EnemyRuntime Enemy { get; }
+        public CircularEnemyState State { get; }
+
+        public PendingFormationReservation(
+            EnemyRuntime enemy,
+            CircularEnemyState state)
+        {
+            Enemy = enemy;
+            State = state;
+        }
+    }
+
+    private readonly struct FormationResolution
+    {
+        public EnemyRuntime Enemy { get; }
+        public Vector2 Direction { get; }
+        public CircularEnemyFormationSolution Solution { get; }
+        public EnemyRuntime Blocker { get; }
+        public IReadOnlyList<EnemyRuntime> PotentialBlockers { get; }
+
+        public FormationResolution(
+            EnemyRuntime enemy,
+            Vector2 direction,
+            CircularEnemyFormationSolution solution,
+            EnemyRuntime blocker,
+            IReadOnlyList<EnemyRuntime> potentialBlockers)
+        {
+            Enemy = enemy;
+            Direction = direction;
+            Solution = solution;
+            Blocker = blocker;
+            PotentialBlockers = potentialBlockers;
+        }
+    }
+
+    private readonly struct FormationStateSnapshot
+    {
+        public CircularEnemyState State { get; }
+        public Vector2 ApproachDirection { get; }
+        public Vector2 TargetPosition { get; }
+        public Vector2 ResolvedPosition { get; }
+        public float CurrentRadius { get; }
+        public float TargetRadius { get; }
+        public float DefenseLineRadius { get; }
+        public int ContactDepth { get; }
+        public int SectorIndex { get; }
+        public int LayerIndex { get; }
+        public EnemyRuntime Blocker { get; }
+        public EnemyRuntime[] PotentialBlockers { get; }
+        public EnemyRuntime[] CollisionNeighbors { get; }
+
+        public FormationStateSnapshot(CircularEnemyState state)
+        {
+            State = state;
+            ApproachDirection = state.ApproachDirection;
+            TargetPosition = state.TargetPosition;
+            ResolvedPosition = state.ResolvedPosition;
+            CurrentRadius = state.CurrentRadius;
+            TargetRadius = state.TargetRadius;
+            DefenseLineRadius = state.DefenseLineRadius;
+            ContactDepth = state.ContactDepth;
+            SectorIndex = state.SectorIndex;
+            LayerIndex = state.LayerIndex;
+            Blocker = state.Blocker;
+            PotentialBlockers = state.PotentialBlockers.ToArray();
+            CollisionNeighbors = state.CollisionNeighbors.ToArray();
+        }
+
+        public void Restore()
+        {
+            if (State == null)
+                return;
+
+            State.ApproachDirection = ApproachDirection;
+            State.TargetPosition = TargetPosition;
+            State.ResolvedPosition = ResolvedPosition;
+            State.CurrentRadius = CurrentRadius;
+            State.TargetRadius = TargetRadius;
+            State.DefenseLineRadius = DefenseLineRadius;
+            State.ContactDepth = ContactDepth;
+            State.SectorIndex = SectorIndex;
+            State.LayerIndex = LayerIndex;
+            State.Blocker = Blocker;
+            State.PotentialBlockers.Clear();
+            if (PotentialBlockers != null)
+                State.PotentialBlockers.AddRange(PotentialBlockers);
+            State.CollisionNeighbors.Clear();
+            if (CollisionNeighbors != null)
+                State.CollisionNeighbors.AddRange(CollisionNeighbors);
         }
     }
 
@@ -206,6 +318,8 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
         private readonly DungeonWorldPolylineRenderer _movementMarkerRing;
         private readonly DungeonWorldPolylineRenderer _cooldownTrack;
         private readonly DungeonWorldPolylineRenderer _cooldownFill;
+        private readonly DungeonWorldPolylineRenderer _enemyHealthTrack;
+        private readonly DungeonWorldPolylineRenderer _enemyHealthFill;
         private readonly SpriteRenderer _abilityReady;
         private float _height;
         private float _spriteScale = 1f;
@@ -220,6 +334,8 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
         private float _hitFlashDuration;
         private float _hitFlashRemaining;
         private bool _selected;
+        private int _displayedEnemyHealth = int.MinValue;
+        private int _displayedEnemyMaximumHealth = int.MinValue;
 
         public GameObject GameObject => _root != null
             ? _root.gameObject
@@ -249,6 +365,8 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
             _spriteTransform = prefabView.ActorTransform;
             _spriteRenderer = prefabView.ActorRenderer;
             _shadowRenderer = prefabView.ShadowRenderer;
+            _enemyHealthTrack = prefabView.EnemyHealthTrack;
+            _enemyHealthFill = prefabView.EnemyHealthFill;
             if (!useAllyHud)
             {
                 _footHudRoot.gameObject.SetActive(false);
@@ -256,6 +374,8 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
                 return;
             }
 
+            _enemyHealthTrack.SetVisible(false);
+            _enemyHealthFill.SetVisible(false);
             _footHudRoot.gameObject.SetActive(true);
             _movementLine = prefabView.MovementLine;
             _movementMarker = prefabView.MovementMarker;
@@ -357,6 +477,55 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
             RefreshCooldownRing(runtime.AttackCooldownProgress, style);
             RefreshMovementIndicator(movement, style);
             RefreshAbilityReady(runtime, style, camera);
+        }
+
+        public void RefreshEnemyHealth(
+            EnemyRuntime runtime,
+            DungeonHudPresentationSO style)
+        {
+            if (_enemyHealthTrack == null || _enemyHealthFill == null ||
+                runtime == null || style == null)
+            {
+                return;
+            }
+
+            if (_displayedEnemyHealth == runtime.Health &&
+                _displayedEnemyMaximumHealth == runtime.MaxHealth)
+            {
+                return;
+            }
+            _displayedEnemyHealth = runtime.Health;
+            _displayedEnemyMaximumHealth = runtime.MaxHealth;
+
+            float maximumHealth = Mathf.Max(1f, runtime.MaxHealth);
+            float progress = Mathf.Clamp01(runtime.Health / maximumHealth);
+            float halfWidth = style.EnemyHealthBarWidth * 0.5f;
+            float groundOffset = style.EnemyHealthBarGroundOffset;
+            Vector3 left = new(-halfWidth, 0f, -groundOffset);
+            Vector3 right = new(halfWidth, 0f, -groundOffset);
+            _enemyHealthTrack.SetSegment(
+                left,
+                right,
+                style.EnemyHealthBarThickness * 1.35f,
+                style.EnemyHealthTrackColor);
+
+            if (progress <= 0.0001f)
+            {
+                _enemyHealthFill.SetVisible(false);
+                return;
+            }
+
+            Vector3 fillRight = Vector3.Lerp(left, right, progress);
+            float healthyBlend = Mathf.Clamp01(
+                progress / style.EnemyHealthCriticalThreshold);
+            _enemyHealthFill.SetSegment(
+                left,
+                fillRight,
+                style.EnemyHealthBarThickness,
+                Color.Lerp(
+                    style.EnemyHealthCriticalColor,
+                    style.EnemyHealthHealthyColor,
+                    healthyBlend));
         }
 
         public void ShowHitFlash(Color color, float duration)
@@ -634,6 +803,10 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
                 _cooldownTrack.SetSortingOrder(_sortingOrder - 4);
             if (_cooldownFill != null)
                 _cooldownFill.SetSortingOrder(_sortingOrder - 3);
+            if (_enemyHealthTrack != null)
+                _enemyHealthTrack.SetSortingOrder(_sortingOrder + 1);
+            if (_enemyHealthFill != null)
+                _enemyHealthFill.SetSortingOrder(_sortingOrder + 2);
             if (_abilityReady != null)
                 _abilityReady.sortingOrder = _sortingOrder + 4;
         }
@@ -705,6 +878,14 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
     private readonly Dictionary<EnemyRuntime, CircularEnemyState>
         _circularEnemyStates = new();
     private readonly List<EnemyRuntime> _circularEnemySnapshot = new();
+    private readonly List<EnemyRuntime> _formationStableOrder = new();
+    private readonly List<EnemyRuntime> _formationMovementOrder = new();
+    private readonly List<CircularEnemyFormationBody>
+        _formationMovementBlockerBodies = new();
+    private readonly Dictionary<Vector2Int, List<EnemyRuntime>>
+        _formationMovementSpatialBuckets = new();
+    private readonly Dictionary<EnemyRuntime, Vector2Int>
+        _formationMovementSpatialCells = new();
     private readonly BattleCoreRuntime _battleCore = new();
     private readonly List<IBattleCharacter> _battleCharacters = new();
     private readonly Dictionary<EnemyRuntime, WorldActorView>
@@ -794,8 +975,11 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
         BattleEnvironmentSetup.Default;
     private int _activeTileCount;
     private int _nextFormationStableOrder;
+    private int _formationSeed;
     private float _formationSpawnRadius;
     private float _formationDefenseLineRadius;
+    private float _formationMovementSpatialCellSize = 1f;
+    private float _formationMovementMaximumRadius;
     private bool _formationRadiiInitialized;
 
     private bool HasWorldPresentation =>
@@ -825,7 +1009,7 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
         ? boardRect
         : transform as RectTransform;
     public int InitialEnemyCapacity => _arenaSetup.UsesBattleCore
-        ? Mathf.Max(1, _arenaSetup.LaneCount)
+        ? Mathf.Max(1, _arenaSetup.MaximumEnemiesPerLayer)
         : _activeTileCount > 0
             ? _activeTileCount
             : GridSize * GridSize;
@@ -2078,7 +2262,8 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
     public void ConfigureArena(
         BattleArenaSetup setup,
         BattleEnvironmentSetup environment = null,
-        int currentCoreHealth = -1)
+        int currentCoreHealth = -1,
+        int formationSeed = 0)
     {
         _arenaSetup = setup ?? BattleArenaSetup.Legacy;
         _environmentSetup = environment ?? BattleEnvironmentSetup.Default;
@@ -2095,9 +2280,14 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
         ApplyArenaPresentation();
         ConfigureVfxPresentationTarget();
         _circularEnemyStates.Clear();
+        _formationStableOrder.Clear();
+        _formationMovementOrder.Clear();
+        _formationMovementBlockerBodies.Clear();
+        ClearFormationMovementSpatialIndex();
         _recentCoreAttackTimes.Clear();
         _spatialBattleElapsedTime = 0f;
         _nextFormationStableOrder = 0;
+        _formationSeed = formationSeed;
         _formationSpawnRadius = 0f;
         _formationDefenseLineRadius = 0f;
         _formationRadiiInitialized = false;
@@ -2395,6 +2585,15 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
             return false;
         }
 
+        List<PendingFormationReservation> formationReservations = null;
+        if (_arenaSetup.UsesBattleCore &&
+            !TryReserveNaturalFormation(
+                placements,
+                out formationReservations))
+        {
+            return false;
+        }
+
         List<PendingEnemyPlacement> added = new(placements.Count);
         foreach (PendingEnemyPlacement placement in placements)
         {
@@ -2409,8 +2608,15 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
             added.Add(placement);
         }
 
-        foreach (PendingEnemyPlacement pending in added)
-            RegisterPlacement(pending);
+        for (int index = 0; index < added.Count; index++)
+        {
+            CircularEnemyState reservedState = formationReservations != null
+                ? formationReservations[index].State
+                : null;
+            RegisterPlacement(added[index], reservedState);
+        }
+        if (_arenaSetup.UsesBattleCore)
+            RefreshFormationOrders();
 
         foreach (PendingEnemyPlacement pending in added)
         {
@@ -2428,7 +2634,9 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
         return true;
     }
 
-    private void RegisterPlacement(PendingEnemyPlacement pending)
+    private void RegisterPlacement(
+        PendingEnemyPlacement pending,
+        CircularEnemyState reservedFormationState = null)
     {
         pending.Enemy.BindBattleBoard(this);
         EnemyPlacement placement = new(
@@ -2439,35 +2647,33 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
         _enemyPlacements[pending.Enemy] = placement;
         if (_arenaSetup.UsesBattleCore)
         {
-            EnsureFormationRadii();
-            if (TryReserveFormationCell(
-                    out int sectorIndex,
-                    out int layerIndex))
+            if (reservedFormationState == null &&
+                TryReserveNaturalFormation(
+                    new[] { pending },
+                    out List<PendingFormationReservation> reservations) &&
+                reservations.Count == 1)
             {
-                Vector2 direction = ResolveFormationSectorDirection(
-                    sectorIndex);
-                float initialRadius = ResolveFormationSpawnRadius(
-                    pending.Enemy,
-                    sectorIndex,
-                    layerIndex);
-                int stableOrder = _nextFormationStableOrder++;
-                CircularEnemyState state = new(
-                    pending.Enemy.CoreAttackInterval,
-                    sectorIndex,
-                    layerIndex,
-                    direction,
-                    initialRadius,
-                    _formationDefenseLineRadius,
-                    _formationDefenseLineRadius,
-                    stableOrder);
-                _circularEnemyStates[pending.Enemy] = state;
-                RefreshFormationTargets();
+                reservedFormationState = reservations[0].State;
+            }
+
+            if (reservedFormationState == null)
+            {
+                Debug.LogError(
+                    "Natural enemy formation has no available position.",
+                    this);
             }
             else
             {
-                Debug.LogError(
-                    "Circular enemy formation has no available cell.",
-                    this);
+                reservedFormationState.SectorIndex =
+                    reservedFormationState.StableOrder %
+                    Mathf.Max(1, _arenaSetup.MaximumEnemiesPerLayer);
+                reservedFormationState.LayerIndex =
+                    reservedFormationState.ContactDepth;
+                _circularEnemyStates[pending.Enemy] =
+                    reservedFormationState;
+                _nextFormationStableOrder = Mathf.Max(
+                    _nextFormationStableOrder,
+                    reservedFormationState.StableOrder + 1);
             }
         }
         if (!pending.IsExclusive)
@@ -2504,13 +2710,6 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
             ReferenceEquals(contact.Target, enemy));
         _initializedEnemyRadiusAbilities.RemoveWhere(contact =>
             ReferenceEquals(contact.Source, enemy));
-        int releasedSector = -1;
-        if (_circularEnemyStates.TryGetValue(
-                enemy,
-                out CircularEnemyState releasedState))
-        {
-            releasedSector = releasedState.SectorIndex;
-        }
         _circularEnemyStates.Remove(enemy);
         _recentCoreAttackTimes.Remove(enemy);
         RemoveWorldEnemyView(enemy);
@@ -2535,9 +2734,7 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
             OccupancyChanged?.Invoke();
         if (_arenaSetup.UsesBattleCore)
         {
-            if (releasedSector >= 0)
-                CompactFormationSector(releasedSector);
-            RefreshFormationTargets();
+            RefreshFormationOrders();
             RefreshCircularLayout();
         }
     }
@@ -3703,19 +3900,16 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
         float appliedDelta = Mathf.Max(0f, deltaTime);
         _spatialBattleElapsedTime += appliedDelta;
         RemoveExpiredCoreAttackHistory();
-        RefreshFormationTargets();
-        _circularEnemySnapshot.Clear();
-        foreach (EnemyRuntime enemy in _enemyPlacements.Keys)
-            _circularEnemySnapshot.Add(enemy);
+        RebuildFormationMovementSpatialIndex();
 
         for (int index = 0;
-             index < _circularEnemySnapshot.Count;
+             index < _formationMovementOrder.Count;
              index++)
         {
             if (_battleCore.IsDestroyed)
                 break;
 
-            EnemyRuntime enemy = _circularEnemySnapshot[index];
+            EnemyRuntime enemy = _formationMovementOrder[index];
             if (enemy == null || enemy.Health <= 0 ||
                 !_enemyPlacements.ContainsKey(enemy) ||
                 !_circularEnemyStates.TryGetValue(
@@ -3726,18 +3920,45 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
                 continue;
             }
 
-            float movementTargetRadius = ResolveFormationMovementTargetRadius(
-                enemy,
-                state);
+            Vector2 inwardAxis = state.ResolvedPosition.sqrMagnitude >
+                                 0.0001f
+                ? state.ResolvedPosition.normalized
+                : state.SpawnDirection;
             Vector2 targetPosition =
-                state.SpawnDirection * movementTargetRadius;
+                inwardAxis * state.DefenseLineRadius;
+            state.TargetPosition = targetPosition;
+            state.TargetRadius = state.DefenseLineRadius;
+            state.ContactDepth = 0;
+            state.LayerIndex = 0;
+            state.Blocker = null;
             if ((state.ResolvedPosition - targetPosition).sqrMagnitude >
                 FormationArrivalTolerance * FormationArrivalTolerance)
             {
-                state.ResolvedPosition = Vector2.MoveTowards(
+                Vector2 previousPosition = state.ResolvedPosition;
+                Vector2 requestedPosition = Vector2.MoveTowards(
                     state.ResolvedPosition,
                     targetPosition,
                     ResolveFormationMovementSpeed(enemy) * appliedDelta);
+                PopulateFormationMovementBodies(
+                    enemy,
+                    state.ResolvedPosition,
+                    Vector2.Distance(
+                        state.ResolvedPosition,
+                        requestedPosition));
+                state.ResolvedPosition =
+                    CircularEnemyFormationSolver.ResolveForwardSearchEnd(
+                        state.ResolvedPosition,
+                        requestedPosition,
+                        enemy.ForwardSearchAngle,
+                        state.StableOrder,
+                        enemy.FormationRadius,
+                        _arenaSetup.LayerSpacing,
+                        _arenaSetup.FormationSeparationRatio,
+                        _formationMovementBlockerBodies);
+                UpdateFormationMovementSpatialIndex(
+                    enemy,
+                    previousPosition,
+                    state.ResolvedPosition);
             }
             else
             {
@@ -3834,8 +4055,6 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
                 state.AttackTimeRemaining += attackInterval;
             }
         }
-
-        _circularEnemySnapshot.Clear();
 
         RefreshCircularLayout();
     }
@@ -5548,11 +5767,19 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
             return true;
         }
 
-        int difference = Mathf.Abs(
-            sourceState.LayerIndex - targetState.LayerIndex);
-        return layerScope == EnemyWorldLayerScope.Same
-            ? difference == 0
-            : difference <= 1;
+        float contactDistance =
+            CircularEnemyFormationSolver.ResolveMinimumSeparation(
+                source.FormationRadius,
+                target.FormationRadius,
+                _arenaSetup.LayerSpacing,
+                _arenaSetup.FormationSeparationRatio);
+        float multiplier = layerScope == EnemyWorldLayerScope.Same
+            ? 1.1f
+            : 2.1f;
+        return (sourceState.ResolvedPosition -
+                targetState.ResolvedPosition).sqrMagnitude <=
+               contactDistance * contactDistance *
+               multiplier * multiplier;
     }
 
     private static void SelectEnemyAbilityTargets<T>(
@@ -5936,6 +6163,10 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
         _exclusiveOccupants.Clear();
         _enemyPlacements.Clear();
         _circularEnemyStates.Clear();
+        _formationStableOrder.Clear();
+        _formationMovementOrder.Clear();
+        _formationMovementBlockerBodies.Clear();
+        ClearFormationMovementSpatialIndex();
         _recentCoreAttackTimes.Clear();
         _spatialBattleElapsedTime = 0f;
         _nextFormationStableOrder = 0;
@@ -6177,39 +6408,24 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
             return;
 
         _worldEnemySync.Clear();
-        _circularEnemySnapshot.Clear();
-        foreach (KeyValuePair<EnemyRuntime, CircularEnemyState> entry in
-                 _circularEnemyStates)
+        int presentationIndex = 0;
+        for (int index = 0; index < _formationMovementOrder.Count; index++)
         {
-            if (entry.Key != null && entry.Key.Health > 0 &&
-                entry.Value != null &&
-                _enemyPlacements.ContainsKey(entry.Key))
-                _circularEnemySnapshot.Add(entry.Key);
-        }
-        _circularEnemySnapshot.Sort((left, right) =>
-        {
-            CircularEnemyState leftState = _circularEnemyStates[left];
-            CircularEnemyState rightState = _circularEnemyStates[right];
-            int layerOrder = leftState.LayerIndex.CompareTo(
-                rightState.LayerIndex);
-            if (layerOrder != 0)
-                return layerOrder;
-            int sectorOrder = leftState.SectorIndex.CompareTo(
-                rightState.SectorIndex);
-            return sectorOrder != 0
-                ? sectorOrder
-                : leftState.StableOrder.CompareTo(rightState.StableOrder);
-        });
+            EnemyRuntime enemy = _formationMovementOrder[index];
+            if (enemy == null || enemy.Health <= 0 ||
+                !_enemyPlacements.ContainsKey(enemy) ||
+                !_circularEnemyStates.TryGetValue(
+                    enemy,
+                    out CircularEnemyState state))
+            {
+                continue;
+            }
 
-        for (int index = 0; index < _circularEnemySnapshot.Count; index++)
-        {
-            EnemyRuntime enemy = _circularEnemySnapshot[index];
             UpdateWorldEnemyView(
                 enemy,
-                _circularEnemyStates[enemy],
-                index);
+                state,
+                presentationIndex++);
         }
-        _circularEnemySnapshot.Clear();
 
         RemoveWorldEnemyViewsNotInSync();
     }
@@ -6470,6 +6686,7 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
             0f,
             state.ResolvedPosition.y));
         view.FaceCamera(worldCamera);
+        view.RefreshEnemyHealth(enemy, presentation);
     }
 
     private void RefreshWorldAllyViews()
@@ -7300,10 +7517,15 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
                         continue;
                     }
 
-                    RegisterPlacement(pending);
+                    _circularEnemyStates.TryGetValue(
+                        enemy,
+                        out CircularEnemyState existingFormationState);
+                    RegisterPlacement(pending, existingFormationState);
                 }
             }
         }
+        if (_arenaSetup.UsesBattleCore)
+            RefreshFormationOrders();
     }
 
     private void ClearTileObjects()
@@ -8378,8 +8600,8 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
             _circularEnemyStates.TryGetValue(
                 target.Enemy,
                 out CircularEnemyState enemyState) &&
-            enemyState.LayerIndex == 0 &&
-            HasReachedFormationCell(enemyState))
+            enemyState.CurrentRadius <=
+            enemyState.DefenseLineRadius + FormationArrivalTolerance)
         {
             return BattleSpatialZone.DefenseLine;
         }
@@ -8494,8 +8716,9 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
             if (entry.Key != null && entry.Key.Health > 0 &&
                 _enemyPlacements.ContainsKey(entry.Key) &&
                 entry.Value != null &&
-                entry.Value.LayerIndex == 0 &&
-                HasReachedFormationCell(entry.Value))
+                entry.Value.CurrentRadius <=
+                entry.Value.DefenseLineRadius +
+                FormationArrivalTolerance)
             {
                 result.Add(entry.Key);
             }
@@ -8728,27 +8951,18 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
         if (movable.Count == 0)
             return 0;
 
-        HashSet<int> occupiedCells = new();
-        foreach (KeyValuePair<EnemyRuntime, CircularEnemyState> entry in
-                 _circularEnemyStates)
-        {
-            if (entry.Key == null || entry.Value == null ||
-                movable.Contains(entry.Key))
-            {
-                continue;
-            }
-            occupiedCells.Add(GetFormationCellKey(
-                entry.Value.SectorIndex,
-                entry.Value.LayerIndex));
-        }
-
+        RefreshFormationOrdersIfStale();
         List<EnemyRuntime> ordered = new(movable);
         ordered.Sort(CompareEnemiesByStableOrder);
-        int sectorCount = Mathf.Max(1, _arenaSetup.LaneCount);
-        int maximumLayers = Mathf.Max(1, _arenaSetup.MaximumLayerCount);
-        float maximumFormationRadius = GetMaximumFormationRadius();
-        int changed = 0;
-        bool movementRequested = false;
+        Dictionary<EnemyRuntime, Vector2> originalPositions = new();
+        foreach (EnemyRuntime enemy in _formationStableOrder)
+        {
+            CircularEnemyState state = _circularEnemyStates[enemy];
+            originalPositions[enemy] = state.ResolvedPosition;
+        }
+
+        Dictionary<EnemyRuntime, Vector2> proposedPositions = new();
+        List<EnemyRuntime> movedCandidates = new(ordered.Count);
         foreach (EnemyRuntime enemy in ordered)
         {
             CircularEnemyState state = _circularEnemyStates[enemy];
@@ -8757,94 +8971,98 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
                 current,
                 point,
                 distance);
-            movementRequested |= (requested - current).sqrMagnitude >
-                                 FormationArrivalTolerance *
-                                 FormationArrivalTolerance;
-            int bestSector = state.SectorIndex;
-            int bestLayer = state.LayerIndex;
-            float bestDistance = float.PositiveInfinity;
-            for (int sector = 0; sector < sectorCount; sector++)
-            {
-                for (int layer = 0; layer < maximumLayers; layer++)
-                {
-                    int cellKey = GetFormationCellKey(sector, layer);
-                    if (occupiedCells.Contains(cellKey))
-                        continue;
-
-                    Vector2 candidate = EstimateFormationCellPosition(
-                        enemy,
-                        sector,
-                        layer,
-                        maximumFormationRadius);
-                    float candidateDistance =
-                        (candidate - requested).sqrMagnitude;
-                    if (candidateDistance < bestDistance - 0.0001f ||
-                        (Mathf.Approximately(
-                             candidateDistance,
-                             bestDistance) &&
-                         cellKey < GetFormationCellKey(
-                             bestSector,
-                             bestLayer)))
-                    {
-                        bestDistance = candidateDistance;
-                        bestSector = sector;
-                        bestLayer = layer;
-                    }
-                }
-            }
-
-            int reservedKey = GetFormationCellKey(
-                bestSector,
-                bestLayer);
-            if (float.IsPositiveInfinity(bestDistance))
-                continue;
-            occupiedCells.Add(reservedKey);
-            if (bestSector != state.SectorIndex ||
-                bestLayer != state.LayerIndex)
-            {
-                changed++;
-            }
-            state.SectorIndex = bestSector;
-            state.LayerIndex = bestLayer;
-        }
-
-        RefreshFormationTargets();
-        foreach (EnemyRuntime enemy in ordered)
-        {
-            CircularEnemyState state = _circularEnemyStates[enemy];
-            float resolvedRadius = ResolveFormationMovementTargetRadius(
-                enemy,
-                state);
-            Vector2 resolved = state.SpawnDirection * resolvedRadius;
-            if ((resolved - state.ResolvedPosition).sqrMagnitude >
+            if ((requested - current).sqrMagnitude <=
                 FormationArrivalTolerance * FormationArrivalTolerance)
             {
-                changed = Mathf.Max(1, changed);
+                continue;
             }
-            state.ResolvedPosition = resolved;
-            UpdateFormationApproachProgress(state);
-        }
 
-        if (changed == 0 && movementRequested)
-            changed = 1;
-
-        if (changed > 0)
-        {
-            foreach (EnemyRuntime enemy in ordered)
+            _formationMovementBlockerBodies.Clear();
+            foreach (EnemyRuntime blocker in _formationStableOrder)
             {
-                if (enemy.TryInterruptCharge(
-                        EnemyChargeInterruptReason.ForcedMovement,
-                        out EnemyActiveChargeRuntimeState interrupted))
+                if (ReferenceEquals(blocker, enemy) || blocker == null ||
+                    !_circularEnemyStates.TryGetValue(
+                        blocker,
+                        out CircularEnemyState blockerState))
                 {
-                    RecordEnemyAbilityActivation(
-                        interrupted.AbilityState,
-                        enemy,
-                        true,
-                        false);
+                    continue;
                 }
+
+                Vector2 blockerPosition = proposedPositions.TryGetValue(
+                    blocker,
+                    out Vector2 proposedBlockerPosition)
+                    ? proposedBlockerPosition
+                    : blockerState.ResolvedPosition;
+                _formationMovementBlockerBodies.Add(
+                    new CircularEnemyFormationBody(
+                        blockerPosition,
+                        blocker.FormationRadius,
+                        blockerState.ContactDepth));
             }
-            RefreshCircularLayout();
+
+            Vector2 resolved =
+                CircularEnemyFormationSolver.ResolveSafeSegmentEnd(
+                    current,
+                    requested,
+                    enemy.FormationRadius,
+                    _arenaSetup.LayerSpacing,
+                    _arenaSetup.FormationSeparationRatio,
+                    _formationMovementBlockerBodies);
+            if (resolved.sqrMagnitude <=
+                    FormationArrivalTolerance * FormationArrivalTolerance ||
+                (resolved - current).sqrMagnitude <=
+                    FormationArrivalTolerance *
+                    FormationArrivalTolerance)
+            {
+                continue;
+            }
+
+            proposedPositions[enemy] = resolved;
+            movedCandidates.Add(enemy);
         }
+
+        if (movedCandidates.Count == 0)
+            return 0;
+
+        int changed = 0;
+        for (int index = 0; index < movedCandidates.Count; index++)
+        {
+            EnemyRuntime enemy = movedCandidates[index];
+            CircularEnemyState state = _circularEnemyStates[enemy];
+            Vector2 previous = originalPositions[enemy];
+            Vector2 resolved = proposedPositions[enemy];
+            if ((resolved - previous).sqrMagnitude <=
+                FormationArrivalTolerance * FormationArrivalTolerance)
+            {
+                continue;
+            }
+
+            state.ResolvedPosition = resolved;
+            Vector2 inwardAxis = resolved.sqrMagnitude > 0.0001f
+                ? resolved.normalized
+                : state.SpawnDirection;
+            state.TargetPosition =
+                inwardAxis * state.DefenseLineRadius;
+            state.TargetRadius = state.DefenseLineRadius;
+            state.ContactDepth = 0;
+            state.LayerIndex = 0;
+            state.Blocker = null;
+            UpdateFormationApproachProgress(state);
+            changed++;
+            if (enemy.TryInterruptCharge(
+                    EnemyChargeInterruptReason.ForcedMovement,
+                    out EnemyActiveChargeRuntimeState interrupted))
+            {
+                RecordEnemyAbilityActivation(
+                    interrupted.AbilityState,
+                    enemy,
+                    true,
+                    false);
+            }
+        }
+
+        RefreshFormationOrders();
+        RefreshCircularLayout();
         return changed;
     }
 
@@ -9053,266 +9271,815 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
         _formationRadiiInitialized = true;
     }
 
-    private bool TryReserveFormationCell(
-        out int sectorIndex,
-        out int layerIndex)
+    private bool TryReserveNaturalFormation(
+        IReadOnlyList<PendingEnemyPlacement> placements,
+        out List<PendingFormationReservation> reservations)
     {
-        sectorIndex = -1;
-        layerIndex = -1;
-        if (!_arenaSetup.UsesBattleCore)
-            return false;
-
-        int sectorCount = Mathf.Max(1, _arenaSetup.LaneCount);
-        int maximumLayers = Mathf.Max(1, _arenaSetup.MaximumLayerCount);
-        int shallowestLayer = maximumLayers;
-        List<int> candidateSectors = new();
-        for (int sector = 0; sector < sectorCount; sector++)
+        reservations = null;
+        if (!_arenaSetup.UsesBattleCore ||
+            placements == null || placements.Count == 0)
         {
-            int firstFreeLayer = 0;
-            while (firstFreeLayer < maximumLayers &&
-                   IsFormationCellOccupied(sector, firstFreeLayer))
-            {
-                firstFreeLayer++;
-            }
-
-            if (firstFreeLayer >= maximumLayers)
-                continue;
-            if (firstFreeLayer < shallowestLayer)
-            {
-                shallowestLayer = firstFreeLayer;
-                candidateSectors.Clear();
-            }
-            if (firstFreeLayer == shallowestLayer)
-                candidateSectors.Add(sector);
+            return !_arenaSetup.UsesBattleCore;
         }
 
-        if (candidateSectors.Count == 0)
+        EnsureFormationRadii();
+        RefreshFormationOrdersIfStale();
+        if (_formationStableOrder.Count + placements.Count >
+            _arenaSetup.MaximumEnemyCapacity)
+        {
             return false;
+        }
 
-        sectorIndex = candidateSectors[
-            Random.Range(0, candidateSectors.Count)];
-        layerIndex = shallowestLayer;
+        List<CircularEnemyFormationBody> occupiedBodies = new(
+            _formationStableOrder.Count + placements.Count);
+        foreach (EnemyRuntime enemy in _formationStableOrder)
+        {
+            if (enemy == null ||
+                !_circularEnemyStates.TryGetValue(
+                    enemy,
+                    out CircularEnemyState state))
+            {
+                continue;
+            }
+
+            occupiedBodies.Add(new CircularEnemyFormationBody(
+                state.ResolvedPosition,
+                enemy.FormationRadius,
+                0));
+        }
+
+        reservations = new List<PendingFormationReservation>(
+            placements.Count);
+        HashSet<EnemyRuntime> pendingEnemies = new();
+        for (int index = 0; index < placements.Count; index++)
+        {
+            EnemyRuntime enemy = placements[index].Enemy;
+            if (enemy == null || !pendingEnemies.Add(enemy) ||
+                !TryResolveNewFormationState(
+                    enemy,
+                    _nextFormationStableOrder + index,
+                    occupiedBodies,
+                    out CircularEnemyState state))
+            {
+                reservations = null;
+                return false;
+            }
+
+            reservations.Add(new PendingFormationReservation(enemy, state));
+            occupiedBodies.Add(new CircularEnemyFormationBody(
+                state.ResolvedPosition,
+                enemy.FormationRadius,
+                0));
+        }
+
         return true;
     }
 
-    private bool IsFormationCellOccupied(
-        int sectorIndex,
-        int layerIndex,
-        EnemyRuntime ignoredEnemy = null)
+    private bool TryResolveNewFormationState(
+        EnemyRuntime enemy,
+        int stableOrder,
+        IReadOnlyList<CircularEnemyFormationBody> occupiedBodies,
+        out CircularEnemyState state)
     {
-        foreach (KeyValuePair<EnemyRuntime, CircularEnemyState> entry in
-                 _circularEnemyStates)
+        state = null;
+        float maximumBandWidth = Mathf.Max(
+            0f,
+            _formationSpawnRadius - _formationDefenseLineRadius);
+        float spawnBandWidth = Mathf.Min(
+            maximumBandWidth,
+            Mathf.Max(0.1f, _arenaSetup.LayerSpacing * 1.5f));
+
+        for (int attempt = 0;
+             attempt < CircularEnemyFormationSolver.MaximumDirectionAttempts;
+             attempt++)
         {
-            CircularEnemyState state = entry.Value;
-            if (state != null &&
-                !ReferenceEquals(entry.Key, ignoredEnemy) &&
-                state.SectorIndex == sectorIndex &&
-                state.LayerIndex == layerIndex)
+            Vector2 direction =
+                CircularEnemyFormationSolver.ResolveDeterministicDirection(
+                    _formationSeed,
+                    stableOrder,
+                    attempt);
+            uint radiusSalt = 0xC2B2AE35u ^
+                unchecked((uint)attempt * 0x27D4EB2Du);
+            float radiusSample =
+                CircularEnemyFormationSolver.ResolveDeterministicSample(
+                    _formationSeed,
+                    stableOrder,
+                    radiusSalt);
+            float spawnRadius = Mathf.Max(
+                _formationDefenseLineRadius,
+                _formationSpawnRadius -
+                spawnBandWidth * radiusSample);
+            Vector2 spawnPosition = direction * spawnRadius;
+            bool overlaps = false;
+            if (occupiedBodies != null)
             {
-                return true;
+                for (int blockerIndex = 0;
+                     blockerIndex < occupiedBodies.Count;
+                     blockerIndex++)
+                {
+                    CircularEnemyFormationBody blocker =
+                        occupiedBodies[blockerIndex];
+                    float separation = CircularEnemyFormationSolver
+                        .ResolveMinimumSeparation(
+                        enemy.FormationRadius,
+                        blocker.Radius,
+                        _arenaSetup.LayerSpacing,
+                        _arenaSetup.FormationSeparationRatio);
+                    if ((spawnPosition - blocker.Position).sqrMagnitude <
+                        separation * separation -
+                        FormationArrivalTolerance)
+                    {
+                        overlaps = true;
+                        break;
+                    }
+                }
             }
+            if (overlaps)
+                continue;
+
+            state = new CircularEnemyState(
+                enemy.CoreAttackInterval,
+                direction,
+                spawnRadius,
+                direction * _formationDefenseLineRadius,
+                _formationDefenseLineRadius,
+                stableOrder,
+                0,
+                null);
+            UpdateFormationApproachProgress(state);
+            return true;
         }
+
         return false;
     }
 
-    private Vector2 ResolveFormationSectorDirection(int sectorIndex)
-    {
-        int sectorCount = Mathf.Max(1, _arenaSetup.LaneCount);
-        int normalizedSector = ((sectorIndex % sectorCount) + sectorCount) %
-                               sectorCount;
-        return DungeonWorldSpawnGeometry.DirectionFromUnitSample(
-            (normalizedSector + 0.5f) / sectorCount);
-    }
-
-    private int GetFormationCellKey(int sectorIndex, int layerIndex)
-    {
-        return Mathf.Max(0, layerIndex) *
-               Mathf.Max(1, _arenaSetup.LaneCount) +
-               Mathf.Max(0, sectorIndex);
-    }
-
-    private Vector2 EstimateFormationCellPosition(
+    private void PopulatePotentialBlockers(
+        CircularEnemyState state,
         EnemyRuntime enemy,
-        int sectorIndex,
-        int layerIndex)
+        IReadOnlyList<EnemyRuntime> stagedEnemies,
+        IReadOnlyList<CircularEnemyFormationBody> targetBodies,
+        IReadOnlyList<CircularEnemyFormationBody> currentBodies)
     {
-        float maximumFormationRadius = GetMaximumFormationRadius(enemy);
-        return EstimateFormationCellPosition(
-            enemy,
-            sectorIndex,
-            layerIndex,
-            maximumFormationRadius);
-    }
-
-    private Vector2 EstimateFormationCellPosition(
-        EnemyRuntime enemy,
-        int sectorIndex,
-        int layerIndex,
-        float maximumFormationRadius)
-    {
-        maximumFormationRadius = Mathf.Max(
-            maximumFormationRadius,
-            enemy != null ? enemy.FormationRadius : 0f);
-        int sectorCount = Mathf.Max(1, _arenaSetup.LaneCount);
-        float angularSine = Mathf.Sin(Mathf.PI / sectorCount);
-        float angularSafeRadius = angularSine > 0.0001f
-            ? maximumFormationRadius *
-              _arenaSetup.FormationSeparationRatio / angularSine
-            : _formationDefenseLineRadius;
-        float baseRadius = Mathf.Max(
-            _formationDefenseLineRadius,
-            angularSafeRadius);
-        float radialSpacing = Mathf.Max(
-            _arenaSetup.LayerSpacing,
-            Mathf.Max(0f, maximumFormationRadius * 2f) *
-            _arenaSetup.FormationSeparationRatio);
-        float radius = baseRadius +
-                       Mathf.Max(0, layerIndex) * radialSpacing;
-        return ResolveFormationSectorDirection(sectorIndex) * radius;
-    }
-
-    private float GetMaximumFormationRadius(
-        EnemyRuntime additionalEnemy = null)
-    {
-        float maximumFormationRadius = additionalEnemy != null
-            ? additionalEnemy.FormationRadius
-            : 0f;
-        foreach (EnemyRuntime candidate in _circularEnemyStates.Keys)
+        state.PotentialBlockers.Clear();
+        for (int index = 0; index < stagedEnemies.Count; index++)
         {
-            if (candidate != null)
+            EnemyRuntime candidate = stagedEnemies[index];
+            if (candidate == null || ReferenceEquals(candidate, enemy))
+                continue;
+
+            float separation =
+                CircularEnemyFormationSolver.ResolveMinimumSeparation(
+                    enemy.FormationRadius,
+                    candidate.FormationRadius,
+                    _arenaSetup.LayerSpacing,
+                    _arenaSetup.FormationSeparationRatio);
+            bool intersectsTarget =
+                index < targetBodies.Count &&
+                CircularEnemyFormationSolver.TryResolveOuterContactRadius(
+                    state.ApproachDirection,
+                    targetBodies[index].Position,
+                    separation,
+                    out _);
+            bool intersectsCurrent =
+                index < currentBodies.Count &&
+                CircularEnemyFormationSolver.TryResolveOuterContactRadius(
+                    state.ApproachDirection,
+                    currentBodies[index].Position,
+                    separation,
+                    out _);
+            bool radialPathsCanContact = false;
+            if (index < targetBodies.Count && index < currentBodies.Count)
             {
-                maximumFormationRadius = Mathf.Max(
-                    maximumFormationRadius,
-                    candidate.FormationRadius);
+                Vector2 candidateDirection =
+                    targetBodies[index].Position.sqrMagnitude > 0.0001f
+                        ? targetBodies[index].Position.normalized
+                        : currentBodies[index].Position.normalized;
+                float pathDistanceSquared =
+                    CircularEnemyFormationSolver
+                        .ResolveMinimumRadialPathDistanceSquared(
+                            state.ApproachDirection,
+                            state.TargetPosition.magnitude,
+                            state.ResolvedPosition.magnitude,
+                            candidateDirection,
+                            targetBodies[index].Position.magnitude,
+                            currentBodies[index].Position.magnitude);
+                radialPathsCanContact = pathDistanceSquared <=
+                    separation * separation +
+                    FormationArrivalTolerance;
+            }
+            if (intersectsTarget || intersectsCurrent ||
+                radialPathsCanContact ||
+                ReferenceEquals(candidate, state.Blocker))
+            {
+                state.PotentialBlockers.Add(candidate);
             }
         }
-        return maximumFormationRadius;
     }
 
-    private float ResolveFormationSpawnRadius(
-        EnemyRuntime enemy,
-        int sectorIndex,
-        int layerIndex)
+    private bool RebuildNaturalFormationTopology(
+        IReadOnlyDictionary<EnemyRuntime, Vector2> directionOverrides = null,
+        bool allowDirectionRetries = false,
+        bool reprojectCurrentPositions = false)
     {
-        Vector2 estimatedCell = EstimateFormationCellPosition(
-            enemy,
-            sectorIndex,
-            layerIndex);
-        float estimatedTargetRadius = estimatedCell.magnitude;
-        float estimatedBaseRadius = EstimateFormationCellPosition(
-            enemy,
-            sectorIndex,
-            0).magnitude;
-        return Mathf.Max(
-            estimatedTargetRadius,
-            _formationSpawnRadius +
-            Mathf.Max(0f, estimatedTargetRadius - estimatedBaseRadius));
-    }
+        if (!_arenaSetup.UsesBattleCore)
+            return true;
 
-    private void CompactFormationSector(int sectorIndex)
-    {
-        _circularEnemySnapshot.Clear();
-        foreach (KeyValuePair<EnemyRuntime, CircularEnemyState> entry in
-                 _circularEnemyStates)
-        {
-            if (entry.Key != null && entry.Value != null &&
-                entry.Value.SectorIndex == sectorIndex)
-            {
-                _circularEnemySnapshot.Add(entry.Key);
-            }
-        }
-        _circularEnemySnapshot.Sort((left, right) =>
+        EnsureFormationRadii();
+        RefreshFormationOrdersIfStale();
+        int maximumLayers = Mathf.Max(1, _arenaSetup.MaximumLayerCount);
+        int maximumPerLayer = Mathf.Max(
+            1,
+            _arenaSetup.MaximumEnemiesPerLayer);
+        List<int> depthCounts = new(maximumLayers);
+        for (int depth = 0; depth < maximumLayers; depth++)
+            depthCounts.Add(0);
+
+        List<EnemyRuntime> settledEnemies = new(
+            _formationStableOrder.Count);
+        List<CircularEnemyFormationBody> targetBodies = new(
+            _formationStableOrder.Count);
+        List<CircularEnemyFormationBody> currentBodies = new(
+            _formationStableOrder.Count);
+        List<FormationResolution> resolutions = new(
+            _formationStableOrder.Count);
+        List<EnemyRuntime> rebuildOrder = new(_formationStableOrder);
+        rebuildOrder.Sort((left, right) =>
         {
             CircularEnemyState leftState = _circularEnemyStates[left];
             CircularEnemyState rightState = _circularEnemyStates[right];
-            int layerOrder = leftState.LayerIndex.CompareTo(
-                rightState.LayerIndex);
-            return layerOrder != 0
-                ? layerOrder
+            int depthOrder = leftState.ContactDepth.CompareTo(
+                rightState.ContactDepth);
+            return depthOrder != 0
+                ? depthOrder
                 : leftState.StableOrder.CompareTo(rightState.StableOrder);
         });
-        for (int index = 0; index < _circularEnemySnapshot.Count; index++)
-            _circularEnemyStates[_circularEnemySnapshot[index]].LayerIndex =
-                index;
-        _circularEnemySnapshot.Clear();
+        bool topologyFailed = false;
+        foreach (EnemyRuntime enemy in rebuildOrder)
+        {
+            if (enemy == null ||
+                !_circularEnemyStates.TryGetValue(
+                    enemy,
+                    out CircularEnemyState state))
+            {
+                continue;
+            }
+
+            Vector2 preferredDirection = state.ApproachDirection;
+            if (directionOverrides != null &&
+                directionOverrides.TryGetValue(
+                    enemy,
+                    out Vector2 overriddenDirection) &&
+                overriddenDirection.sqrMagnitude > 0.0001f)
+            {
+                preferredDirection = overriddenDirection.normalized;
+            }
+
+            if (!TryResolveExistingFormationDirection(
+                    enemy,
+                    state,
+                    preferredDirection,
+                    settledEnemies,
+                    targetBodies,
+                    currentBodies,
+                    depthCounts,
+                    maximumPerLayer,
+                    maximumLayers,
+                    allowDirectionRetries,
+                    directionOverrides == null ||
+                    !directionOverrides.ContainsKey(enemy),
+                    out FormationResolution resolution))
+            {
+                topologyFailed = true;
+                break;
+            }
+
+            resolutions.Add(resolution);
+            settledEnemies.Add(enemy);
+            targetBodies.Add(new CircularEnemyFormationBody(
+                resolution.Solution.TargetPosition,
+                enemy.FormationRadius,
+                resolution.Solution.ContactDepth));
+            currentBodies.Add(new CircularEnemyFormationBody(
+                state.ResolvedPosition,
+                enemy.FormationRadius,
+                resolution.Solution.ContactDepth));
+            depthCounts[resolution.Solution.ContactDepth]++;
+        }
+
+        if (topologyFailed)
+            return false;
+
+        foreach (FormationResolution resolution in resolutions)
+        {
+            CircularEnemyState state =
+                _circularEnemyStates[resolution.Enemy];
+            float currentRadius = state.ResolvedPosition.magnitude;
+            bool directionChanged =
+                Vector2.Dot(
+                    state.ApproachDirection,
+                    resolution.Direction) < 0.9999f;
+            state.ApproachDirection = resolution.Direction;
+            if (directionChanged && reprojectCurrentPositions)
+            {
+                state.ResolvedPosition =
+                    resolution.Direction * currentRadius;
+            }
+            state.TargetPosition = resolution.Solution.TargetPosition;
+            state.TargetRadius = state.TargetPosition.magnitude;
+            state.DefenseLineRadius = _formationDefenseLineRadius;
+            state.ContactDepth = resolution.Solution.ContactDepth;
+            state.LayerIndex = state.ContactDepth;
+            state.SectorIndex = state.StableOrder %
+                Mathf.Max(1, _arenaSetup.MaximumEnemiesPerLayer);
+            state.Blocker = resolution.Blocker;
+            state.PotentialBlockers.Clear();
+            if (resolution.PotentialBlockers != null)
+            {
+                foreach (EnemyRuntime blocker in
+                         resolution.PotentialBlockers)
+                {
+                    state.PotentialBlockers.Add(blocker);
+                }
+            }
+            UpdateFormationApproachProgress(state);
+        }
+
+        RefreshFormationOrders();
+        return true;
     }
 
-    private void RefreshFormationTargets()
+    private bool TryResolveExistingFormationDirection(
+        EnemyRuntime enemy,
+        CircularEnemyState state,
+        Vector2 preferredDirection,
+        IReadOnlyList<EnemyRuntime> settledEnemies,
+        IReadOnlyList<CircularEnemyFormationBody> targetBodies,
+        IReadOnlyList<CircularEnemyFormationBody> currentBodies,
+        IReadOnlyList<int> depthCounts,
+        int maximumPerLayer,
+        int maximumLayers,
+        bool allowsDirectionChanges,
+        bool allowsPreservedTarget,
+        out FormationResolution resolution)
     {
-        if (!_arenaSetup.UsesBattleCore)
-            return;
-
-        EnsureFormationRadii();
-        int sectorCount = Mathf.Max(1, _arenaSetup.LaneCount);
-        for (int sector = 0; sector < sectorCount; sector++)
-            CompactFormationSector(sector);
-
-        float maximumFormationRadius = 0f;
-        foreach (EnemyRuntime enemy in _circularEnemyStates.Keys)
+        resolution = default;
+        bool hasLiveAssignedBlocker = state.ContactDepth == 0 ||
+            state.Blocker != null &&
+            _circularEnemyStates.ContainsKey(state.Blocker);
+        if (allowsPreservedTarget && hasLiveAssignedBlocker &&
+            TryResolvePreservedFormationTarget(
+                enemy,
+                state,
+                preferredDirection,
+                settledEnemies,
+                targetBodies,
+                currentBodies,
+                depthCounts,
+                maximumPerLayer,
+                maximumLayers,
+                out resolution))
         {
-            if (enemy != null)
+            return true;
+        }
+
+        int maximumAttempts = allowsDirectionChanges
+            ? CircularEnemyFormationSolver.MaximumDirectionAttempts
+            : 0;
+        for (int attempt = -1;
+             attempt < maximumAttempts;
+             attempt++)
+        {
+            Vector2 direction = attempt < 0
+                ? preferredDirection
+                : CircularEnemyFormationSolver
+                    .ResolveDeterministicDirection(
+                        _formationSeed,
+                        state.StableOrder,
+                        attempt);
+            if (!CircularEnemyFormationSolver.TryResolveTarget(
+                    direction,
+                    enemy.FormationRadius,
+                    _formationDefenseLineRadius,
+                    _arenaSetup.LayerSpacing,
+                    _arenaSetup.FormationSeparationRatio,
+                    targetBodies,
+                    depthCounts,
+                    maximumPerLayer,
+                    maximumLayers,
+                    out CircularEnemyFormationSolution solution))
             {
-                maximumFormationRadius = Mathf.Max(
-                    maximumFormationRadius,
+                if (attempt < 0 && allowsPreservedTarget &&
+                    TryResolvePreservedFormationTarget(
+                        enemy,
+                        state,
+                        preferredDirection,
+                        settledEnemies,
+                        targetBodies,
+                        currentBodies,
+                        depthCounts,
+                        maximumPerLayer,
+                        maximumLayers,
+                        out resolution))
+                {
+                    return true;
+                }
+                continue;
+            }
+
+            EnemyRuntime blocker = solution.BlockerIndex >= 0 &&
+                                   solution.BlockerIndex <
+                                       settledEnemies.Count
+                ? settledEnemies[solution.BlockerIndex]
+                : null;
+            CircularEnemyState projectedState = new(
+                enemy.CoreAttackInterval,
+                direction,
+                state.ResolvedPosition.magnitude,
+                solution.TargetPosition,
+                _formationDefenseLineRadius,
+                state.StableOrder,
+                solution.ContactDepth,
+                blocker);
+            List<EnemyRuntime> potentialBlockers = new();
+            PopulatePotentialBlockers(
+                projectedState,
+                enemy,
+                settledEnemies,
+                targetBodies,
+                currentBodies);
+            potentialBlockers.AddRange(projectedState.PotentialBlockers);
+            resolution = new FormationResolution(
+                enemy,
+                direction.normalized,
+                solution,
+                blocker,
+                potentialBlockers);
+            return true;
+        }
+
+        return false;
+    }
+
+    private bool TryResolvePreservedFormationTarget(
+        EnemyRuntime enemy,
+        CircularEnemyState state,
+        Vector2 direction,
+        IReadOnlyList<EnemyRuntime> settledEnemies,
+        IReadOnlyList<CircularEnemyFormationBody> targetBodies,
+        IReadOnlyList<CircularEnemyFormationBody> currentBodies,
+        IReadOnlyList<int> depthCounts,
+        int maximumPerLayer,
+        int maximumLayers,
+        out FormationResolution resolution)
+    {
+        resolution = default;
+        int depth = state.ContactDepth;
+        if (depth < 0 || depth >= maximumLayers ||
+            depth >= depthCounts.Count ||
+            depthCounts[depth] >= maximumPerLayer ||
+            direction.sqrMagnitude <= 0.0001f ||
+            Vector2.Dot(
+                direction.normalized,
+                state.ApproachDirection) < 0.9999f)
+        {
+            return false;
+        }
+
+        int blockerIndex = -1;
+        for (int index = 0; index < targetBodies.Count; index++)
+        {
+            EnemyRuntime candidate = settledEnemies[index];
+            CircularEnemyFormationBody body = targetBodies[index];
+            float separation =
+                CircularEnemyFormationSolver.ResolveMinimumSeparation(
+                    enemy.FormationRadius,
+                    body.Radius,
+                    _arenaSetup.LayerSpacing,
+                    _arenaSetup.FormationSeparationRatio);
+            float distance = Vector2.Distance(
+                state.TargetPosition,
+                body.Position);
+            if (distance < separation - FormationArrivalTolerance)
+                return false;
+
+            if (depth > 0 && body.ContactDepth == depth - 1 &&
+                distance <= separation + FormationArrivalTolerance * 4f)
+            {
+                if (ReferenceEquals(candidate, state.Blocker))
+                    blockerIndex = index;
+                else if (blockerIndex < 0)
+                    blockerIndex = index;
+            }
+        }
+
+        if (depth > 0 && blockerIndex < 0)
+            return false;
+
+        EnemyRuntime blocker = blockerIndex >= 0
+            ? settledEnemies[blockerIndex]
+            : null;
+        CircularEnemyFormationSolution preserved = new(
+            state.TargetPosition,
+            depth,
+            blockerIndex);
+        CircularEnemyState projectedState = new(
+            enemy.CoreAttackInterval,
+            state.ApproachDirection,
+            state.ResolvedPosition.magnitude,
+            state.TargetPosition,
+            _formationDefenseLineRadius,
+            state.StableOrder,
+            depth,
+            blocker);
+        PopulatePotentialBlockers(
+            projectedState,
+            enemy,
+            settledEnemies,
+            targetBodies,
+            currentBodies);
+        List<EnemyRuntime> potentialBlockers = new(
+            projectedState.PotentialBlockers);
+        resolution = new FormationResolution(
+            enemy,
+            state.ApproachDirection,
+            preserved,
+            blocker,
+            potentialBlockers);
+        return true;
+    }
+
+    private void RefreshFormationOrdersIfStale()
+    {
+        if (_formationStableOrder.Count != _circularEnemyStates.Count)
+            RefreshFormationOrders();
+    }
+
+    private void RefreshFormationOrders()
+    {
+        _formationStableOrder.Clear();
+        foreach (KeyValuePair<EnemyRuntime, CircularEnemyState> entry in
+                 _circularEnemyStates)
+        {
+            if (entry.Key != null && entry.Key.Health > 0 &&
+                entry.Value != null &&
+                _enemyPlacements.ContainsKey(entry.Key))
+            {
+                _formationStableOrder.Add(entry.Key);
+            }
+        }
+        _formationStableOrder.Sort((left, right) =>
+            _circularEnemyStates[left].StableOrder.CompareTo(
+                _circularEnemyStates[right].StableOrder));
+
+        _formationMovementOrder.Clear();
+        _formationMovementOrder.AddRange(_formationStableOrder);
+    }
+
+    private void RebuildFormationCollisionNeighborCache()
+    {
+        foreach (EnemyRuntime enemy in _formationStableOrder)
+        {
+            if (!_circularEnemyStates.TryGetValue(
+                    enemy,
+                    out CircularEnemyState state))
+            {
+                continue;
+            }
+
+            state.CollisionNeighbors.Clear();
+        }
+
+        foreach (EnemyRuntime enemy in _formationStableOrder)
+        {
+            if (!_circularEnemyStates.TryGetValue(
+                    enemy,
+                    out CircularEnemyState state))
+            {
+                continue;
+            }
+
+            for (int index = state.PotentialBlockers.Count - 1;
+                 index >= 0;
+                 index--)
+            {
+                EnemyRuntime neighbor = state.PotentialBlockers[index];
+                if (neighbor == null || ReferenceEquals(neighbor, enemy) ||
+                    !_circularEnemyStates.TryGetValue(
+                        neighbor,
+                        out CircularEnemyState neighborState))
+                {
+                    state.PotentialBlockers.RemoveAt(index);
+                    continue;
+                }
+
+                if (!state.CollisionNeighbors.Contains(neighbor))
+                    state.CollisionNeighbors.Add(neighbor);
+                if (!neighborState.CollisionNeighbors.Contains(enemy))
+                    neighborState.CollisionNeighbors.Add(enemy);
+            }
+        }
+    }
+
+    private void RefreshFormationCollisionAdjacency()
+    {
+        List<EnemyRuntime> stagedEnemies = new(
+            _formationStableOrder.Count);
+        List<CircularEnemyFormationBody> targetBodies = new(
+            _formationStableOrder.Count);
+        List<CircularEnemyFormationBody> currentBodies = new(
+            _formationStableOrder.Count);
+        foreach (EnemyRuntime enemy in _formationStableOrder)
+        {
+            if (enemy == null ||
+                !_circularEnemyStates.TryGetValue(
+                    enemy,
+                    out CircularEnemyState state))
+            {
+                continue;
+            }
+
+            PopulatePotentialBlockers(
+                state,
+                enemy,
+                stagedEnemies,
+                targetBodies,
+                currentBodies);
+            stagedEnemies.Add(enemy);
+            targetBodies.Add(new CircularEnemyFormationBody(
+                state.TargetPosition,
+                enemy.FormationRadius,
+                state.ContactDepth));
+            currentBodies.Add(new CircularEnemyFormationBody(
+                state.ResolvedPosition,
+                enemy.FormationRadius,
+                state.ContactDepth));
+        }
+
+        RebuildFormationCollisionNeighborCache();
+    }
+
+    private void RebuildFormationMovementSpatialIndex()
+    {
+        foreach (List<EnemyRuntime> bucket in
+                 _formationMovementSpatialBuckets.Values)
+        {
+            bucket.Clear();
+        }
+        _formationMovementSpatialCells.Clear();
+        _formationMovementMaximumRadius = 0f;
+
+        foreach (EnemyRuntime enemy in _formationMovementOrder)
+        {
+            if (enemy != null && enemy.Health > 0 &&
+                _circularEnemyStates.ContainsKey(enemy))
+            {
+                _formationMovementMaximumRadius = Mathf.Max(
+                    _formationMovementMaximumRadius,
                     enemy.FormationRadius);
             }
         }
 
-        float angularSine = Mathf.Sin(Mathf.PI / sectorCount);
-        float angularSafeRadius = angularSine > 0.0001f
-            ? maximumFormationRadius *
-              _arenaSetup.FormationSeparationRatio / angularSine
-            : _formationDefenseLineRadius;
-        float defenseLineRadius = Mathf.Max(
-            _formationDefenseLineRadius,
-            angularSafeRadius);
+        _formationMovementSpatialCellSize = Mathf.Max(
+            0.1f,
+            CircularEnemyFormationSolver.ResolveMinimumSeparation(
+                _formationMovementMaximumRadius,
+                _formationMovementMaximumRadius,
+                _arenaSetup.LayerSpacing,
+                _arenaSetup.FormationSeparationRatio));
 
-        for (int sector = 0; sector < sectorCount; sector++)
+        foreach (EnemyRuntime enemy in _formationMovementOrder)
         {
-            _circularEnemySnapshot.Clear();
-            foreach (KeyValuePair<EnemyRuntime, CircularEnemyState> entry in
-                     _circularEnemyStates)
+            if (enemy == null || enemy.Health <= 0 ||
+                !_circularEnemyStates.TryGetValue(
+                    enemy,
+                    out CircularEnemyState state))
             {
-                if (entry.Key != null && entry.Value != null &&
-                    entry.Value.SectorIndex == sector)
-                {
-                    _circularEnemySnapshot.Add(entry.Key);
-                }
+                continue;
             }
-            _circularEnemySnapshot.Sort((left, right) =>
-                _circularEnemyStates[left].LayerIndex.CompareTo(
-                    _circularEnemyStates[right].LayerIndex));
 
-            float targetRadius = defenseLineRadius;
-            EnemyRuntime previousEnemy = null;
-            Vector2 direction = ResolveFormationSectorDirection(sector);
-            for (int layer = 0;
-                 layer < _circularEnemySnapshot.Count;
-                 layer++)
-            {
-                EnemyRuntime enemy = _circularEnemySnapshot[layer];
-                CircularEnemyState state = _circularEnemyStates[enemy];
-                if (previousEnemy != null)
-                {
-                    float separation =
-                        (previousEnemy.FormationRadius +
-                         enemy.FormationRadius) *
-                        _arenaSetup.FormationSeparationRatio;
-                    targetRadius += Mathf.Max(
-                        _arenaSetup.LayerSpacing,
-                        separation);
-                }
-
-                state.SectorIndex = sector;
-                state.LayerIndex = layer;
-                state.SpawnDirection = direction;
-                state.DefenseLineRadius = defenseLineRadius;
-                state.TargetRadius = targetRadius;
-                UpdateFormationApproachProgress(state);
-                previousEnemy = enemy;
-            }
-            _circularEnemySnapshot.Clear();
+            AddToFormationMovementSpatialIndex(
+                enemy,
+                ResolveFormationMovementSpatialCell(
+                    state.ResolvedPosition));
         }
+    }
+
+    private void PopulateFormationMovementBodies(
+        EnemyRuntime movingEnemy,
+        Vector2 start,
+        float movementDistance)
+    {
+        _formationMovementBlockerBodies.Clear();
+        if (movingEnemy == null ||
+            _formationMovementSpatialBuckets.Count == 0)
+        {
+            return;
+        }
+
+        float maximumSeparation =
+            CircularEnemyFormationSolver.ResolveMinimumSeparation(
+                movingEnemy.FormationRadius,
+                _formationMovementMaximumRadius,
+                _arenaSetup.LayerSpacing,
+                _arenaSetup.FormationSeparationRatio);
+        float queryRadius = Mathf.Max(0f, movementDistance) +
+            maximumSeparation * 3f + FormationArrivalTolerance;
+        Vector2Int minimumCell = ResolveFormationMovementSpatialCell(
+            start - Vector2.one * queryRadius);
+        Vector2Int maximumCell = ResolveFormationMovementSpatialCell(
+            start + Vector2.one * queryRadius);
+        for (int x = minimumCell.x; x <= maximumCell.x; x++)
+        {
+            for (int y = minimumCell.y; y <= maximumCell.y; y++)
+            {
+                if (!_formationMovementSpatialBuckets.TryGetValue(
+                        new Vector2Int(x, y),
+                        out List<EnemyRuntime> bucket))
+                {
+                    continue;
+                }
+
+                foreach (EnemyRuntime neighbor in bucket)
+                {
+                    if (neighbor == null || neighbor.Health <= 0 ||
+                        ReferenceEquals(neighbor, movingEnemy) ||
+                        !_circularEnemyStates.TryGetValue(
+                            neighbor,
+                            out CircularEnemyState neighborState))
+                    {
+                        continue;
+                    }
+
+                    _formationMovementBlockerBodies.Add(
+                        new CircularEnemyFormationBody(
+                            neighborState.ResolvedPosition,
+                            neighbor.FormationRadius,
+                            neighborState.ContactDepth));
+                }
+            }
+        }
+    }
+
+    private void UpdateFormationMovementSpatialIndex(
+        EnemyRuntime enemy,
+        Vector2 previousPosition,
+        Vector2 currentPosition)
+    {
+        if (enemy == null)
+            return;
+
+        Vector2Int previousCell =
+            _formationMovementSpatialCells.TryGetValue(
+                enemy,
+                out Vector2Int indexedCell)
+                ? indexedCell
+                : ResolveFormationMovementSpatialCell(previousPosition);
+        Vector2Int currentCell =
+            ResolveFormationMovementSpatialCell(currentPosition);
+        if (previousCell == currentCell)
+            return;
+
+        if (_formationMovementSpatialBuckets.TryGetValue(
+                previousCell,
+                out List<EnemyRuntime> previousBucket))
+        {
+            previousBucket.Remove(enemy);
+        }
+        AddToFormationMovementSpatialIndex(enemy, currentCell);
+    }
+
+    private void AddToFormationMovementSpatialIndex(
+        EnemyRuntime enemy,
+        Vector2Int cell)
+    {
+        if (!_formationMovementSpatialBuckets.TryGetValue(
+                cell,
+                out List<EnemyRuntime> bucket))
+        {
+            bucket = new List<EnemyRuntime>();
+            _formationMovementSpatialBuckets.Add(cell, bucket);
+        }
+        bucket.Add(enemy);
+        _formationMovementSpatialCells[enemy] = cell;
+    }
+
+    private Vector2Int ResolveFormationMovementSpatialCell(
+        Vector2 position)
+    {
+        float cellSize = Mathf.Max(
+            0.1f,
+            _formationMovementSpatialCellSize);
+        return new Vector2Int(
+            Mathf.FloorToInt(position.x / cellSize),
+            Mathf.FloorToInt(position.y / cellSize));
+    }
+
+    private void ClearFormationMovementSpatialIndex()
+    {
+        _formationMovementSpatialBuckets.Clear();
+        _formationMovementSpatialCells.Clear();
+        _formationMovementMaximumRadius = 0f;
+        _formationMovementSpatialCellSize = 1f;
     }
 
     private void UpdateFormationApproachProgress(CircularEnemyState state)
@@ -9336,8 +10103,7 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
         if (state == null)
             return false;
 
-        Vector2 target = state.SpawnDirection * state.TargetRadius;
-        return (state.ResolvedPosition - target).sqrMagnitude <=
+        return (state.ResolvedPosition - state.TargetPosition).sqrMagnitude <=
                FormationArrivalTolerance * FormationArrivalTolerance;
     }
 
@@ -9362,30 +10128,77 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
         EnemyRuntime enemy,
         CircularEnemyState state)
     {
-        if (enemy == null || state == null || state.LayerIndex <= 0)
+        if (enemy == null || state == null)
             return state != null ? state.TargetRadius : 0f;
 
-        foreach (KeyValuePair<EnemyRuntime, CircularEnemyState> entry in
-                 _circularEnemyStates)
+        float result = state.TargetRadius;
+        if (state.Blocker != null && state.Blocker.Health > 0 &&
+            _circularEnemyStates.TryGetValue(
+                state.Blocker,
+                out CircularEnemyState directBlockerState))
         {
-            CircularEnemyState innerState = entry.Value;
-            if (entry.Key == null || innerState == null ||
-                innerState.SectorIndex != state.SectorIndex ||
-                innerState.LayerIndex != state.LayerIndex - 1)
+            result = ResolveFormationPathClearanceRadius(
+                enemy,
+                state,
+                state.Blocker,
+                directBlockerState,
+                result);
+        }
+        foreach (EnemyRuntime blocker in state.PotentialBlockers)
+        {
+            if (blocker == null || blocker.Health <= 0 ||
+                ReferenceEquals(blocker, state.Blocker) ||
+                !_circularEnemyStates.TryGetValue(
+                    blocker,
+                    out CircularEnemyState blockerState))
             {
                 continue;
             }
 
-            float separation = Mathf.Max(
-                _arenaSetup.LayerSpacing,
-                (entry.Key.FormationRadius + enemy.FormationRadius) *
-                _arenaSetup.FormationSeparationRatio);
-            return Mathf.Max(
-                state.TargetRadius,
-                innerState.CurrentRadius + separation);
+            result = ResolveFormationPathClearanceRadius(
+                enemy,
+                state,
+                blocker,
+                blockerState,
+                result);
         }
 
-        return state.TargetRadius;
+        return result;
+    }
+
+    private float ResolveFormationPathClearanceRadius(
+        EnemyRuntime enemy,
+        CircularEnemyState state,
+        EnemyRuntime blocker,
+        CircularEnemyState blockerState,
+        float minimumRadius)
+    {
+        if (enemy == null || state == null || blocker == null ||
+            blockerState == null)
+        {
+            return minimumRadius;
+        }
+
+        float separation =
+            CircularEnemyFormationSolver.ResolveMinimumSeparation(
+                enemy.FormationRadius,
+                blocker.FormationRadius,
+                _arenaSetup.LayerSpacing,
+                _arenaSetup.FormationSeparationRatio);
+        if (!CircularEnemyFormationSolver
+            .TryResolveOuterCapsuleContactRadius(
+                state.ApproachDirection,
+                blockerState.ResolvedPosition,
+                blockerState.TargetPosition,
+                separation,
+                out float blockedRadius))
+        {
+            return minimumRadius;
+        }
+
+        return Mathf.Max(
+            minimumRadius,
+            blockedRadius);
     }
 
     private void ResolveCircularEnemyRadii(

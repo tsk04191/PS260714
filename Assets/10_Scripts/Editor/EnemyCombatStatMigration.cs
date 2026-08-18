@@ -7,6 +7,7 @@ public static class EnemyCombatStatMigration
         "Tools/PS260714/Migrations/";
     private const int AttackPowerSchemaVersion = 1;
     private const int FormationSchemaVersion = 2;
+    private const int ForwardSearchSchemaVersion = 3;
 
     [MenuItem(MenuRoot + "Audit Enemy Combat Stats")]
     private static void Audit()
@@ -94,10 +95,13 @@ public static class EnemyCombatStatMigration
             "coreAttackDamage");
         SerializedProperty formationRadius = serialized.FindProperty(
             "formationRadius");
+        SerializedProperty forwardSearchAngle = serialized.FindProperty(
+            "forwardSearchAngle");
         SerializedProperty coreAttackRange = serialized.FindProperty(
             "coreAttackRange");
         if (version == null || attackPower == null ||
             coreAttackDamage == null || formationRadius == null ||
+            forwardSearchAngle == null ||
             coreAttackRange == null)
         {
             Debug.LogError(
@@ -122,6 +126,12 @@ public static class EnemyCombatStatMigration
             formationRadius.floatValue =
                 EnemySO.GetDefaultFormationRadius(enemy.Type);
             coreAttackRange.floatValue = 0f;
+        }
+
+        if (sourceVersion < ForwardSearchSchemaVersion)
+        {
+            forwardSearchAngle.floatValue =
+                EnemySO.DefaultForwardSearchAngle;
         }
 
         version.intValue = EnemySO.CurrentCombatStatSchemaVersion;

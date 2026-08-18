@@ -105,6 +105,9 @@ public sealed class EnemyRosterCatalogGeneratorTests
             Is.True);
         Assert.That(baseline.RecommendedMaxPerWave, Is.Zero);
         Assert.That(baseline.CoreAttackRange, Is.Zero);
+        Assert.That(
+            baseline.ForwardSearchAngle,
+            Is.EqualTo(EnemySO.DefaultForwardSearchAngle));
     }
 
     [Test]

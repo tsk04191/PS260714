@@ -408,7 +408,192 @@ public sealed class StageSelectPage : RuntimeMenuPageBase
 
     public bool SyncEditorUi(out string error)
     {
-        return ValidateEditorUi(out error);
+        if (Application.isPlaying)
+        {
+            error = "Stage Select UI cannot be synchronized in Play Mode.";
+            return false;
+        }
+
+        if (!TryBindStageContainers(out error))
+            return false;
+
+        IReadOnlyList<DungeonDefinition> definitions =
+            DungeonDefinitionCatalog.GetStageSelectDefinitions();
+        List<Transform> orderedNodes = new(definitions.Count);
+        List<string> expectedConnectorNames = new(
+            Mathf.Max(0, definitions.Count - 1));
+        for (int index = 0; index < definitions.Count; index++)
+        {
+            DungeonDefinition definition = definitions[index];
+            Transform node = definition != null
+                ? _stageContent.Find(GetStageNodeName(definition))
+                : null;
+            if (!HasRequiredStageNodeReferences(node))
+            {
+                error = $"{name}: saved stage node for " +
+                        $"'{definition?.DungeonId ?? "unknown"}' is " +
+                        "missing or incomplete.";
+                return false;
+            }
+
+            orderedNodes.Add(node);
+            if (index > 0)
+            {
+                expectedConnectorNames.Add(GetConnectorName(
+                    definitions[index - 1],
+                    definition));
+            }
+        }
+
+        if (!TryReorderSavedStageChildrenForEditor(
+                _stageContent,
+                orderedNodes,
+                expectedConnectorNames,
+                out error))
+        {
+            error = $"{name}: {error}";
+            return false;
+        }
+
+        int numberedStageIndex = 0;
+        for (int index = 0; index < definitions.Count; index++)
+        {
+            TextMeshProUGUI sequence = orderedNodes[index].Find(
+                    TitleBannerObjectName + "/" + SequenceTextObjectName)
+                ?.GetComponent<TextMeshProUGUI>();
+            if (sequence != null)
+            {
+                sequence.text = definitions[index].IsPractice
+                    ? "PRACTICE"
+                    : $"STAGE {numberedStageIndex}";
+            }
+            if (!definitions[index].IsPractice)
+                numberedStageIndex++;
+        }
+
+        RefreshStageTrack(true);
+        return TryBindSavedStageUi(out error);
+    }
+
+    internal static bool TryReorderSavedStageChildrenForEditor(
+        RectTransform content,
+        IReadOnlyList<Transform> orderedNodes,
+        IReadOnlyList<string> expectedConnectorNames,
+        out string error)
+    {
+        error = string.Empty;
+        if (content == null || orderedNodes == null ||
+            expectedConnectorNames == null ||
+            expectedConnectorNames.Count !=
+            Mathf.Max(0, orderedNodes.Count - 1))
+        {
+            error = "saved Stage Select order is invalid.";
+            return false;
+        }
+
+        for (int index = 0; index < orderedNodes.Count; index++)
+        {
+            if (orderedNodes[index] == null ||
+                orderedNodes[index].parent != content)
+            {
+                error = "saved stage nodes do not belong to the Stage " +
+                        "Select content.";
+                return false;
+            }
+        }
+
+        List<Transform> connectors = new();
+        for (int index = 0; index < content.childCount; index++)
+        {
+            Transform child = content.GetChild(index);
+            if (!child.name.StartsWith(
+                    ConnectorPrefix,
+                    StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            if (child.Find("imgLine")?.GetComponent<Image>() == null)
+            {
+                error = $"saved connector '{child.name}' is incomplete.";
+                return false;
+            }
+            connectors.Add(child);
+        }
+
+        if (connectors.Count != expectedConnectorNames.Count)
+        {
+            error = $"saved connector count is {connectors.Count}, " +
+                    $"expected {expectedConnectorNames.Count}.";
+            return false;
+        }
+
+        Transform[] assigned = new Transform[connectors.Count];
+        HashSet<Transform> used = new();
+        for (int index = 0; index < expectedConnectorNames.Count; index++)
+        {
+            string expectedName = expectedConnectorNames[index];
+            for (int candidateIndex = 0;
+                 candidateIndex < connectors.Count;
+                 candidateIndex++)
+            {
+                Transform candidate = connectors[candidateIndex];
+                if (used.Contains(candidate) ||
+                    !string.Equals(
+                        candidate.name,
+                        expectedName,
+                        StringComparison.Ordinal))
+                {
+                    continue;
+                }
+
+                assigned[index] = candidate;
+                used.Add(candidate);
+                break;
+            }
+        }
+
+        int fallbackIndex = 0;
+        for (int index = 0; index < assigned.Length; index++)
+        {
+            if (assigned[index] != null)
+                continue;
+            while (fallbackIndex < connectors.Count &&
+                   used.Contains(connectors[fallbackIndex]))
+            {
+                fallbackIndex++;
+            }
+
+            if (fallbackIndex >= connectors.Count)
+            {
+                error = "saved connectors could not be reassigned.";
+                return false;
+            }
+
+            assigned[index] = connectors[fallbackIndex];
+            used.Add(connectors[fallbackIndex]);
+            fallbackIndex++;
+        }
+
+        for (int index = 0; index < assigned.Length; index++)
+        {
+            assigned[index].name = ConnectorPrefix +
+                                   "sync_pending_" +
+                                   index.ToString("D2") + "_" +
+                                   assigned[index].GetInstanceID();
+        }
+        for (int index = 0; index < assigned.Length; index++)
+            assigned[index].name = expectedConnectorNames[index];
+
+        int siblingIndex = 0;
+        for (int index = 0; index < orderedNodes.Count; index++)
+        {
+            if (index > 0)
+                assigned[index - 1].SetSiblingIndex(siblingIndex++);
+            orderedNodes[index].SetSiblingIndex(siblingIndex++);
+        }
+
+        return true;
     }
 #endif
 

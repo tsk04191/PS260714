@@ -419,6 +419,9 @@ public sealed class EnemyEditorWindow : EditorWindow
                 EditorStyles.boldLabel);
             DrawProperty("approachSpeed", "Approach Speed");
             DrawProperty("formationRadius", "Formation Radius");
+            DrawProperty(
+                "forwardSearchAngle",
+                "Forward Search Angle");
             DrawProperty("attackPower", "Attack Power");
             DrawProperty(
                 "coreAttackDamage",
@@ -1723,6 +1726,8 @@ public sealed class EnemyEditorWindow : EditorWindow
             serialized.FindProperty("coreAttackDamage").intValue;
         serialized.FindProperty("formationRadius").floatValue =
             EnemySO.GetDefaultFormationRadius(definition.Type);
+        serialized.FindProperty("forwardSearchAngle").floatValue =
+            EnemySO.DefaultForwardSearchAngle;
         serialized.FindProperty("coreAttackRange").floatValue = 0f;
         serialized.ApplyModifiedPropertiesWithoutUndo();
 

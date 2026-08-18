@@ -32,6 +32,10 @@ public sealed class BattleArchitectureRegressionTests
                 Is.False,
                 $"{definition.name} formation radius must be finite.");
             Assert.That(
+                definition.ForwardSearchAngle,
+                Is.InRange(0f, EnemySO.MaximumForwardSearchAngle),
+                $"{definition.name} forward search angle is invalid.");
+            Assert.That(
                 definition.CoreAttackRange,
                 Is.GreaterThanOrEqualTo(0f),
                 $"{definition.name} core range cannot be negative.");
@@ -45,6 +49,9 @@ public sealed class BattleArchitectureRegressionTests
             Assert.That(
                 enemy.FormationRadius,
                 Is.EqualTo(definition.FormationRadius));
+            Assert.That(
+                enemy.ForwardSearchAngle,
+                Is.EqualTo(definition.ForwardSearchAngle));
             Assert.That(
                 enemy.CoreAttackRange,
                 Is.EqualTo(definition.CoreAttackRange));

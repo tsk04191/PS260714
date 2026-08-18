@@ -1098,6 +1098,78 @@ public sealed class CharacterP0RegressionTests
     }
 
     [Test]
+    public void StageSelectSync_ReusesConnectorsWhenStageOrderChanges()
+    {
+        GameObject contentObject = new(
+            "grpStageContent",
+            typeof(RectTransform));
+        _createdObjects.Add(contentObject);
+        RectTransform content = contentObject.GetComponent<RectTransform>();
+
+        Transform tutorial = CreateStageSyncChild(
+            content,
+            "btnStage_tutorial_field");
+        Transform tutorialPractice = CreateStageSyncConnector(
+            content,
+            "imgStageConnector_tutorial_field_practice_battle");
+        Transform practice = CreateStageSyncChild(
+            content,
+            "btnStage_practice_battle");
+        Transform practiceFree = CreateStageSyncConnector(
+            content,
+            "imgStageConnector_practice_battle_free_battle");
+        Transform free = CreateStageSyncChild(
+            content,
+            "btnStage_free_battle");
+
+        Assert.That(
+            StageSelectPage.TryReorderSavedStageChildrenForEditor(
+                content,
+                new[] { practice, tutorial, free },
+                new[]
+                {
+                    "imgStageConnector_practice_battle_tutorial_field",
+                    "imgStageConnector_tutorial_field_free_battle"
+                },
+                out string error),
+            Is.True,
+            error);
+
+        Assert.That(content.GetChild(0), Is.SameAs(practice));
+        Assert.That(content.GetChild(1), Is.SameAs(tutorialPractice));
+        Assert.That(
+            tutorialPractice.name,
+            Is.EqualTo(
+                "imgStageConnector_practice_battle_tutorial_field"));
+        Assert.That(content.GetChild(2), Is.SameAs(tutorial));
+        Assert.That(content.GetChild(3), Is.SameAs(practiceFree));
+        Assert.That(
+            practiceFree.name,
+            Is.EqualTo(
+                "imgStageConnector_tutorial_field_free_battle"));
+        Assert.That(content.GetChild(4), Is.SameAs(free));
+    }
+
+    private static Transform CreateStageSyncChild(
+        Transform parent,
+        string objectName)
+    {
+        GameObject child = new(objectName, typeof(RectTransform));
+        child.transform.SetParent(parent, false);
+        return child.transform;
+    }
+
+    private static Transform CreateStageSyncConnector(
+        Transform parent,
+        string objectName)
+    {
+        Transform connector = CreateStageSyncChild(parent, objectName);
+        GameObject line = new("imgLine", typeof(RectTransform), typeof(Image));
+        line.transform.SetParent(connector, false);
+        return connector;
+    }
+
+    [Test]
     public void DungeonProgressData_RoundTripsClearStateAndCount()
     {
         DungeonProgressData source = new();

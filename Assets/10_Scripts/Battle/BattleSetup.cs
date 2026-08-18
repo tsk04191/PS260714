@@ -11,10 +11,16 @@ public enum BattleArenaMode
 public sealed class BattleArenaSetup
 {
     public const int DefaultCoreMaximumHealth = 100;
-    public const int DefaultLaneCount = 12;
+    public const int DefaultMaximumEnemiesPerLayer = 12;
+    public const int MinimumEnemiesPerLayer = 4;
+    public const int MaximumEnemiesPerLayerLimit = 64;
+    public const int DefaultLaneCount = DefaultMaximumEnemiesPerLayer;
     public const int DefaultMaximumLayerCount = 3;
     public const int MinimumLayerCount = 1;
     public const int MaximumLayerCountLimit = 8;
+    public const int DefaultMaximumActiveEnemies = 100;
+    public const int MinimumMaximumActiveEnemies = 4;
+    public const int MaximumActiveEnemiesLimit = 512;
     public const float DefaultLayerSpacing = 0.55f;
     public const float MinimumLayerSpacing = 0.1f;
     public const float MaximumLayerSpacing = 2f;
@@ -37,15 +43,17 @@ public sealed class BattleArenaSetup
 
     public BattleArenaMode Mode { get; }
     public int CoreMaximumHealth { get; }
-    public int LaneCount { get; }
+    public int MaximumEnemiesPerLayer { get; }
+    public int LaneCount => MaximumEnemiesPerLayer;
     public float WallRadiusNormalized { get; }
     public float SpawnRadiusNormalized { get; }
     public float WorldRadius { get; }
     public int MaximumLayerCount { get; }
+    public int MaximumActiveEnemies { get; }
     public float LayerSpacing { get; }
     public float FormationSeparationRatio { get; }
     public int MaximumEnemyCapacity => UsesBattleCore
-        ? LaneCount * MaximumLayerCount
+        ? MaximumActiveEnemies
         : 0;
     public bool UsesBattleCore => Mode == BattleArenaMode.CircularDefense;
 
@@ -59,24 +67,29 @@ public sealed class BattleArenaSetup
         int maximumLayerCount = DefaultMaximumLayerCount,
         float layerSpacing = DefaultLayerSpacing,
         float formationSeparationRatio =
-            DefaultFormationSeparationRatio)
+            DefaultFormationSeparationRatio,
+        int? maximumActiveEnemies = null)
     {
         Mode = mode;
         if (mode != BattleArenaMode.CircularDefense)
         {
             CoreMaximumHealth = 0;
-            LaneCount = 0;
+            MaximumEnemiesPerLayer = 0;
             WallRadiusNormalized = 0f;
             SpawnRadiusNormalized = 0f;
             WorldRadius = 0f;
             MaximumLayerCount = 0;
+            MaximumActiveEnemies = 0;
             LayerSpacing = 0f;
             FormationSeparationRatio = 0f;
             return;
         }
 
         CoreMaximumHealth = Mathf.Max(1, coreMaximumHealth);
-        LaneCount = Mathf.Clamp(laneCount, 4, 64);
+        MaximumEnemiesPerLayer = Mathf.Clamp(
+            laneCount,
+            MinimumEnemiesPerLayer,
+            MaximumEnemiesPerLayerLimit);
         WallRadiusNormalized = Mathf.Clamp(
             wallRadiusNormalized,
             0.12f,
@@ -90,6 +103,10 @@ public sealed class BattleArenaSetup
             maximumLayerCount,
             MinimumLayerCount,
             MaximumLayerCountLimit);
+        MaximumActiveEnemies = Mathf.Clamp(
+            maximumActiveEnemies ?? DefaultMaximumActiveEnemies,
+            MinimumMaximumActiveEnemies,
+            MaximumActiveEnemiesLimit);
         LayerSpacing = NormalizeFinite(
             layerSpacing,
             DefaultLayerSpacing,
@@ -111,18 +128,31 @@ public sealed class BattleArenaSetup
         int maximumLayerCount = DefaultMaximumLayerCount,
         float layerSpacing = DefaultLayerSpacing,
         float formationSeparationRatio =
-            DefaultFormationSeparationRatio)
+            DefaultFormationSeparationRatio,
+        int? maximumEnemiesPerLayer = null,
+        int? maximumActiveEnemies = null)
     {
+        int resolvedMaximumPerLayer = maximumEnemiesPerLayer ?? laneCount;
+        bool usesLegacyCapacityInputs =
+            maximumEnemiesPerLayer.HasValue ||
+            laneCount != DefaultLaneCount ||
+            maximumLayerCount != DefaultMaximumLayerCount;
+        int resolvedMaximumActiveEnemies = maximumActiveEnemies ??
+            (usesLegacyCapacityInputs
+                ? Mathf.Max(1, resolvedMaximumPerLayer) *
+                  Mathf.Max(1, maximumLayerCount)
+                : DefaultMaximumActiveEnemies);
         return new BattleArenaSetup(
             BattleArenaMode.CircularDefense,
             coreMaximumHealth,
-            laneCount,
+            resolvedMaximumPerLayer,
             wallRadiusNormalized,
             spawnRadiusNormalized,
             worldRadius,
             maximumLayerCount,
             layerSpacing,
-            formationSeparationRatio);
+            formationSeparationRatio,
+            resolvedMaximumActiveEnemies);
     }
 
     public BattleArenaSetup WithWorldRadius(float worldRadius)
@@ -131,13 +161,14 @@ public sealed class BattleArenaSetup
             ? new BattleArenaSetup(
                 Mode,
                 CoreMaximumHealth,
-                LaneCount,
+                MaximumEnemiesPerLayer,
                 WallRadiusNormalized,
                 SpawnRadiusNormalized,
                 worldRadius,
                 MaximumLayerCount,
                 LayerSpacing,
-                FormationSeparationRatio)
+                FormationSeparationRatio,
+                MaximumActiveEnemies)
             : this;
     }
 
@@ -147,13 +178,50 @@ public sealed class BattleArenaSetup
             ? new BattleArenaSetup(
                 Mode,
                 maximumHealth,
-                LaneCount,
+                MaximumEnemiesPerLayer,
                 WallRadiusNormalized,
                 SpawnRadiusNormalized,
                 WorldRadius,
                 MaximumLayerCount,
                 LayerSpacing,
-                FormationSeparationRatio)
+                FormationSeparationRatio,
+                MaximumActiveEnemies)
+            : this;
+    }
+
+    public BattleArenaSetup WithMaximumEnemiesPerLayer(
+        int maximumEnemiesPerLayer)
+    {
+        return UsesBattleCore
+            ? new BattleArenaSetup(
+                Mode,
+                CoreMaximumHealth,
+                maximumEnemiesPerLayer,
+                WallRadiusNormalized,
+                SpawnRadiusNormalized,
+                WorldRadius,
+                MaximumLayerCount,
+                LayerSpacing,
+                FormationSeparationRatio,
+                MaximumActiveEnemies)
+            : this;
+    }
+
+    public BattleArenaSetup WithMaximumActiveEnemies(
+        int maximumActiveEnemies)
+    {
+        return UsesBattleCore
+            ? new BattleArenaSetup(
+                Mode,
+                CoreMaximumHealth,
+                MaximumEnemiesPerLayer,
+                WallRadiusNormalized,
+                SpawnRadiusNormalized,
+                WorldRadius,
+                MaximumLayerCount,
+                LayerSpacing,
+                FormationSeparationRatio,
+                maximumActiveEnemies)
             : this;
     }
 
@@ -542,14 +610,21 @@ public sealed class BattleSetup
         Arena = arena ?? BattleArenaSetup.Legacy;
         Environment = environment ?? BattleEnvironmentSetup.Default;
         int defaultInitialCount = Arena.UsesBattleCore
-            ? Arena.LaneCount
+            ? Arena.MaximumEnemiesPerLayer
             : fieldSize * fieldSize;
+        int requestedInitialCount = System.Math.Max(
+            0,
+            initialEnemyCount > 0
+                ? initialEnemyCount
+                : defaultInitialCount);
+        if (Arena.UsesBattleCore)
+        {
+            requestedInitialCount = System.Math.Min(
+                requestedInitialCount,
+                Arena.MaximumEnemiesPerLayer);
+        }
         InitialEnemyCount = System.Math.Min(
             Enemies.Count,
-            System.Math.Max(
-                0,
-                initialEnemyCount > 0
-                    ? initialEnemyCount
-                    : defaultInitialCount));
+            requestedInitialCount);
     }
 }

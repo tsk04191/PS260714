@@ -1432,6 +1432,9 @@ public partial class DungeonPage : MonoBehaviour, IPage
         }
 
         DungeonBattlePlan plan = _battlePlans[battleIndex];
+        int dungeonMaximumActiveEnemies = _session.Definition != null
+            ? _session.Definition.MaximumActiveEnemies
+            : BattleArenaSetup.DefaultMaximumActiveEnemies;
         BattleSetup setup;
         string error;
         bool setupCreated;
@@ -1449,6 +1452,7 @@ public partial class DungeonPage : MonoBehaviour, IPage
         {
             setupCreated = fixedBattle.TryCreateSetup(
                 plan.RandomSeed,
+                dungeonMaximumActiveEnemies,
                 out setup,
                 out error);
         }
@@ -1459,8 +1463,16 @@ public partial class DungeonPage : MonoBehaviour, IPage
                 _session.Definition.UsesTutorialBattleSetup &&
                 _session.CurrentBattleNumber == 1;
             setupCreated = useTutorialSetup
-                ? TryCreateTutorialBattleSetup(plan, out setup, out error)
-                : TryCreateScaledBattleSetup(plan, out setup, out error);
+                ? TryCreateTutorialBattleSetup(
+                    plan,
+                    dungeonMaximumActiveEnemies,
+                    out setup,
+                    out error)
+                : TryCreateScaledBattleSetup(
+                    plan,
+                    dungeonMaximumActiveEnemies,
+                    out setup,
+                    out error);
         }
         if (!setupCreated)
         {
@@ -1488,7 +1500,8 @@ public partial class DungeonPage : MonoBehaviour, IPage
         board.ConfigureArena(
             arena,
             setup.Environment,
-            _dungeonShieldCurrentHealth);
+            _dungeonShieldCurrentHealth,
+            formationSeed: plan.RandomSeed);
         board.Initialize(setup.FieldSize, setup.MaximumStackSize);
         ResetBattleItemCooldowns();
         _battleManager.ConfigureActiveSkillResource(
@@ -1526,15 +1539,19 @@ public partial class DungeonPage : MonoBehaviour, IPage
     {
         DungeonDefinition definition = _session.Definition;
         BattleArenaSetup arena = BattleArenaSetup.CreateCircular(
-            definition != null
+            coreMaximumHealth: definition != null
                 ? definition.BattleShieldMaximumHealth
                 : DungeonDefinition.DefaultBattleShieldMaximumHealth,
-            BattleArenaSetup.DefaultLaneCount,
-            BattleArenaSetup.DefaultWallRadiusNormalized,
-            BattleArenaSetup.DefaultSpawnRadiusNormalized,
-            definition != null
+            wallRadiusNormalized:
+                BattleArenaSetup.DefaultWallRadiusNormalized,
+            spawnRadiusNormalized:
+                BattleArenaSetup.DefaultSpawnRadiusNormalized,
+            worldRadius: definition != null
                 ? definition.BattleArenaRadius
-                : DungeonDefinition.DefaultBattleArenaRadius);
+                : DungeonDefinition.DefaultBattleArenaRadius,
+            maximumActiveEnemies: definition != null
+                ? definition.MaximumActiveEnemies
+                : BattleArenaSetup.DefaultMaximumActiveEnemies);
         return new BattleSetup(
             initialGridSize,
             maximumStackSize,
@@ -1587,6 +1604,7 @@ public partial class DungeonPage : MonoBehaviour, IPage
 
     private bool TryCreateScaledBattleSetup(
         DungeonBattlePlan plan,
+        int dungeonMaximumActiveEnemies,
         out BattleSetup setup,
         out string error)
     {
@@ -1742,8 +1760,11 @@ public partial class DungeonPage : MonoBehaviour, IPage
             enemies,
             initialEnemyCount,
             firstBattle != null
-                ? firstBattle.CreateArenaSetup()
-                : BattleArenaSetup.CreateCircular(),
+                ? firstBattle.CreateArenaSetup(
+                    dungeonMaximumActiveEnemies)
+                : BattleArenaSetup.CreateCircular(
+                    maximumActiveEnemies:
+                        dungeonMaximumActiveEnemies),
             firstBattle != null
                 ? firstBattle.CreateEnvironmentSetup()
                 : BattleEnvironmentSetup.Default);
@@ -1773,6 +1794,7 @@ public partial class DungeonPage : MonoBehaviour, IPage
 
     private bool TryCreateTutorialBattleSetup(
         DungeonBattlePlan plan,
+        int dungeonMaximumActiveEnemies,
         out BattleSetup setup,
         out string error)
     {
@@ -1849,8 +1871,11 @@ public partial class DungeonPage : MonoBehaviour, IPage
             enemies,
             TutorialInitialEnemyCount,
             firstBattle != null
-                ? firstBattle.CreateArenaSetup()
-                : BattleArenaSetup.CreateCircular(),
+                ? firstBattle.CreateArenaSetup(
+                    dungeonMaximumActiveEnemies)
+                : BattleArenaSetup.CreateCircular(
+                    maximumActiveEnemies:
+                        dungeonMaximumActiveEnemies),
             firstBattle != null
                 ? firstBattle.CreateEnvironmentSetup()
                 : BattleEnvironmentSetup.Default);

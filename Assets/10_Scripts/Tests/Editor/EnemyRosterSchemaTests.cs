@@ -119,7 +119,7 @@ public sealed class EnemyRosterSchemaTests
         SetPrivateField(
             target,
             "layerScope",
-            EnemyWorldLayerScope.SameOrAdjacent);
+            EnemyWorldLayerScope.All);
         SetPrivateField(
             enemy,
             "abilities",

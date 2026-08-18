@@ -466,11 +466,16 @@ public sealed class StageSelectEditorWindow : EditorWindow
                 "battleShieldMaximumHealth",
                 "Shield Maximum Health");
             DrawProperty("battleArenaRadius", "Circular Arena Radius");
+            DrawProperty(
+                "maximumActiveEnemies",
+                "Maximum Active Enemies");
             EditorGUILayout.HelpBox(
                 "Shield Maximum Health controls the defended projected " +
                 "shield in every battle. The world-space radius controls " +
                 "the authored arena ring, enemy approach radius, ally " +
-                "movement boundary, and the projected shield health UI.",
+                "movement boundary, and the projected shield health UI. " +
+                "Maximum Active Enemies is the dungeon default; an " +
+                "individual battle can explicitly override it.",
                 MessageType.Info);
         }
         EditorGUILayout.EndFoldoutHeaderGroup();
@@ -1030,6 +1035,9 @@ public sealed class StageSelectEditorWindow : EditorWindow
         AssetDatabase.SaveAssets();
         DungeonDefinitionCatalog.Invalidate();
 
+        Undo.RegisterFullObjectHierarchyUndo(
+            _targetPage.gameObject,
+            "Synchronize Stage Select Preview");
         if (!_targetPage.SyncEditorUi(out string error))
         {
             Debug.LogError(error, _targetPage);

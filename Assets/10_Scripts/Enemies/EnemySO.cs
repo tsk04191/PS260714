@@ -13,9 +13,11 @@ public sealed class EnemySO : ScriptableObject,
     IBattlePresentationUnitDefinition,
     IBattleAbilityProvider
 {
-    public const int CurrentCombatStatSchemaVersion = 2;
+    public const int CurrentCombatStatSchemaVersion = 3;
     public const int CurrentRosterSchemaVersion = 1;
     public const float DefaultFormationRadius = 0.35f;
+    public const float DefaultForwardSearchAngle = 60f;
+    public const float MaximumForwardSearchAngle = 180f;
     public const int MaximumFootprintSize = 9;
 
     [Header("Identity")]
@@ -67,6 +69,11 @@ public sealed class EnemySO : ScriptableObject,
     [SerializeField, Min(0.01f), Tooltip(
         "World-space occupancy radius used by circular enemy formations.")]
     private float formationRadius = DefaultFormationRadius;
+    [SerializeField, Range(0f, MaximumForwardSearchAngle), Tooltip(
+        "Full forward cone angle used to find an open path when another " +
+        "enemy blocks movement. 60 means 30 degrees to each side. Zero " +
+        "waits behind the blocker without steering.")]
+    private float forwardSearchAngle = DefaultForwardSearchAngle;
     [SerializeField, HideInInspector]
     private int combatStatSchemaVersion;
     [SerializeField, Min(0.1f)] private float attackPower = 5f;
@@ -143,6 +150,13 @@ public sealed class EnemySO : ScriptableObject,
         IsFinite(formationRadius) && formationRadius > 0f
             ? formationRadius
             : GetDefaultFormationRadius(type);
+    public float ForwardSearchAngle =>
+        IsFinite(forwardSearchAngle)
+            ? Mathf.Clamp(
+                forwardSearchAngle,
+                0f,
+                MaximumForwardSearchAngle)
+            : DefaultForwardSearchAngle;
     public float AttackPower => combatStatSchemaVersion > 0
         ? Mathf.Max(0.1f, attackPower)
         : CoreAttackDamage;
@@ -204,6 +218,7 @@ public sealed class EnemySO : ScriptableObject,
     internal int AuthoredInitialShield => initialShield;
     internal float AuthoredApproachSpeed => approachSpeed;
     internal float AuthoredFormationRadius => formationRadius;
+    internal float AuthoredForwardSearchAngle => forwardSearchAngle;
     internal int AuthoredCombatStatSchemaVersion =>
         combatStatSchemaVersion;
     internal int AuthoredRosterSchemaVersion => rosterSchemaVersion;
@@ -281,6 +296,7 @@ public sealed class EnemySO : ScriptableObject,
         initialShield = 0;
         spawnIntervalMultiplier = 1f;
         formationRadius = GetDefaultFormationRadius(enemyType);
+        forwardSearchAngle = DefaultForwardSearchAngle;
         combatStatSchemaVersion = CurrentCombatStatSchemaVersion;
         attackPower = coreAttackDamage;
         coreAttackDamagePolicy =

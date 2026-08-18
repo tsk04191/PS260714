@@ -173,16 +173,7 @@ public sealed class BattleEditorWindow : EditorWindow
         DrawSection("Identity", "battleId", "displayName");
         DrawProgressBalance();
         DrawSection("Field", "fieldSize", "maximumStackSize");
-        DrawSection(
-            "Arena",
-            "arenaMode",
-            "coreMaximumHealth",
-            "circularLaneCount",
-            "circularMaximumLayerCount",
-            "circularLayerSpacing",
-            "formationSeparationRatio",
-            "wallRadiusNormalized",
-            "spawnRadiusNormalized");
+        DrawArenaSection();
         DrawSection(
             "Enemy Spawn",
             "totalEnemyCount",
@@ -488,6 +479,47 @@ public sealed class BattleEditorWindow : EditorWindow
             if (property != null)
                 EditorGUILayout.PropertyField(property);
         }
+    }
+
+    private void DrawArenaSection()
+    {
+        EditorGUILayout.Space(8f);
+        EditorGUILayout.LabelField("Arena", EditorStyles.boldLabel);
+        EditorGUILayout.PropertyField(
+            _serializedBattle.FindProperty("arenaMode"));
+        EditorGUILayout.PropertyField(
+            _serializedBattle.FindProperty("coreMaximumHealth"));
+
+        SerializedProperty overrideMaximumEnemies =
+            _serializedBattle.FindProperty(
+                "overrideDungeonMaximumActiveEnemies");
+        EditorGUILayout.PropertyField(
+            overrideMaximumEnemies,
+            new GUIContent(
+                "Override Dungeon Maximum Active Enemies"));
+        if (overrideMaximumEnemies.boolValue)
+        {
+            EditorGUILayout.PropertyField(
+                _serializedBattle.FindProperty(
+                    "circularMaximumActiveEnemies"),
+                new GUIContent("Maximum Active Enemies"));
+        }
+
+        EditorGUILayout.PropertyField(
+            _serializedBattle.FindProperty("circularLayerSpacing"),
+            new GUIContent("Minimum Enemy Spacing"));
+        EditorGUILayout.PropertyField(
+            _serializedBattle.FindProperty("formationSeparationRatio"));
+        EditorGUILayout.PropertyField(
+            _serializedBattle.FindProperty("wallRadiusNormalized"));
+        EditorGUILayout.PropertyField(
+            _serializedBattle.FindProperty("spawnRadiusNormalized"));
+        EditorGUILayout.HelpBox(
+            "Maximum Active Enemies uses the dungeon setting unless " +
+            "this battle explicitly overrides it. Enemies spawn at " +
+            "deterministic random positions on the outer ring and move " +
+            "inward until another enemy blocks them.",
+            MessageType.Info);
     }
 
     private void DrawGradeRule(

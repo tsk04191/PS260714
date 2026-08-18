@@ -45,6 +45,19 @@ public sealed class DungeonHudPresentationSO : ScriptableObject
     [SerializeField, Min(0.05f)] private float attackCooldownRingRadius = 0.39f;
     [SerializeField, Min(0.01f)] private float attackCooldownRingWidth = 0.055f;
 
+    [Header("World Enemy Status")]
+    [SerializeField] private Color enemyHealthTrackColor =
+        new(0.035f, 0.04f, 0.045f, 0.92f);
+    [SerializeField] private Color enemyHealthHealthyColor =
+        new(0.22f, 0.9f, 0.32f, 1f);
+    [SerializeField] private Color enemyHealthCriticalColor =
+        new(1f, 0.16f, 0.12f, 1f);
+    [SerializeField, Min(0.05f)] private float enemyHealthBarWidth = 0.68f;
+    [SerializeField, Min(0.01f)] private float enemyHealthBarThickness = 0.075f;
+    [SerializeField, Min(0f)] private float enemyHealthBarGroundOffset = 0.1f;
+    [SerializeField, Range(0.01f, 1f)]
+    private float enemyHealthCriticalThreshold = 0.3f;
+
     [Header("Battle Core Ring")]
     [SerializeField] private Color battleCoreRingTrackColor =
         new(0.03f, 0.06f, 0.08f, 0.72f);
@@ -106,6 +119,17 @@ public sealed class DungeonHudPresentationSO : ScriptableObject
         Mathf.Max(0.05f, attackCooldownRingRadius);
     public float AttackCooldownRingWidth =>
         Mathf.Max(0.01f, attackCooldownRingWidth);
+    public Color EnemyHealthTrackColor => enemyHealthTrackColor;
+    public Color EnemyHealthHealthyColor => enemyHealthHealthyColor;
+    public Color EnemyHealthCriticalColor => enemyHealthCriticalColor;
+    public float EnemyHealthBarWidth =>
+        Mathf.Max(0.05f, enemyHealthBarWidth);
+    public float EnemyHealthBarThickness =>
+        Mathf.Max(0.01f, enemyHealthBarThickness);
+    public float EnemyHealthBarGroundOffset =>
+        Mathf.Max(0f, enemyHealthBarGroundOffset);
+    public float EnemyHealthCriticalThreshold =>
+        Mathf.Clamp(enemyHealthCriticalThreshold, 0.01f, 1f);
     public Color BattleCoreRingTrackColor => battleCoreRingTrackColor;
     public Color BattleCoreRingDelayedColor => battleCoreRingDelayedColor;
     public Color BattleCoreRingHealthyColor => battleCoreRingHealthyColor;
@@ -152,6 +176,17 @@ public sealed class DungeonHudPresentationSO : ScriptableObject
         abilityReadyIconOffset = Mathf.Max(0f, abilityReadyIconOffset);
         attackCooldownRingRadius = Mathf.Max(0.05f, attackCooldownRingRadius);
         attackCooldownRingWidth = Mathf.Max(0.01f, attackCooldownRingWidth);
+        enemyHealthBarWidth = Mathf.Max(0.05f, enemyHealthBarWidth);
+        enemyHealthBarThickness = Mathf.Max(
+            0.01f,
+            enemyHealthBarThickness);
+        enemyHealthBarGroundOffset = Mathf.Max(
+            0f,
+            enemyHealthBarGroundOffset);
+        enemyHealthCriticalThreshold = Mathf.Clamp(
+            enemyHealthCriticalThreshold,
+            0.01f,
+            1f);
         battleCoreRingThickness = Mathf.Max(0.01f, battleCoreRingThickness);
         battleCoreRingGap = Mathf.Max(0f, battleCoreRingGap);
         battleCoreRingGroundHeight = Mathf.Max(

@@ -65,6 +65,10 @@ public sealed class DungeonDefinition : ScriptableObject
         BattleArenaSetup.DefaultWorldRadius;
     public const int DefaultBattleShieldMaximumHealth =
         BattleArenaSetup.DefaultCoreMaximumHealth;
+    public const int DefaultMaximumEnemiesPerLayer =
+        BattleArenaSetup.DefaultMaximumEnemiesPerLayer;
+    public const int DefaultMaximumActiveEnemies =
+        BattleArenaSetup.DefaultMaximumActiveEnemies;
 
     [Header("Identity")]
     [SerializeField] private string dungeonId = "free_battle";
@@ -133,6 +137,13 @@ public sealed class DungeonDefinition : ScriptableObject
         "World-space radius shared by the circular wall, movement bounds, " +
         "enemy approach, and shield health ring.")]
     private float battleArenaRadius = DefaultBattleArenaRadius;
+    [FormerlySerializedAs("maximumEnemiesPerLayer")]
+    [SerializeField, Range(
+        BattleArenaSetup.MinimumMaximumActiveEnemies,
+        BattleArenaSetup.MaximumActiveEnemiesLimit), Tooltip(
+        "Maximum number of simultaneously active enemies. A BattleSO " +
+        "can explicitly override this value.")]
+    private int maximumActiveEnemies = DefaultMaximumActiveEnemies;
 
     [Header("Battle Completion Rewards")]
     [SerializeField]
@@ -291,6 +302,12 @@ public sealed class DungeonDefinition : ScriptableObject
         BattleArenaSetup.NormalizeWorldRadius(battleArenaRadius);
     public int BattleShieldMaximumHealth =>
         Mathf.Max(1, battleShieldMaximumHealth);
+    public int MaximumActiveEnemies => Mathf.Clamp(
+        maximumActiveEnemies,
+        BattleArenaSetup.MinimumMaximumActiveEnemies,
+        BattleArenaSetup.MaximumActiveEnemiesLimit);
+    public int MaximumEnemiesPerLayer =>
+        BattleArenaSetup.DefaultMaximumEnemiesPerLayer;
     public DungeonShieldRecoveryRule ShieldRecoveryReward =>
         shieldRecoveryReward ?? new DungeonShieldRecoveryRule();
     public IReadOnlyList<BattleCardSO> BattleCardRewardPool =>
@@ -438,7 +455,11 @@ public sealed class DungeonDefinition : ScriptableObject
             clearedBattleHealthCost < AutomaticClearedBattleHealthCost ||
             float.IsNaN(battleArenaRadius) ||
             float.IsInfinity(battleArenaRadius) ||
-            battleArenaRadius <= 0f || battleShieldMaximumHealth < 1)
+            battleArenaRadius <= 0f || battleShieldMaximumHealth < 1 ||
+            maximumActiveEnemies <
+                BattleArenaSetup.MinimumMaximumActiveEnemies ||
+            maximumActiveEnemies >
+                BattleArenaSetup.MaximumActiveEnemiesLimit)
         {
             error = "Dungeon version, battle counts, or battle values are invalid.";
             return false;
@@ -604,7 +625,7 @@ public sealed class DungeonDefinition : ScriptableObject
         definition.runMode = practiceStage
             ? EDungeonRunMode.Practice
             : EDungeonRunMode.Standard;
-        definition.stageOrder = tutorialStage ? 0 : practiceStage ? 1 : 2;
+        definition.stageOrder = practiceStage ? 0 : tutorialStage ? 1 : 2;
         definition.titleLocalizationKey = tutorialStage
             ? LocalizationKeys.UiStageSelectTutorialField
             : practiceStage

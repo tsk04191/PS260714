@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using UnityEngine;
+using UnityEngine.Serialization;
 
 public enum EEnemyCompositionMode
 {
@@ -76,8 +77,18 @@ public sealed class BattleSO : ScriptableObject
         BattleArenaMode.CircularDefense;
     [SerializeField, Min(1)] private int coreMaximumHealth =
         BattleArenaSetup.DefaultCoreMaximumHealth;
-    [SerializeField, Range(4, 64)] private int circularLaneCount =
-        BattleArenaSetup.DefaultLaneCount;
+    [FormerlySerializedAs("overrideDungeonMaximumEnemiesPerLayer")]
+    [SerializeField, Tooltip(
+        "Use this battle's maximum active enemy count instead of the " +
+        "dungeon default.")]
+    private bool overrideDungeonMaximumActiveEnemies;
+    [FormerlySerializedAs("circularMaximumEnemiesPerLayer")]
+    [FormerlySerializedAs("circularLaneCount")]
+    [SerializeField, Range(
+        BattleArenaSetup.MinimumMaximumActiveEnemies,
+        BattleArenaSetup.MaximumActiveEnemiesLimit)]
+    private int circularMaximumActiveEnemies =
+        BattleArenaSetup.DefaultMaximumActiveEnemies;
     [SerializeField, Range(
         BattleArenaSetup.MinimumLayerCount,
         BattleArenaSetup.MaximumLayerCountLimit)]
@@ -163,7 +174,17 @@ public sealed class BattleSO : ScriptableObject
     public int MaximumStackSize => maximumStackSize;
     public BattleArenaMode ArenaMode => arenaMode;
     public int CoreMaximumHealth => Mathf.Max(1, coreMaximumHealth);
-    public int CircularLaneCount => Mathf.Clamp(circularLaneCount, 4, 64);
+    public bool OverrideDungeonMaximumActiveEnemies =>
+        overrideDungeonMaximumActiveEnemies;
+    public int CircularMaximumActiveEnemies => Mathf.Clamp(
+        circularMaximumActiveEnemies,
+        BattleArenaSetup.MinimumMaximumActiveEnemies,
+        BattleArenaSetup.MaximumActiveEnemiesLimit);
+    public bool OverrideDungeonMaximumEnemiesPerLayer =>
+        OverrideDungeonMaximumActiveEnemies;
+    public int CircularMaximumEnemiesPerLayer =>
+        BattleArenaSetup.DefaultMaximumEnemiesPerLayer;
+    public int CircularLaneCount => CircularMaximumEnemiesPerLayer;
     public int CircularMaximumLayerCount => Mathf.Clamp(
         circularMaximumLayerCount,
         BattleArenaSetup.MinimumLayerCount,
@@ -291,17 +312,39 @@ public sealed class BattleSO : ScriptableObject
         return true;
     }
 
+    public int ResolveMaximumActiveEnemies(
+        int dungeonMaximumActiveEnemies)
+    {
+        return overrideDungeonMaximumActiveEnemies
+            ? CircularMaximumActiveEnemies
+            : Mathf.Clamp(
+                dungeonMaximumActiveEnemies,
+                BattleArenaSetup.MinimumMaximumActiveEnemies,
+                BattleArenaSetup.MaximumActiveEnemiesLimit);
+    }
+
+    public int ResolveMaximumEnemiesPerLayer(int unusedDungeonValue) =>
+        BattleArenaSetup.DefaultMaximumEnemiesPerLayer;
+
     public BattleArenaSetup CreateArenaSetup()
+    {
+        return CreateArenaSetup(
+            BattleArenaSetup.DefaultMaximumActiveEnemies);
+    }
+
+    public BattleArenaSetup CreateArenaSetup(
+        int dungeonMaximumActiveEnemies)
     {
         return arenaMode == BattleArenaMode.CircularDefense
             ? BattleArenaSetup.CreateCircular(
-                coreMaximumHealth,
-                circularLaneCount,
-                wallRadiusNormalized,
-                spawnRadiusNormalized,
+                coreMaximumHealth: coreMaximumHealth,
+                wallRadiusNormalized: wallRadiusNormalized,
+                spawnRadiusNormalized: spawnRadiusNormalized,
                 maximumLayerCount: circularMaximumLayerCount,
                 layerSpacing: circularLayerSpacing,
-                formationSeparationRatio: formationSeparationRatio)
+                formationSeparationRatio: formationSeparationRatio,
+                maximumActiveEnemies: ResolveMaximumActiveEnemies(
+                    dungeonMaximumActiveEnemies))
             : BattleArenaSetup.Legacy;
     }
 
@@ -332,7 +375,11 @@ public sealed class BattleSO : ScriptableObject
             return false;
         }
         if (arenaMode == BattleArenaMode.CircularDefense &&
-            (circularLaneCount < 4 || circularLaneCount > 64 ||
+            (overrideDungeonMaximumActiveEnemies &&
+             (circularMaximumActiveEnemies <
+                  BattleArenaSetup.MinimumMaximumActiveEnemies ||
+              circularMaximumActiveEnemies >
+                  BattleArenaSetup.MaximumActiveEnemiesLimit) ||
              circularMaximumLayerCount <
                  BattleArenaSetup.MinimumLayerCount ||
              circularMaximumLayerCount >
@@ -444,6 +491,19 @@ public sealed class BattleSO : ScriptableObject
         out BattleSetup setup,
         out string error)
     {
+        return TryCreateSetup(
+            randomSeed,
+            BattleArenaSetup.DefaultMaximumActiveEnemies,
+            out setup,
+            out error);
+    }
+
+    public bool TryCreateSetup(
+        int randomSeed,
+        int dungeonMaximumActiveEnemies,
+        out BattleSetup setup,
+        out string error)
+    {
         setup = null;
         if (!TryValidate(out error) ||
             !TryGetGradeCounts(out BattleEnemyGradeCounts counts, out error))
@@ -500,7 +560,7 @@ public sealed class BattleSO : ScriptableObject
             counts,
             enemies,
             0,
-            CreateArenaSetup(),
+            CreateArenaSetup(dungeonMaximumActiveEnemies),
             CreateEnvironmentSetup());
         return true;
     }

@@ -843,7 +843,7 @@ public sealed class EnemyRuntimeFoundationTests
     }
 
     [Test]
-    public void WorldRadiusAura_RespectsCircularFormationLayerScope()
+    public void WorldRadiusAura_TargetsAllPhysicalFormationPositions()
     {
         EnemyAbilityTargetDefinition target =
             EnemyAbilityTargetDefinition.CreateRuntimePreset(
@@ -851,7 +851,7 @@ public sealed class EnemyRuntimeFoundationTests
                 EnemyAbilityTargetSubject.WorldRadius,
                 count: 16,
                 radius: 100f,
-                worldLayerScope: EnemyWorldLayerScope.Same);
+                worldLayerScope: EnemyWorldLayerScope.All);
         EnemyAbilityOperationDefinition operation = CreateOperation(
             EnemyAbilityOperationType.ModifyCoreAttackDamage,
             multiplier: 1.5f);
@@ -874,7 +874,7 @@ public sealed class EnemyRuntimeFoundationTests
         Assert.That(board.TryAddEnemy(rearLayer), Is.True);
 
         Assert.That(sameLayer.CoreAttackDamageValue, Is.EqualTo(15f));
-        Assert.That(rearLayer.CoreAttackDamageValue, Is.EqualTo(10f));
+        Assert.That(rearLayer.CoreAttackDamageValue, Is.EqualTo(15f));
     }
 
     [Test]

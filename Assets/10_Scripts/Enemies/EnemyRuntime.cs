@@ -108,6 +108,7 @@ public sealed class EnemyRuntime
                                   _untargetableRemaining > 0f;
     public float ApproachSpeed => Definition.ApproachSpeed;
     public float FormationRadius => Definition.FormationRadius;
+    public float ForwardSearchAngle => Definition.ForwardSearchAngle;
     public float CurrentAttackPower => Mathf.Max(
         0f,
         GetStatusModifiedStat(

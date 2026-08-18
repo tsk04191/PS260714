@@ -197,6 +197,7 @@ public sealed class EnemyDefinitionValidationTests
         SetPrivateField(definition, "healthScale", -2f);
         SetPrivateField(definition, "initialArmor", -1);
         SetPrivateField(definition, "formationRadius", float.NaN);
+        SetPrivateField(definition, "forwardSearchAngle", 181f);
         SetPrivateField(definition, "coreAttackRange", -1f);
         SetPrivateField(definition, "unlockDifficulty", -2);
         SetPrivateField(
@@ -215,6 +216,9 @@ public sealed class EnemyDefinitionValidationTests
         Assert.That(HasCode(result, "enemy.health_scale_invalid"), Is.True);
         Assert.That(HasCode(result, "enemy.initial_defense_invalid"), Is.True);
         Assert.That(HasCode(result, "enemy.formation_radius_invalid"), Is.True);
+        Assert.That(
+            HasCode(result, "enemy.forward_search_angle_invalid"),
+            Is.True);
         Assert.That(HasCode(result, "enemy.core_attack_range_invalid"), Is.True);
         Assert.That(HasCode(result, "enemy.unlock_difficulty_invalid"), Is.True);
         Assert.That(HasCode(result, "enemy.footprint_invalid"), Is.True);
@@ -225,17 +229,20 @@ public sealed class EnemyDefinitionValidationTests
     }
 
     [Test]
-    public void FormationAndCoreAttackRange_AreExposedByRuntime()
+    public void FormationMovementSettings_AreExposedByRuntime()
     {
         EnemySO definition = CreateEnemy("formation_runtime_enemy");
         SetPrivateField(definition, "formationRadius", 0.42f);
+        SetPrivateField(definition, "forwardSearchAngle", 75f);
         SetPrivateField(definition, "coreAttackRange", 1.15f);
 
         EnemyRuntime runtime = definition.CreateRuntime();
 
         Assert.That(definition.FormationRadius, Is.EqualTo(0.42f));
+        Assert.That(definition.ForwardSearchAngle, Is.EqualTo(75f));
         Assert.That(definition.CoreAttackRange, Is.EqualTo(1.15f));
         Assert.That(runtime.FormationRadius, Is.EqualTo(0.42f));
+        Assert.That(runtime.ForwardSearchAngle, Is.EqualTo(75f));
         Assert.That(runtime.CoreAttackRange, Is.EqualTo(1.15f));
         Assert.That(
             EnemyDefinitionValidator.Validate(definition).ErrorCount,
@@ -250,6 +257,7 @@ public sealed class EnemyDefinitionValidationTests
         SetPrivateField(missingValues, "combatStatSchemaVersion", 1);
         SetPrivateField(missingValues, "attackPower", 9f);
         SetPrivateField(missingValues, "formationRadius", 0f);
+        SetPrivateField(missingValues, "forwardSearchAngle", 0f);
         SetPrivateField(missingValues, "coreAttackRange", -1f);
 
         Assert.That(
@@ -260,6 +268,9 @@ public sealed class EnemyDefinitionValidationTests
             Is.EqualTo(EnemySO.CurrentCombatStatSchemaVersion));
         Assert.That(missingValues.AttackPower, Is.EqualTo(9f));
         Assert.That(missingValues.FormationRadius, Is.EqualTo(0.45f));
+        Assert.That(
+            missingValues.ForwardSearchAngle,
+            Is.EqualTo(EnemySO.DefaultForwardSearchAngle));
         Assert.That(missingValues.CoreAttackRange, Is.Zero);
     }
 

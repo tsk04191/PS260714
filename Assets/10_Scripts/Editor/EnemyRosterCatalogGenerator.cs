@@ -205,6 +205,7 @@ public static class EnemyRosterCatalogGenerator
             spec.CoreAttackInterval,
             spec.ApproachSpeed,
             spec.FormationRadius,
+            spec.ForwardSearchAngle,
             spec.CoreAttackRange,
             spec.RecommendedMaxPerWave,
             spec.EncounterOnly,
@@ -1520,6 +1521,10 @@ public static class EnemyRosterCatalogGenerator
         SetFloat(serialized, "spawnIntervalMultiplier", 1f);
         SetFloat(serialized, "approachSpeed", spec.ApproachSpeed);
         SetFloat(serialized, "formationRadius", spec.FormationRadius);
+        SetFloat(
+            serialized,
+            "forwardSearchAngle",
+            spec.ForwardSearchAngle);
         SetInt(
             serialized,
             "combatStatSchemaVersion",
@@ -2049,6 +2054,9 @@ public static class EnemyRosterCatalogGenerator
                     definition.FormationRadius,
                     spec.FormationRadius) ||
                 !Mathf.Approximately(
+                    definition.ForwardSearchAngle,
+                    spec.ForwardSearchAngle) ||
+                !Mathf.Approximately(
                     definition.CoreAttackRange,
                     spec.CoreAttackRange) ||
                 definition.RecommendedMaxPerWave !=
@@ -2568,7 +2576,15 @@ public static class EnemyRosterCatalogGenerator
             yaml,
             2,
             $"formationRadius: {YamlFloat(spec.FormationRadius)}");
-        AppendYaml(yaml, 2, "combatStatSchemaVersion: 2");
+        AppendYaml(
+            yaml,
+            2,
+            $"forwardSearchAngle: {YamlFloat(spec.ForwardSearchAngle)}");
+        AppendYaml(
+            yaml,
+            2,
+            $"combatStatSchemaVersion: " +
+            $"{EnemySO.CurrentCombatStatSchemaVersion}");
         AppendYaml(
             yaml,
             2,
@@ -3730,6 +3746,8 @@ public static class EnemyRosterCatalogGenerator
         public float CoreAttackInterval;
         public float ApproachSpeed;
         public float FormationRadius;
+        public float ForwardSearchAngle =
+            EnemySO.DefaultForwardSearchAngle;
         public float CoreAttackRange;
         public bool UsesFractionalCoreDamage;
         public int RecommendedMaxPerWave;
@@ -3917,7 +3935,7 @@ public static class EnemyRosterCatalogGenerator
                 Count = Mathf.Clamp(count, 1, 99),
                 WorldRadius = radius,
                 IncludeSource = includeSource,
-                LayerScope = "SameOrAdjacent",
+                LayerScope = "All",
             };
         }
 
@@ -4254,6 +4272,7 @@ public readonly struct EnemyRosterSpecSummary
     public float CoreAttackInterval { get; }
     public float ApproachSpeed { get; }
     public float FormationRadius { get; }
+    public float ForwardSearchAngle { get; }
     public float CoreAttackRange { get; }
     public int RecommendedMaxPerWave { get; }
     public bool EncounterOnly { get; }
@@ -4270,6 +4289,7 @@ public readonly struct EnemyRosterSpecSummary
         float coreAttackInterval,
         float approachSpeed,
         float formationRadius,
+        float forwardSearchAngle,
         float coreAttackRange,
         int recommendedMaxPerWave,
         bool encounterOnly,
@@ -4285,6 +4305,7 @@ public readonly struct EnemyRosterSpecSummary
         CoreAttackInterval = coreAttackInterval;
         ApproachSpeed = approachSpeed;
         FormationRadius = formationRadius;
+        ForwardSearchAngle = forwardSearchAngle;
         CoreAttackRange = coreAttackRange;
         RecommendedMaxPerWave = recommendedMaxPerWave;
         EncounterOnly = encounterOnly;

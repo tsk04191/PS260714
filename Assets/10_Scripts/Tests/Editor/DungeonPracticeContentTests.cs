@@ -35,7 +35,7 @@ public sealed class DungeonPracticeContentTests
             tutorial.DungeonId,
             Is.EqualTo(DungeonDefinitionCatalog.TutorialFieldId));
         Assert.That(tutorial.RunMode, Is.EqualTo(EDungeonRunMode.Standard));
-        Assert.That(tutorial.StageOrder, Is.Zero);
+        Assert.That(tutorial.StageOrder, Is.EqualTo(1));
         Assert.That(
             tutorial.TitleLocalizationKey,
             Is.EqualTo(LocalizationKeys.UiStageSelectTutorialField));
@@ -50,7 +50,7 @@ public sealed class DungeonPracticeContentTests
         Assert.That(practice.PersistsDungeonProgress, Is.False);
         Assert.That(practice.SelectStartingCharacter, Is.False);
         Assert.That(practice.SelectStartingItems, Is.False);
-        Assert.That(practice.StageOrder, Is.EqualTo(1));
+        Assert.That(practice.StageOrder, Is.Zero);
         Assert.That(
             practice.TitleLocalizationKey,
             Is.EqualTo(LocalizationKeys.UiStageSelectPracticeBattle));

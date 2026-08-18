@@ -13,6 +13,8 @@ public sealed class DungeonWorldActorPrefabView : MonoBehaviour
     [SerializeField] private DungeonWorldPolylineRenderer movementMarkerRing;
     [SerializeField] private DungeonWorldPolylineRenderer cooldownTrack;
     [SerializeField] private DungeonWorldPolylineRenderer cooldownFill;
+    [SerializeField] private DungeonWorldPolylineRenderer enemyHealthTrack;
+    [SerializeField] private DungeonWorldPolylineRenderer enemyHealthFill;
     [SerializeField] private SpriteRenderer abilityReady;
 
     public Transform FootHudRoot => footHudRoot;
@@ -25,6 +27,8 @@ public sealed class DungeonWorldActorPrefabView : MonoBehaviour
     public DungeonWorldPolylineRenderer MovementMarkerRing => movementMarkerRing;
     public DungeonWorldPolylineRenderer CooldownTrack => cooldownTrack;
     public DungeonWorldPolylineRenderer CooldownFill => cooldownFill;
+    public DungeonWorldPolylineRenderer EnemyHealthTrack => enemyHealthTrack;
+    public DungeonWorldPolylineRenderer EnemyHealthFill => enemyHealthFill;
     public SpriteRenderer AbilityReady => abilityReady;
 
     public bool HasRequiredReferences =>
@@ -38,5 +42,7 @@ public sealed class DungeonWorldActorPrefabView : MonoBehaviour
         movementMarkerRing != null &&
         cooldownTrack != null &&
         cooldownFill != null &&
+        enemyHealthTrack != null &&
+        enemyHealthFill != null &&
         abilityReady != null;
 }

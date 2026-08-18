@@ -490,6 +490,19 @@ public static class EnemyDefinitionValidator
                 "Formation radius must be finite and greater than zero.");
         }
 
+        if (!IsFinite(definition.AuthoredForwardSearchAngle) ||
+            definition.AuthoredForwardSearchAngle < 0f ||
+            definition.AuthoredForwardSearchAngle >
+            EnemySO.MaximumForwardSearchAngle)
+        {
+            AddError(
+                result,
+                "enemy.forward_search_angle_invalid",
+                "forwardSearchAngle",
+                "Forward search angle must be finite and between 0 and " +
+                $"{EnemySO.MaximumForwardSearchAngle} degrees.");
+        }
+
         if (definition.AuthoredCombatStatSchemaVersion !=
             EnemySO.CurrentCombatStatSchemaVersion)
         {

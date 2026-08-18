@@ -1031,6 +1031,7 @@ public static class PracticeBattleUiInstaller
         HashSet<string> expectedConnectors =
             new(StringComparer.Ordinal);
         List<Transform> ordered = new();
+        int numberedStageIndex = 0;
         for (int index = 0; index < definitions.Count; index++)
         {
             DungeonDefinition definition = definitions[index];
@@ -1046,7 +1047,13 @@ public static class PracticeBattleUiInstaller
                 clone.name = nodeName;
                 node = clone.transform;
             }
-            InitializeStageNode(node, definition, index, created);
+            InitializeStageNode(
+                node,
+                definition,
+                definition.IsPractice
+                    ? numberedStageIndex
+                    : numberedStageIndex++,
+                created);
 
             if (index > 0)
             {
@@ -1125,7 +1132,7 @@ public static class PracticeBattleUiInstaller
         {
             sequence.text = definition.IsPractice
                 ? "PRACTICE"
-                : index == 0 ? "STAGE 0" : $"STAGE {index}";
+                : $"STAGE {index}";
         }
         node.gameObject.SetActive(true);
     }
