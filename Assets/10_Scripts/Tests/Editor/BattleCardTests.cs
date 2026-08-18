@@ -293,6 +293,198 @@ public sealed class BattleCardTests
     }
 
     [Test]
+    public void ZoneSelection_ExcludesResolvingCard_AndPausesDeck()
+    {
+        BattleCardDeckRuntime deck = new();
+        deck.ConfigureResolvedDeck(
+            CreateRules(3, 2f),
+            CreateCards(6),
+            101);
+        deck.BeginBattle();
+        BattleCardInstance resolving = deck.Hand[0];
+        float cooldown = deck.CooldownRemaining;
+
+        Assert.That(
+            deck.TryBeginZoneSelection(
+                BattleCardZone.Hand,
+                1,
+                2,
+                resolving),
+            Is.True);
+        Assert.That(deck.IsZoneSelectionPending, Is.True);
+        Assert.That(deck.CurrentSelection.Candidates.Count, Is.EqualTo(2));
+        foreach (BattleCardInstance candidate in
+                 deck.CurrentSelection.Candidates)
+        {
+            Assert.That(candidate, Is.Not.SameAs(resolving));
+        }
+        Assert.That(deck.CanPlay(resolving), Is.False);
+
+        deck.Tick(1f);
+
+        Assert.That(deck.CooldownRemaining, Is.EqualTo(cooldown));
+        Assert.That(deck.TryDrawCards(1), Is.Zero);
+
+        BattleCardInstance selected = deck.CurrentSelection.Candidates[0];
+        Assert.That(deck.TryToggleZoneSelection(selected), Is.True);
+        Assert.That(deck.CurrentSelection.CanConfirm, Is.True);
+        Assert.That(
+            deck.TryConfirmZoneSelection(out
+                IReadOnlyList<BattleCardInstance> selection),
+            Is.True);
+        Assert.That(selection.Count, Is.EqualTo(1));
+        Assert.That(selection[0], Is.SameAs(selected));
+        Assert.That(deck.IsZoneSelectionPending, Is.False);
+        Assert.That(deck.CanPlay(resolving), Is.True);
+    }
+
+    [Test]
+    public void SelectedHandMoves_IgnoreDuplicatesAndResolvingCard()
+    {
+        BattleCardDeckRuntime deck = new();
+        deck.ConfigureResolvedDeck(
+            CreateRules(5, 2f),
+            CreateCards(8),
+            102);
+        deck.BeginBattle();
+        BattleCardInstance resolving = deck.Hand[0];
+        BattleCardInstance discarded = deck.Hand[1];
+        BattleCardInstance exhausted = deck.Hand[2];
+
+        Assert.That(
+            deck.TryDiscardSelectedHandCards(
+                new[] { discarded, discarded, resolving },
+                resolving),
+            Is.EqualTo(1));
+        Assert.That(deck.DiscardPile, Has.Member(discarded));
+        Assert.That(deck.Hand, Has.Member(resolving));
+        Assert.That(
+            deck.TryExhaustSelectedHandCards(
+                new[] { exhausted, resolving },
+                resolving),
+            Is.EqualTo(1));
+        Assert.That(deck.ExhaustPile, Has.Member(exhausted));
+
+        Assert.That(deck.TryMoveDiscardCardToHand(discarded), Is.True);
+        Assert.That(deck.Hand, Has.Member(discarded));
+        Assert.That(deck.DiscardPile, Has.No.Member(discarded));
+
+        int expectedDiscarded = deck.Hand.Count - 1;
+        Assert.That(
+            deck.DiscardEntireHand(resolving),
+            Is.EqualTo(expectedDiscarded));
+        Assert.That(deck.Hand, Has.Count.EqualTo(1));
+        Assert.That(deck.Hand[0], Is.SameAs(resolving));
+        Assert.That(deck.ExhaustPile, Has.Member(exhausted));
+    }
+
+    [Test]
+    public void ForcedShuffle_MergesDiscardIntoExistingDrawPile()
+    {
+        BattleCardDeckRuntime deck = new();
+        deck.ConfigureResolvedDeck(
+            CreateRules(3, 2f),
+            CreateCards(8),
+            103);
+        deck.BeginBattle();
+        BattleCardInstance discarded = deck.Hand[0];
+        int drawCount = deck.DrawPile.Count;
+
+        Assert.That(
+            deck.TryDiscardSelectedHandCards(new[] { discarded }),
+            Is.EqualTo(1));
+        Assert.That(deck.DiscardPile, Has.Count.EqualTo(1));
+        Assert.That(deck.TryShuffleDiscardIntoDrawPile(), Is.True);
+        Assert.That(deck.DiscardPile, Is.Empty);
+        Assert.That(deck.DrawPile, Has.Count.EqualTo(drawCount + 1));
+        Assert.That(deck.DrawPile, Has.Member(discarded));
+        Assert.That(deck.TryShuffleDrawPile(), Is.True);
+    }
+
+    [Test]
+    public void CostModifiers_ApplyInOrder_AndConsumeOnSuccessOnly()
+    {
+        List<BattleCardSO> definitions = CreateCards(6);
+        foreach (BattleCardSO definition in definitions)
+            SetSerializedInt(definition, "energyCost", 3);
+        BattleCardDeckRuntime deck = new();
+        deck.ConfigureResolvedDeck(
+            CreateRules(6, 2f),
+            definitions,
+            104);
+        deck.BeginBattle();
+        BattleCardInstance source = deck.Hand[0];
+
+        Assert.That(
+            deck.TryAddCostModifier(
+                BattleCardCostModifierMode.Add,
+                -1,
+                3,
+                source),
+            Is.True);
+        Assert.That(deck.GetEffectiveCost(source), Is.EqualTo(3));
+        Assert.That(deck.CompleteSuccessfulPlay(source), Is.True);
+        Assert.That(deck.ActiveCostModifierCount, Is.EqualTo(1));
+
+        BattleCardInstance next = deck.Hand[0];
+        Assert.That(deck.GetEffectiveCost(next), Is.EqualTo(2));
+        Assert.That(
+            deck.TryAddCostModifier(
+                BattleCardCostModifierMode.Set,
+                0,
+                1),
+            Is.True);
+        Assert.That(deck.GetEffectiveCost(next), Is.Zero);
+        Assert.That(deck.CompleteSuccessfulPlay(source), Is.False);
+        Assert.That(deck.ActiveCostModifierCount, Is.EqualTo(2));
+
+        Assert.That(deck.CompleteSuccessfulPlay(next), Is.True);
+        Assert.That(deck.ActiveCostModifierCount, Is.EqualTo(1));
+        Assert.That(deck.GetEffectiveCost(deck.Hand[0]), Is.EqualTo(2));
+        Assert.That(deck.CompleteSuccessfulPlay(deck.Hand[0]), Is.True);
+        Assert.That(deck.GetEffectiveCost(deck.Hand[0]), Is.EqualTo(2));
+        Assert.That(deck.CompleteSuccessfulPlay(deck.Hand[0]), Is.True);
+        Assert.That(deck.ActiveCostModifierCount, Is.Zero);
+        Assert.That(deck.GetEffectiveCost(deck.Hand[0]), Is.EqualTo(3));
+    }
+
+    [Test]
+    public void AutomaticRedrawSkip_IsOneShot_AndDoesNotSkipMulligan()
+    {
+        BattleCardDeckRuntime deck = new();
+        deck.ConfigureResolvedDeck(
+            CreateRules(3, 0.5f, 0.2f),
+            CreateCards(9),
+            105);
+        deck.BeginBattle();
+        List<BattleCardInstance> openingHand = new(deck.Hand);
+
+        Assert.That(deck.TrySkipNextAutomaticRedraw(), Is.True);
+        Assert.That(deck.TrySkipNextAutomaticRedraw(), Is.False);
+        deck.Tick(0.5f);
+
+        Assert.That(deck.AutomaticRedrawSkipPending, Is.False);
+        Assert.That(deck.Hand, Is.EqualTo(openingHand));
+        Assert.That(deck.DiscardPile, Is.Empty);
+
+        deck.Tick(0.5f);
+
+        Assert.That(deck.Hand, Is.Not.EqualTo(openingHand));
+        Assert.That(deck.DiscardPile, Has.Count.EqualTo(3));
+
+        Assert.That(deck.TrySkipNextAutomaticRedraw(), Is.True);
+        Assert.That(deck.TryMulligan(), Is.True);
+        deck.Tick(0.2f);
+        Assert.That(deck.AutomaticRedrawSkipPending, Is.True);
+        List<BattleCardInstance> postMulligan = new(deck.Hand);
+
+        deck.Tick(0.5f);
+
+        Assert.That(deck.AutomaticRedrawSkipPending, Is.False);
+        Assert.That(deck.Hand, Is.EqualTo(postMulligan));
+    }
+
+    [Test]
     public void Affiliation_RestrictsCardsToConfiguredParty()
     {
         CharacterSO first = Create<CharacterSO>();

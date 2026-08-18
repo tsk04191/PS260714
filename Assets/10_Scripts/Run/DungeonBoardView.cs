@@ -14,7 +14,14 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
     IBattleManualTargetSelectionService,
     IBattleCardDrawServiceProvider,
     IBattleAbilityUserModifierServiceProvider,
-    IBattleObjectiveProvider
+    IBattleCardControlServiceProvider,
+    IBattleEnemySummonServiceProvider,
+    IBattleObjectiveProvider,
+    IBattleSpatialServiceProvider,
+    IBattleSpatialService,
+    IEnemyCombatRuntimeServiceProvider,
+    IEnemyCombatRuntimeService,
+    IPracticeBattleDebugVisualization
 {
     private const int MaximumStatusEventsPerDispatch = 128;
     private const int MaximumDefeatEventsPerDispatch = 128;
@@ -24,6 +31,8 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
     private const float WorldActorGroundHeight = 0f;
     public const int MinimumGridSize = 3;
     public const int MaximumGridSize = 9;
+    private const float FormationArrivalTolerance = 0.001f;
+    private const int PracticeDebugGroundCircleSegments = 48;
 
     private sealed class EnemyPlacement
     {
@@ -42,6 +51,73 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
             Anchor = anchor;
             OccupiedTiles = occupiedTiles;
             IsExclusive = isExclusive;
+        }
+    }
+
+    private sealed class TimedScalarModifier
+    {
+        public string SourceId { get; }
+        public float Multiplier { get; private set; }
+        public float Remaining { get; private set; }
+
+        public TimedScalarModifier(
+            string sourceId,
+            float multiplier,
+            float duration)
+        {
+            SourceId = sourceId;
+            Refresh(multiplier, duration);
+        }
+
+        public bool Refresh(float multiplier, float duration)
+        {
+            multiplier = Mathf.Max(0f, multiplier);
+            float resolvedDuration = duration > 0f
+                ? duration
+                : float.PositiveInfinity;
+            bool changed = !Mathf.Approximately(Multiplier, multiplier) ||
+                           resolvedDuration > Remaining;
+            Multiplier = multiplier;
+            Remaining = Mathf.Max(Remaining, resolvedDuration);
+            return changed;
+        }
+
+        public bool Tick(float deltaTime)
+        {
+            if (float.IsPositiveInfinity(Remaining))
+                return false;
+            Remaining = Mathf.Max(0f, Remaining - deltaTime);
+            return Remaining <= 0f;
+        }
+    }
+
+    private sealed class EnemyDamageLinkGroup
+    {
+        public EnemyRuntime Owner { get; }
+        public string SourceId { get; }
+        public float ShareRatio { get; }
+        public float Remaining { get; private set; }
+        public List<EnemyRuntime> Members { get; } = new();
+
+        public EnemyDamageLinkGroup(
+            EnemyRuntime owner,
+            string sourceId,
+            float shareRatio,
+            float duration)
+        {
+            Owner = owner;
+            SourceId = sourceId;
+            ShareRatio = Mathf.Clamp01(shareRatio);
+            Remaining = duration > 0f
+                ? duration
+                : float.PositiveInfinity;
+        }
+
+        public bool Tick(float deltaTime)
+        {
+            if (!float.IsPositiveInfinity(Remaining))
+                Remaining = Mathf.Max(0f, Remaining - deltaTime);
+            return Remaining <= 0f || Owner == null || Owner.Health <= 0;
         }
     }
 
@@ -69,16 +145,38 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
     {
         public float ApproachProgress;
         public float AttackTimeRemaining;
-        public Vector2 SpawnDirection { get; }
+        public int SectorIndex;
+        public int LayerIndex;
+        public Vector2 ResolvedPosition;
+        public float CurrentRadius;
+        public float TargetRadius;
+        public float DefenseLineRadius;
+        public int StableOrder;
+        public bool WasWithinCoreRange;
+        public bool HasContactedCore;
+        public Vector2 SpawnDirection { get; set; }
 
         public CircularEnemyState(
             float attackInterval,
-            Vector2 spawnDirection)
+            int sectorIndex,
+            int layerIndex,
+            Vector2 spawnDirection,
+            float spawnRadius,
+            float targetRadius,
+            float defenseLineRadius,
+            int stableOrder)
         {
             AttackTimeRemaining = Mathf.Max(0.1f, attackInterval);
+            SectorIndex = Mathf.Max(0, sectorIndex);
+            LayerIndex = Mathf.Max(0, layerIndex);
             SpawnDirection = spawnDirection.sqrMagnitude > 0.0001f
                 ? spawnDirection.normalized
                 : Vector2.up;
+            CurrentRadius = Mathf.Max(0f, spawnRadius);
+            TargetRadius = Mathf.Max(0f, targetRadius);
+            DefenseLineRadius = Mathf.Max(0f, defenseLineRadius);
+            ResolvedPosition = SpawnDirection * CurrentRadius;
+            StableOrder = Mathf.Max(0, stableOrder);
         }
     }
 
@@ -567,6 +665,8 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
     [SerializeField] private GameObject worldAreaPreviewPrefab;
     [SerializeField] private GameObject worldActorPreview;
     [SerializeField] private DungeonWorldInputView worldInputView;
+    [SerializeField]
+    private PracticeBattleDebugOverlayView practiceDebugOverlay;
     [SerializeField] private SpriteRenderer worldBackdrop;
     [SerializeField] private Transform worldGround;
     [SerializeField] private Transform worldArenaRing;
@@ -613,10 +713,31 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
         _worldAllyActors = new();
     private readonly Dictionary<IBattleCharacter, AllyMovementState>
         _worldAllyMovement = new();
+    private readonly Dictionary<EnemyRuntime, float>
+        _recentCoreAttackTimes = new();
+    private readonly List<TimedScalarModifier>
+        _timedResourceRecoveryModifiers = new();
+    private readonly List<EnemyDamageLinkGroup> _enemyDamageLinks = new();
+    private readonly HashSet<(
+        EnemyRuntime Source,
+        EnemyAbilityDefinition Ability,
+        EnemyRuntime Target)> _enemyRadiusContacts = new();
+    private readonly HashSet<(
+        EnemyRuntime Source,
+        EnemyAbilityDefinition Ability,
+        EnemyRuntime Target)> _currentEnemyRadiusContacts = new();
+    private readonly HashSet<(
+        EnemyRuntime Source,
+        EnemyAbilityDefinition Ability)> _initializedEnemyRadiusAbilities =
+        new();
+    private bool _resolvingDamageLink;
     private readonly HashSet<EnemySO> _missingWorldEnemySpriteWarnings = new();
     private readonly HashSet<EnemyRuntime> _worldEnemySync = new();
+    private readonly List<float> _practiceDebugRangeRadii = new();
     private Func<EnemyRuntime, bool> _itemTargetHandler;
     private IBattleCardDrawService _cardDrawService;
+    private IBattleCardControlService _cardControlService;
+    private IBattleEnemySummonService _enemySummonService;
     private IBattleAbilityUserModifierService _abilityUserModifierService;
     private BattleManualTargetSelectionRequest _manualTargetRequest;
     private readonly List<EnemyRuntime> _manualEnemyTargets = new();
@@ -624,6 +745,9 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
     private BattleAreaPreviewView _areaPreview;
     private RenderTexture _runtimeWorldRenderTexture;
     private IBattleCharacter _selectedWorldAlly;
+    private IBattleCharacter _lastPracticeDebugAlly;
+    private EnemyRuntime _lastPracticeDebugEnemy;
+    private bool _practiceDebugVisualizationEnabled;
     private IBattleCharacter _pressedWorldAlly;
     private bool _draggingWorldAlly;
     private Vector2 _manualAreaOrigin;
@@ -633,12 +757,16 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
     private EnemyRuntime _forcedPriorityTarget;
     private float _forcedPriorityRemaining;
     private float _worldSpawnLineRadius;
+    private float _spatialBattleElapsedTime;
     private int _maximumStackSize = 8;
     private bool _initialized;
     private readonly Queue<BattleStatusAppliedEvent> _statusEventQueue = new();
     private bool _dispatchingStatusEvents;
     private readonly Queue<BattleEnemyDefeatedEvent> _defeatEventQueue = new();
     private bool _dispatchingDefeatEvents;
+    private readonly Queue<EnemyCombatEvent> _enemyCombatEventQueue = new();
+    private bool _dispatchingEnemyCombatEvents;
+    private EnemyCombatEvent _currentEnemyCombatEvent;
     private readonly Queue<BattleEffectResolvedEvent>
         _effectResolvedEventQueue = new();
     private readonly Queue<StatusEffectLifecycleEvent>
@@ -665,6 +793,10 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
     private BattleEnvironmentSetup _environmentSetup =
         BattleEnvironmentSetup.Default;
     private int _activeTileCount;
+    private int _nextFormationStableOrder;
+    private float _formationSpawnRadius;
+    private float _formationDefenseLineRadius;
+    private bool _formationRadiiInitialized;
 
     private bool HasWorldPresentation =>
         worldPresentationRoot != null &&
@@ -684,26 +816,43 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
 
     public bool UsesFullscreenWorldPresentation => UsesWorldPresentation;
     public bool SupportsWorldPresentation => HasWorldPresentation;
+    public bool PracticeDebugVisualizationEnabled =>
+        _practiceDebugVisualizationEnabled;
 
     public int GridSize { get; private set; } = MinimumGridSize;
     public float DungeonStageProgress { get; private set; }
     public RectTransform HighlightRect => boardRect != null
         ? boardRect
         : transform as RectTransform;
-    public int InitialEnemyCapacity => _activeTileCount > 0
-        ? _activeTileCount
-        : GridSize * GridSize;
+    public int InitialEnemyCapacity => _arenaSetup.UsesBattleCore
+        ? Mathf.Max(1, _arenaSetup.LaneCount)
+        : _activeTileCount > 0
+            ? _activeTileCount
+            : GridSize * GridSize;
+    public int TotalEnemyCapacity => _arenaSetup.UsesBattleCore
+        ? Mathf.Max(1, _arenaSetup.MaximumEnemyCapacity)
+        : InitialEnemyCapacity;
     public IBattleObjective Objective => _battleCore;
+    public IBattleSpatialService SpatialService => this;
+    public bool IsAvailable => _arenaSetup.UsesBattleCore;
+    public float ArenaRadius => GetAllowedAllyRadius();
+    public float InnerZoneBoundaryRadius =>
+        ArenaRadius * BattleSpatialDefaults.InnerZoneRadiusRatio;
     public IBattleCardDrawService CardDrawService => _cardDrawService;
+    public IBattleCardControlService CardControlService =>
+        _cardControlService;
+    public IBattleEnemySummonService EnemySummonService =>
+        _enemySummonService;
     public IBattleAbilityUserModifierService AbilityUserModifierService =>
         _abilityUserModifierService;
+    public IEnemyCombatRuntimeService EnemyCombatRuntimeService => this;
     public int LivingEnemyCount
     {
         get
         {
             int count = 0;
             for (int index = 0;
-                 index < _tiles.Count && index < InitialEnemyCapacity;
+                 index < _tiles.Count && index < TotalEnemyCapacity;
                  index++)
             {
                 DungeonBoardSlot tile = _tiles[index];
@@ -721,7 +870,7 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
         get
         {
             for (int index = 0;
-                 index < _tiles.Count && index < InitialEnemyCapacity;
+                 index < _tiles.Count && index < TotalEnemyCapacity;
                  index++)
             {
                 DungeonBoardSlot tile = _tiles[index];
@@ -750,6 +899,7 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
     public event Action<BattleEffectResolvedEvent> EffectResolved;
     public event Action<StatusEffectLifecycleEvent> StatusLifecycle;
     public event Action<BattleUnitLifecycleEvent> UnitLifecycle;
+    public event Action<EnemyCombatEvent> EnemyCombatEventRaised;
     public event Action<bool> ManualTargetSelectionPendingChanged;
     public event Action ManualTargetSelectionProgressChanged;
 
@@ -957,6 +1107,591 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
         }
     }
 
+    public float ResolvePassiveModifier(
+        EnemyRuntime target,
+        EnemyCombatModifierType modifierType,
+        float baseValue)
+    {
+        if (target == null || target.Health <= 0)
+            return baseValue;
+
+        float result = baseValue;
+        foreach (EnemyRuntime source in _enemyPlacements.Keys)
+        {
+            if (source == null || source.Health <= 0 ||
+                source.AreAllActionsDisabled ||
+                !TryFindEnemyTile(source, out DungeonBoardSlot sourceTile))
+            {
+                continue;
+            }
+
+            foreach (EnemyAbilityRuntimeState state in source.AbilityStates)
+            {
+                EnemyAbilityDefinition ability = state.Definition;
+                if (!CanActivateEnemyAbility(source, state) ||
+                    !ability.RespondsToTrigger(
+                        EnemyAbilityTrigger.AlwaysWhileActive) ||
+                    !PassiveAbilityTargetsEnemy(
+                        sourceTile,
+                        source,
+                        ability,
+                        target,
+                        out IReadOnlyList<EnemyRuntime> enemyTargets))
+                {
+                    continue;
+                }
+
+                foreach (EnemyAbilityOperationDefinition operation in
+                         ability.Operations)
+                {
+                    if (operation == null || !operation.Enabled ||
+                        !MatchesPassiveModifierType(
+                            operation.Type,
+                            modifierType))
+                    {
+                        continue;
+                    }
+
+                    result = EvaluateOperationModifier(result, operation);
+                }
+            }
+        }
+
+        return NormalizeEnemyCombatValue(result, baseValue);
+    }
+
+    public EnemyStatusApplicationPolicy ResolveStatusApplication(
+        EnemyRuntime target,
+        StatusEffectSO statusEffect,
+        float duration)
+    {
+        if (target == null || statusEffect == null)
+            return new EnemyStatusApplicationPolicy(false, 0f);
+
+        bool permanent = float.IsPositiveInfinity(duration);
+        float resolvedDuration = duration;
+        foreach (EnemyRuntime source in _enemyPlacements.Keys)
+        {
+            if (source == null || source.Health <= 0 ||
+                source.AreAllActionsDisabled ||
+                !TryFindEnemyTile(source, out DungeonBoardSlot sourceTile))
+            {
+                continue;
+            }
+
+            foreach (EnemyAbilityRuntimeState state in source.AbilityStates)
+            {
+                EnemyAbilityDefinition ability = state.Definition;
+                if (!CanActivateEnemyAbility(source, state) ||
+                    !ability.RespondsToTrigger(
+                        EnemyAbilityTrigger.AlwaysWhileActive) ||
+                    !PassiveAbilityTargetsEnemy(
+                        sourceTile,
+                        source,
+                        ability,
+                        target,
+                        out _))
+                {
+                    continue;
+                }
+
+                EnemyStatusModifierScope scope =
+                    ResolveStatusModifierScope(ability);
+                if (!MatchesStatusModifierScope(scope, statusEffect))
+                    continue;
+
+                foreach (EnemyAbilityOperationDefinition operation in
+                         ability.Operations)
+                {
+                    if (operation == null || !operation.Enabled)
+                        continue;
+                    if (operation.Type ==
+                        EnemyAbilityOperationType.GrantStatusImmunity)
+                    {
+                        return EnemyStatusApplicationPolicy.Immune(duration);
+                    }
+                    if (!permanent && operation.Type ==
+                        EnemyAbilityOperationType.ModifyStatusDuration)
+                    {
+                        resolvedDuration = EvaluateOperationModifier(
+                            resolvedDuration,
+                            operation);
+                    }
+                }
+            }
+        }
+
+        return resolvedDuration > 0f || permanent
+            ? EnemyStatusApplicationPolicy.Allowed(resolvedDuration)
+            : new EnemyStatusApplicationPolicy(false, 0f);
+    }
+
+    public float ResolvePlayerActionPeriodMultiplier(
+        IBattleCharacter target)
+    {
+        if (target == null || target.CurrentHealth <= 0)
+            return 1f;
+
+        float result = 1f;
+        foreach (EnemyRuntime source in _enemyPlacements.Keys)
+        {
+            if (source == null || source.Health <= 0 ||
+                source.AreAllActionsDisabled ||
+                !TryFindEnemyTile(source, out DungeonBoardSlot sourceTile))
+            {
+                continue;
+            }
+
+            foreach (EnemyAbilityRuntimeState state in source.AbilityStates)
+            {
+                EnemyAbilityDefinition ability = state.Definition;
+                if (!CanActivateEnemyAbility(source, state) ||
+                    !ability.RespondsToTrigger(
+                        EnemyAbilityTrigger.AlwaysWhileActive) ||
+                    !TryResolveEnemyAbilityTargets(
+                        sourceTile,
+                        source,
+                        ability.Target,
+                        _battleCharacters,
+                        out CharacterTargetFaction faction,
+                        out IReadOnlyList<EnemyRuntime> enemyTargets,
+                        out IReadOnlyList<IBattleCharacter> playerTargets) ||
+                    faction != CharacterTargetFaction.Ally ||
+                    !ContainsCharacterReference(playerTargets, target) ||
+                    !MatchesEnemyAbilityConditions(
+                        ability,
+                        source,
+                        enemyTargets,
+                        playerTargets))
+                {
+                    continue;
+                }
+
+                foreach (EnemyAbilityOperationDefinition operation in
+                         ability.Operations)
+                {
+                    if (operation != null && operation.Enabled &&
+                        operation.Type ==
+                            EnemyAbilityOperationType
+                                .ModifyPlayerActionInterval)
+                    {
+                        result = EvaluateOperationModifier(
+                            result,
+                            operation);
+                    }
+                }
+            }
+        }
+
+        return Mathf.Max(TimePrecision.Step, result);
+    }
+
+    public float ResolveResourceRecoveryMultiplier()
+    {
+        float result = 1f;
+        foreach (EnemyRuntime source in _enemyPlacements.Keys)
+        {
+            if (source == null || source.Health <= 0 ||
+                source.AreAllActionsDisabled ||
+                !TryFindEnemyTile(source, out DungeonBoardSlot sourceTile))
+            {
+                continue;
+            }
+
+            foreach (EnemyAbilityRuntimeState state in source.AbilityStates)
+            {
+                EnemyAbilityDefinition ability = state.Definition;
+                if (!CanActivateEnemyAbility(source, state) ||
+                    !ability.RespondsToTrigger(
+                        EnemyAbilityTrigger.AlwaysWhileActive))
+                {
+                    continue;
+                }
+
+                IReadOnlyList<EnemyRuntime> enemyTargets =
+                    Array.Empty<EnemyRuntime>();
+                IReadOnlyList<IBattleCharacter> playerTargets =
+                    Array.Empty<IBattleCharacter>();
+                if (ability.Target?.HasTarget == true &&
+                    (!TryResolveEnemyAbilityTargets(
+                         sourceTile,
+                         source,
+                         ability.Target,
+                         _battleCharacters,
+                         out CharacterTargetFaction faction,
+                         out enemyTargets,
+                         out playerTargets) ||
+                     faction != CharacterTargetFaction.Ally ||
+                     playerTargets.Count == 0))
+                {
+                    continue;
+                }
+                if (!MatchesEnemyAbilityConditions(
+                        ability,
+                        source,
+                        enemyTargets,
+                        playerTargets))
+                {
+                    continue;
+                }
+
+                foreach (EnemyAbilityOperationDefinition operation in
+                         ability.Operations)
+                {
+                    if (operation != null && operation.Enabled &&
+                        operation.Type ==
+                            EnemyAbilityOperationType
+                                .ModifyResourceRecovery)
+                    {
+                        result = EvaluateOperationModifier(
+                            result,
+                            operation);
+                    }
+                }
+            }
+        }
+
+        foreach (TimedScalarModifier modifier in
+                 _timedResourceRecoveryModifiers)
+        {
+            if (modifier != null && modifier.Remaining > 0f)
+                result *= modifier.Multiplier;
+        }
+
+        return Mathf.Max(0f, result);
+    }
+
+    private bool TryAddTimedResourceRecoveryModifier(
+        string sourceId,
+        float multiplier,
+        float duration)
+    {
+        sourceId = (sourceId ?? string.Empty).Trim();
+        duration = TimePrecision.Normalize(duration);
+        if (string.IsNullOrEmpty(sourceId) || float.IsNaN(multiplier) ||
+            float.IsInfinity(multiplier) || multiplier < 0f ||
+            float.IsNaN(duration) || float.IsInfinity(duration) ||
+            duration < 0f)
+        {
+            return false;
+        }
+
+        foreach (TimedScalarModifier modifier in
+                 _timedResourceRecoveryModifiers)
+        {
+            if (modifier != null && string.Equals(
+                    modifier.SourceId,
+                    sourceId,
+                    StringComparison.Ordinal))
+            {
+                return modifier.Refresh(multiplier, duration);
+            }
+        }
+
+        _timedResourceRecoveryModifiers.Add(
+            new TimedScalarModifier(sourceId, multiplier, duration));
+        return true;
+    }
+
+    private void TickTimedEnemyGlobalModifiers(float deltaTime)
+    {
+        for (int index = _timedResourceRecoveryModifiers.Count - 1;
+             index >= 0;
+             index--)
+        {
+            TimedScalarModifier modifier =
+                _timedResourceRecoveryModifiers[index];
+            if (modifier == null || modifier.Tick(deltaTime))
+                _timedResourceRecoveryModifiers.RemoveAt(index);
+        }
+
+
+        for (int index = _enemyDamageLinks.Count - 1;
+             index >= 0;
+             index--)
+        {
+            EnemyDamageLinkGroup group = _enemyDamageLinks[index];
+            if (group == null || group.Tick(deltaTime))
+            {
+                _enemyDamageLinks.RemoveAt(index);
+                continue;
+            }
+
+            for (int memberIndex = group.Members.Count - 1;
+                 memberIndex >= 0;
+                 memberIndex--)
+            {
+                EnemyRuntime member = group.Members[memberIndex];
+                if (member == null || member.Health <= 0)
+                    group.Members.RemoveAt(memberIndex);
+            }
+            if (group.Members.Count < 2)
+                _enemyDamageLinks.RemoveAt(index);
+        }
+    }
+
+    public void PublishEnemyCombatEvent(EnemyCombatEvent eventData)
+    {
+        if (!eventData.IsValid)
+            return;
+
+        _enemyCombatEventQueue.Enqueue(eventData);
+        if (_dispatchingEnemyCombatEvents)
+            return;
+
+        _dispatchingEnemyCombatEvents = true;
+        try
+        {
+            int processedCount = 0;
+            while (_enemyCombatEventQueue.Count > 0 &&
+                   processedCount < MaximumStatusEventsPerDispatch)
+            {
+                EnemyCombatEvent queuedEvent =
+                    _enemyCombatEventQueue.Dequeue();
+                InvokeSafely(EnemyCombatEventRaised, queuedEvent);
+                ProcessEnemyCombatEvent(queuedEvent);
+                processedCount++;
+            }
+
+            if (_enemyCombatEventQueue.Count > 0)
+            {
+                int discarded = _enemyCombatEventQueue.Count;
+                _enemyCombatEventQueue.Clear();
+                Debug.LogError(
+                    "Enemy combat event dispatch limit exceeded. " +
+                    $"Discarded {discarded} chained events.",
+                    this);
+            }
+        }
+        finally
+        {
+            _dispatchingEnemyCombatEvents = false;
+        }
+    }
+
+    private void ProcessEnemyCombatEvent(EnemyCombatEvent eventData)
+    {
+        EnemyAbilityTrigger? trigger = eventData.Type switch
+        {
+            EnemyCombatEventType.FirstCoreContact =>
+                EnemyAbilityTrigger.OnFirstCoreContact,
+            EnemyCombatEventType.CoreContact =>
+                EnemyAbilityTrigger.OnCoreContact,
+            EnemyCombatEventType.CoreAttackPreparing =>
+                EnemyAbilityTrigger.BeforeCoreAttack,
+            EnemyCombatEventType.CoreDamageApplied =>
+                EnemyAbilityTrigger.OnCoreHit,
+            EnemyCombatEventType.DamageTaken =>
+                EnemyAbilityTrigger.OnDamageTaken,
+            EnemyCombatEventType.ChargeStarted =>
+                EnemyAbilityTrigger.OnChargeStarted,
+            EnemyCombatEventType.ChargeInterrupted =>
+                EnemyAbilityTrigger.OnChargeInterrupted,
+            EnemyCombatEventType.StatusApplied =>
+                EnemyAbilityTrigger.OnStatusApplied,
+            EnemyCombatEventType.PhaseChanged =>
+                EnemyAbilityTrigger.OnPhaseChanged,
+            _ => null,
+        };
+        if (!trigger.HasValue || eventData.Source == null ||
+            !TryFindEnemyTile(
+                eventData.Source,
+                out DungeonBoardSlot sourceTile))
+        {
+            return;
+        }
+
+        EnemyCombatEvent previousEvent = _currentEnemyCombatEvent;
+        _currentEnemyCombatEvent = eventData;
+        try
+        {
+            ExecuteTriggeredAbilities(
+                sourceTile,
+                eventData.Source,
+                trigger.Value,
+                _battleCharacters);
+        }
+        finally
+        {
+            _currentEnemyCombatEvent = previousEvent;
+        }
+    }
+
+    private bool PassiveAbilityTargetsEnemy(
+        DungeonBoardSlot sourceTile,
+        EnemyRuntime source,
+        EnemyAbilityDefinition ability,
+        EnemyRuntime target,
+        out IReadOnlyList<EnemyRuntime> enemyTargets)
+    {
+        enemyTargets = Array.Empty<EnemyRuntime>();
+        EnemyAbilityTargetDefinition targetDefinition = ability?.Target;
+        if (targetDefinition == null || !targetDefinition.HasTarget)
+        {
+            enemyTargets = new[] { source };
+        }
+        else if (!TryResolveEnemyAbilityTargets(
+                     sourceTile,
+                     source,
+                     targetDefinition,
+                     _battleCharacters,
+                     out CharacterTargetFaction faction,
+                     out enemyTargets,
+                     out IReadOnlyList<IBattleCharacter> playerTargets) ||
+                 faction != CharacterTargetFaction.Enemy)
+        {
+            return false;
+        }
+
+        if (!ContainsEnemyReference(enemyTargets, target) ||
+            !MatchesRequiredEnemyRoleTag(ability, target) ||
+            !MatchesPassiveTargetMetadata(ability, target) ||
+            !MatchesEnemyAbilityConditions(
+                ability,
+                source,
+                enemyTargets,
+                Array.Empty<IBattleCharacter>()))
+        {
+            return false;
+        }
+
+        return true;
+    }
+
+    private static bool MatchesPassiveTargetMetadata(
+        EnemyAbilityDefinition ability,
+        EnemyRuntime target)
+    {
+        if (ability == null || target == null)
+            return false;
+
+        if (TryGetAbilityBooleanParameter(
+                ability,
+                "summonedOnly",
+                out bool summonedOnly) && summonedOnly &&
+            !target.IsSummoned)
+        {
+            return false;
+        }
+
+        if (TryGetAbilityTextParameter(
+                ability,
+                "requiredEnemyTier",
+                out string requiredTier) &&
+            (!Enum.TryParse(
+                 requiredTier,
+                 true,
+                 out EnemyRosterTier rosterTier) ||
+             target.Definition.RosterTier != rosterTier))
+        {
+            return false;
+        }
+
+        return true;
+    }
+
+    private static bool MatchesRequiredEnemyRoleTag(
+        EnemyAbilityDefinition ability,
+        EnemyRuntime target)
+    {
+        if (!TryGetAbilityTextParameter(
+                ability,
+                "requiredRoleTag",
+                out string requiredRoleTag))
+        {
+            return true;
+        }
+        if (target?.Definition?.RoleTags == null)
+            return false;
+        foreach (string roleTag in target.Definition.RoleTags)
+        {
+            if (string.Equals(
+                    roleTag?.Trim(),
+                    requiredRoleTag.Trim(),
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static bool ContainsEnemyReference(
+        IReadOnlyList<EnemyRuntime> enemies,
+        EnemyRuntime target)
+    {
+        if (enemies == null || target == null)
+            return false;
+        foreach (EnemyRuntime enemy in enemies)
+        {
+            if (ReferenceEquals(enemy, target))
+                return true;
+        }
+        return false;
+    }
+
+    private static bool ContainsCharacterReference(
+        IReadOnlyList<IBattleCharacter> characters,
+        IBattleCharacter target)
+    {
+        if (characters == null || target == null)
+            return false;
+        foreach (IBattleCharacter character in characters)
+        {
+            if (ReferenceEquals(character, target))
+                return true;
+        }
+        return false;
+    }
+
+    private static bool MatchesPassiveModifierType(
+        EnemyAbilityOperationType operationType,
+        EnemyCombatModifierType modifierType)
+    {
+        return (operationType ==
+                    EnemyAbilityOperationType.ModifyCoreAttackDamage &&
+                modifierType == EnemyCombatModifierType.CoreAttackDamage) ||
+               (operationType ==
+                    EnemyAbilityOperationType.ModifyCoreAttackInterval &&
+                modifierType == EnemyCombatModifierType.CoreAttackInterval);
+    }
+
+    private static float EvaluateOperationModifier(
+        float baseValue,
+        EnemyAbilityOperationDefinition operation)
+    {
+        float result = (baseValue + operation.Amount) *
+                       Mathf.Max(0f, 1f + operation.Percentage) *
+                       operation.Multiplier;
+        return NormalizeEnemyCombatValue(result, baseValue);
+    }
+
+    private static float NormalizeEnemyCombatValue(
+        float value,
+        float fallback)
+    {
+        if (float.IsNaN(value))
+            return Mathf.Max(0f, fallback);
+        if (float.IsPositiveInfinity(value))
+            return float.MaxValue;
+        return Mathf.Max(0f, value);
+    }
+
+    private static bool MatchesStatusModifierScope(
+        EnemyStatusModifierScope scope,
+        StatusEffectSO statusEffect)
+    {
+        return scope switch
+        {
+            EnemyStatusModifierScope.All => true,
+            EnemyStatusModifierScope.Debuffs =>
+                statusEffect.Alignment == StatusEffectAlignment.Debuff,
+            EnemyStatusModifierScope.Controls =>
+                EnemyStatusRules.HasControlEffect(statusEffect),
+            _ => false,
+        };
+    }
+
     public void BindItemTargetHandler(
         Func<EnemyRuntime, bool> itemTargetHandler)
     {
@@ -969,6 +1704,18 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
         _cardDrawService = cardDrawService;
     }
 
+    public void BindCardControlService(
+        IBattleCardControlService cardControlService)
+    {
+        _cardControlService = cardControlService;
+    }
+
+    public void BindEnemySummonService(
+        IBattleEnemySummonService enemySummonService)
+    {
+        _enemySummonService = enemySummonService;
+    }
+
     public void BindAbilityUserModifierService(
         IBattleAbilityUserModifierService modifierService)
     {
@@ -979,7 +1726,7 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
         BattleManualTargetSelectionRequest request)
     {
         if (request == null ||
-            request.RequiredCount <= 0 ||
+            (!request.UsesWorldArea && request.RequiredCount <= 0) ||
             (request.UsesWorldArea && !UsesWorldPresentation) ||
             IsManualTargetSelectionPending)
         {
@@ -1022,7 +1769,11 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
         BattleManualTargetSelectionResult result = new(
             request.Faction,
             _manualEnemyTargets.ToArray(),
-            _manualAllyTargets.ToArray());
+            _manualAllyTargets.ToArray(),
+            false,
+            _manualAreaOrigin,
+            _manualAreaDirection,
+            request.UsesWorldArea && _manualAreaAnchorSet);
         ClearManualTargetSelection();
         request.Complete(result);
     }
@@ -1261,6 +2012,30 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
         return false;
     }
 
+    public void SetPracticeDebugVisualization(bool enabled)
+    {
+        bool canEnable = enabled &&
+                         UsesWorldPresentation &&
+                         practiceDebugOverlay != null &&
+                         practiceDebugOverlay.HasRequiredReferences;
+        _practiceDebugVisualizationEnabled = canEnable;
+        practiceDebugOverlay?.SetVisible(canEnable);
+        if (!canEnable)
+        {
+            practiceDebugOverlay?.Clear();
+            _lastPracticeDebugAlly = null;
+            _lastPracticeDebugEnemy = null;
+            return;
+        }
+
+        if (_lastPracticeDebugAlly == null &&
+            _lastPracticeDebugEnemy == null)
+        {
+            _lastPracticeDebugAlly = _selectedWorldAlly;
+        }
+        RefreshPracticeDebugVisualization();
+    }
+
     public void Initialize(int gridSize, int stackSize)
     {
         EnsurePresentationPipeline();
@@ -1283,13 +2058,10 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
 
         if (_arenaSetup.UsesBattleCore)
         {
-            gridSize = Mathf.Clamp(
-                Mathf.CeilToInt(Mathf.Sqrt(_arenaSetup.LaneCount)),
-                MinimumGridSize,
-                MaximumGridSize);
+            gridSize = ResolveRequiredFormationGridSize();
             stackSize = 1;
             _activeTileCount = Mathf.Min(
-                _arenaSetup.LaneCount,
+                _arenaSetup.MaximumEnemyCapacity,
                 gridSize * gridSize);
         }
         else
@@ -1323,6 +2095,12 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
         ApplyArenaPresentation();
         ConfigureVfxPresentationTarget();
         _circularEnemyStates.Clear();
+        _recentCoreAttackTimes.Clear();
+        _spatialBattleElapsedTime = 0f;
+        _nextFormationStableOrder = 0;
+        _formationSpawnRadius = 0f;
+        _formationDefenseLineRadius = 0f;
+        _formationRadiiInitialized = false;
         RefreshWorldAllyViews();
     }
 
@@ -1344,9 +2122,11 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
         if (!_initialized)
             return;
 
-        size = Mathf.Clamp(size, MinimumGridSize, MaximumGridSize);
+        size = _arenaSetup.UsesBattleCore
+            ? ResolveRequiredFormationGridSize()
+            : Mathf.Clamp(size, MinimumGridSize, MaximumGridSize);
         _activeTileCount = _arenaSetup.UsesBattleCore
-            ? Mathf.Min(_arenaSetup.LaneCount, size * size)
+            ? Mathf.Min(_arenaSetup.MaximumEnemyCapacity, size * size)
             : size * size;
 
         if (size == GridSize && _tiles.Count == size * size)
@@ -1608,6 +2388,12 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
     {
         if (placements == null || placements.Count == 0)
             return false;
+        if (_arenaSetup.UsesBattleCore &&
+            _enemyPlacements.Count + placements.Count >
+            TotalEnemyCapacity)
+        {
+            return false;
+        }
 
         List<PendingEnemyPlacement> added = new(placements.Count);
         foreach (PendingEnemyPlacement placement in placements)
@@ -1653,11 +2439,36 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
         _enemyPlacements[pending.Enemy] = placement;
         if (_arenaSetup.UsesBattleCore)
         {
-            _circularEnemyStates[pending.Enemy] =
-                new CircularEnemyState(
+            EnsureFormationRadii();
+            if (TryReserveFormationCell(
+                    out int sectorIndex,
+                    out int layerIndex))
+            {
+                Vector2 direction = ResolveFormationSectorDirection(
+                    sectorIndex);
+                float initialRadius = ResolveFormationSpawnRadius(
+                    pending.Enemy,
+                    sectorIndex,
+                    layerIndex);
+                int stableOrder = _nextFormationStableOrder++;
+                CircularEnemyState state = new(
                     pending.Enemy.CoreAttackInterval,
-                    DungeonWorldSpawnGeometry.DirectionFromUnitSample(
-                        Random.value));
+                    sectorIndex,
+                    layerIndex,
+                    direction,
+                    initialRadius,
+                    _formationDefenseLineRadius,
+                    _formationDefenseLineRadius,
+                    stableOrder);
+                _circularEnemyStates[pending.Enemy] = state;
+                RefreshFormationTargets();
+            }
+            else
+            {
+                Debug.LogError(
+                    "Circular enemy formation has no available cell.",
+                    this);
+            }
         }
         if (!pending.IsExclusive)
             return;
@@ -1685,7 +2496,23 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
 
         _enemyPlacements.Remove(enemy);
         enemy.BindBattleBoard(null);
+        _enemyRadiusContacts.RemoveWhere(contact =>
+            ReferenceEquals(contact.Source, enemy) ||
+            ReferenceEquals(contact.Target, enemy));
+        _currentEnemyRadiusContacts.RemoveWhere(contact =>
+            ReferenceEquals(contact.Source, enemy) ||
+            ReferenceEquals(contact.Target, enemy));
+        _initializedEnemyRadiusAbilities.RemoveWhere(contact =>
+            ReferenceEquals(contact.Source, enemy));
+        int releasedSector = -1;
+        if (_circularEnemyStates.TryGetValue(
+                enemy,
+                out CircularEnemyState releasedState))
+        {
+            releasedSector = releasedState.SectorIndex;
+        }
         _circularEnemyStates.Remove(enemy);
+        _recentCoreAttackTimes.Remove(enemy);
         RemoveWorldEnemyView(enemy);
 
         if (placement.IsExclusive)
@@ -1707,7 +2534,12 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
         if (notify)
             OccupancyChanged?.Invoke();
         if (_arenaSetup.UsesBattleCore)
+        {
+            if (releasedSector >= 0)
+                CompactFormationSector(releasedSector);
+            RefreshFormationTargets();
             RefreshCircularLayout();
+        }
     }
 
     private EnemyRuntime GetEnemyAtTile(DungeonBoardSlot tile)
@@ -1884,7 +2716,21 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
 
         targetCount = Mathf.Clamp(targetCount, 1, candidates.Count);
         List<DungeonBoardSlot> selected = new(candidates.Count);
-        if (TryGetForcedPriorityTile(out DungeonBoardSlot forcedTarget) &&
+        IBattleCardActionRuntimeService cardRuntime =
+            _abilityUserModifierService as
+                IBattleCardActionRuntimeService;
+        if (cardRuntime?.TryGetForcedTarget(
+                source,
+                out EnemyRuntime sourceForcedEnemy) == true &&
+            TryFindEnemyTile(
+                sourceForcedEnemy,
+                out DungeonBoardSlot sourceForcedTarget) &&
+            candidates.Remove(sourceForcedTarget))
+        {
+            selected.Add(sourceForcedTarget);
+        }
+        else if (TryGetForcedPriorityTile(
+                     out DungeonBoardSlot forcedTarget) &&
             candidates.Remove(forcedTarget))
         {
             selected.Add(forcedTarget);
@@ -2673,8 +3519,11 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
         if (deltaTime <= 0f)
             return;
 
+        _battleCore.Tick(deltaTime);
+        TickTimedEnemyGlobalModifiers(deltaTime);
         if (UsesWorldPresentation)
             TickWorldAllyMovement(deltaTime);
+        TickEnemyCombatRuntimeStates(deltaTime, characters);
         if (_arenaSetup.UsesBattleCore)
             TickCircularEnemies(deltaTime);
 
@@ -2692,12 +3541,169 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
         }
     }
 
+    private void TickEnemyCombatRuntimeStates(
+        float deltaTime,
+        IReadOnlyList<IBattleCharacter> characters)
+    {
+        _circularEnemySnapshot.Clear();
+        foreach (EnemyRuntime enemy in _enemyPlacements.Keys)
+            _circularEnemySnapshot.Add(enemy);
+
+        foreach (EnemyRuntime enemy in _circularEnemySnapshot)
+        {
+            if (enemy == null || enemy.Health <= 0)
+                continue;
+
+            if (enemy.AreAllActionsDisabled && enemy.IsCharging)
+            {
+                EnemyChargeInterruptReason reason =
+                    enemy.HasStatusEffectId(StatusEffectIds.Stun)
+                        ? EnemyChargeInterruptReason.Stun
+                        : EnemyChargeInterruptReason.OtherControl;
+                if (enemy.TryInterruptCharge(
+                        reason,
+                        out EnemyActiveChargeRuntimeState interrupted))
+                {
+                    RecordEnemyAbilityActivation(
+                        interrupted.AbilityState,
+                        enemy,
+                        true,
+                        false);
+                }
+            }
+
+            enemy.TickCombatRuntime(
+                deltaTime,
+                out EnemyActiveChargeRuntimeState completed);
+            if (completed?.AbilityState != null &&
+                !completed.IsCoreAttackCharge &&
+                TryFindEnemyTile(enemy, out DungeonBoardSlot sourceTile))
+            {
+                BattleEffectResult result = ExecuteTriggeredAbilityNow(
+                    sourceTile,
+                    enemy,
+                    null,
+                    completed.AbilityState,
+                    characters);
+                RecordEnemyAbilityActivation(
+                    completed.AbilityState,
+                    enemy,
+                    result.Attempted,
+                    result.Succeeded);
+            }
+
+            ExecuteNoDamageAbilities(enemy, characters);
+        }
+        TickEnemyRadiusEntryAbilities(
+            _circularEnemySnapshot,
+            characters);
+        _circularEnemySnapshot.Clear();
+    }
+
+    private void TickEnemyRadiusEntryAbilities(
+        IReadOnlyList<EnemyRuntime> sources,
+        IReadOnlyList<IBattleCharacter> characters)
+    {
+        _currentEnemyRadiusContacts.Clear();
+        if (sources == null)
+            return;
+
+        foreach (EnemyRuntime source in sources)
+        {
+            if (source == null || source.Health <= 0 ||
+                source.AreAllActionsDisabled ||
+                !TryFindEnemyTile(source, out DungeonBoardSlot sourceTile))
+            {
+                continue;
+            }
+
+            foreach (EnemyAbilityRuntimeState state in source.AbilityStates)
+            {
+                EnemyAbilityDefinition ability = state?.Definition;
+                if (ability == null || !ability.RespondsToTrigger(
+                        EnemyAbilityTrigger.OnAllyEnteredRadius))
+                {
+                    continue;
+                }
+
+                var abilityContact = (source, ability);
+                bool initializing =
+                    _initializedEnemyRadiusAbilities.Add(abilityContact);
+                IReadOnlyList<EnemyRuntime> targets;
+                if (ability.Target?.Faction ==
+                        EnemyAbilityTargetFaction.EnemyAllies &&
+                    ability.Target.Subject ==
+                        EnemyAbilityTargetSubject.WorldRadius)
+                {
+                    targets = CollectWorldRadiusEnemyTargets(
+                        source,
+                        ability.Target);
+                }
+                else if (!TryResolveEnemyAbilityTargets(
+                             sourceTile,
+                             source,
+                             ability.Target,
+                             characters,
+                             out CharacterTargetFaction faction,
+                             out targets,
+                             out _) ||
+                         faction != CharacterTargetFaction.Enemy)
+                {
+                    continue;
+                }
+
+                bool canRespond = !initializing &&
+                                  CanActivateEnemyAbility(source, state) &&
+                                  !source.IsAbilityCharging(ability);
+                bool hasNewContact = false;
+                foreach (EnemyRuntime target in targets)
+                {
+                    if (target == null || target.Health <= 0 ||
+                        ReferenceEquals(target, source))
+                    {
+                        continue;
+                    }
+
+                    var contact = (source, ability, target);
+                    bool wasInRadius = _enemyRadiusContacts.Contains(contact);
+                    if (initializing || wasInRadius || canRespond)
+                        _currentEnemyRadiusContacts.Add(contact);
+                    hasNewContact |= canRespond && !wasInRadius;
+                }
+
+                if (!hasNewContact)
+                {
+                    continue;
+                }
+
+                BattleEffectResult result = ExecuteTriggeredAbilityNow(
+                    sourceTile,
+                    source,
+                    EnemyAbilityTrigger.OnAllyEnteredRadius,
+                    state,
+                    characters);
+                RecordEnemyAbilityActivation(
+                    state,
+                    source,
+                    result.Attempted,
+                    result.Succeeded);
+            }
+        }
+
+        _enemyRadiusContacts.Clear();
+        foreach (var contact in _currentEnemyRadiusContacts)
+            _enemyRadiusContacts.Add(contact);
+    }
+
     private void TickCircularEnemies(float deltaTime)
     {
         if (!_battleCore.IsActive || _battleCore.IsDestroyed)
             return;
 
         float appliedDelta = Mathf.Max(0f, deltaTime);
+        _spatialBattleElapsedTime += appliedDelta;
+        RemoveExpiredCoreAttackHistory();
+        RefreshFormationTargets();
         _circularEnemySnapshot.Clear();
         foreach (EnemyRuntime enemy in _enemyPlacements.Keys)
             _circularEnemySnapshot.Add(enemy);
@@ -2720,26 +3726,111 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
                 continue;
             }
 
-            if (state.ApproachProgress < 1f)
+            float movementTargetRadius = ResolveFormationMovementTargetRadius(
+                enemy,
+                state);
+            Vector2 targetPosition =
+                state.SpawnDirection * movementTargetRadius;
+            if ((state.ResolvedPosition - targetPosition).sqrMagnitude >
+                FormationArrivalTolerance * FormationArrivalTolerance)
             {
-                state.ApproachProgress = Mathf.Clamp01(
-                    state.ApproachProgress +
-                    enemy.ApproachSpeed * appliedDelta /
-                    Mathf.Max(
-                        0.01f,
-                        _arenaSetup.SpawnRadiusNormalized -
-                        _arenaSetup.WallRadiusNormalized));
+                state.ResolvedPosition = Vector2.MoveTowards(
+                    state.ResolvedPosition,
+                    targetPosition,
+                    ResolveFormationMovementSpeed(enemy) * appliedDelta);
+            }
+            else
+            {
+                state.ResolvedPosition = targetPosition;
+            }
+            UpdateFormationApproachProgress(state);
+
+            float distanceFromDefenseLine = Mathf.Max(
+                0f,
+                state.CurrentRadius - state.DefenseLineRadius);
+            bool withinCoreRange = distanceFromDefenseLine <=
+                enemy.CoreAttackRange + FormationArrivalTolerance;
+            if (!withinCoreRange)
+            {
+                if (state.WasWithinCoreRange)
+                {
+                    state.WasWithinCoreRange = false;
+                    PublishEnemyCombatEvent(new EnemyCombatEvent(
+                        EnemyCombatEventType.CoreRangeExited,
+                        enemy,
+                        worldPosition: state.ResolvedPosition));
+                }
                 continue;
             }
 
+            if (!state.WasWithinCoreRange)
+            {
+                state.WasWithinCoreRange = true;
+                PublishEnemyCombatEvent(new EnemyCombatEvent(
+                    EnemyCombatEventType.CoreRangeEntered,
+                    enemy,
+                    worldPosition: state.ResolvedPosition));
+                TryAdvanceEnemyPhaseOnCoreContact(
+                    enemy,
+                    state.ResolvedPosition);
+                if (!state.HasContactedCore)
+                {
+                    state.HasContactedCore = true;
+                    PublishEnemyCombatEvent(new EnemyCombatEvent(
+                        EnemyCombatEventType.FirstCoreContact,
+                        enemy,
+                        worldPosition: state.ResolvedPosition));
+                }
+                PublishEnemyCombatEvent(new EnemyCombatEvent(
+                    EnemyCombatEventType.CoreContact,
+                    enemy,
+                    worldPosition: state.ResolvedPosition));
+            }
+
             state.AttackTimeRemaining -= appliedDelta;
-            float attackInterval = Mathf.Max(
-                0.1f,
-                enemy.CoreAttackInterval);
             while (state.AttackTimeRemaining <= 0f &&
                    !_battleCore.IsDestroyed)
             {
-                _battleCore.TakeDamage(enemy.CoreAttackDamage);
+                if (!enemy.HasReadyChargedCoreAttack)
+                {
+                    PublishEnemyCombatEvent(new EnemyCombatEvent(
+                        EnemyCombatEventType.CoreAttackPreparing,
+                        enemy,
+                        worldPosition: state.ResolvedPosition));
+                }
+                if (enemy.IsCharging)
+                    break;
+
+                int requestedDamage =
+                    enemy.ResolveCoreAttackDamageForHit();
+                float protectionBypass =
+                    enemy.ConsumeNextCoreProtectionBypass();
+                int appliedDamage = _battleCore is
+                    IBattleObjectiveModifierService modifierService
+                        ? modifierService.TakeDamage(
+                            requestedDamage,
+                            protectionBypass)
+                        : _battleCore.TakeDamage(requestedDamage);
+                PublishEnemyCombatEvent(new EnemyCombatEvent(
+                    EnemyCombatEventType.CoreAttackResolved,
+                    enemy,
+                    requestedDamage: requestedDamage,
+                    appliedDamage: appliedDamage,
+                    worldPosition: state.ResolvedPosition));
+                if (appliedDamage > 0)
+                {
+                    _recentCoreAttackTimes[enemy] =
+                        _spatialBattleElapsedTime;
+                    PublishEnemyCombatEvent(new EnemyCombatEvent(
+                        EnemyCombatEventType.CoreDamageApplied,
+                        enemy,
+                        requestedDamage: requestedDamage,
+                        appliedDamage: appliedDamage,
+                        worldPosition: state.ResolvedPosition));
+                }
+                float attackInterval = Mathf.Max(
+                    0.1f,
+                    enemy.CoreAttackInterval);
                 state.AttackTimeRemaining += attackInterval;
             }
         }
@@ -2755,11 +3846,17 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
         float deltaTime,
         IReadOnlyList<IBattleCharacter> characters)
     {
+        if (source == null || source.IsCharging)
+            return;
+
         foreach (EnemyAbilityRuntimeState state in source.AbilityStates)
         {
+            if (source.IsAbilityCharging(state.Definition))
+                continue;
             if (!state.TickCooldown(
                     deltaTime,
-                    source.AreAllActionsDisabled))
+                    source.AreAllActionsDisabled,
+                    GetEnemyHealthPercentage(source)))
             {
                 continue;
             }
@@ -2767,26 +3864,33 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
             BattleEffectResult result = ExecuteCooldownAbility(
                 sourceTile,
                 source,
-                state.Definition,
-                characters);
-            state.RecordActivation(result.Attempted, result.Succeeded);
+                state,
+                characters,
+                out bool charging);
+            if (!charging)
+                RecordEnemyAbilityActivation(
+                    state,
+                    source,
+                    result.Attempted,
+                    result.Succeeded);
         }
     }
 
     private BattleEffectResult ExecuteCooldownAbility(
         DungeonBoardSlot sourceTile,
         EnemyRuntime source,
-        EnemyAbilityDefinition ability,
-        IReadOnlyList<IBattleCharacter> characters)
+        EnemyAbilityRuntimeState state,
+        IReadOnlyList<IBattleCharacter> characters,
+        out bool charging)
     {
+        charging = false;
+        EnemyAbilityDefinition ability = state?.Definition;
         if (ability == null ||
-            ability.Trigger != EnemyAbilityTrigger.OnCooldown ||
+            !ability.RespondsToTrigger(EnemyAbilityTrigger.OnCooldown) ||
             !TryResolveEnemyAbilityTargets(
                 sourceTile,
                 source,
-                BattleAbilityRules.RequiresActionTargets(ability)
-                    ? ability.Target
-                    : null,
+                ResolveEnemyAbilityTarget(ability),
                 characters,
                 out CharacterTargetFaction targetFaction,
                 out IReadOnlyList<EnemyRuntime> enemyTargets,
@@ -2800,6 +3904,13 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
             return default;
         }
 
+        if (ability.Charge.IsEnabled && ability.Charge.Duration > 0f &&
+            source.TryBeginAbilityCharge(state, out _))
+        {
+            charging = true;
+            return new BattleEffectResult(true, true);
+        }
+
         BattleEffectContext context =
             BattleEffectContext.ForEnemyAbility(
                 source,
@@ -2807,7 +3918,12 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
                 targetFaction,
                 enemyTargets,
                 playerTargets);
-        return ExecuteEffectOperations(ability, context);
+        return ExecuteAbilityOperations(
+            source,
+            state,
+            ability,
+            context,
+            enemyTargets);
     }
 
     private void ExecuteSpawnAbilities(
@@ -2820,14 +3936,12 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
         foreach (EnemyAbilityRuntimeState state in source.AbilityStates)
         {
             EnemyAbilityDefinition ability = state.Definition;
-            if (!state.CanActivate ||
-                ability.Trigger != EnemyAbilityTrigger.OnSpawn ||
+            if (!CanActivateEnemyAbility(source, state) ||
+                !ability.RespondsToTrigger(EnemyAbilityTrigger.OnSpawn) ||
                 !TryResolveEnemyAbilityTargets(
                     sourceTile,
                     source,
-                    BattleAbilityRules.RequiresActionTargets(ability)
-                        ? ability.Target
-                        : null,
+                    ResolveEnemyAbilityTarget(ability),
                     _battleCharacters,
                     out CharacterTargetFaction targetFaction,
                     out IReadOnlyList<EnemyRuntime> enemyTargets,
@@ -2849,7 +3963,12 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
                     enemyTargets,
                     playerTargets);
             BattleEffectResult combined =
-                ExecuteEffectOperations(ability, context);
+                ExecuteAbilityOperations(
+                    source,
+                    state,
+                    ability,
+                    context,
+                    enemyTargets);
             foreach (EnemyAbilityOperationDefinition operation in
                      ability.Operations)
             {
@@ -2861,12 +3980,21 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
                 }
 
                 int armor = ResolveGrantedArmor(source, operation);
+                if (operation.Count > 1)
+                {
+                    long totalArmor = (long)armor * operation.Count;
+                    armor = totalArmor >= int.MaxValue
+                        ? int.MaxValue
+                        : (int)Math.Max(0L, totalArmor);
+                }
                 int granted = source.GainArmor(armor);
                 combined = combined.Combine(
                     new BattleEffectResult(true, granted > 0));
             }
 
-            state.RecordActivation(
+            RecordEnemyAbilityActivation(
+                state,
+                source,
                 combined.Attempted,
                 combined.Succeeded);
         }
@@ -2876,7 +4004,8 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
         DungeonBoardSlot sourceTile,
         EnemyRuntime source,
         int damage,
-        CharacterAttackDamageType damageType)
+        CharacterAttackDamageType damageType,
+        string damageSourceId)
     {
         if (source == null || source.AreAllActionsDisabled)
         {
@@ -2886,15 +4015,13 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
         foreach (EnemyAbilityRuntimeState state in source.AbilityStates)
         {
             EnemyAbilityDefinition ability = state.Definition;
-            if (!state.CanActivate ||
-                ability.Trigger !=
-                    EnemyAbilityTrigger.BeforeSelfDamage ||
+            if (!CanActivateEnemyAbility(source, state) ||
+                !ability.RespondsToTrigger(
+                    EnemyAbilityTrigger.BeforeSelfDamage) ||
                 !TryResolveEnemyAbilityTargets(
                     sourceTile,
                     source,
-                    BattleAbilityRules.RequiresActionTargets(ability)
-                        ? ability.Target
-                        : null,
+                    ResolveEnemyAbilityTarget(ability),
                     _battleCharacters,
                     out CharacterTargetFaction targetFaction,
                     out IReadOnlyList<EnemyRuntime> enemyTargets,
@@ -2904,7 +4031,8 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
                     source,
                     enemyTargets,
                     playerTargets,
-                    damageType))
+                    damageType,
+                    damageSourceId))
             {
                 continue;
             }
@@ -2917,23 +4045,35 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
                     enemyTargets,
                     playerTargets);
             BattleEffectResult combined =
-                ExecuteEffectOperations(ability, context);
+                ExecuteAbilityOperations(
+                    source,
+                    state,
+                    ability,
+                    context,
+                    enemyTargets);
             foreach (EnemyAbilityOperationDefinition operation in
                      ability.Operations)
             {
                 if (operation == null || !operation.Enabled ||
                     operation.Type !=
-                        EnemyAbilityOperationType.ModifyIncomingDamage)
+                        EnemyAbilityOperationType.ModifyIncomingDamage ||
+                    damageType == CharacterAttackDamageType.Fixed)
                 {
                     continue;
                 }
 
-                damage = Mathf.Max(0, operation.Amount);
+                damage = Mathf.Max(
+                    0,
+                    Mathf.RoundToInt(EvaluateOperationModifier(
+                        damage,
+                        operation)));
                 combined = combined.Combine(
                     new BattleEffectResult(true, true));
             }
 
-            state.RecordActivation(
+            RecordEnemyAbilityActivation(
+                state,
+                source,
                 combined.Attempted,
                 combined.Succeeded);
         }
@@ -2943,7 +4083,8 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
 
     private DungeonBoardSlot FindModularDamageRedirect(
         DungeonBoardSlot targetTile,
-        CharacterAttackDamageType damageType)
+        CharacterAttackDamageType damageType,
+        string damageSourceId)
     {
         EnemyRuntime target = targetTile?.TopEnemy;
         if (target == null)
@@ -2961,9 +4102,9 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
             foreach (EnemyAbilityRuntimeState state in source.AbilityStates)
             {
                 EnemyAbilityDefinition ability = state.Definition;
-                if (!state.CanActivate ||
-                    ability.Trigger !=
-                        EnemyAbilityTrigger.BeforeAllyDamage)
+                if (!CanActivateEnemyAbility(source, state) ||
+                    !ability.RespondsToTrigger(
+                        EnemyAbilityTrigger.BeforeAllyDamage))
                 {
                     continue;
                 }
@@ -2975,7 +4116,8 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
                         source,
                         enemyTargets,
                         Array.Empty<IBattleCharacter>(),
-                        damageType))
+                        damageType,
+                        damageSourceId))
                 {
                     continue;
                 }
@@ -3008,9 +4150,16 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
                         enemyTargets,
                         null);
                 BattleEffectResult combined =
-                    ExecuteEffectOperations(ability, context).Combine(
+                    ExecuteAbilityOperations(
+                        source,
+                        state,
+                        ability,
+                        context,
+                        enemyTargets).Combine(
                         new BattleEffectResult(true, true));
-                state.RecordActivation(
+                RecordEnemyAbilityActivation(
+                    state,
+                    source,
                     combined.Attempted,
                     combined.Succeeded);
                 return sourceTile;
@@ -3030,14 +4179,12 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
         foreach (EnemyAbilityRuntimeState state in source.AbilityStates)
         {
             EnemyAbilityDefinition ability = state.Definition;
-            if (!state.CanActivate ||
-                ability.Trigger != EnemyAbilityTrigger.OnDeath ||
+            if (!CanActivateEnemyAbility(source, state) ||
+                !ability.RespondsToTrigger(EnemyAbilityTrigger.OnDeath) ||
                 !TryResolveEnemyAbilityTargets(
                     sourceTile,
                     source,
-                    BattleAbilityRules.RequiresActionTargets(ability)
-                        ? ability.Target
-                        : null,
+                    ResolveEnemyAbilityTarget(ability),
                     _battleCharacters,
                     out CharacterTargetFaction targetFaction,
                     out IReadOnlyList<EnemyRuntime> enemyTargets,
@@ -3059,35 +4206,997 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
                     enemyTargets,
                     playerTargets);
             BattleEffectResult combined =
-                ExecuteEffectOperations(ability, context);
-            state.RecordActivation(
+                ExecuteAbilityOperations(
+                    source,
+                    state,
+                    ability,
+                    context,
+                    enemyTargets);
+            RecordEnemyAbilityActivation(
+                state,
+                source,
                 combined.Attempted,
                 combined.Succeeded);
         }
     }
 
-    private static BattleEffectResult ExecuteEffectOperations(
+    private void ExecuteHealthThresholdAbilities(
+        DungeonBoardSlot sourceTile,
+        EnemyRuntime source,
+        int previousHealth,
+        Vector2 worldPosition)
+    {
+        if (source == null || source.Health <= 0 ||
+            source.AreAllActionsDisabled)
+        {
+            return;
+        }
+
+        foreach (EnemyAbilityRuntimeState state in source.AbilityStates)
+        {
+            EnemyAbilityDefinition ability = state.Definition;
+            if (!CanActivateEnemyAbility(source, state) ||
+                !ability.RespondsToTrigger(
+                    EnemyAbilityTrigger.OnHealthThreshold) ||
+                !source.TryMarkHealthThresholdCrossed(
+                    ability,
+                    previousHealth,
+                    source.Health))
+            {
+                continue;
+            }
+
+            BattleEffectResult result = ExecuteTriggeredAbilityNow(
+                sourceTile,
+                source,
+                EnemyAbilityTrigger.OnHealthThreshold,
+                state,
+                _battleCharacters);
+            RecordEnemyAbilityActivation(
+                state,
+                source,
+                result.Attempted,
+                result.Succeeded);
+            PublishEnemyCombatEvent(new EnemyCombatEvent(
+                EnemyCombatEventType.HealthThresholdCrossed,
+                source,
+                ability: ability,
+                previousHealth: previousHealth,
+                currentHealth: source.Health,
+                thresholdPercent: ability.HealthThresholdPercent,
+                worldPosition: worldPosition));
+        }
+    }
+
+    private void TryAdvanceEnemyPhaseForHealth(
+        EnemyRuntime source,
+        Vector2 worldPosition)
+    {
+        if (source == null || !source.TryAdvancePhaseForHealth(
+                out _,
+                out _))
+        {
+            return;
+        }
+
+        PublishEnemyCombatEvent(new EnemyCombatEvent(
+            EnemyCombatEventType.PhaseChanged,
+            source,
+            currentHealth: source.Health,
+            worldPosition: worldPosition));
+    }
+
+    private void TryAdvanceEnemyPhaseOnCoreContact(
+        EnemyRuntime source,
+        Vector2 worldPosition)
+    {
+        if (source == null || !source.TryAdvancePhaseOnCoreContact(
+                out _,
+                out _))
+        {
+            return;
+        }
+
+        PublishEnemyCombatEvent(new EnemyCombatEvent(
+            EnemyCombatEventType.PhaseChanged,
+            source,
+            currentHealth: source.Health,
+            worldPosition: worldPosition));
+    }
+
+    private void ExecuteNearbyEnemyDeathAbilities(
+        EnemyRuntime defeated,
+        Vector2 defeatedPosition,
+        DungeonBoardSlot defeatedTile)
+    {
+        _circularEnemySnapshot.Clear();
+        foreach (EnemyRuntime source in _enemyPlacements.Keys)
+            _circularEnemySnapshot.Add(source);
+        if (defeated != null &&
+            !_circularEnemySnapshot.Contains(defeated))
+        {
+            _circularEnemySnapshot.Add(defeated);
+        }
+
+        foreach (EnemyRuntime source in _circularEnemySnapshot)
+        {
+            bool isDefeatedSource = ReferenceEquals(source, defeated);
+            if (source == null || source.Health <= 0 && !isDefeatedSource ||
+                source.AreAllActionsDisabled && !isDefeatedSource)
+            {
+                continue;
+            }
+
+            DungeonBoardSlot sourceTile;
+            Vector2 sourcePosition;
+            if (isDefeatedSource)
+            {
+                sourceTile = defeatedTile;
+                sourcePosition = defeatedPosition;
+            }
+            else if (!TryFindEnemyTile(
+                         source,
+                         out sourceTile) ||
+                     !TryGetUnitPosition(
+                         BattleStatusTarget.FromEnemy(source),
+                         out sourcePosition))
+            {
+                continue;
+            }
+
+            foreach (EnemyAbilityRuntimeState state in source.AbilityStates)
+            {
+                EnemyAbilityDefinition ability = state.Definition;
+                if (!CanActivateEnemyAbility(source, state) ||
+                    !ability.RespondsToTrigger(
+                        EnemyAbilityTrigger.OnNearbyEnemyDeath))
+                {
+                    continue;
+                }
+
+                IReadOnlyList<EnemyRuntime> linkedSurvivors = null;
+                bool requiresOwnedLink = TryGetAbilityBooleanParameter(
+                        ability,
+                        "linkedOnly",
+                        out bool linkedOnly) && linkedOnly;
+                if (isDefeatedSource && !requiresOwnedLink)
+                    continue;
+                if (requiresOwnedLink && !TryGetLinkedSurvivors(
+                        source,
+                        defeated,
+                        ability.Target?.IncludeSource == true,
+                        ability.Target?.TargetCount ?? int.MaxValue,
+                        out linkedSurvivors))
+                {
+                    continue;
+                }
+                if (TryGetAbilityTextParameter(
+                        ability,
+                        "requiredEnemyTier",
+                        out string requiredTier) &&
+                    (!Enum.TryParse(
+                         requiredTier,
+                         true,
+                         out EnemyRosterTier rosterTier) ||
+                     defeated.Definition.RosterTier != rosterTier))
+                {
+                    continue;
+                }
+
+                float radius = ResolveNearbyDeathRadius(ability);
+                if ((sourcePosition - defeatedPosition).sqrMagnitude >
+                    radius * radius)
+                {
+                    continue;
+                }
+
+                BattleEffectResult result;
+                if (linkedSurvivors != null)
+                {
+                    if (!MatchesEnemyAbilityConditions(
+                            ability,
+                            source,
+                            linkedSurvivors,
+                            Array.Empty<IBattleCharacter>()))
+                    {
+                        continue;
+                    }
+                    BattleEffectContext context =
+                        BattleEffectContext.ForEnemyAbility(
+                            source,
+                            this,
+                            CharacterTargetFaction.Enemy,
+                            linkedSurvivors,
+                            Array.Empty<IBattleCharacter>());
+                    result = ExecuteAbilityOperations(
+                        source,
+                        state,
+                        ability,
+                        context,
+                        linkedSurvivors);
+                }
+                else
+                {
+                    result = ExecuteTriggeredAbilityNow(
+                        sourceTile,
+                        source,
+                        EnemyAbilityTrigger.OnNearbyEnemyDeath,
+                        state,
+                        _battleCharacters);
+                }
+                RecordEnemyAbilityActivation(
+                    state,
+                    source,
+                    result.Attempted,
+                    result.Succeeded);
+                PublishEnemyCombatEvent(new EnemyCombatEvent(
+                    EnemyCombatEventType.NearbyEnemyDefeated,
+                    source,
+                    relatedEnemy: defeated,
+                    ability: ability,
+                    worldPosition: defeatedPosition));
+            }
+        }
+        _circularEnemySnapshot.Clear();
+    }
+
+    private bool TryGetLinkedSurvivors(
+        EnemyRuntime source,
+        EnemyRuntime defeated,
+        bool includeSource,
+        int targetLimit,
+        out IReadOnlyList<EnemyRuntime> survivors)
+    {
+        List<EnemyRuntime> result = new();
+        for (int groupIndex = 0;
+             groupIndex < _enemyDamageLinks.Count;
+             groupIndex++)
+        {
+            EnemyDamageLinkGroup group = _enemyDamageLinks[groupIndex];
+            if (group == null ||
+                !ReferenceEquals(group.Owner, source) ||
+                !group.Members.Contains(source) ||
+                !group.Members.Contains(defeated))
+            {
+                continue;
+            }
+
+            for (int memberIndex = 0;
+                 memberIndex < group.Members.Count;
+                 memberIndex++)
+            {
+                EnemyRuntime member = group.Members[memberIndex];
+                if (member == null || member.Health <= 0 ||
+                    ReferenceEquals(member, defeated) ||
+                    (!includeSource && ReferenceEquals(member, source)) ||
+                    result.Contains(member))
+                {
+                    continue;
+                }
+                result.Add(member);
+                if (targetLimit > 0 && result.Count >= targetLimit)
+                    break;
+            }
+            break;
+        }
+
+        survivors = result.Count > 0
+            ? result
+            : Array.Empty<EnemyRuntime>();
+        return result.Count > 0;
+    }
+
+    private static float ResolveNearbyDeathRadius(
+        EnemyAbilityDefinition ability)
+    {
+        float radius = ability?.Target?.WorldRadius ?? 0f;
+        if (ability?.Operations != null)
+        {
+            foreach (EnemyAbilityOperationDefinition operation in
+                     ability.Operations)
+            {
+                if (operation != null)
+                    radius = Mathf.Max(radius, operation.WorldRadius);
+            }
+        }
+
+        return radius > 0f
+            ? radius
+            : BattleSpatialDefaults.NearbyRadius;
+    }
+
+    private BattleEffectResult ExecuteAbilityOperations(
+        EnemyRuntime source,
+        EnemyAbilityRuntimeState abilityState,
         EnemyAbilityDefinition ability,
-        BattleEffectContext context)
+        BattleEffectContext context,
+        IReadOnlyList<EnemyRuntime> enemyTargets)
     {
         BattleEffectResult combined = default;
         foreach (EnemyAbilityOperationDefinition operation in
                  ability.Operations)
         {
-            if (operation == null || !operation.Enabled ||
-                operation.Type !=
-                    EnemyAbilityOperationType.ExecuteEffects)
+            if (operation == null || !operation.Enabled)
             {
                 continue;
             }
 
+            if (operation.Type == EnemyAbilityOperationType.ExecuteEffects)
+            {
+                combined = combined.Combine(
+                    BattleEffectExecutor.ExecuteSequence(
+                        context,
+                        operation.Effects));
+                continue;
+            }
+
             combined = combined.Combine(
-                BattleEffectExecutor.ExecuteSequence(
-                    context,
-                    operation.Effects));
+                ExecuteEnemyRuntimeOperation(
+                    source,
+                    abilityState,
+                    ability,
+                    operation,
+                    enemyTargets));
         }
 
         return combined;
+    }
+
+    private BattleEffectResult ExecuteEnemyRuntimeOperation(
+        EnemyRuntime source,
+        EnemyAbilityRuntimeState abilityState,
+        EnemyAbilityDefinition ability,
+        EnemyAbilityOperationDefinition operation,
+        IReadOnlyList<EnemyRuntime> enemyTargets)
+    {
+        if (source == null || ability == null || operation == null)
+            return default;
+
+        if (operation.Type == EnemyAbilityOperationType.ChargeCoreAttack)
+        {
+            if (ability.Charge.IsEnabled && ability.Charge.Duration > 0f)
+            {
+                EnemyCombatModifier chargedAttack = new(
+                    source.ResolveModifierSourceId(ability, operation),
+                    EnemyCombatModifierType.CoreAttackDamage,
+                    operation.Amount,
+                    operation.Percentage,
+                    operation.Multiplier,
+                    0f,
+                    1,
+                    EnemyStatusModifierScope.All);
+                bool reserved =
+                    source.ReserveReadyChargedCoreAttackModifier(
+                        chargedAttack);
+                return new BattleEffectResult(true, reserved);
+            }
+
+            bool started = source.TryBeginCoreAttackCharge(
+                abilityState,
+                operation,
+                out _);
+            return new BattleEffectResult(true, started);
+        }
+
+        if (operation.Type == EnemyAbilityOperationType.ApplyCoreEffect)
+        {
+            if (_currentEnemyCombatEvent.Type ==
+                    EnemyCombatEventType.CoreDamageApplied &&
+                ReferenceEquals(_currentEnemyCombatEvent.Source, source))
+            {
+                if (operation.Amount > 0 && operation.Interval > 0f &&
+                    operation.Duration >= operation.Interval &&
+                    _battleCore is
+                        IBattleObjectiveModifierService objectiveEffects)
+                {
+                    bool applied = objectiveEffects.TryApplyDamageOverTime(
+                        source.ResolveModifierSourceId(ability, operation),
+                        operation.Amount,
+                        operation.Interval,
+                        operation.Duration,
+                        Mathf.Max(1, operation.MaximumStacks));
+                    return new BattleEffectResult(true, applied);
+                }
+
+                int healing = Mathf.Max(
+                    0,
+                    Mathf.RoundToInt(
+                        _currentEnemyCombatEvent.AppliedDamage *
+                        Mathf.Max(0f, operation.Percentage)));
+                int healed = source.Heal(healing);
+                return new BattleEffectResult(true, healed > 0);
+            }
+
+            bool reserved = source.ReserveNextCoreProtectionBypass(
+                operation.Percentage);
+            return new BattleEffectResult(true, reserved);
+        }
+        if (operation.Type == EnemyAbilityOperationType.SummonEnemy)
+        {
+            if (operation.Duration > 0f)
+            {
+                bool scheduled =
+                    _enemySummonService?.TryScheduleSummon(
+                        source,
+                        ability.AbilityId,
+                        operation.Summon,
+                        operation.Duration) == true;
+                return new BattleEffectResult(true, scheduled);
+            }
+
+            int summoned = _enemySummonService?.TrySummonEnemies(
+                source,
+                ability.AbilityId,
+                operation.Summon) ?? 0;
+            return new BattleEffectResult(true, summoned > 0);
+        }
+
+        if (operation.Type ==
+            EnemyAbilityOperationType.ModifySpawnInterval)
+        {
+            bool applied =
+                _enemySummonService?.TryAddSpawnIntervalModifier(
+                    source.ResolveModifierSourceId(ability, operation),
+                    operation.Multiplier,
+                    operation.Duration) == true;
+            return new BattleEffectResult(true, applied);
+        }
+        if (operation.Type ==
+            EnemyAbilityOperationType.ConvertCoreDamageToSelfShield)
+        {
+            if (_currentEnemyCombatEvent.Type !=
+                    EnemyCombatEventType.CoreDamageApplied ||
+                !ReferenceEquals(_currentEnemyCombatEvent.Source, source) ||
+                _currentEnemyCombatEvent.AppliedDamage <= 0)
+            {
+                return default;
+            }
+
+            float ratio = Mathf.Max(0f, operation.Percentage);
+            int requestedShield = ratio > 0f
+                ? Mathf.Max(
+                    0,
+                    Mathf.RoundToInt(
+                        _currentEnemyCombatEvent.AppliedDamage * ratio))
+                : Mathf.Max(0, operation.Amount);
+            int granted = source.GainShield(requestedShield);
+            return new BattleEffectResult(true, granted > 0);
+        }
+
+        if (operation.Type ==
+            EnemyAbilityOperationType.ModifyCoreAttackDamage &&
+            _currentEnemyCombatEvent.Type ==
+                EnemyCombatEventType.FirstCoreContact &&
+            ReferenceEquals(_currentEnemyCombatEvent.Source, source))
+        {
+            EnemyCombatModifier nextAttack = new(
+                source.ResolveModifierSourceId(ability, operation),
+                EnemyCombatModifierType.CoreAttackDamage,
+                operation.Amount,
+                operation.Percentage,
+                operation.Multiplier,
+                0f,
+                1,
+                EnemyStatusModifierScope.All);
+            bool reserved = source.ReserveNextCoreAttackModifier(nextAttack);
+            return new BattleEffectResult(true, reserved);
+        }
+
+        if (operation.Type ==
+                EnemyAbilityOperationType.ModifyCoreAttackDamage &&
+            TryGetAbilityIntegerParameter(
+                ability,
+                "stackDelta",
+                out int stackDelta) &&
+            stackDelta < 0)
+        {
+            int removed = source.RemoveCombatModifierStacks(
+                EnemyCombatModifierType.CoreAttackDamage,
+                -stackDelta);
+            return new BattleEffectResult(true, removed > 0);
+        }
+
+        if (operation.Type == EnemyAbilityOperationType.ModifyCoreRecovery &&
+            _battleCore is IBattleObjectiveModifierService recoveryService)
+        {
+            bool applied = recoveryService.TryAddTimedModifier(
+                source.ResolveModifierSourceId(ability, operation),
+                BattleObjectiveModifierType.HealingReceivedMultiplier,
+                operation.Multiplier,
+                operation.Duration,
+                Mathf.Max(1, operation.MaximumStacks));
+            return new BattleEffectResult(true, applied);
+        }
+
+        if (operation.Type ==
+                EnemyAbilityOperationType.ModifyCoreMaximumHealth &&
+            _battleCore is IBattleObjectiveModifierService maximumService)
+        {
+            float reduction = Mathf.Abs(operation.Percentage);
+            bool applied = maximumService.TryAddTimedModifier(
+                source.ResolveModifierSourceId(ability, operation),
+                BattleObjectiveModifierType.MaximumHealthReduction,
+                reduction,
+                operation.Duration,
+                Mathf.Max(1, operation.MaximumStacks));
+            return new BattleEffectResult(true, applied);
+        }
+
+        if (operation.Type == EnemyAbilityOperationType.CreateWorldZone &&
+            _battleCore is IBattleObjectiveModifierService zoneService)
+        {
+            // Until enemy-authored spatial zones have their own runtime,
+            // multiple authored zone markers collapse into one global effect.
+            // Stacking here would incorrectly square the multiplier merely
+            // because the presentation requested more than one marker.
+            bool applied = zoneService.TryAddTimedModifier(
+                source.ResolveModifierSourceId(ability, operation),
+                BattleObjectiveModifierType.HealingReceivedMultiplier,
+                operation.Multiplier,
+                operation.Duration,
+                1);
+            return new BattleEffectResult(true, applied);
+        }
+
+        if (operation.Type ==
+            EnemyAbilityOperationType.ModifyResourceRecovery)
+        {
+            bool applied = TryAddTimedResourceRecoveryModifier(
+                source.ResolveModifierSourceId(ability, operation),
+                operation.Multiplier,
+                operation.Duration);
+            return new BattleEffectResult(true, applied);
+        }
+
+        if (operation.Type == EnemyAbilityOperationType.ModifyCardCost)
+        {
+            bool applied = _cardControlService?.TryAddTimedCostModifier(
+                BattleCardCostModifierMode.Add,
+                operation.Amount,
+                operation.Duration) == true;
+            return new BattleEffectResult(true, applied);
+        }
+
+        if (operation.Type == EnemyAbilityOperationType.LockCard)
+        {
+            bool applied = _cardControlService?.TryLockRandomHandCard(
+                operation.Duration) == true;
+            return new BattleEffectResult(true, applied);
+        }
+
+        if (operation.Type == EnemyAbilityOperationType.SetUntargetable)
+        {
+            bool applied = source.TrySetUntargetable(operation.Duration);
+            return new BattleEffectResult(true, applied);
+        }
+
+        if (operation.Type == EnemyAbilityOperationType.ReflectDamage)
+        {
+            bool applied = source.TryReserveDamageReflection(
+                operation.Percentage,
+                operation.Duration);
+            return new BattleEffectResult(true, applied);
+        }
+
+        if (operation.Type == EnemyAbilityOperationType.LinkTargets)
+        {
+            string sourceId = source.ResolveModifierSourceId(
+                ability,
+                operation);
+            for (int index = _enemyDamageLinks.Count - 1;
+                 index >= 0;
+                 index--)
+            {
+                EnemyDamageLinkGroup existing = _enemyDamageLinks[index];
+                if (existing != null &&
+                    ReferenceEquals(existing.Owner, source) &&
+                    string.Equals(
+                        existing.SourceId,
+                        sourceId,
+                        StringComparison.Ordinal))
+                {
+                    _enemyDamageLinks.RemoveAt(index);
+                }
+            }
+
+            EnemyDamageLinkGroup group = new(
+                source,
+                sourceId,
+                operation.Percentage,
+                operation.Duration);
+            group.Members.Add(source);
+            if (enemyTargets != null)
+            {
+                foreach (EnemyRuntime target in enemyTargets)
+                {
+                    if (target != null && target.Health > 0 &&
+                        !group.Members.Contains(target))
+                    {
+                        group.Members.Add(target);
+                    }
+                }
+            }
+
+            if (group.ShareRatio <= 0f || group.Members.Count < 2)
+                return new BattleEffectResult(true, false);
+            _enemyDamageLinks.Add(group);
+            return new BattleEffectResult(true, true);
+        }
+
+        if (operation.Type ==
+                EnemyAbilityOperationType.ModifyTargetPriority &&
+            operation.TargetPriorityMode ==
+                EnemyTargetPriorityMode.ForceFocus &&
+            operation.Duration > 0f)
+        {
+            bool applied = TryForcePriorityTarget(
+                source,
+                operation.Duration);
+            return new BattleEffectResult(true, applied);
+        }
+
+        if (operation.Type == EnemyAbilityOperationType.GrantArmor &&
+            !ability.RespondsToTrigger(EnemyAbilityTrigger.OnSpawn))
+        {
+            bool armorAttempted = false;
+            bool armorSucceeded = false;
+            IReadOnlyList<EnemyRuntime> targets = enemyTargets != null &&
+                                                  enemyTargets.Count > 0
+                ? enemyTargets
+                : new[] { source };
+            foreach (EnemyRuntime target in targets)
+            {
+                if (target == null || target.Health <= 0)
+                    continue;
+                armorAttempted = true;
+                int armor = ResolveGrantedArmor(target, operation);
+                if (operation.Count > 1)
+                {
+                    long totalArmor = (long)armor * operation.Count;
+                    armor = totalArmor >= int.MaxValue
+                        ? int.MaxValue
+                        : (int)Math.Max(0L, totalArmor);
+                }
+                armorSucceeded |= target.GainArmor(armor) > 0;
+            }
+            return new BattleEffectResult(
+                armorAttempted,
+                armorSucceeded);
+        }
+
+        EnemyCombatModifierType modifierType;
+        switch (operation.Type)
+        {
+            case EnemyAbilityOperationType.ModifyCoreAttackDamage:
+                modifierType = EnemyCombatModifierType.CoreAttackDamage;
+                break;
+
+            case EnemyAbilityOperationType.ModifyCoreAttackInterval:
+                modifierType = EnemyCombatModifierType.CoreAttackInterval;
+                break;
+
+            case EnemyAbilityOperationType.ModifyStatusDuration:
+                modifierType = EnemyCombatModifierType.StatusDuration;
+                break;
+
+            case EnemyAbilityOperationType.GrantStatusImmunity:
+                modifierType = EnemyCombatModifierType.StatusImmunity;
+                break;
+
+            case EnemyAbilityOperationType.ModifyIncomingDamage
+                when !ability.RespondsToTrigger(
+                    EnemyAbilityTrigger.BeforeSelfDamage):
+                modifierType = EnemyCombatModifierType.IncomingDamage;
+                break;
+
+            default:
+                return default;
+        }
+
+        EnemyStatusModifierScope statusScope =
+            ResolveStatusModifierScope(ability);
+        EnemyCombatModifier modifier = new(
+            source.ResolveModifierSourceId(ability, operation),
+            modifierType,
+            operation.Amount,
+            operation.Percentage,
+            operation.Multiplier,
+            operation.Duration,
+            operation.MaximumStacks > 0
+                ? operation.MaximumStacks
+                : 1,
+            statusScope);
+        bool attempted = false;
+        bool succeeded = false;
+        if (enemyTargets != null)
+        {
+            foreach (EnemyRuntime target in enemyTargets)
+            {
+                if (target == null || target.Health <= 0)
+                    continue;
+                attempted = true;
+                succeeded |= target.ApplyCombatModifier(modifier);
+            }
+        }
+        if (!attempted)
+        {
+            attempted = true;
+            succeeded = source.ApplyCombatModifier(modifier);
+        }
+
+        return new BattleEffectResult(attempted, succeeded);
+    }
+
+    private static EnemyStatusModifierScope ResolveStatusModifierScope(
+        EnemyAbilityDefinition ability)
+    {
+        if (ability?.Parameters != null)
+        {
+            foreach (EnemyAbilityParameterDefinition parameter in
+                     ability.Parameters)
+            {
+                if (parameter == null ||
+                    (!string.Equals(
+                         parameter.Key,
+                         "scope",
+                         StringComparison.OrdinalIgnoreCase) &&
+                     !string.Equals(
+                         parameter.Key,
+                         "statusScope",
+                         StringComparison.OrdinalIgnoreCase)))
+                {
+                    continue;
+                }
+
+                string value = parameter.TextValue;
+                if (value.IndexOf(
+                        "control",
+                        StringComparison.OrdinalIgnoreCase) >= 0)
+                {
+                    return EnemyStatusModifierScope.Controls;
+                }
+                if (value.IndexOf(
+                        "debuff",
+                        StringComparison.OrdinalIgnoreCase) >= 0)
+                {
+                    return EnemyStatusModifierScope.Debuffs;
+                }
+            }
+        }
+
+        return ability != null &&
+               ability.AbilityTypeId.IndexOf(
+                   "control",
+                   StringComparison.OrdinalIgnoreCase) >= 0
+            ? EnemyStatusModifierScope.Controls
+            : EnemyStatusModifierScope.All;
+    }
+
+    private static bool TryGetAbilityIntegerParameter(
+        EnemyAbilityDefinition ability,
+        string key,
+        out int value)
+    {
+        value = 0;
+        if (ability?.Parameters == null || string.IsNullOrWhiteSpace(key))
+            return false;
+
+        foreach (EnemyAbilityParameterDefinition parameter in
+                 ability.Parameters)
+        {
+            if (parameter != null && string.Equals(
+                    parameter.Key,
+                    key,
+                    StringComparison.OrdinalIgnoreCase) &&
+                parameter.ValueType ==
+                    EnemyAbilityParameterValueType.Integer)
+            {
+                value = parameter.IntValue;
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static bool TryGetAbilityBooleanParameter(
+        EnemyAbilityDefinition ability,
+        string key,
+        out bool value)
+    {
+        value = false;
+        if (ability?.Parameters == null || string.IsNullOrWhiteSpace(key))
+            return false;
+        foreach (EnemyAbilityParameterDefinition parameter in
+                 ability.Parameters)
+        {
+            if (parameter != null && string.Equals(
+                    parameter.Key,
+                    key,
+                    StringComparison.OrdinalIgnoreCase) &&
+                parameter.ValueType ==
+                    EnemyAbilityParameterValueType.Boolean)
+            {
+                value = parameter.BoolValue;
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static bool TryGetAbilityTextParameter(
+        EnemyAbilityDefinition ability,
+        string key,
+        out string value)
+    {
+        value = string.Empty;
+        if (ability?.Parameters == null || string.IsNullOrWhiteSpace(key))
+            return false;
+        foreach (EnemyAbilityParameterDefinition parameter in
+                 ability.Parameters)
+        {
+            if (parameter != null && string.Equals(
+                    parameter.Key,
+                    key,
+                    StringComparison.OrdinalIgnoreCase) &&
+                parameter.ValueType ==
+                    EnemyAbilityParameterValueType.Text)
+            {
+                value = parameter.TextValue;
+                return !string.IsNullOrWhiteSpace(value);
+            }
+        }
+        return false;
+    }
+
+    private BattleEffectResult ExecuteTriggeredAbilityNow(
+        DungeonBoardSlot sourceTile,
+        EnemyRuntime source,
+        EnemyAbilityTrigger? trigger,
+        EnemyAbilityRuntimeState state,
+        IReadOnlyList<IBattleCharacter> characters)
+    {
+        EnemyAbilityDefinition ability = state?.Definition;
+        if (ability == null ||
+            (trigger.HasValue &&
+             !ability.RespondsToTrigger(trigger.Value)) ||
+            !TryResolveEnemyAbilityTargets(
+                sourceTile,
+                source,
+                ResolveEnemyAbilityTarget(ability),
+                characters,
+                out CharacterTargetFaction targetFaction,
+                out IReadOnlyList<EnemyRuntime> enemyTargets,
+                out IReadOnlyList<IBattleCharacter> playerTargets) ||
+            !MatchesEnemyAbilityConditions(
+                ability,
+                source,
+                enemyTargets,
+                playerTargets))
+        {
+            return default;
+        }
+
+        BattleEffectContext context = BattleEffectContext.ForEnemyAbility(
+            source,
+            this,
+            targetFaction,
+            enemyTargets,
+            playerTargets);
+        return ExecuteAbilityOperations(
+            source,
+            state,
+            ability,
+            context,
+            enemyTargets);
+    }
+
+    private void ExecuteTriggeredAbilities(
+        DungeonBoardSlot sourceTile,
+        EnemyRuntime source,
+        EnemyAbilityTrigger trigger,
+        IReadOnlyList<IBattleCharacter> characters)
+    {
+        if (source == null || source.AreAllActionsDisabled)
+            return;
+
+        foreach (EnemyAbilityRuntimeState state in source.AbilityStates)
+        {
+            EnemyAbilityDefinition ability = state.Definition;
+            if (!CanActivateEnemyAbility(source, state) ||
+                !ability.RespondsToTrigger(trigger) ||
+                source.IsAbilityCharging(ability))
+            {
+                continue;
+            }
+
+            if (ability.Charge.IsEnabled && ability.Charge.Duration > 0f)
+            {
+                if (source.IsCharging)
+                    continue;
+                if (CanBeginTriggeredCharge(
+                        sourceTile,
+                        source,
+                        ability,
+                        characters) &&
+                    source.TryBeginAbilityCharge(state, out _))
+                {
+                    continue;
+                }
+            }
+
+            BattleEffectResult result = ExecuteTriggeredAbilityNow(
+                sourceTile,
+                source,
+                trigger,
+                state,
+                characters);
+            RecordEnemyAbilityActivation(
+                state,
+                source,
+                result.Attempted,
+                result.Succeeded);
+        }
+    }
+
+    private bool CanBeginTriggeredCharge(
+        DungeonBoardSlot sourceTile,
+        EnemyRuntime source,
+        EnemyAbilityDefinition ability,
+        IReadOnlyList<IBattleCharacter> characters)
+    {
+        return TryResolveEnemyAbilityTargets(
+                   sourceTile,
+                   source,
+                   ResolveEnemyAbilityTarget(ability),
+                   characters,
+                   out _,
+                   out IReadOnlyList<EnemyRuntime> enemyTargets,
+                   out IReadOnlyList<IBattleCharacter> playerTargets) &&
+               MatchesEnemyAbilityConditions(
+                   ability,
+                   source,
+                   enemyTargets,
+                   playerTargets);
+    }
+
+    private void ExecuteNoDamageAbilities(
+        EnemyRuntime source,
+        IReadOnlyList<IBattleCharacter> characters)
+    {
+        if (source == null || source.AreAllActionsDisabled ||
+            !TryFindEnemyTile(source, out DungeonBoardSlot sourceTile))
+        {
+            return;
+        }
+
+        foreach (EnemyAbilityRuntimeState state in source.AbilityStates)
+        {
+            EnemyAbilityDefinition ability = state.Definition;
+            if (!CanActivateEnemyAbility(source, state) ||
+                !ability.RespondsToTrigger(
+                    EnemyAbilityTrigger.AfterNoDamage) ||
+                !source.TryMarkNoDamageDurationReached(ability))
+            {
+                continue;
+            }
+
+            BattleEffectResult result = ExecuteTriggeredAbilityNow(
+                sourceTile,
+                source,
+                EnemyAbilityTrigger.AfterNoDamage,
+                state,
+                characters);
+            RecordEnemyAbilityActivation(
+                state,
+                source,
+                result.Attempted,
+                result.Succeeded);
+            PublishEnemyCombatEvent(new EnemyCombatEvent(
+                EnemyCombatEventType.NoDamageDurationReached,
+                source,
+                ability: ability,
+                elapsedTime: source.TimeSinceLastDamage));
+        }
     }
 
     private static int ResolveGrantedArmor(
@@ -3101,6 +5210,34 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
         if (double.IsInfinity(amount) || amount >= int.MaxValue)
             return int.MaxValue;
         return Mathf.Max(0, Mathf.RoundToInt((float)amount));
+    }
+
+    private static float GetEnemyHealthPercentage(EnemyRuntime enemy)
+    {
+        return enemy != null && enemy.MaxHealth > 0
+            ? enemy.Health * 100f / enemy.MaxHealth
+            : 0f;
+    }
+
+    private static bool CanActivateEnemyAbility(
+        EnemyRuntime source,
+        EnemyAbilityRuntimeState state)
+    {
+        return source != null && state?.Definition != null &&
+               state.CanActivate &&
+               source.IsAbilityEnabledInCurrentPhase(state.Definition);
+    }
+
+    private static void RecordEnemyAbilityActivation(
+        EnemyAbilityRuntimeState state,
+        EnemyRuntime source,
+        bool attempted,
+        bool succeeded)
+    {
+        state?.RecordActivation(
+            attempted,
+            succeeded,
+            GetEnemyHealthPercentage(source));
     }
 
     private bool IsWithinAbilityRange(
@@ -3193,8 +5330,15 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
             }
 
             targetFaction = CharacterTargetFaction.Ally;
-            List<IBattleCharacter> candidates = new();
-            if (characters != null)
+            List<IBattleCharacter> candidates =
+                target.Subject == EnemyAbilityTargetSubject.WorldRadius
+                    ? CollectWorldRadiusPlayerTargets(
+                        source,
+                        characters,
+                        target.WorldRadius)
+                    : new List<IBattleCharacter>();
+            if (target.Subject != EnemyAbilityTargetSubject.WorldRadius &&
+                characters != null)
             {
                 foreach (IBattleCharacter character in characters)
                 {
@@ -3224,12 +5368,17 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
         }
 
         List<EnemyRuntime> enemyCandidates =
-            target.Subject == EnemyAbilityTargetSubject.Adjacent
-                ? CollectAdjacentEnemyTargets(
-                    sourceTile,
-                    target.Range,
-                    target.IncludeDiagonals)
-                : CollectEnemyAbilityTargets(source);
+            target.Subject switch
+            {
+                EnemyAbilityTargetSubject.Adjacent =>
+                    CollectAdjacentEnemyTargets(
+                        sourceTile,
+                        target.Range,
+                        target.IncludeDiagonals),
+                EnemyAbilityTargetSubject.WorldRadius =>
+                    CollectWorldRadiusEnemyTargets(source, target),
+                _ => CollectEnemyAbilityTargets(source),
+            };
         SelectEnemyAbilityTargets(
             enemyCandidates,
             target.Subject,
@@ -3239,6 +5388,18 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
             GetEnemyAllyTargetPriority);
         enemyTargets = enemyCandidates;
         return enemyCandidates.Count > 0;
+    }
+
+    private static EnemyAbilityTargetDefinition ResolveEnemyAbilityTarget(
+        EnemyAbilityDefinition ability)
+    {
+        if (ability == null)
+            return null;
+
+        return ability.Target?.HasTarget == true ||
+               BattleAbilityRules.RequiresActionTargets(ability)
+            ? ability.Target
+            : null;
     }
 
     private List<EnemyRuntime> CollectEnemyAbilityTargets(
@@ -3294,6 +5455,106 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
         return result;
     }
 
+    private List<EnemyRuntime> CollectWorldRadiusEnemyTargets(
+        EnemyRuntime source,
+        EnemyAbilityTargetDefinition target)
+    {
+        List<EnemyRuntime> result = new();
+        if (source == null || target == null || target.WorldRadius <= 0f ||
+            !TryGetUnitPosition(
+                BattleStatusTarget.FromEnemy(source),
+                out Vector2 sourcePosition))
+        {
+            return result;
+        }
+
+        IReadOnlyList<EnemyRuntime> nearby = SelectNearbyEnemies(
+            BattleStatusTarget.FromEnemy(source),
+            target.WorldRadius,
+            0,
+            target.IncludeSource);
+        foreach (EnemyRuntime candidate in nearby)
+        {
+            if (candidate != null &&
+                IsWithinWorldLayerScope(
+                    source,
+                    candidate,
+                    target.LayerScope))
+            {
+                result.Add(candidate);
+            }
+        }
+
+        SortEnemiesByDistance(result, sourcePosition);
+        return result;
+    }
+
+    private List<IBattleCharacter> CollectWorldRadiusPlayerTargets(
+        EnemyRuntime source,
+        IReadOnlyList<IBattleCharacter> characters,
+        float radius)
+    {
+        List<IBattleCharacter> result = new();
+        if (source == null || characters == null || radius <= 0f ||
+            !TryGetUnitPosition(
+                BattleStatusTarget.FromEnemy(source),
+                out Vector2 sourcePosition))
+        {
+            return result;
+        }
+
+        float radiusSquared = radius * radius;
+        foreach (IBattleCharacter character in characters)
+        {
+            if (character == null || character.CurrentHealth <= 0 ||
+                !TryGetUnitPosition(
+                    BattleStatusTarget.FromAlly(character),
+                    out Vector2 position) ||
+                (position - sourcePosition).sqrMagnitude > radiusSquared)
+            {
+                continue;
+            }
+
+            result.Add(character);
+        }
+
+        result.Sort((left, right) =>
+        {
+            TryGetUnitPosition(
+                BattleStatusTarget.FromAlly(left),
+                out Vector2 leftPosition);
+            TryGetUnitPosition(
+                BattleStatusTarget.FromAlly(right),
+                out Vector2 rightPosition);
+            return (leftPosition - sourcePosition).sqrMagnitude.CompareTo(
+                (rightPosition - sourcePosition).sqrMagnitude);
+        });
+        return result;
+    }
+
+    private bool IsWithinWorldLayerScope(
+        EnemyRuntime source,
+        EnemyRuntime target,
+        EnemyWorldLayerScope layerScope)
+    {
+        if (layerScope == EnemyWorldLayerScope.All ||
+            !_circularEnemyStates.TryGetValue(
+                source,
+                out CircularEnemyState sourceState) ||
+            !_circularEnemyStates.TryGetValue(
+                target,
+                out CircularEnemyState targetState))
+        {
+            return true;
+        }
+
+        int difference = Mathf.Abs(
+            sourceState.LayerIndex - targetState.LayerIndex);
+        return layerScope == EnemyWorldLayerScope.Same
+            ? difference == 0
+            : difference <= 1;
+    }
+
     private static void SelectEnemyAbilityTargets<T>(
         List<T> candidates,
         EnemyAbilityTargetSubject subject,
@@ -3322,7 +5583,8 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
                 candidates,
                 getPriority);
         }
-        else
+        else if (subject != EnemyAbilityTargetSubject.WorldRadius ||
+                 metric != EnemyAbilityTargetMetric.None)
         {
             bool descending =
                 subject == EnemyAbilityTargetSubject.HighestValue;
@@ -3477,7 +5739,8 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
         EnemyRuntime source,
         IReadOnlyList<EnemyRuntime> enemyTargets,
         IReadOnlyList<IBattleCharacter> playerTargets,
-        CharacterAttackDamageType? incomingDamageType = null)
+        CharacterAttackDamageType? incomingDamageType = null,
+        string incomingDamageSourceId = null)
     {
         IReadOnlyList<EnemyAbilityConditionDefinition> conditions =
             ability.Conditions;
@@ -3498,7 +5761,8 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
                 source,
                 enemyTargets,
                 playerTargets,
-                incomingDamageType);
+                incomingDamageType,
+                incomingDamageSourceId);
             if (matchAny && matched)
                 return true;
             if (!matchAny && !matched)
@@ -3513,7 +5777,8 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
         EnemyRuntime source,
         IReadOnlyList<EnemyRuntime> enemyTargets,
         IReadOnlyList<IBattleCharacter> playerTargets,
-        CharacterAttackDamageType? incomingDamageType)
+        CharacterAttackDamageType? incomingDamageType,
+        string incomingDamageSourceId)
     {
         switch (condition.Type)
         {
@@ -3611,6 +5876,15 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
                 return hasTarget == condition.Expected;
             }
 
+            case EnemyAbilityConditionType.RepeatedDamageSource:
+            {
+                bool repeated = source != null &&
+                    source.WasDamagedBySourceWithin(
+                        incomingDamageSourceId,
+                        condition.WindowDuration);
+                return repeated == condition.Expected;
+            }
+
             default:
                 return false;
         }
@@ -3649,6 +5923,8 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
 
     public void ClearAllStacks()
     {
+        _lastPracticeDebugEnemy = null;
+        practiceDebugOverlay?.Clear();
         UnbindAllPresentationEnemies();
         foreach (EnemyRuntime enemy in _enemyPlacements.Keys)
             enemy?.BindBattleBoard(null);
@@ -3660,6 +5936,9 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
         _exclusiveOccupants.Clear();
         _enemyPlacements.Clear();
         _circularEnemyStates.Clear();
+        _recentCoreAttackTimes.Clear();
+        _spatialBattleElapsedTime = 0f;
+        _nextFormationStableOrder = 0;
         ClearWorldEnemyViews();
         foreach (DungeonBoardSlot tile in _tiles)
         {
@@ -3671,11 +5950,20 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
 
     public void ClearAllEnemies()
     {
+        _lastPracticeDebugEnemy = null;
+        practiceDebugOverlay?.Clear();
         CancelManualTargetSelection();
         _forcedPriorityTarget = null;
         _forcedPriorityRemaining = 0f;
         _statusEventQueue.Clear();
         _defeatEventQueue.Clear();
+        _enemyCombatEventQueue.Clear();
+        _timedResourceRecoveryModifiers.Clear();
+        _enemyDamageLinks.Clear();
+        _enemyRadiusContacts.Clear();
+        _currentEnemyRadiusContacts.Clear();
+        _initializedEnemyRadiusAbilities.Clear();
+        _resolvingDamageLink = false;
         _effectResolvedEventQueue.Clear();
         _statusLifecycleEventQueue.Clear();
         _unitLifecycleEventQueue.Clear();
@@ -3694,6 +5982,7 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
 
     private void OnDestroy()
     {
+        SetPracticeDebugVisualization(false);
         _presentationDispatcher?.Dispose();
         _presentationDispatcher = null;
         UnbindAllPresentationEnemies();
@@ -3719,6 +6008,7 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
 
     private void Awake()
     {
+        practiceDebugOverlay?.SetVisible(false);
         if (worldActorPreview != null)
             worldActorPreview.SetActive(false);
         if (!HasWorldPresentation)
@@ -3826,6 +6116,7 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
 
     private void OnDisable()
     {
+        SetPracticeDebugVisualization(false);
         _presentationDispatcher?.Unbind();
         vfxPlayer?.ClearActive();
         if (worldPresentationRoot != null)
@@ -3885,36 +6176,40 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
         if (!_initialized || _tiles.Count == 0)
             return;
 
-        int laneCount = Mathf.Clamp(
-            InitialEnemyCapacity,
-            1,
-            _tiles.Count);
-
         _worldEnemySync.Clear();
-
-        for (int index = 0; index < _tiles.Count; index++)
+        _circularEnemySnapshot.Clear();
+        foreach (KeyValuePair<EnemyRuntime, CircularEnemyState> entry in
+                 _circularEnemyStates)
         {
-            DungeonBoardSlot tile = _tiles[index];
-            if (tile == null)
-                continue;
-
-            bool active = index < laneCount;
-            if (!active)
-                continue;
-
-            EnemyRuntime enemy = tile.TopEnemy;
-            if (enemy != null &&
-                _circularEnemyStates.TryGetValue(
-                    enemy,
-                    out CircularEnemyState state))
-            {
-                UpdateWorldEnemyView(
-                    enemy,
-                    state.SpawnDirection,
-                    state.ApproachProgress,
-                    index);
-            }
+            if (entry.Key != null && entry.Key.Health > 0 &&
+                entry.Value != null &&
+                _enemyPlacements.ContainsKey(entry.Key))
+                _circularEnemySnapshot.Add(entry.Key);
         }
+        _circularEnemySnapshot.Sort((left, right) =>
+        {
+            CircularEnemyState leftState = _circularEnemyStates[left];
+            CircularEnemyState rightState = _circularEnemyStates[right];
+            int layerOrder = leftState.LayerIndex.CompareTo(
+                rightState.LayerIndex);
+            if (layerOrder != 0)
+                return layerOrder;
+            int sectorOrder = leftState.SectorIndex.CompareTo(
+                rightState.SectorIndex);
+            return sectorOrder != 0
+                ? sectorOrder
+                : leftState.StableOrder.CompareTo(rightState.StableOrder);
+        });
+
+        for (int index = 0; index < _circularEnemySnapshot.Count; index++)
+        {
+            EnemyRuntime enemy = _circularEnemySnapshot[index];
+            UpdateWorldEnemyView(
+                enemy,
+                _circularEnemyStates[enemy],
+                index);
+        }
+        _circularEnemySnapshot.Clear();
 
         RemoveWorldEnemyViewsNotInSync();
     }
@@ -3962,6 +6257,9 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
                 movement.Destination - movement.Position,
                 worldCamera);
         }
+
+        if (_practiceDebugVisualizationEnabled)
+            RefreshPracticeDebugVisualization();
     }
 
     private void ApplyWorldEnvironment()
@@ -4129,11 +6427,10 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
 
     private void UpdateWorldEnemyView(
         EnemyRuntime enemy,
-        Vector2 direction,
-        float progress,
+        CircularEnemyState state,
         int laneIndex)
     {
-        if (!UsesWorldPresentation || enemy == null)
+        if (!UsesWorldPresentation || enemy == null || state == null)
             return;
 
         _worldEnemySync.Add(enemy);
@@ -4168,18 +6465,10 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
                 100 + laneIndex))
             return;
 
-        float wallRadius = GetWorldEnemyStopRadius(presentation);
-        float spawnRadius = Mathf.Max(
-            GetWorldSpawnRadius(),
-            wallRadius + presentation.WorldEnemyArenaRingClearance);
-        float radius = Mathf.Lerp(
-            spawnRadius,
-            wallRadius,
-            Mathf.Clamp01(progress));
         view.SetWorldPosition(new Vector3(
-            direction.x * radius,
+            state.ResolvedPosition.x,
             0f,
-            direction.y * radius));
+            state.ResolvedPosition.y));
         view.FaceCamera(worldCamera);
     }
 
@@ -4381,11 +6670,13 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
 
     private void RemoveWorldEnemyView(EnemyRuntime enemy)
     {
-        if (enemy == null ||
-            !_worldEnemyActors.TryGetValue(enemy, out WorldActorView view))
-        {
+        if (enemy == null)
             return;
-        }
+
+        if (ReferenceEquals(enemy, _lastPracticeDebugEnemy))
+            _lastPracticeDebugEnemy = null;
+        if (!_worldEnemyActors.TryGetValue(enemy, out WorldActorView view))
+            return;
 
         if (view?.GameObject != null)
             Destroy(view.GameObject);
@@ -4395,8 +6686,14 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
 
     private void RemoveWorldAllyView(IBattleCharacter character)
     {
-        if (character == null ||
-            !_worldAllyActors.TryGetValue(character, out WorldActorView view))
+        if (character == null)
+            return;
+
+        if (ReferenceEquals(character, _lastPracticeDebugAlly))
+            _lastPracticeDebugAlly = null;
+        if (!_worldAllyActors.TryGetValue(
+                character,
+                out WorldActorView view))
         {
             return;
         }
@@ -4415,6 +6712,8 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
         }
         _worldEnemyActors.Clear();
         _worldEnemySync.Clear();
+        _lastPracticeDebugEnemy = null;
+        practiceDebugOverlay?.Clear();
     }
 
     private void ClearWorldAllyViews()
@@ -4425,6 +6724,8 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
                 Destroy(view.GameObject);
         }
         _worldAllyActors.Clear();
+        _lastPracticeDebugAlly = null;
+        practiceDebugOverlay?.Clear();
     }
 
     private static void SetLayerRecursively(GameObject target, int layer)
@@ -4445,7 +6746,7 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
 
         int index = row * GridSize + column;
         if (index < 0 || index >= _tiles.Count ||
-            index >= InitialEnemyCapacity)
+            index >= TotalEnemyCapacity)
             return false;
 
         tile = _tiles[index];
@@ -4494,41 +6795,226 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
         IBattleCharacter source)
     {
         targetTile = ResolveAnchorTile(targetTile);
-        if (targetTile == null || targetTile.TopEnemy == null || damage <= 0)
+        if (targetTile == null || targetTile.TopEnemy == null || damage <= 0 ||
+            targetTile.TopEnemy.IsUntargetable)
             return 0;
 
+        string damageSourceId = ResolveDamageSourceId(source);
         DungeonBoardSlot redirectTile =
-            FindModularDamageRedirect(targetTile, damageType);
+            damageType == CharacterAttackDamageType.Fixed
+                ? null
+                : FindModularDamageRedirect(
+                    targetTile,
+                    damageType,
+                    damageSourceId);
         DungeonBoardSlot damageReceiver = redirectTile != null
             ? redirectTile
             : targetTile;
         EnemyRuntime damagedEnemy = damageReceiver.TopEnemy;
+        int linkedAppliedDamage = 0;
+        if (!_resolvingDamageLink)
+        {
+            linkedAppliedDamage = ShareLinkedDamage(
+                damagedEnemy,
+                ref damage,
+                damageType,
+                source);
+        }
         CaptureEnemyVfxAnchor(damagedEnemy, damageReceiver);
         damage = ExecuteBeforeSelfDamageAbilities(
             damageReceiver,
             damagedEnemy,
             damage,
-            damageType);
+            damageType,
+            damageSourceId);
         if (damage <= 0 || damagedEnemy.Health <= 0)
-            return 0;
+            return linkedAppliedDamage;
 
+        int previousHealth = damagedEnemy.Health;
+        TryGetUnitPosition(
+            BattleStatusTarget.FromEnemy(damagedEnemy),
+            out Vector2 damagedPosition);
         int appliedDamage = damageReceiver.TryDamageTop(damage, damageType);
         if (appliedDamage > 0)
         {
+            damagedEnemy.RecordDamageTaken(damageSourceId);
+            if (source != null &&
+                damageType != CharacterAttackDamageType.StatusEffect &&
+                damageType != CharacterAttackDamageType.StatusRemoval &&
+                damagedEnemy.TryConsumeDamageReflection(
+                    out float reflectionRatio))
+            {
+                int reflectedDamage = Mathf.Max(
+                    1,
+                    Mathf.RoundToInt(appliedDamage * reflectionRatio));
+                source.TakeDamage(reflectedDamage);
+            }
+            if (damageType != CharacterAttackDamageType.StatusEffect &&
+                damageType != CharacterAttackDamageType.StatusRemoval &&
+                damagedEnemy.TryInterruptCharge(
+                    EnemyChargeInterruptReason.DirectDamage,
+                    out EnemyActiveChargeRuntimeState interrupted))
+            {
+                RecordEnemyAbilityActivation(
+                    interrupted.AbilityState,
+                    damagedEnemy,
+                    true,
+                    false);
+            }
+            TryAdvanceEnemyPhaseForHealth(
+                damagedEnemy,
+                damagedPosition);
+            PublishEnemyCombatEvent(new EnemyCombatEvent(
+                EnemyCombatEventType.DamageTaken,
+                damagedEnemy,
+                relatedCharacter: source,
+                requestedDamage: damage,
+                appliedDamage: appliedDamage,
+                previousHealth: previousHealth,
+                currentHealth: damagedEnemy.Health,
+                damageSourceId: damageSourceId,
+                worldPosition: damagedPosition));
+            ExecuteHealthThresholdAbilities(
+                damageReceiver,
+                damagedEnemy,
+                previousHealth,
+                damagedPosition);
             ShowEnemyHitFeedback(damageReceiver, damagedEnemy);
         }
         if (appliedDamage > 0 && damagedEnemy.Health <= 0)
         {
-            ReleasePlacement(damagedEnemy, false);
             ExecuteDeathAbilities(damageReceiver, damagedEnemy);
+            ReleasePlacement(damagedEnemy, false);
             NotifyEnemyDefeated(new BattleEnemyDefeatedEvent(
                 damagedEnemy,
                 source));
+            ExecuteNearbyEnemyDeathAbilities(
+                damagedEnemy,
+                damagedPosition,
+                damageReceiver);
             SynchronizeEnemyPresentationBindings();
             OccupancyChanged?.Invoke();
         }
 
-        return appliedDamage;
+        return BattleValueMath.SaturatingAddNonNegative(
+            appliedDamage,
+            linkedAppliedDamage);
+    }
+
+    private int ShareLinkedDamage(
+        EnemyRuntime damagedEnemy,
+        ref int primaryDamage,
+        CharacterAttackDamageType damageType,
+        IBattleCharacter damageSource)
+    {
+        if (damagedEnemy == null || primaryDamage <= 0 ||
+            damageType == CharacterAttackDamageType.Fixed)
+        {
+            return 0;
+        }
+
+        EnemyDamageLinkGroup selected = null;
+        foreach (EnemyDamageLinkGroup group in _enemyDamageLinks)
+        {
+            if (group == null || group.Remaining <= 0f ||
+                !group.Members.Contains(damagedEnemy) ||
+                group.ShareRatio <= 0f)
+            {
+                continue;
+            }
+            if (selected == null || group.ShareRatio > selected.ShareRatio)
+                selected = group;
+        }
+        if (selected == null)
+            return 0;
+
+        List<EnemyRuntime> receivers = new();
+        foreach (EnemyRuntime member in selected.Members)
+        {
+            if (member != null && member.Health > 0 &&
+                !ReferenceEquals(member, damagedEnemy) &&
+                TryFindEnemyTile(member, out _))
+            {
+                receivers.Add(member);
+            }
+        }
+        if (receivers.Count == 0)
+            return 0;
+
+        int sharedRequested = Mathf.Clamp(
+            Mathf.RoundToInt(primaryDamage * selected.ShareRatio),
+            0,
+            primaryDamage);
+        if (sharedRequested <= 0)
+            return 0;
+        primaryDamage -= sharedRequested;
+
+        int totalApplied = 0;
+        int baseShare = sharedRequested / receivers.Count;
+        int remainder = sharedRequested % receivers.Count;
+        _resolvingDamageLink = true;
+        try
+        {
+            for (int index = 0; index < receivers.Count; index++)
+            {
+                int share = baseShare + (index < remainder ? 1 : 0);
+                if (share <= 0 || !TryFindEnemyTile(
+                        receivers[index],
+                        out DungeonBoardSlot receiverTile))
+                {
+                    continue;
+                }
+
+                totalApplied = BattleValueMath.SaturatingAddNonNegative(
+                    totalApplied,
+                    TryDamageTile(
+                        receiverTile,
+                        share,
+                        damageType,
+                        damageSource));
+            }
+        }
+        finally
+        {
+            _resolvingDamageLink = false;
+        }
+        return totalApplied;
+    }
+
+    private bool AreEnemiesDamageLinked(
+        EnemyRuntime left,
+        EnemyRuntime right)
+    {
+        if (left == null || right == null)
+            return false;
+        foreach (EnemyDamageLinkGroup group in _enemyDamageLinks)
+        {
+            if (group != null && group.Remaining > 0f &&
+                group.Members.Contains(left) &&
+                group.Members.Contains(right))
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static string ResolveDamageSourceId(IBattleCharacter source)
+    {
+        if (source == null)
+            return string.Empty;
+
+        if (source.PartySlotIndex >= 0)
+            return $"player-slot:{source.PartySlotIndex}";
+
+        if (source is CharacterRuntime runtime &&
+            !string.IsNullOrWhiteSpace(
+                runtime.Definition?.CharacterId))
+        {
+            return $"player-character:{runtime.Definition.CharacterId}";
+        }
+
+        return string.Empty;
     }
 
     private void ShowEnemyHitFeedback(
@@ -4627,9 +7113,9 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
         foreach (EnemyAbilityRuntimeState state in source.AbilityStates)
         {
             EnemyAbilityDefinition ability = state.Definition;
-            if (!state.CanActivate ||
-                ability.Trigger !=
-                    EnemyAbilityTrigger.OnTargetPriorityEvaluation ||
+            if (!CanActivateEnemyAbility(source, state) ||
+                !ability.RespondsToTrigger(
+                    EnemyAbilityTrigger.OnTargetPriorityEvaluation) ||
                 !EnemyAbilityConditionEvaluator.MatchesSourceOnly(
                     ability,
                     source,
@@ -4828,7 +7314,9 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
     private void CreateEnemySlots(int gridSize)
     {
         _tiles.Clear();
-        GridSize = Mathf.Clamp(gridSize, MinimumGridSize, MaximumGridSize);
+        GridSize = _arenaSetup.UsesBattleCore
+            ? Mathf.Max(MinimumGridSize, gridSize)
+            : Mathf.Clamp(gridSize, MinimumGridSize, MaximumGridSize);
         for (int row = 0; row < GridSize; row++)
         {
             for (int column = 0; column < GridSize; column++)
@@ -5077,11 +7565,12 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
                 }
                 else if (_manualTargetRequest.Faction ==
                              CharacterTargetFaction.Ally &&
-                         TryHitWorldAlly(
+                    TryHitWorldAlly(
                              eventData.position,
                              out IBattleCharacter manualAlly) &&
                          manualAlly is CharacterRuntime manualRuntime)
                 {
+                    RecordPracticeDebugAlly(manualAlly);
                     manualRuntime.TryHandleWorldTargetClick();
                 }
             }
@@ -5095,6 +7584,7 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
         _draggingWorldAlly = false;
         if (TryHitWorldAlly(eventData.position, out IBattleCharacter ally))
         {
+            RecordPracticeDebugAlly(ally);
             if (ally is CharacterRuntime runtime &&
                 runtime.TryHandleWorldTargetClick())
             {
@@ -5156,8 +7646,7 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
             {
                 UpdateManualAreaAim(eventData.position);
                 _manualAreaPointerDown = false;
-                if (_manualEnemyTargets.Count > 0 ||
-                    _manualAllyTargets.Count > 0)
+                if (_manualAreaAnchorSet)
                 {
                     CompleteManualTargetSelection();
                 }
@@ -5181,53 +7670,21 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
     private void SelectWorldAlly(IBattleCharacter character)
     {
         _selectedWorldAlly = character;
+        RecordPracticeDebugAlly(character);
         RefreshManualTargetHighlights();
+    }
+
+    private void RecordPracticeDebugAlly(IBattleCharacter character)
+    {
+        _lastPracticeDebugAlly = character;
+        _lastPracticeDebugEnemy = null;
     }
 
     private void RequestWorldAllyMove(
         IBattleCharacter character,
         Vector2 destination)
     {
-        if (character == null ||
-            !_worldAllyMovement.TryGetValue(
-                character,
-                out AllyMovementState movement))
-        {
-            return;
-        }
-
-        float allowedRadius = Mathf.Max(
-            0f,
-            GetWorldWallRadius() - worldAllyBoundaryPadding);
-        Vector2 resolved = BattleAreaGeometry.ClampToRadius(
-            destination,
-            Vector2.zero,
-            allowedRadius);
-        foreach (KeyValuePair<IBattleCharacter, AllyMovementState> entry in
-                 _worldAllyMovement)
-        {
-            if (ReferenceEquals(entry.Key, character))
-                continue;
-
-            Vector2 otherDestination = entry.Value.Destination;
-            Vector2 separation = resolved - otherDestination;
-            float spacing = Mathf.Max(0f, worldAllyMinimumSpacing);
-            if (separation.sqrMagnitude >= spacing * spacing)
-                continue;
-
-            Vector2 direction = separation.sqrMagnitude > 0.0001f
-                ? separation.normalized
-                : (movement.Position - otherDestination).normalized;
-            if (direction.sqrMagnitude <= 0.0001f)
-                direction = Vector2.right;
-            resolved = otherDestination + direction * spacing;
-            resolved = BattleAreaGeometry.ClampToRadius(
-                resolved,
-                Vector2.zero,
-                allowedRadius);
-        }
-
-        movement.Destination = resolved;
+        TrySetAllyDestination(character, destination, false);
     }
 
     private void InitializeManualAreaAim(
@@ -5516,16 +7973,339 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
             return false;
         }
 
-        Vector3 world = view.InteractionWorldPosition;
-        Vector3 viewport = worldCamera.WorldToViewportPoint(world);
-        if (viewport.z <= 0f)
+        return TryGetActorInputLocalPosition(view, rect, out Vector2 center) &&
+               PracticeBattleDebugGeometry.TryMeasureActorHit(
+                   pointerLocal,
+                   center,
+                   worldActorHitRadiusPixels,
+                   out distance);
+    }
+
+    private bool TryGetActorInputLocalPosition(
+        WorldActorView view,
+        RectTransform inputRect,
+        out Vector2 localPosition)
+    {
+        localPosition = default;
+        return view != null &&
+               TryProjectWorldToInputLocal(
+                   view.InteractionWorldPosition,
+                   inputRect,
+                   out localPosition);
+    }
+
+    private bool TryProjectGroundToInputLocal(
+        Vector2 ground,
+        out Vector2 localPosition)
+    {
+        localPosition = default;
+        if (worldActorRoot == null ||
+            worldInputView == null ||
+            worldInputView.transform is not RectTransform inputRect)
+        {
             return false;
-        Rect bounds = rect.rect;
-        Vector2 actorLocal = new(
-            Mathf.Lerp(bounds.xMin, bounds.xMax, viewport.x),
-            Mathf.Lerp(bounds.yMin, bounds.yMax, viewport.y));
-        distance = Vector2.Distance(pointerLocal, actorLocal);
-        return distance <= Mathf.Max(1f, worldActorHitRadiusPixels);
+        }
+
+        Vector3 world = worldActorRoot.TransformPoint(new Vector3(
+            ground.x,
+            WorldActorGroundHeight,
+            ground.y));
+        return TryProjectWorldToInputLocal(
+            world,
+            inputRect,
+            out localPosition,
+            false);
+    }
+
+    private bool TryProjectWorldToInputLocal(
+        Vector3 world,
+        RectTransform inputRect,
+        out Vector2 localPosition,
+        bool clampToViewport = true)
+    {
+        localPosition = default;
+        if (worldCamera == null || inputRect == null)
+            return false;
+
+        Vector3 viewport = worldCamera.WorldToViewportPoint(world);
+        if (viewport.z <= 0f ||
+            float.IsNaN(viewport.x) || float.IsInfinity(viewport.x) ||
+            float.IsNaN(viewport.y) || float.IsInfinity(viewport.y))
+        {
+            return false;
+        }
+
+        Rect bounds = inputRect.rect;
+        localPosition = clampToViewport
+            ? new Vector2(
+                Mathf.Lerp(bounds.xMin, bounds.xMax, viewport.x),
+                Mathf.Lerp(bounds.yMin, bounds.yMax, viewport.y))
+            : new Vector2(
+                bounds.xMin + bounds.width * viewport.x,
+                bounds.yMin + bounds.height * viewport.y);
+        return true;
+    }
+
+    private void RefreshPracticeDebugVisualization()
+    {
+        if (!_practiceDebugVisualizationEnabled ||
+            practiceDebugOverlay == null ||
+            !practiceDebugOverlay.HasRequiredReferences ||
+            worldInputView == null ||
+            worldInputView.transform is not RectTransform inputRect)
+        {
+            practiceDebugOverlay?.Clear();
+            return;
+        }
+
+        practiceDebugOverlay.BeginFrame();
+        float actorHitRadius =
+            PracticeBattleDebugGeometry.ResolveActorHitRadius(
+                worldActorHitRadiusPixels);
+        float allySpacingRadius =
+            PracticeBattleDebugGeometry.ResolveAllySpacingRadius(
+                worldAllyMinimumSpacing);
+        foreach (KeyValuePair<IBattleCharacter, WorldActorView> entry in
+                 _worldAllyActors)
+        {
+            if (entry.Key == null || entry.Key.CurrentHealth <= 0 ||
+                entry.Value == null)
+            {
+                continue;
+            }
+
+            if (TryGetActorInputLocalPosition(
+                    entry.Value,
+                    inputRect,
+                    out Vector2 actorCenter))
+            {
+                practiceDebugOverlay.AddInputCircle(
+                    inputRect,
+                    actorCenter,
+                    actorHitRadius,
+                    PracticeBattleDebugPrimitiveKind.AllyClick);
+            }
+
+            if (allySpacingRadius > 0f &&
+                _worldAllyMovement.TryGetValue(
+                    entry.Key,
+                    out AllyMovementState movement) &&
+                movement != null)
+            {
+                AddPracticeDebugGroundCircle(
+                    inputRect,
+                    movement.Position,
+                    allySpacingRadius,
+                    PracticeBattleDebugPrimitiveKind.AllySpacing);
+            }
+        }
+
+        foreach (KeyValuePair<EnemyRuntime, WorldActorView> entry in
+                 _worldEnemyActors)
+        {
+            EnemyRuntime enemy = entry.Key;
+            if (enemy == null || enemy.Health <= 0 || entry.Value == null ||
+                !_circularEnemyStates.TryGetValue(
+                    enemy,
+                    out CircularEnemyState state) ||
+                state == null)
+            {
+                continue;
+            }
+
+            if (TryGetActorInputLocalPosition(
+                    entry.Value,
+                    inputRect,
+                    out Vector2 actorCenter))
+            {
+                practiceDebugOverlay.AddInputCircle(
+                    inputRect,
+                    actorCenter,
+                    actorHitRadius,
+                    PracticeBattleDebugPrimitiveKind.EnemyClick);
+            }
+
+            float formationRadius =
+                PracticeBattleDebugGeometry.ResolveEnemyFormationRadius(
+                    enemy.FormationRadius,
+                    _arenaSetup.FormationSeparationRatio);
+            if (formationRadius > 0f)
+            {
+                AddPracticeDebugGroundCircle(
+                    inputRect,
+                    state.ResolvedPosition,
+                    formationRadius,
+                    PracticeBattleDebugPrimitiveKind.EnemyFormation);
+            }
+        }
+
+        AddPracticeDebugSelectedAllyRanges(inputRect);
+        AddPracticeDebugSelectedEnemyRanges(inputRect);
+        practiceDebugOverlay.EndFrame();
+    }
+
+    private void AddPracticeDebugSelectedAllyRanges(
+        RectTransform inputRect)
+    {
+        if (_lastPracticeDebugAlly is not CharacterRuntime runtime ||
+            runtime.CurrentHealth <= 0 || runtime.Data?.Definition == null ||
+            !_worldAllyMovement.TryGetValue(
+                runtime,
+                out AllyMovementState movement) ||
+            movement == null)
+        {
+            return;
+        }
+
+        _practiceDebugRangeRadii.Clear();
+        foreach (IBattleAbilityDefinition ability in
+                 runtime.Data.Definition.EnumerateBattleAbilities())
+        {
+            if (ability == null)
+                continue;
+
+            AddPracticeDebugAreaRadius(
+                ability.Targeting.AreaDefinition);
+            if (ability.BattleEffects == null)
+                continue;
+            foreach (IBattleEffectDefinition effect in
+                     ability.BattleEffects)
+            {
+                AddPracticeDebugAreaRadius(
+                    effect?.BattleTargetSelector?.AreaDefinition);
+            }
+        }
+
+        AddPracticeDebugAbilityCircles(inputRect, movement.Position);
+    }
+
+    private void AddPracticeDebugSelectedEnemyRanges(
+        RectTransform inputRect)
+    {
+        EnemyRuntime enemy = _lastPracticeDebugEnemy;
+        if (enemy == null || enemy.Health <= 0 ||
+            enemy.Definition == null ||
+            !_circularEnemyStates.TryGetValue(
+                enemy,
+                out CircularEnemyState state) ||
+            state == null)
+        {
+            return;
+        }
+
+        _practiceDebugRangeRadii.Clear();
+        foreach (EnemyAbilityDefinition ability in
+                 enemy.Definition.Abilities)
+        {
+            if (ability == null)
+                continue;
+
+            AddUniquePracticeDebugRadius(ability.Target?.WorldRadius ?? 0f);
+            AddPracticeDebugAreaRadius(
+                ability.Target?.AreaDefinition);
+            AddUniquePracticeDebugRadius(
+                ability.Telegraph?.WorldRadius ?? 0f);
+            foreach (EnemyAbilityOperationDefinition operation in
+                     ability.Operations)
+            {
+                if (operation == null || !operation.Enabled)
+                    continue;
+
+                AddUniquePracticeDebugRadius(operation.WorldRadius);
+                foreach (CharacterEffectDefinition effect in
+                         operation.Effects)
+                {
+                    AddPracticeDebugAreaRadius(
+                        effect?.BattleTargetSelector?.AreaDefinition);
+                }
+            }
+        }
+
+        AddPracticeDebugAbilityCircles(
+            inputRect,
+            state.ResolvedPosition);
+
+        if (!PracticeBattleDebugGeometry.IsFinitePositive(
+                enemy.CoreAttackRange))
+        {
+            return;
+        }
+
+        Vector2 reachEnd =
+            PracticeBattleDebugGeometry.ResolveEnemyCoreReachEnd(
+                state.ResolvedPosition,
+                state.DefenseLineRadius,
+                enemy.CoreAttackRange);
+        if (TryProjectGroundToInputLocal(
+                state.ResolvedPosition,
+                out Vector2 projectedStart) &&
+            TryProjectGroundToInputLocal(
+                reachEnd,
+                out Vector2 projectedEnd))
+        {
+            practiceDebugOverlay.AddInputLine(
+                inputRect,
+                projectedStart,
+                projectedEnd,
+                PracticeBattleDebugPrimitiveKind.CoreReach);
+        }
+    }
+
+    private void AddPracticeDebugAreaRadius(BattleAreaDefinition area)
+    {
+        if (area?.UsesWorldArea != true || !area.IsValid)
+            return;
+
+        float radius = area.OriginMode == CharacterAreaOriginMode.Caster
+            ? area.Radius
+            : area.MaxCastDistance;
+        AddUniquePracticeDebugRadius(radius);
+    }
+
+    private void AddUniquePracticeDebugRadius(float radius)
+    {
+        if (!PracticeBattleDebugGeometry.IsFinitePositive(radius))
+            return;
+
+        foreach (float existing in _practiceDebugRangeRadii)
+        {
+            if (Mathf.Abs(existing - radius) <= 0.001f)
+                return;
+        }
+        _practiceDebugRangeRadii.Add(radius);
+    }
+
+    private void AddPracticeDebugAbilityCircles(
+        RectTransform inputRect,
+        Vector2 center)
+    {
+        foreach (float radius in _practiceDebugRangeRadii)
+        {
+            AddPracticeDebugGroundCircle(
+                inputRect,
+                center,
+                radius,
+                PracticeBattleDebugPrimitiveKind.AbilityRange);
+        }
+        _practiceDebugRangeRadii.Clear();
+    }
+
+    private void AddPracticeDebugGroundCircle(
+        RectTransform inputRect,
+        Vector2 center,
+        float radius,
+        PracticeBattleDebugPrimitiveKind kind)
+    {
+        PracticeBattleDebugGeometry.AppendProjectedGroundCircle(
+            center,
+            radius,
+            PracticeDebugGroundCircleSegments,
+            TryProjectGroundToInputLocal,
+            (start, end) => practiceDebugOverlay.AddInputLine(
+                inputRect,
+                start,
+                end,
+                kind));
     }
 
     private static Camera ResolveUiCamera(RectTransform rect)
@@ -5537,6 +8317,1209 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
                canvas.renderMode != RenderMode.ScreenSpaceOverlay
             ? canvas.worldCamera
             : null;
+    }
+
+    public bool TryGetUnitPosition(
+        BattleStatusTarget target,
+        out Vector2 position)
+    {
+        position = Vector2.zero;
+        if (!target.IsValid)
+            return false;
+
+        if (target.Ally != null)
+        {
+            if (!TryGetAllyMovementState(
+                    target.Ally,
+                    out AllyMovementState movement))
+            {
+                return false;
+            }
+
+            position = movement.Position;
+            return true;
+        }
+
+        EnemyRuntime enemy = target.Enemy;
+        if (enemy == null || enemy.Health <= 0 ||
+            !_enemyPlacements.ContainsKey(enemy))
+        {
+            return false;
+        }
+
+        if (_circularEnemyStates.TryGetValue(
+                enemy,
+                out CircularEnemyState circularState))
+        {
+            position = ResolveCircularEnemyPosition(circularState);
+            return true;
+        }
+
+        if (!_enemyPlacements.TryGetValue(
+                enemy,
+                out EnemyPlacement placement) ||
+            placement?.Anchor == null)
+            return false;
+
+        DungeonBoardSlot tile = placement.Anchor;
+        float center = (GridSize - 1) * 0.5f;
+        position = new Vector2(
+            tile.Column - center,
+            tile.Row - center);
+        return true;
+    }
+
+    public BattleSpatialZone GetUnitZone(BattleStatusTarget target)
+    {
+        if (!target.IsValid)
+            return BattleSpatialZone.Unknown;
+
+        if (target.Enemy != null &&
+            _circularEnemyStates.TryGetValue(
+                target.Enemy,
+                out CircularEnemyState enemyState) &&
+            enemyState.LayerIndex == 0 &&
+            HasReachedFormationCell(enemyState))
+        {
+            return BattleSpatialZone.DefenseLine;
+        }
+
+        if (!TryGetUnitPosition(target, out Vector2 position))
+            return BattleSpatialZone.Unknown;
+
+        return position.magnitude <= InnerZoneBoundaryRadius
+            ? BattleSpatialZone.Inner
+            : BattleSpatialZone.Outer;
+    }
+
+    public IReadOnlyList<EnemyRuntime> SelectNearbyEnemies(
+        BattleStatusTarget anchor,
+        float radius = BattleSpatialDefaults.NearbyRadius,
+        int maximumCount = 0,
+        bool includeAnchor = false)
+    {
+        if (!TryGetUnitPosition(anchor, out Vector2 anchorPosition) ||
+            !IsFinite(radius) || radius <= 0f)
+        {
+            return Array.Empty<EnemyRuntime>();
+        }
+
+        float radiusSquared = radius * radius;
+        List<EnemyRuntime> result = new();
+        foreach (EnemyRuntime enemy in _enemyPlacements.Keys)
+        {
+            if (enemy == null || enemy.Health <= 0 ||
+                (!includeAnchor && ReferenceEquals(enemy, anchor.Enemy)) ||
+                !TryGetUnitPosition(
+                    BattleStatusTarget.FromEnemy(enemy),
+                    out Vector2 enemyPosition) ||
+                (enemyPosition - anchorPosition).sqrMagnitude >
+                    radiusSquared)
+            {
+                continue;
+            }
+
+            result.Add(enemy);
+        }
+
+        SortEnemiesByDistance(result, anchorPosition);
+        TrimToMaximumCount(result, maximumCount);
+        return result.Count > 0
+            ? result.ToArray()
+            : Array.Empty<EnemyRuntime>();
+    }
+
+    public IReadOnlyList<EnemyRuntime> SelectEnemiesBehind(
+        EnemyRuntime anchor,
+        float maximumDistance = BattleSpatialDefaults.NearbyRadius,
+        int maximumCount = 1,
+        float halfAngle = BattleSpatialDefaults.BehindHalfAngle)
+    {
+        if (anchor == null ||
+            !TryGetUnitPosition(
+                BattleStatusTarget.FromEnemy(anchor),
+                out Vector2 anchorPosition) ||
+            !IsFinite(maximumDistance) || maximumDistance <= 0f ||
+            !IsFinite(halfAngle))
+        {
+            return Array.Empty<EnemyRuntime>();
+        }
+
+        Vector2 outward = anchorPosition.sqrMagnitude > 0.0001f
+            ? anchorPosition.normalized
+            : _circularEnemyStates.TryGetValue(
+                anchor,
+                out CircularEnemyState anchorState)
+                ? anchorState.SpawnDirection
+                : Vector2.up;
+        float appliedHalfAngle = Mathf.Clamp(halfAngle, 0f, 180f);
+        float maximumDistanceSquared = maximumDistance * maximumDistance;
+        List<EnemyRuntime> result = new();
+        foreach (EnemyRuntime enemy in _enemyPlacements.Keys)
+        {
+            if (enemy == null || enemy.Health <= 0 ||
+                ReferenceEquals(enemy, anchor) ||
+                !TryGetUnitPosition(
+                    BattleStatusTarget.FromEnemy(enemy),
+                    out Vector2 enemyPosition))
+            {
+                continue;
+            }
+
+            Vector2 offset = enemyPosition - anchorPosition;
+            if (offset.sqrMagnitude <= 0.0001f ||
+                offset.sqrMagnitude > maximumDistanceSquared ||
+                Vector2.Dot(offset, outward) <= 0f ||
+                Vector2.Angle(outward, offset) > appliedHalfAngle)
+            {
+                continue;
+            }
+
+            result.Add(enemy);
+        }
+
+        SortEnemiesByDistance(result, anchorPosition);
+        TrimToMaximumCount(result, maximumCount);
+        return result.Count > 0
+            ? result.ToArray()
+            : Array.Empty<EnemyRuntime>();
+    }
+
+    public IReadOnlyList<EnemyRuntime> SelectDefenseLineEnemies()
+    {
+        List<EnemyRuntime> result = new();
+        foreach (KeyValuePair<EnemyRuntime, CircularEnemyState> entry in
+                 _circularEnemyStates)
+        {
+            if (entry.Key != null && entry.Key.Health > 0 &&
+                _enemyPlacements.ContainsKey(entry.Key) &&
+                entry.Value != null &&
+                entry.Value.LayerIndex == 0 &&
+                HasReachedFormationCell(entry.Value))
+            {
+                result.Add(entry.Key);
+            }
+        }
+
+        SortEnemiesByStableOrder(result);
+        return result.Count > 0
+            ? result.ToArray()
+            : Array.Empty<EnemyRuntime>();
+    }
+
+    public IReadOnlyList<EnemyRuntime> SelectRecentCoreAttackers(
+        float lookbackSeconds =
+            BattleSpatialDefaults.RecentCoreAttackWindow)
+    {
+        if (!IsFinite(lookbackSeconds) || lookbackSeconds <= 0f)
+            return Array.Empty<EnemyRuntime>();
+
+        float appliedLookback = Mathf.Min(
+            lookbackSeconds,
+            BattleSpatialDefaults.RecentCoreAttackWindow);
+        RemoveExpiredCoreAttackHistory();
+        List<EnemyRuntime> result = new();
+        foreach (KeyValuePair<EnemyRuntime, float> entry in
+                 _recentCoreAttackTimes)
+        {
+            if (entry.Key != null && entry.Key.Health > 0 &&
+                _enemyPlacements.ContainsKey(entry.Key) &&
+                _spatialBattleElapsedTime - entry.Value <= appliedLookback)
+            {
+                result.Add(entry.Key);
+            }
+        }
+
+        result.Sort((left, right) =>
+        {
+            int timeOrder = _recentCoreAttackTimes[right].CompareTo(
+                _recentCoreAttackTimes[left]);
+            return timeOrder != 0
+                ? timeOrder
+                : GetEnemyStableOrder(left).CompareTo(
+                    GetEnemyStableOrder(right));
+        });
+        return result.Count > 0
+            ? result.ToArray()
+            : Array.Empty<EnemyRuntime>();
+    }
+
+    public int MoveAlliesCoreward(
+        IReadOnlyList<IBattleCharacter> targets,
+        float distance = BattleSpatialDefaults.MovementStep)
+    {
+        if (!TryNormalizeMovementTargets(targets, distance, out float step))
+            return 0;
+
+        int changed = 0;
+        foreach (IBattleCharacter target in targets)
+        {
+            if (!TryGetMovableAllyState(target, out AllyMovementState state))
+                continue;
+
+            Vector2 destination = Vector2.MoveTowards(
+                state.Destination,
+                Vector2.zero,
+                step);
+            if (TrySetAllyDestination(target, destination, false))
+                changed++;
+        }
+        return changed;
+    }
+
+    public int MoveAlliesOutward(
+        IReadOnlyList<IBattleCharacter> targets,
+        float distance = BattleSpatialDefaults.MovementStep)
+    {
+        if (!TryNormalizeMovementTargets(targets, distance, out float step))
+            return 0;
+
+        int changed = 0;
+        foreach (IBattleCharacter target in targets)
+        {
+            if (!TryGetMovableAllyState(target, out AllyMovementState state))
+                continue;
+
+            Vector2 direction = ResolveAllyRadialDirection(target, state);
+            if (TrySetAllyDestination(
+                    target,
+                    state.Destination + direction * step,
+                    false))
+            {
+                changed++;
+            }
+        }
+        return changed;
+    }
+
+    public int MoveAlliesToOuterZone(
+        IReadOnlyList<IBattleCharacter> targets)
+    {
+        if (!CanMoveSpatialTargets(targets))
+            return 0;
+
+        float radius = GetAllowedAllyRadius();
+        int changed = 0;
+        foreach (IBattleCharacter target in targets)
+        {
+            if (!TryGetMovableAllyState(target, out AllyMovementState state))
+                continue;
+
+            Vector2 direction = ResolveAllyRadialDirection(target, state);
+            if (TrySetAllyDestination(
+                    target,
+                    direction * radius,
+                    false))
+            {
+                changed++;
+            }
+        }
+        return changed;
+    }
+
+    public int MoveAlliesToPoint(
+        IReadOnlyList<IBattleCharacter> targets,
+        Vector2 point,
+        bool instant = false)
+    {
+        if (!CanMoveSpatialTargets(targets) || !IsFinite(point))
+            return 0;
+
+        int changed = 0;
+        foreach (IBattleCharacter target in targets)
+        {
+            if (TryGetMovableAllyState(target, out _) &&
+                TrySetAllyDestination(target, point, instant))
+            {
+                changed++;
+            }
+        }
+        return changed;
+    }
+
+    public int MoveAlliesToEnemyFlank(
+        IReadOnlyList<IBattleCharacter> targets,
+        EnemyRuntime enemy,
+        float flankDistance = BattleSpatialDefaults.MovementStep,
+        bool instant = false)
+    {
+        if (!CanMoveSpatialTargets(targets) || enemy == null ||
+            !IsFinite(flankDistance) || flankDistance <= 0f ||
+            !TryGetUnitPosition(
+                BattleStatusTarget.FromEnemy(enemy),
+                out Vector2 enemyPosition))
+        {
+            return 0;
+        }
+
+        Vector2 radial = enemyPosition.sqrMagnitude > 0.0001f
+            ? enemyPosition.normalized
+            : Vector2.up;
+        Vector2 tangent = new(-radial.y, radial.x);
+        int changed = 0;
+        foreach (IBattleCharacter target in targets)
+        {
+            if (!TryGetMovableAllyState(target, out AllyMovementState state))
+                continue;
+
+            Vector2 first = enemyPosition + tangent * flankDistance;
+            Vector2 second = enemyPosition - tangent * flankDistance;
+            Vector2 destination =
+                (first - state.Destination).sqrMagnitude <=
+                (second - state.Destination).sqrMagnitude
+                    ? first
+                    : second;
+            if (TrySetAllyDestination(target, destination, instant))
+                changed++;
+        }
+        return changed;
+    }
+
+    public bool TrySwapAllies(
+        IBattleCharacter first,
+        IBattleCharacter second)
+    {
+        if (first == null || second == null ||
+            ReferenceEquals(first, second) ||
+            !TryGetMovableAllyState(first, out AllyMovementState firstState) ||
+            !TryGetMovableAllyState(second, out AllyMovementState secondState))
+        {
+            return false;
+        }
+
+        Vector2 firstPosition = firstState.Position;
+        Vector2 secondPosition = secondState.Position;
+        if ((firstPosition - secondPosition).sqrMagnitude <= 0.0001f)
+            return false;
+
+        firstState.Position = secondPosition;
+        firstState.Destination = secondPosition;
+        secondState.Position = firstPosition;
+        secondState.Destination = firstPosition;
+        RefreshWorldAllyPosition(first, firstState);
+        RefreshWorldAllyPosition(second, secondState);
+        return true;
+    }
+
+    public int PullEnemiesTowardPoint(
+        IReadOnlyList<EnemyRuntime> targets,
+        Vector2 point,
+        float distance = BattleSpatialDefaults.MovementStep)
+    {
+        if (!_arenaSetup.UsesBattleCore || targets == null ||
+            targets.Count == 0 || !IsFinite(point) ||
+            !IsFinite(distance) || distance <= 0f)
+        {
+            return 0;
+        }
+
+        EnsureFormationRadii();
+        HashSet<EnemyRuntime> movable = new();
+        foreach (EnemyRuntime enemy in targets)
+        {
+            if (enemy == null || enemy.Health <= 0 ||
+                !_enemyPlacements.ContainsKey(enemy) ||
+                !_circularEnemyStates.ContainsKey(enemy))
+            {
+                continue;
+            }
+            movable.Add(enemy);
+        }
+        if (movable.Count == 0)
+            return 0;
+
+        HashSet<int> occupiedCells = new();
+        foreach (KeyValuePair<EnemyRuntime, CircularEnemyState> entry in
+                 _circularEnemyStates)
+        {
+            if (entry.Key == null || entry.Value == null ||
+                movable.Contains(entry.Key))
+            {
+                continue;
+            }
+            occupiedCells.Add(GetFormationCellKey(
+                entry.Value.SectorIndex,
+                entry.Value.LayerIndex));
+        }
+
+        List<EnemyRuntime> ordered = new(movable);
+        ordered.Sort(CompareEnemiesByStableOrder);
+        int sectorCount = Mathf.Max(1, _arenaSetup.LaneCount);
+        int maximumLayers = Mathf.Max(1, _arenaSetup.MaximumLayerCount);
+        float maximumFormationRadius = GetMaximumFormationRadius();
+        int changed = 0;
+        bool movementRequested = false;
+        foreach (EnemyRuntime enemy in ordered)
+        {
+            CircularEnemyState state = _circularEnemyStates[enemy];
+            Vector2 current = state.ResolvedPosition;
+            Vector2 requested = Vector2.MoveTowards(
+                current,
+                point,
+                distance);
+            movementRequested |= (requested - current).sqrMagnitude >
+                                 FormationArrivalTolerance *
+                                 FormationArrivalTolerance;
+            int bestSector = state.SectorIndex;
+            int bestLayer = state.LayerIndex;
+            float bestDistance = float.PositiveInfinity;
+            for (int sector = 0; sector < sectorCount; sector++)
+            {
+                for (int layer = 0; layer < maximumLayers; layer++)
+                {
+                    int cellKey = GetFormationCellKey(sector, layer);
+                    if (occupiedCells.Contains(cellKey))
+                        continue;
+
+                    Vector2 candidate = EstimateFormationCellPosition(
+                        enemy,
+                        sector,
+                        layer,
+                        maximumFormationRadius);
+                    float candidateDistance =
+                        (candidate - requested).sqrMagnitude;
+                    if (candidateDistance < bestDistance - 0.0001f ||
+                        (Mathf.Approximately(
+                             candidateDistance,
+                             bestDistance) &&
+                         cellKey < GetFormationCellKey(
+                             bestSector,
+                             bestLayer)))
+                    {
+                        bestDistance = candidateDistance;
+                        bestSector = sector;
+                        bestLayer = layer;
+                    }
+                }
+            }
+
+            int reservedKey = GetFormationCellKey(
+                bestSector,
+                bestLayer);
+            if (float.IsPositiveInfinity(bestDistance))
+                continue;
+            occupiedCells.Add(reservedKey);
+            if (bestSector != state.SectorIndex ||
+                bestLayer != state.LayerIndex)
+            {
+                changed++;
+            }
+            state.SectorIndex = bestSector;
+            state.LayerIndex = bestLayer;
+        }
+
+        RefreshFormationTargets();
+        foreach (EnemyRuntime enemy in ordered)
+        {
+            CircularEnemyState state = _circularEnemyStates[enemy];
+            float resolvedRadius = ResolveFormationMovementTargetRadius(
+                enemy,
+                state);
+            Vector2 resolved = state.SpawnDirection * resolvedRadius;
+            if ((resolved - state.ResolvedPosition).sqrMagnitude >
+                FormationArrivalTolerance * FormationArrivalTolerance)
+            {
+                changed = Mathf.Max(1, changed);
+            }
+            state.ResolvedPosition = resolved;
+            UpdateFormationApproachProgress(state);
+        }
+
+        if (changed == 0 && movementRequested)
+            changed = 1;
+
+        if (changed > 0)
+        {
+            foreach (EnemyRuntime enemy in ordered)
+            {
+                if (enemy.TryInterruptCharge(
+                        EnemyChargeInterruptReason.ForcedMovement,
+                        out EnemyActiveChargeRuntimeState interrupted))
+                {
+                    RecordEnemyAbilityActivation(
+                        interrupted.AbilityState,
+                        enemy,
+                        true,
+                        false);
+                }
+            }
+            RefreshCircularLayout();
+        }
+        return changed;
+    }
+
+    private bool TryGetAllyMovementState(
+        IBattleCharacter character,
+        out AllyMovementState movement)
+    {
+        movement = null;
+        if (character == null || !_battleCharacters.Contains(character))
+            return false;
+
+        if (_worldAllyMovement.TryGetValue(character, out movement))
+            return true;
+
+        int index = _battleCharacters.IndexOf(character);
+        movement = GetOrCreateAllyMovementState(
+            character,
+            index,
+            _battleCharacters.Count,
+            GetWorldWallRadius());
+        return movement != null;
+    }
+
+    private bool TryGetMovableAllyState(
+        IBattleCharacter character,
+        out AllyMovementState movement)
+    {
+        movement = null;
+        return character != null &&
+               character.CurrentHealth > 0 &&
+               TryGetAllyMovementState(character, out movement);
+    }
+
+    private bool CanMoveSpatialTargets(
+        IReadOnlyList<IBattleCharacter> targets)
+    {
+        return _arenaSetup.UsesBattleCore &&
+               targets != null &&
+               targets.Count > 0;
+    }
+
+    private bool TryNormalizeMovementTargets(
+        IReadOnlyList<IBattleCharacter> targets,
+        float requestedDistance,
+        out float distance)
+    {
+        distance = 0f;
+        if (!CanMoveSpatialTargets(targets) ||
+            !IsFinite(requestedDistance) ||
+            requestedDistance <= 0f)
+        {
+            return false;
+        }
+
+        distance = requestedDistance;
+        return true;
+    }
+
+    private bool TrySetAllyDestination(
+        IBattleCharacter character,
+        Vector2 destination,
+        bool instant)
+    {
+        if (!IsFinite(destination) ||
+            !TryGetAllyMovementState(character, out AllyMovementState state))
+        {
+            return false;
+        }
+
+        Vector2 resolved = ResolveWorldAllyDestination(
+            character,
+            state,
+            destination);
+        bool destinationChanged =
+            (state.Destination - resolved).sqrMagnitude > 0.0001f;
+        bool positionChanged = instant &&
+            (state.Position - resolved).sqrMagnitude > 0.0001f;
+        if (!destinationChanged && !positionChanged)
+            return false;
+
+        state.Destination = resolved;
+        if (instant)
+        {
+            state.Position = resolved;
+            RefreshWorldAllyPosition(character, state);
+        }
+        return true;
+    }
+
+    private Vector2 ResolveWorldAllyDestination(
+        IBattleCharacter character,
+        AllyMovementState movement,
+        Vector2 destination)
+    {
+        float allowedRadius = GetAllowedAllyRadius();
+        Vector2 resolved = BattleAreaGeometry.ClampToRadius(
+            destination,
+            Vector2.zero,
+            allowedRadius);
+        float spacing = Mathf.Max(0f, worldAllyMinimumSpacing);
+        foreach (KeyValuePair<IBattleCharacter, AllyMovementState> entry in
+                 _worldAllyMovement)
+        {
+            if (ReferenceEquals(entry.Key, character) || entry.Value == null)
+                continue;
+
+            Vector2 otherDestination = entry.Value.Destination;
+            Vector2 separation = resolved - otherDestination;
+            if (separation.sqrMagnitude >= spacing * spacing)
+                continue;
+
+            Vector2 direction = separation.sqrMagnitude > 0.0001f
+                ? separation.normalized
+                : (movement.Position - otherDestination).normalized;
+            if (direction.sqrMagnitude <= 0.0001f)
+                direction = ResolveAllyRadialDirection(character, movement);
+            resolved = otherDestination + direction * spacing;
+            resolved = BattleAreaGeometry.ClampToRadius(
+                resolved,
+                Vector2.zero,
+                allowedRadius);
+        }
+
+        return resolved;
+    }
+
+    private Vector2 ResolveAllyRadialDirection(
+        IBattleCharacter character,
+        AllyMovementState movement)
+    {
+        Vector2 radial = movement != null &&
+                         movement.Destination.sqrMagnitude > 0.0001f
+            ? movement.Destination
+            : movement != null
+                ? movement.Position
+                : Vector2.zero;
+        if (radial.sqrMagnitude > 0.0001f)
+            return radial.normalized;
+
+        int count = Mathf.Max(1, _battleCharacters.Count);
+        int index = Mathf.Max(0, _battleCharacters.IndexOf(character));
+        float angle = count switch
+        {
+            1 => 90f,
+            2 => index == 0 ? 180f : 0f,
+            _ => 90f - index * (360f / count),
+        };
+        float radians = angle * Mathf.Deg2Rad;
+        return new Vector2(Mathf.Cos(radians), Mathf.Sin(radians));
+    }
+
+    private void RefreshWorldAllyPosition(
+        IBattleCharacter character,
+        AllyMovementState movement)
+    {
+        if (character == null || movement == null ||
+            !_worldAllyActors.TryGetValue(
+                character,
+                out WorldActorView view))
+        {
+            return;
+        }
+
+        view?.SetWorldPosition(new Vector3(
+            movement.Position.x,
+            WorldActorGroundHeight,
+            movement.Position.y));
+    }
+
+    private float GetAllowedAllyRadius()
+    {
+        return Mathf.Max(
+            0f,
+            GetWorldWallRadius() - worldAllyBoundaryPadding);
+    }
+
+    private Vector2 ResolveCircularEnemyPosition(
+        CircularEnemyState state)
+    {
+        return state != null
+            ? state.ResolvedPosition
+            : Vector2.zero;
+    }
+
+    private int ResolveRequiredFormationGridSize()
+    {
+        int capacity = Mathf.Max(
+            1,
+            _arenaSetup.MaximumEnemyCapacity);
+        return Mathf.Max(
+            MinimumGridSize,
+            Mathf.CeilToInt(Mathf.Sqrt(capacity)));
+    }
+
+    private void EnsureFormationRadii()
+    {
+        if (_formationRadiiInitialized)
+            return;
+
+        ResolveCircularEnemyRadii(
+            out _formationSpawnRadius,
+            out _formationDefenseLineRadius);
+        _formationSpawnRadius = Mathf.Max(
+            _formationDefenseLineRadius,
+            _formationSpawnRadius);
+        _formationRadiiInitialized = true;
+    }
+
+    private bool TryReserveFormationCell(
+        out int sectorIndex,
+        out int layerIndex)
+    {
+        sectorIndex = -1;
+        layerIndex = -1;
+        if (!_arenaSetup.UsesBattleCore)
+            return false;
+
+        int sectorCount = Mathf.Max(1, _arenaSetup.LaneCount);
+        int maximumLayers = Mathf.Max(1, _arenaSetup.MaximumLayerCount);
+        int shallowestLayer = maximumLayers;
+        List<int> candidateSectors = new();
+        for (int sector = 0; sector < sectorCount; sector++)
+        {
+            int firstFreeLayer = 0;
+            while (firstFreeLayer < maximumLayers &&
+                   IsFormationCellOccupied(sector, firstFreeLayer))
+            {
+                firstFreeLayer++;
+            }
+
+            if (firstFreeLayer >= maximumLayers)
+                continue;
+            if (firstFreeLayer < shallowestLayer)
+            {
+                shallowestLayer = firstFreeLayer;
+                candidateSectors.Clear();
+            }
+            if (firstFreeLayer == shallowestLayer)
+                candidateSectors.Add(sector);
+        }
+
+        if (candidateSectors.Count == 0)
+            return false;
+
+        sectorIndex = candidateSectors[
+            Random.Range(0, candidateSectors.Count)];
+        layerIndex = shallowestLayer;
+        return true;
+    }
+
+    private bool IsFormationCellOccupied(
+        int sectorIndex,
+        int layerIndex,
+        EnemyRuntime ignoredEnemy = null)
+    {
+        foreach (KeyValuePair<EnemyRuntime, CircularEnemyState> entry in
+                 _circularEnemyStates)
+        {
+            CircularEnemyState state = entry.Value;
+            if (state != null &&
+                !ReferenceEquals(entry.Key, ignoredEnemy) &&
+                state.SectorIndex == sectorIndex &&
+                state.LayerIndex == layerIndex)
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private Vector2 ResolveFormationSectorDirection(int sectorIndex)
+    {
+        int sectorCount = Mathf.Max(1, _arenaSetup.LaneCount);
+        int normalizedSector = ((sectorIndex % sectorCount) + sectorCount) %
+                               sectorCount;
+        return DungeonWorldSpawnGeometry.DirectionFromUnitSample(
+            (normalizedSector + 0.5f) / sectorCount);
+    }
+
+    private int GetFormationCellKey(int sectorIndex, int layerIndex)
+    {
+        return Mathf.Max(0, layerIndex) *
+               Mathf.Max(1, _arenaSetup.LaneCount) +
+               Mathf.Max(0, sectorIndex);
+    }
+
+    private Vector2 EstimateFormationCellPosition(
+        EnemyRuntime enemy,
+        int sectorIndex,
+        int layerIndex)
+    {
+        float maximumFormationRadius = GetMaximumFormationRadius(enemy);
+        return EstimateFormationCellPosition(
+            enemy,
+            sectorIndex,
+            layerIndex,
+            maximumFormationRadius);
+    }
+
+    private Vector2 EstimateFormationCellPosition(
+        EnemyRuntime enemy,
+        int sectorIndex,
+        int layerIndex,
+        float maximumFormationRadius)
+    {
+        maximumFormationRadius = Mathf.Max(
+            maximumFormationRadius,
+            enemy != null ? enemy.FormationRadius : 0f);
+        int sectorCount = Mathf.Max(1, _arenaSetup.LaneCount);
+        float angularSine = Mathf.Sin(Mathf.PI / sectorCount);
+        float angularSafeRadius = angularSine > 0.0001f
+            ? maximumFormationRadius *
+              _arenaSetup.FormationSeparationRatio / angularSine
+            : _formationDefenseLineRadius;
+        float baseRadius = Mathf.Max(
+            _formationDefenseLineRadius,
+            angularSafeRadius);
+        float radialSpacing = Mathf.Max(
+            _arenaSetup.LayerSpacing,
+            Mathf.Max(0f, maximumFormationRadius * 2f) *
+            _arenaSetup.FormationSeparationRatio);
+        float radius = baseRadius +
+                       Mathf.Max(0, layerIndex) * radialSpacing;
+        return ResolveFormationSectorDirection(sectorIndex) * radius;
+    }
+
+    private float GetMaximumFormationRadius(
+        EnemyRuntime additionalEnemy = null)
+    {
+        float maximumFormationRadius = additionalEnemy != null
+            ? additionalEnemy.FormationRadius
+            : 0f;
+        foreach (EnemyRuntime candidate in _circularEnemyStates.Keys)
+        {
+            if (candidate != null)
+            {
+                maximumFormationRadius = Mathf.Max(
+                    maximumFormationRadius,
+                    candidate.FormationRadius);
+            }
+        }
+        return maximumFormationRadius;
+    }
+
+    private float ResolveFormationSpawnRadius(
+        EnemyRuntime enemy,
+        int sectorIndex,
+        int layerIndex)
+    {
+        Vector2 estimatedCell = EstimateFormationCellPosition(
+            enemy,
+            sectorIndex,
+            layerIndex);
+        float estimatedTargetRadius = estimatedCell.magnitude;
+        float estimatedBaseRadius = EstimateFormationCellPosition(
+            enemy,
+            sectorIndex,
+            0).magnitude;
+        return Mathf.Max(
+            estimatedTargetRadius,
+            _formationSpawnRadius +
+            Mathf.Max(0f, estimatedTargetRadius - estimatedBaseRadius));
+    }
+
+    private void CompactFormationSector(int sectorIndex)
+    {
+        _circularEnemySnapshot.Clear();
+        foreach (KeyValuePair<EnemyRuntime, CircularEnemyState> entry in
+                 _circularEnemyStates)
+        {
+            if (entry.Key != null && entry.Value != null &&
+                entry.Value.SectorIndex == sectorIndex)
+            {
+                _circularEnemySnapshot.Add(entry.Key);
+            }
+        }
+        _circularEnemySnapshot.Sort((left, right) =>
+        {
+            CircularEnemyState leftState = _circularEnemyStates[left];
+            CircularEnemyState rightState = _circularEnemyStates[right];
+            int layerOrder = leftState.LayerIndex.CompareTo(
+                rightState.LayerIndex);
+            return layerOrder != 0
+                ? layerOrder
+                : leftState.StableOrder.CompareTo(rightState.StableOrder);
+        });
+        for (int index = 0; index < _circularEnemySnapshot.Count; index++)
+            _circularEnemyStates[_circularEnemySnapshot[index]].LayerIndex =
+                index;
+        _circularEnemySnapshot.Clear();
+    }
+
+    private void RefreshFormationTargets()
+    {
+        if (!_arenaSetup.UsesBattleCore)
+            return;
+
+        EnsureFormationRadii();
+        int sectorCount = Mathf.Max(1, _arenaSetup.LaneCount);
+        for (int sector = 0; sector < sectorCount; sector++)
+            CompactFormationSector(sector);
+
+        float maximumFormationRadius = 0f;
+        foreach (EnemyRuntime enemy in _circularEnemyStates.Keys)
+        {
+            if (enemy != null)
+            {
+                maximumFormationRadius = Mathf.Max(
+                    maximumFormationRadius,
+                    enemy.FormationRadius);
+            }
+        }
+
+        float angularSine = Mathf.Sin(Mathf.PI / sectorCount);
+        float angularSafeRadius = angularSine > 0.0001f
+            ? maximumFormationRadius *
+              _arenaSetup.FormationSeparationRatio / angularSine
+            : _formationDefenseLineRadius;
+        float defenseLineRadius = Mathf.Max(
+            _formationDefenseLineRadius,
+            angularSafeRadius);
+
+        for (int sector = 0; sector < sectorCount; sector++)
+        {
+            _circularEnemySnapshot.Clear();
+            foreach (KeyValuePair<EnemyRuntime, CircularEnemyState> entry in
+                     _circularEnemyStates)
+            {
+                if (entry.Key != null && entry.Value != null &&
+                    entry.Value.SectorIndex == sector)
+                {
+                    _circularEnemySnapshot.Add(entry.Key);
+                }
+            }
+            _circularEnemySnapshot.Sort((left, right) =>
+                _circularEnemyStates[left].LayerIndex.CompareTo(
+                    _circularEnemyStates[right].LayerIndex));
+
+            float targetRadius = defenseLineRadius;
+            EnemyRuntime previousEnemy = null;
+            Vector2 direction = ResolveFormationSectorDirection(sector);
+            for (int layer = 0;
+                 layer < _circularEnemySnapshot.Count;
+                 layer++)
+            {
+                EnemyRuntime enemy = _circularEnemySnapshot[layer];
+                CircularEnemyState state = _circularEnemyStates[enemy];
+                if (previousEnemy != null)
+                {
+                    float separation =
+                        (previousEnemy.FormationRadius +
+                         enemy.FormationRadius) *
+                        _arenaSetup.FormationSeparationRatio;
+                    targetRadius += Mathf.Max(
+                        _arenaSetup.LayerSpacing,
+                        separation);
+                }
+
+                state.SectorIndex = sector;
+                state.LayerIndex = layer;
+                state.SpawnDirection = direction;
+                state.DefenseLineRadius = defenseLineRadius;
+                state.TargetRadius = targetRadius;
+                UpdateFormationApproachProgress(state);
+                previousEnemy = enemy;
+            }
+            _circularEnemySnapshot.Clear();
+        }
+    }
+
+    private void UpdateFormationApproachProgress(CircularEnemyState state)
+    {
+        if (state == null)
+            return;
+
+        state.CurrentRadius = state.ResolvedPosition.magnitude;
+        float travel = _formationSpawnRadius - state.DefenseLineRadius;
+        state.ApproachProgress = travel > FormationArrivalTolerance
+            ? Mathf.Clamp01(
+                (_formationSpawnRadius - state.CurrentRadius) / travel)
+            : state.CurrentRadius <=
+              state.DefenseLineRadius + FormationArrivalTolerance
+                ? 1f
+                : 0f;
+    }
+
+    private static bool HasReachedFormationCell(CircularEnemyState state)
+    {
+        if (state == null)
+            return false;
+
+        Vector2 target = state.SpawnDirection * state.TargetRadius;
+        return (state.ResolvedPosition - target).sqrMagnitude <=
+               FormationArrivalTolerance * FormationArrivalTolerance;
+    }
+
+    private float ResolveFormationMovementSpeed(EnemyRuntime enemy)
+    {
+        if (enemy == null)
+            return 0f;
+
+        float normalizedSpan = Mathf.Max(
+            0.01f,
+            _arenaSetup.SpawnRadiusNormalized -
+            _arenaSetup.WallRadiusNormalized);
+        float worldSpan = Mathf.Max(
+            0.01f,
+            _formationSpawnRadius - _formationDefenseLineRadius);
+        return Mathf.Max(
+            0.01f,
+            enemy.ApproachSpeed * worldSpan / normalizedSpan);
+    }
+
+    private float ResolveFormationMovementTargetRadius(
+        EnemyRuntime enemy,
+        CircularEnemyState state)
+    {
+        if (enemy == null || state == null || state.LayerIndex <= 0)
+            return state != null ? state.TargetRadius : 0f;
+
+        foreach (KeyValuePair<EnemyRuntime, CircularEnemyState> entry in
+                 _circularEnemyStates)
+        {
+            CircularEnemyState innerState = entry.Value;
+            if (entry.Key == null || innerState == null ||
+                innerState.SectorIndex != state.SectorIndex ||
+                innerState.LayerIndex != state.LayerIndex - 1)
+            {
+                continue;
+            }
+
+            float separation = Mathf.Max(
+                _arenaSetup.LayerSpacing,
+                (entry.Key.FormationRadius + enemy.FormationRadius) *
+                _arenaSetup.FormationSeparationRatio);
+            return Mathf.Max(
+                state.TargetRadius,
+                innerState.CurrentRadius + separation);
+        }
+
+        return state.TargetRadius;
+    }
+
+    private void ResolveCircularEnemyRadii(
+        out float spawnRadius,
+        out float stopRadius)
+    {
+        DungeonHudPresentationSO presentation =
+            DungeonHudPresentation.Load();
+        stopRadius = GetWorldEnemyStopRadius(presentation);
+        float clearance = presentation != null
+            ? presentation.WorldEnemyArenaRingClearance
+            : 0f;
+        spawnRadius = Mathf.Max(
+            GetWorldSpawnRadius(),
+            stopRadius + clearance);
+    }
+
+    private void SortEnemiesByDistance(
+        List<EnemyRuntime> enemies,
+        Vector2 origin)
+    {
+        enemies?.Sort((left, right) =>
+        {
+            float leftDistance = TryGetUnitPosition(
+                BattleStatusTarget.FromEnemy(left),
+                out Vector2 leftPosition)
+                ? (leftPosition - origin).sqrMagnitude
+                : float.PositiveInfinity;
+            float rightDistance = TryGetUnitPosition(
+                BattleStatusTarget.FromEnemy(right),
+                out Vector2 rightPosition)
+                ? (rightPosition - origin).sqrMagnitude
+                : float.PositiveInfinity;
+            int distanceOrder = leftDistance.CompareTo(rightDistance);
+            return distanceOrder != 0
+                ? distanceOrder
+                : CompareEnemiesByStableOrder(left, right);
+        });
+    }
+
+    private void SortEnemiesByStableOrder(List<EnemyRuntime> enemies)
+    {
+        enemies?.Sort(CompareEnemiesByStableOrder);
+    }
+
+    private int CompareEnemiesByStableOrder(
+        EnemyRuntime left,
+        EnemyRuntime right)
+    {
+        if (ReferenceEquals(left, right))
+            return 0;
+        int placementOrder = GetEnemyStableOrder(left).CompareTo(
+            GetEnemyStableOrder(right));
+        if (placementOrder != 0)
+            return placementOrder;
+
+        string leftName = left?.Definition != null
+            ? left.Definition.name
+            : string.Empty;
+        string rightName = right?.Definition != null
+            ? right.Definition.name
+            : string.Empty;
+        int nameOrder = string.CompareOrdinal(leftName, rightName);
+        return nameOrder != 0
+            ? nameOrder
+            : (left?.GetHashCode() ?? 0).CompareTo(
+                right?.GetHashCode() ?? 0);
+    }
+
+    private int GetEnemyStableOrder(EnemyRuntime enemy)
+    {
+        if (enemy != null &&
+            _circularEnemyStates.TryGetValue(
+                enemy,
+                out CircularEnemyState state) &&
+            state != null)
+        {
+            return state.StableOrder;
+        }
+
+        return enemy != null &&
+               _enemyPlacements.TryGetValue(
+                   enemy,
+                   out EnemyPlacement placement) &&
+               placement.Anchor != null
+            ? placement.Anchor.Row * GridSize +
+              placement.Anchor.Column
+            : int.MaxValue;
+    }
+
+    private static void TrimToMaximumCount<T>(
+        List<T> values,
+        int maximumCount)
+    {
+        if (values == null || maximumCount <= 0 ||
+            values.Count <= maximumCount)
+        {
+            return;
+        }
+
+        values.RemoveRange(maximumCount, values.Count - maximumCount);
+    }
+
+    private void RemoveExpiredCoreAttackHistory()
+    {
+        if (_recentCoreAttackTimes.Count == 0)
+            return;
+
+        _circularEnemySnapshot.Clear();
+        foreach (KeyValuePair<EnemyRuntime, float> entry in
+                 _recentCoreAttackTimes)
+        {
+            if (entry.Key == null || entry.Key.Health <= 0 ||
+                !_enemyPlacements.ContainsKey(entry.Key) ||
+                _spatialBattleElapsedTime - entry.Value >
+                    BattleSpatialDefaults.RecentCoreAttackWindow)
+            {
+                _circularEnemySnapshot.Add(entry.Key);
+            }
+        }
+
+        foreach (EnemyRuntime enemy in _circularEnemySnapshot)
+            _recentCoreAttackTimes.Remove(enemy);
+        _circularEnemySnapshot.Clear();
+    }
+
+    private static bool IsFinite(float value)
+    {
+        return !float.IsNaN(value) && !float.IsInfinity(value);
+    }
+
+    private static bool IsFinite(Vector2 value)
+    {
+        return IsFinite(value.x) && IsFinite(value.y);
     }
 
     private Vector2 GetWorldAllyPosition(IBattleCharacter character)
@@ -5595,6 +9578,9 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
     {
         if (enemy == null)
             return;
+
+        _lastPracticeDebugEnemy = enemy;
+        _lastPracticeDebugAlly = null;
 
         if (HandleManualEnemyClicked(enemy))
             return;

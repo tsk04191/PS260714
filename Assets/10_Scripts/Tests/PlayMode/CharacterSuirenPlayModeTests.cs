@@ -1,10 +1,7 @@
 #if UNITY_INCLUDE_TESTS
 using System.Collections.Generic;
-using System.Reflection;
 using NUnit.Framework;
-using TMPro;
 using UnityEngine;
-using UnityEngine.UI;
 
 public sealed class CharacterSuirenPlayModeTests
 {
@@ -13,6 +10,8 @@ public sealed class CharacterSuirenPlayModeTests
     private const string EmergencyKitResourcePath =
         "StatusEffects/EmergencyKit";
     private const string StunResourcePath = "StatusEffects/Stun";
+    private const string CharacterInfoResourcePath =
+        "Presentation/CharacterInfo";
 
     private readonly List<CharacterRuntime> _characters = new();
     private readonly List<GameObject> _createdObjects = new();
@@ -129,6 +128,7 @@ public sealed class CharacterSuirenPlayModeTests
             "Test_DungeonBoard",
             typeof(RectTransform));
         _createdObjects.Add(root);
+        root.AddComponent<BattleVfxPlayer>();
         return root.AddComponent<DungeonBoardView>();
     }
 
@@ -136,43 +136,18 @@ public sealed class CharacterSuirenPlayModeTests
         CharacterSO definition,
         string label)
     {
-        GameObject root = new(
-            $"Test_{label}",
-            typeof(RectTransform),
-            typeof(CanvasRenderer),
-            typeof(Image),
-            typeof(AudioSource));
+        GameObject prefab = LoadResource<GameObject>(
+            CharacterInfoResourcePath);
+        GameObject root = UnityEngine.Object.Instantiate(prefab);
+        root.name = $"Test_{label}";
         _createdObjects.Add(root);
 
         CharacterRuntime character =
-            root.AddComponent<CharacterRuntime>();
-        TextMeshProUGUI nameText =
-            CreateText(root.transform, "txtName");
-        TextMeshProUGUI attackText =
-            CreateText(root.transform, "txtAttack");
-        TextMeshProUGUI cooldownText =
-            CreateText(root.transform, "txtCooldown");
-
-        GameObject cooldownTrack = new(
-            "grpCooldown",
-            typeof(RectTransform));
-        cooldownTrack.transform.SetParent(root.transform, false);
-        GameObject cooldownFillObject = new(
-            "imgCooldownFill",
-            typeof(RectTransform),
-            typeof(CanvasRenderer),
-            typeof(Image));
-        cooldownFillObject.transform.SetParent(
-            cooldownTrack.transform,
-            false);
-
-        SetPrivateField(character, "nameText", nameText);
-        SetPrivateField(character, "attackText", attackText);
-        SetPrivateField(character, "cooldownText", cooldownText);
-        SetPrivateField(
+            root.GetComponent<CharacterRuntime>();
+        Assert.That(
             character,
-            "cooldownFill",
-            cooldownFillObject.GetComponent<Image>());
+            Is.Not.Null,
+            $"Missing CharacterRuntime on '{CharacterInfoResourcePath}'.");
 
         Assert.That(
             character.ConfigureDefinition(definition),
@@ -180,34 +155,6 @@ public sealed class CharacterSuirenPlayModeTests
             $"Failed to configure CharacterRuntime '{label}'.");
         _characters.Add(character);
         return character;
-    }
-
-    private static TextMeshProUGUI CreateText(
-        Transform parent,
-        string objectName)
-    {
-        GameObject textObject = new(
-            objectName,
-            typeof(RectTransform),
-            typeof(CanvasRenderer),
-            typeof(TextMeshProUGUI));
-        textObject.transform.SetParent(parent, false);
-        return textObject.GetComponent<TextMeshProUGUI>();
-    }
-
-    private static void SetPrivateField<T>(
-        CharacterRuntime character,
-        string fieldName,
-        T value)
-    {
-        FieldInfo field = typeof(CharacterRuntime).GetField(
-            fieldName,
-            BindingFlags.Instance | BindingFlags.NonPublic);
-        Assert.That(
-            field,
-            Is.Not.Null,
-            $"Missing CharacterRuntime test field '{fieldName}'.");
-        field.SetValue(character, value);
     }
 
     private static T LoadResource<T>(string resourcePath)

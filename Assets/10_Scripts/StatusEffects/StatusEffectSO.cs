@@ -656,7 +656,7 @@ internal sealed class StatusEffectRuntimeBatch
 {
     public int Stacks { get; set; }
     public float RemainingDuration { get; set; }
-    public float TotalDuration { get; }
+    public float TotalDuration { get; set; }
     public float TickInterval { get; }
     public BattleAbilityUser User { get; }
 
@@ -917,6 +917,45 @@ internal sealed class StatusEffectRuntimeState
             user);
     }
 
+    public bool TryExtendDuration(float seconds)
+    {
+        if (!HasStacks ||
+            Definition.DurationMode == StatusEffectDurationMode.Permanent ||
+            IsPermanent ||
+            float.IsNaN(seconds) ||
+            float.IsInfinity(seconds) ||
+            seconds <= 0f)
+        {
+            return false;
+        }
+
+        StatusEffectRuntimeBatch active = ActiveBatch;
+        if (active == null ||
+            !TryAddFiniteDuration(
+                active.RemainingDuration,
+                seconds,
+                out float nextRemainingDuration))
+        {
+            return false;
+        }
+
+        float appliedSeconds =
+            nextRemainingDuration - active.RemainingDuration;
+        if (!TryAddFiniteDuration(
+                active.TotalDuration,
+                appliedSeconds,
+                out float nextTotalDuration))
+        {
+            nextTotalDuration = active.TotalDuration;
+        }
+
+        active.RemainingDuration = nextRemainingDuration;
+        active.TotalDuration = Mathf.Max(
+            nextRemainingDuration,
+            nextTotalDuration);
+        return true;
+    }
+
     public float AdvanceActiveDuration(float deltaTime)
     {
         StatusEffectRuntimeBatch active = ActiveBatch;
@@ -1026,6 +1065,29 @@ internal sealed class StatusEffectRuntimeState
     private static bool DurationsEqual(float left, float right)
     {
         return left.Equals(right) || Mathf.Approximately(left, right);
+    }
+
+    private static bool TryAddFiniteDuration(
+        float current,
+        float increment,
+        out float result)
+    {
+        result = current;
+        if (float.IsNaN(current) ||
+            float.IsInfinity(current) ||
+            current < 0f ||
+            float.IsNaN(increment) ||
+            float.IsInfinity(increment) ||
+            increment <= 0f)
+        {
+            return false;
+        }
+
+        double sum = (double)current + increment;
+        result = sum >= float.MaxValue
+            ? float.MaxValue
+            : (float)sum;
+        return result > current;
     }
 }
 

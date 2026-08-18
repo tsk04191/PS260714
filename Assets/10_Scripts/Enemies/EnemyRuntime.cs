@@ -15,10 +15,35 @@ public sealed class EnemyRuntime
     private readonly Queue<BattleStatusChangedEvent> _statusChangeQueue =
         new();
     private readonly List<EnemyAbilityRuntimeState> _abilityStates = new();
+    private readonly List<EnemyCombatModifierRuntimeState>
+        _combatModifiers = new();
+    private readonly List<EnemyCombatModifier>
+        _nextCoreAttackModifiers = new();
+    private readonly HashSet<string> _triggeredHealthThresholds =
+        new(StringComparer.Ordinal);
+    private readonly Dictionary<string, float> _nextNoDamageActivations =
+        new(StringComparer.Ordinal);
+    private readonly Dictionary<string, float> _lastDamageSourceTimes =
+        new(StringComparer.Ordinal);
     private IBattleBoard _boundBattleBoard;
+    private EnemyActiveChargeRuntimeState _activeCharge;
+    private EnemyCombatModifier _readyCoreAttackModifier;
+    private bool _hasReadyCoreAttackModifier;
+    private float _fractionalCoreDamageRemainder;
+    private float _combatElapsedTime;
+    private float _timeSinceLastDamage;
+    private float _summonedCoreAttackMultiplier = 1f;
+    private float _untargetableRemaining;
+    private float _reflectionRemaining;
+    private float _reflectionRatio;
+    private float _pendingCoreProtectionBypass;
+    private int _currentPhaseIndex = -1;
     private int _statusMutationDepth;
     private bool _dispatchingStatusChanges;
     internal IBattleBoard BoundBattleBoard => _boundBattleBoard;
+    private IEnemyCombatRuntimeService CombatRuntimeService =>
+        (_boundBattleBoard as IEnemyCombatRuntimeServiceProvider)
+        ?.EnemyCombatRuntimeService;
 
     internal void BindBattleBoard(IBattleBoard board)
     {
@@ -49,10 +74,14 @@ public sealed class EnemyRuntime
     {
         get
         {
+            if (IsUntargetable)
+                return true;
+
             foreach (EnemyAbilityRuntimeState state in _abilityStates)
             {
-                if (state.Definition.Trigger !=
-                    EnemyAbilityTrigger.OnTargetPriorityEvaluation)
+                if (!IsAbilityEnabledInCurrentPhase(state.Definition) ||
+                    !state.Definition.RespondsToTrigger(
+                        EnemyAbilityTrigger.OnTargetPriorityEvaluation))
                 {
                     continue;
                 }
@@ -75,18 +104,103 @@ public sealed class EnemyRuntime
         }
     }
     public float SpawnIntervalMultiplier => Definition.SpawnIntervalMultiplier;
+    public bool IsUntargetable => Health > 0 &&
+                                  _untargetableRemaining > 0f;
     public float ApproachSpeed => Definition.ApproachSpeed;
-    public float CurrentAttackPower => Definition.AttackPower;
-    public int CoreAttackDamage => Definition.CoreAttackDamage;
-    public float CoreAttackInterval => Definition.CoreAttackInterval;
+    public float FormationRadius => Definition.FormationRadius;
+    public float CurrentAttackPower => Mathf.Max(
+        0f,
+        GetStatusModifiedStat(
+            Definition.AttackPower,
+            StatusEffectStatType.AttackPower,
+            StatusEffectOperationType.AttackPowerModifier));
+    public float CoreAttackDamageValue
+    {
+        get
+        {
+            float value = GetStatusModifiedStat(
+                Definition.CoreAttackDamageValue *
+                _summonedCoreAttackMultiplier,
+                StatusEffectStatType.AttackPower,
+                StatusEffectOperationType.AttackPowerModifier);
+            value = EvaluateCombatModifiers(
+                EnemyCombatModifierType.CoreAttackDamage,
+                value);
+            IEnemyCombatRuntimeService service = CombatRuntimeService;
+            if (service != null)
+            {
+                value = service.ResolvePassiveModifier(
+                    this,
+                    EnemyCombatModifierType.CoreAttackDamage,
+                    value);
+            }
+
+            return NormalizeNonNegative(value);
+        }
+    }
+    public int CoreAttackDamage => SaturatingRoundToInt(
+        CoreAttackDamageValue);
+    public float CoreAttackInterval
+    {
+        get
+        {
+            float baseInterval = Definition.CoreAttackInterval;
+            float baseSpeed = baseInterval > 0f
+                ? 1f / baseInterval
+                : 0f;
+            float modifiedSpeed = GetStatusModifiedStat(
+                baseSpeed,
+                StatusEffectStatType.AttackSpeed,
+                StatusEffectOperationType.AttackSpeedModifier);
+            float value = modifiedSpeed > 0f
+                ? 1f / modifiedSpeed
+                : float.MaxValue;
+            value = EvaluateCombatModifiers(
+                EnemyCombatModifierType.CoreAttackInterval,
+                value);
+            IEnemyCombatRuntimeService service = CombatRuntimeService;
+            if (service != null)
+            {
+                value = service.ResolvePassiveModifier(
+                    this,
+                    EnemyCombatModifierType.CoreAttackInterval,
+                    value);
+            }
+
+            return Mathf.Max(TimePrecision.Step, NormalizeFinite(value));
+        }
+    }
+    public float CoreAttackRange => Definition.CoreAttackRange;
+    public float TimeSinceLastDamage =>
+        TimePrecision.FloorToTenth(_timeSinceLastDamage);
+    public bool IsCharging => _activeCharge != null;
+    internal bool HasReadyChargedCoreAttack =>
+        _hasReadyCoreAttackModifier;
+    internal float PendingCoreProtectionBypass =>
+        Mathf.Clamp01(_pendingCoreProtectionBypass);
+    public EnemyChargeSnapshot ActiveCharge => _activeCharge != null
+        ? _activeCharge.CreateSnapshot(this)
+        : default;
+    public bool IsSummoned { get; private set; }
+    public int SummonDepth { get; private set; }
+    public string SummonerEnemyId { get; private set; } = string.Empty;
+    public string OriginAbilityId { get; private set; } = string.Empty;
+    public int CurrentPhaseIndex => _currentPhaseIndex;
+    public EnemyBossPhaseDefinition CurrentPhase =>
+        _currentPhaseIndex >= 0 &&
+        _currentPhaseIndex < Definition.PhaseDefinitions.Count
+            ? Definition.PhaseDefinitions[_currentPhaseIndex]
+            : null;
+    public string CurrentPhaseId => CurrentPhase?.PhaseId ?? string.Empty;
     public float AbilityCooldownRemaining
     {
         get
         {
             foreach (EnemyAbilityRuntimeState state in _abilityStates)
             {
-                if (state.Definition.Trigger ==
-                    EnemyAbilityTrigger.OnCooldown)
+                if (IsAbilityEnabledInCurrentPhase(state.Definition) &&
+                    state.Definition.RespondsToTrigger(
+                        EnemyAbilityTrigger.OnCooldown))
                 {
                     return state.CooldownRemaining;
                 }
@@ -127,6 +241,41 @@ public sealed class EnemyRuntime
             : Array.Empty<BattleStatusSnapshot>();
     }
 
+    public bool TryExtendStatusDuration(
+        StatusEffectSO definition,
+        float seconds)
+    {
+        BeginStatusMutation();
+        try
+        {
+            if (definition == null ||
+                string.IsNullOrWhiteSpace(definition.StatusId) ||
+                !_statusEffects.TryGetValue(
+                    definition.StatusId,
+                    out StatusEffectRuntimeState state) ||
+                state == null ||
+                !state.HasStacks)
+            {
+                return false;
+            }
+
+            BattleStatusSnapshot previousSnapshot =
+                CreateStatusSnapshot(state);
+            if (!state.TryExtendDuration(seconds))
+                return false;
+
+            NotifyStatusChanged(
+                BattleStatusChangeType.Reapplied,
+                previousSnapshot,
+                CreateStatusSnapshot(state));
+            return true;
+        }
+        finally
+        {
+            EndStatusMutation();
+        }
+    }
+
     public EnemyRuntime(EnemySO definition, int maximumHealthOverride = 0)
     {
         Definition = definition != null
@@ -142,6 +291,626 @@ public sealed class EnemyRuntime
         Armor = Definition.InitialArmor;
         CurrentShield = Definition.InitialShield;
         InitializeAbilityStates();
+        InitializePhaseState();
+    }
+
+    internal int ResolveCoreAttackDamageForHit()
+    {
+        float value = CoreAttackDamageValue;
+        if (_hasReadyCoreAttackModifier)
+        {
+            value = _readyCoreAttackModifier.IsValid
+                ? EvaluateModifier(_readyCoreAttackModifier, value, 1)
+                : value;
+            _readyCoreAttackModifier = default;
+            _hasReadyCoreAttackModifier = false;
+        }
+        foreach (EnemyCombatModifier modifier in _nextCoreAttackModifiers)
+        {
+            if (modifier.IsValid)
+                value = EvaluateModifier(modifier, value, 1);
+        }
+        _nextCoreAttackModifiers.Clear();
+
+        return EnemyCoreAttackDamageResolver.Resolve(
+            NormalizeNonNegative(value),
+            Definition.CoreAttackDamagePolicy,
+            ref _fractionalCoreDamageRemainder);
+    }
+
+    internal bool ReserveNextCoreAttackModifier(
+        EnemyCombatModifier modifier)
+    {
+        if (!modifier.IsValid || modifier.Type !=
+            EnemyCombatModifierType.CoreAttackDamage)
+        {
+            return false;
+        }
+
+        for (int index = 0;
+             index < _nextCoreAttackModifiers.Count;
+             index++)
+        {
+            if (string.Equals(
+                    _nextCoreAttackModifiers[index].SourceId,
+                    modifier.SourceId,
+                    StringComparison.Ordinal))
+            {
+                _nextCoreAttackModifiers[index] = modifier;
+                return true;
+            }
+        }
+
+        _nextCoreAttackModifiers.Add(modifier);
+        _nextCoreAttackModifiers.Sort((left, right) => string.Compare(
+            left.SourceId,
+            right.SourceId,
+            StringComparison.Ordinal));
+        return true;
+    }
+
+    internal bool ReserveReadyChargedCoreAttackModifier(
+        EnemyCombatModifier modifier)
+    {
+        if (!modifier.IsValid || modifier.Type !=
+            EnemyCombatModifierType.CoreAttackDamage)
+        {
+            return false;
+        }
+
+        _readyCoreAttackModifier = modifier;
+        _hasReadyCoreAttackModifier = true;
+        return true;
+    }
+
+    internal bool ReserveNextCoreProtectionBypass(float ratio)
+    {
+        if (float.IsNaN(ratio) || float.IsInfinity(ratio) || ratio <= 0f)
+            return false;
+
+        float resolved = Mathf.Clamp01(ratio);
+        if (resolved <= _pendingCoreProtectionBypass)
+            return false;
+        _pendingCoreProtectionBypass = resolved;
+        return true;
+    }
+
+    internal float ConsumeNextCoreProtectionBypass()
+    {
+        float resolved = Mathf.Clamp01(_pendingCoreProtectionBypass);
+        _pendingCoreProtectionBypass = 0f;
+        return resolved;
+    }
+
+    internal void MarkSummoned(
+        EnemyRuntime summoner,
+        string abilityId,
+        float healthMultiplier,
+        float coreAttackMultiplier)
+    {
+        IsSummoned = true;
+        SummonDepth = Mathf.Max(1, (summoner?.SummonDepth ?? 0) + 1);
+        SummonerEnemyId = summoner?.Definition?.EnemyId ?? string.Empty;
+        OriginAbilityId = (abilityId ?? string.Empty).Trim();
+        float appliedHealthMultiplier = IsFinitePositive(healthMultiplier)
+            ? healthMultiplier
+            : 1f;
+        _summonedCoreAttackMultiplier =
+            IsFinitePositive(coreAttackMultiplier)
+                ? coreAttackMultiplier
+                : 1f;
+        MaxHealth = Mathf.Max(
+            1,
+            SaturatingRoundToInt(MaxHealth * appliedHealthMultiplier));
+        Health = MaxHealth;
+    }
+
+    internal bool ApplyCombatModifier(EnemyCombatModifier modifier)
+    {
+        if (!modifier.IsValid)
+            return false;
+
+        foreach (EnemyCombatModifierRuntimeState state in _combatModifiers)
+        {
+            if (state != null &&
+                state.Definition.Type == modifier.Type &&
+                string.Equals(
+                    state.Definition.SourceId,
+                    modifier.SourceId,
+                    StringComparison.Ordinal))
+            {
+                return state.Reapply();
+            }
+        }
+
+        _combatModifiers.Add(
+            new EnemyCombatModifierRuntimeState(modifier));
+        SortCombatModifiers();
+        return true;
+    }
+
+    internal bool TrySetUntargetable(float duration)
+    {
+        duration = TimePrecision.Normalize(duration);
+        if (Health <= 0 || duration <= 0f || float.IsNaN(duration) ||
+            float.IsInfinity(duration) ||
+            duration <= _untargetableRemaining)
+        {
+            return false;
+        }
+
+        _untargetableRemaining = duration;
+        return true;
+    }
+
+    internal bool TryReserveDamageReflection(float ratio, float duration)
+    {
+        ratio = Mathf.Clamp01(ratio);
+        duration = TimePrecision.Normalize(duration);
+        if (Health <= 0 || ratio <= 0f || float.IsNaN(ratio) ||
+            float.IsInfinity(ratio) || float.IsNaN(duration) ||
+            float.IsInfinity(duration) || duration < 0f)
+        {
+            return false;
+        }
+
+        _reflectionRatio = Mathf.Max(_reflectionRatio, ratio);
+        _reflectionRemaining = duration > 0f
+            ? Mathf.Max(_reflectionRemaining, duration)
+            : float.PositiveInfinity;
+        return true;
+    }
+
+    internal bool TryConsumeDamageReflection(out float ratio)
+    {
+        ratio = 0f;
+        if (Health <= 0 || _reflectionRatio <= 0f ||
+            _reflectionRemaining <= 0f)
+        {
+            return false;
+        }
+
+        ratio = _reflectionRatio;
+        _reflectionRatio = 0f;
+        _reflectionRemaining = 0f;
+        return true;
+    }
+
+    internal int RemoveCombatModifiers(string sourceId)
+    {
+        if (string.IsNullOrWhiteSpace(sourceId))
+            return 0;
+
+        int removed = 0;
+        for (int index = _combatModifiers.Count - 1;
+             index >= 0;
+             index--)
+        {
+            EnemyCombatModifierRuntimeState state =
+                _combatModifiers[index];
+            if (state != null && string.Equals(
+                    state.Definition.SourceId,
+                    sourceId,
+                    StringComparison.Ordinal))
+            {
+                _combatModifiers.RemoveAt(index);
+                removed++;
+            }
+        }
+
+        return removed;
+    }
+
+    internal int RemoveCombatModifierStacks(
+        EnemyCombatModifierType type,
+        int count)
+    {
+        count = Mathf.Max(0, count);
+        int removed = 0;
+        for (int index = _combatModifiers.Count - 1;
+             index >= 0 && removed < count;
+             index--)
+        {
+            EnemyCombatModifierRuntimeState state =
+                _combatModifiers[index];
+            if (state == null || state.Definition.Type != type ||
+                state.Definition.Percentage <= 0f)
+            {
+                continue;
+            }
+
+            removed += state.RemoveStacks(count - removed);
+            if (!state.IsActive)
+                _combatModifiers.RemoveAt(index);
+        }
+        return removed;
+    }
+
+    internal void TickCombatRuntime(
+        float deltaTime,
+        out EnemyActiveChargeRuntimeState completedCharge)
+    {
+        completedCharge = null;
+        if (deltaTime <= 0f || Health <= 0)
+            return;
+
+        _combatElapsedTime = Mathf.Min(
+            float.MaxValue,
+            _combatElapsedTime + deltaTime);
+        _timeSinceLastDamage = Mathf.Min(
+            float.MaxValue,
+            _timeSinceLastDamage + deltaTime);
+        _untargetableRemaining = Mathf.Max(
+            0f,
+            _untargetableRemaining - deltaTime);
+        if (!float.IsPositiveInfinity(_reflectionRemaining))
+        {
+            _reflectionRemaining = Mathf.Max(
+                0f,
+                _reflectionRemaining - deltaTime);
+            if (_reflectionRemaining <= 0f)
+                _reflectionRatio = 0f;
+        }
+        for (int index = _combatModifiers.Count - 1;
+             index >= 0;
+             index--)
+        {
+            EnemyCombatModifierRuntimeState state =
+                _combatModifiers[index];
+            if (state == null || state.Tick(deltaTime))
+                _combatModifiers.RemoveAt(index);
+        }
+
+        if (_activeCharge == null)
+            return;
+
+        bool completed = _activeCharge.Tick(
+            deltaTime,
+            out bool telegraphStarted);
+        if (telegraphStarted)
+        {
+            CombatRuntimeService?.PublishEnemyCombatEvent(
+                new EnemyCombatEvent(
+                    EnemyCombatEventType.TelegraphStarted,
+                    this,
+                    ability: _activeCharge.AbilityState?.Definition,
+                    charge: _activeCharge.CreateSnapshot(this)));
+        }
+        if (!completed)
+            return;
+
+        completedCharge = _activeCharge;
+        _activeCharge = null;
+        if (completedCharge.IsCoreAttackCharge)
+        {
+            _readyCoreAttackModifier =
+                completedCharge.CoreAttackModifier;
+            _hasReadyCoreAttackModifier =
+                _readyCoreAttackModifier.IsValid;
+        }
+        CombatRuntimeService?.PublishEnemyCombatEvent(
+            new EnemyCombatEvent(
+                EnemyCombatEventType.ChargeCompleted,
+                this,
+                ability: completedCharge.AbilityState?.Definition,
+                charge: completedCharge.CreateSnapshot(this)));
+    }
+
+    internal bool TryBeginAbilityCharge(
+        EnemyAbilityRuntimeState abilityState,
+        out EnemyChargeSnapshot charge)
+    {
+        charge = default;
+        EnemyAbilityDefinition ability = abilityState?.Definition;
+        EnemyAbilityChargeDefinition definition = ability?.Charge;
+        if (ability == null || definition?.IsEnabled != true ||
+            definition.Duration <= 0f || _activeCharge != null)
+        {
+            return false;
+        }
+
+        string sourceId = ResolveModifierSourceId(ability, null);
+        _activeCharge = new EnemyActiveChargeRuntimeState(
+            abilityState,
+            sourceId,
+            definition.Duration,
+            false,
+            definition.IsInterruptible,
+            definition.Interrupts,
+            ability.Telegraph);
+        charge = _activeCharge.CreateSnapshot(this);
+        CombatRuntimeService?.PublishEnemyCombatEvent(
+            new EnemyCombatEvent(
+                EnemyCombatEventType.ChargeStarted,
+                this,
+                ability: ability,
+                charge: charge));
+        if (_activeCharge.ShouldTelegraph &&
+            ability.Telegraph.LeadTime >= definition.Duration)
+        {
+            CombatRuntimeService?.PublishEnemyCombatEvent(
+                new EnemyCombatEvent(
+                    EnemyCombatEventType.TelegraphStarted,
+                    this,
+                    ability: ability,
+                    charge: charge));
+        }
+        return true;
+    }
+
+    internal bool TryBeginCoreAttackCharge(
+        EnemyAbilityRuntimeState abilityState,
+        EnemyAbilityOperationDefinition operation,
+        out EnemyChargeSnapshot charge)
+    {
+        charge = default;
+        if (abilityState?.Definition == null || operation == null ||
+            _activeCharge != null)
+        {
+            return false;
+        }
+
+        EnemyAbilityDefinition ability = abilityState.Definition;
+        EnemyAbilityChargeDefinition definition = ability.Charge;
+        float duration = operation.Duration > 0f
+            ? operation.Duration
+            : definition.IsEnabled
+                ? definition.Duration
+                : 0f;
+        if (duration <= 0f)
+            return false;
+
+        string sourceId = ResolveModifierSourceId(ability, operation);
+        EnemyCombatModifier modifier = new(
+            sourceId,
+            EnemyCombatModifierType.CoreAttackDamage,
+            operation.Amount,
+            operation.Percentage,
+            operation.Multiplier,
+            maximumStacks: 1);
+        bool interruptible = definition.IsEnabled
+            ? definition.IsInterruptible
+            : true;
+        EnemyChargeInterruptFlags interrupts = definition.IsEnabled
+            ? definition.Interrupts
+            : EnemyChargeInterruptFlags.Stun |
+              EnemyChargeInterruptFlags.DirectDamage;
+        _activeCharge = new EnemyActiveChargeRuntimeState(
+            abilityState,
+            sourceId,
+            duration,
+            true,
+            interruptible,
+            interrupts,
+            ability.Telegraph,
+            modifier);
+        charge = _activeCharge.CreateSnapshot(this);
+        CombatRuntimeService?.PublishEnemyCombatEvent(
+            new EnemyCombatEvent(
+                EnemyCombatEventType.ChargeStarted,
+                this,
+                ability: ability,
+                charge: charge));
+        return true;
+    }
+
+    internal bool TryInterruptCharge(
+        EnemyChargeInterruptReason reason,
+        out EnemyActiveChargeRuntimeState interruptedCharge)
+    {
+        interruptedCharge = null;
+        if (_activeCharge == null || !_activeCharge.CanInterrupt(reason))
+            return false;
+
+        interruptedCharge = _activeCharge;
+        _activeCharge = null;
+        CombatRuntimeService?.PublishEnemyCombatEvent(
+            new EnemyCombatEvent(
+                EnemyCombatEventType.ChargeInterrupted,
+                this,
+                ability: interruptedCharge.AbilityState?.Definition,
+                charge: interruptedCharge.CreateSnapshot(this)));
+        return true;
+    }
+
+    internal bool IsAbilityCharging(EnemyAbilityDefinition ability)
+    {
+        return ability != null &&
+               ReferenceEquals(
+                   _activeCharge?.AbilityState?.Definition,
+                   ability);
+    }
+
+    internal bool WasDamagedBySourceWithin(
+        string damageSourceId,
+        float windowDuration)
+    {
+        damageSourceId = (damageSourceId ?? string.Empty).Trim();
+        if (string.IsNullOrEmpty(damageSourceId) ||
+            float.IsNaN(windowDuration) ||
+            float.IsInfinity(windowDuration) ||
+            windowDuration <= 0f ||
+            !_lastDamageSourceTimes.TryGetValue(
+                damageSourceId,
+                out float lastDamageTime))
+        {
+            return false;
+        }
+
+        float elapsed = _combatElapsedTime - lastDamageTime;
+        return elapsed >= 0f && elapsed <= windowDuration;
+    }
+
+    internal void RecordDamageTaken(string damageSourceId = null)
+    {
+        _timeSinceLastDamage = 0f;
+        _nextNoDamageActivations.Clear();
+
+        damageSourceId = (damageSourceId ?? string.Empty).Trim();
+        if (!string.IsNullOrEmpty(damageSourceId))
+            _lastDamageSourceTimes[damageSourceId] = _combatElapsedTime;
+    }
+
+    internal bool TryMarkHealthThresholdCrossed(
+        EnemyAbilityDefinition ability,
+        int previousHealth,
+        int currentHealth)
+    {
+        if (ability == null || ability.HealthThresholdPercent <= 0f ||
+            MaxHealth <= 0 || currentHealth >= previousHealth ||
+            _triggeredHealthThresholds.Contains(ability.AbilityId))
+        {
+            return false;
+        }
+
+        float previousPercent = previousHealth * 100f / MaxHealth;
+        float currentPercent = currentHealth * 100f / MaxHealth;
+        if (previousPercent <= ability.HealthThresholdPercent ||
+            currentPercent > ability.HealthThresholdPercent)
+        {
+            return false;
+        }
+
+        _triggeredHealthThresholds.Add(ability.AbilityId);
+        return true;
+    }
+
+    internal bool TryMarkNoDamageDurationReached(
+        EnemyAbilityDefinition ability)
+    {
+        if (ability == null || ability.NoDamageDuration <= 0f)
+        {
+            return false;
+        }
+
+        float nextActivation = _nextNoDamageActivations.TryGetValue(
+            ability.AbilityId,
+            out float configuredNext)
+                ? configuredNext
+                : ability.NoDamageDuration;
+        if (_timeSinceLastDamage < nextActivation)
+            return false;
+
+        float interval = ResolveNoDamageRepeatInterval(ability);
+        _nextNoDamageActivations[ability.AbilityId] = interval > 0f
+            ? nextActivation + interval
+            : float.PositiveInfinity;
+        return true;
+    }
+
+    internal bool IsAbilityEnabledInCurrentPhase(
+        EnemyAbilityDefinition ability)
+    {
+        if (ability == null)
+            return false;
+
+        EnemyBossPhaseDefinition phase = CurrentPhase;
+        if (phase == null || phase.AbilityIds.Count == 0)
+            return true;
+
+        foreach (string abilityId in phase.AbilityIds)
+        {
+            if (string.Equals(
+                    abilityId,
+                    ability.AbilityId,
+                    StringComparison.Ordinal))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    internal bool TryAdvancePhaseForHealth(
+        out EnemyBossPhaseDefinition previousPhase,
+        out EnemyBossPhaseDefinition currentPhase)
+    {
+        previousPhase = CurrentPhase;
+        currentPhase = previousPhase;
+        IReadOnlyList<EnemyBossPhaseDefinition> phases =
+            Definition.PhaseDefinitions;
+        if (phases == null || phases.Count == 0 ||
+            _currentPhaseIndex >= phases.Count - 1)
+        {
+            return false;
+        }
+
+        float healthPercent = MaxHealth > 0
+            ? Health * 100f / MaxHealth
+            : 0f;
+        int resolvedIndex = _currentPhaseIndex;
+        for (int index = _currentPhaseIndex + 1;
+             index < phases.Count;
+             index++)
+        {
+            EnemyBossPhaseDefinition phase = phases[index];
+            if (phase == null)
+                continue;
+            if (healthPercent <= phase.MaximumHealthPercent &&
+                healthPercent >= phase.MinimumHealthPercent)
+            {
+                resolvedIndex = index;
+            }
+        }
+
+        if (resolvedIndex <= _currentPhaseIndex)
+            return false;
+
+        _currentPhaseIndex = resolvedIndex;
+        currentPhase = CurrentPhase;
+        return true;
+    }
+
+    internal bool TryAdvancePhaseOnCoreContact(
+        out EnemyBossPhaseDefinition previousPhase,
+        out EnemyBossPhaseDefinition currentPhase)
+    {
+        previousPhase = CurrentPhase;
+        currentPhase = previousPhase;
+        IReadOnlyList<EnemyBossPhaseDefinition> phases =
+            Definition.PhaseDefinitions;
+        if (previousPhase?.AdvanceOnCoreContact != true ||
+            phases == null || _currentPhaseIndex < 0 ||
+            _currentPhaseIndex >= phases.Count - 1)
+        {
+            return false;
+        }
+
+        _currentPhaseIndex++;
+        currentPhase = CurrentPhase;
+        return true;
+    }
+
+    private void InitializePhaseState()
+    {
+        IReadOnlyList<EnemyBossPhaseDefinition> phases =
+            Definition.PhaseDefinitions;
+        _currentPhaseIndex = phases != null && phases.Count > 0
+            ? 0
+            : -1;
+        TryAdvancePhaseForHealth(out _, out _);
+    }
+
+    private static float ResolveNoDamageRepeatInterval(
+        EnemyAbilityDefinition ability)
+    {
+        float interval = 0f;
+        foreach (EnemyAbilityOperationDefinition operation in
+                 ability.Operations)
+        {
+            if (operation == null || !operation.Enabled ||
+                operation.Interval <= 0f)
+            {
+                continue;
+            }
+
+            interval = interval <= 0f
+                ? operation.Interval
+                : Mathf.Min(interval, operation.Interval);
+        }
+
+        return interval;
     }
 
     internal void SetHealth(int health)
@@ -163,13 +932,22 @@ public sealed class EnemyRuntime
         if (damage <= 0 || Health <= 0)
             return 0;
 
-        damage = ResolveIncomingDamage(damage);
-        if (damage <= 0)
-            return 0;
-
         if (damageType == CharacterAttackDamageType.StatusEffect ||
             damageType == CharacterAttackDamageType.StatusRemoval)
             return 0;
+
+        bool ignoresProtection =
+            damageType == CharacterAttackDamageType.Fixed;
+        damage = ResolveIncomingDamage(damage, ignoresProtection);
+        if (damage <= 0)
+            return 0;
+
+        if (ignoresProtection)
+        {
+            int fixedDamage = Mathf.Min(Health, damage);
+            Health -= fixedDamage;
+            return fixedDamage;
+        }
 
         int appliedDamage = 0;
         if (CurrentShield > 0)
@@ -182,13 +960,6 @@ public sealed class EnemyRuntime
 
         if (damage <= 0)
             return appliedDamage;
-
-        if (damageType == CharacterAttackDamageType.Fixed)
-        {
-            int fixedDamage = Mathf.Min(Health, damage);
-            Health -= fixedDamage;
-            return appliedDamage + fixedDamage;
-        }
 
         if (damageType == CharacterAttackDamageType.Physical && Armor > 0)
         {
@@ -206,7 +977,9 @@ public sealed class EnemyRuntime
         return appliedDamage + healthDamage;
     }
 
-    private int ResolveIncomingDamage(int damage)
+    private int ResolveIncomingDamage(
+        int damage,
+        bool ignoreProtectiveModifiers = false)
     {
         StatusEffectStatAccumulator accumulator = default;
         foreach (StatusEffectRuntimeState state in _statusEffects.Values)
@@ -228,7 +1001,8 @@ public sealed class EnemyRuntime
             {
                 if (modifier != null &&
                     modifier.StatType ==
-                    StatusEffectStatType.IncomingDamage)
+                    StatusEffectStatType.IncomingDamage &&
+                    (!ignoreProtectiveModifiers || modifier.Value >= 0f))
                 {
                     accumulator.Add(modifier, stacks);
                 }
@@ -236,6 +1010,19 @@ public sealed class EnemyRuntime
         }
 
         float modifiedDamage = accumulator.Evaluate(damage);
+        foreach (EnemyCombatModifierRuntimeState state in _combatModifiers)
+        {
+            if (state == null || !state.IsActive ||
+                state.Definition.Type !=
+                    EnemyCombatModifierType.IncomingDamage)
+            {
+                continue;
+            }
+
+            float candidate = state.Evaluate(modifiedDamage);
+            if (!ignoreProtectiveModifiers || candidate >= modifiedDamage)
+                modifiedDamage = candidate;
+        }
         if (float.IsNaN(modifiedDamage) || modifiedDamage <= 0f)
             return 0;
         if (float.IsInfinity(modifiedDamage) ||
@@ -423,9 +1210,12 @@ public sealed class EnemyRuntime
             return false;
         }
 
-        float remainingDuration = ResolveStatusDuration(definition, duration);
-        if (remainingDuration <= 0f)
+        float requestedDuration = ResolveStatusDuration(definition, duration);
+        EnemyStatusApplicationPolicy applicationPolicy =
+            ResolveStatusApplicationPolicy(definition, requestedDuration);
+        if (!applicationPolicy.CanApply || applicationPolicy.Duration <= 0f)
             return false;
+        float remainingDuration = applicationPolicy.Duration;
 
         tickInterval = TimePrecision.Normalize(
             tickInterval > 0f ? tickInterval : definition.TickInterval,
@@ -478,6 +1268,11 @@ public sealed class EnemyRuntime
                 mutation.User,
                 applyDamage);
         }
+
+        CombatRuntimeService?.PublishEnemyCombatEvent(
+            new EnemyCombatEvent(
+                EnemyCombatEventType.StatusApplied,
+                this));
 
         return true;
     }
@@ -1130,16 +1925,208 @@ public sealed class EnemyRuntime
             0.1f);
     }
 
+    private EnemyStatusApplicationPolicy ResolveStatusApplicationPolicy(
+        StatusEffectSO definition,
+        float duration)
+    {
+        bool permanent = float.IsPositiveInfinity(duration);
+        float resolvedDuration = duration;
+        foreach (EnemyCombatModifierRuntimeState state in _combatModifiers)
+        {
+            if (state == null || !state.IsActive ||
+                !state.MatchesStatus(definition))
+            {
+                continue;
+            }
+
+            if (state.Definition.Type ==
+                EnemyCombatModifierType.StatusImmunity)
+            {
+                return EnemyStatusApplicationPolicy.Immune(duration);
+            }
+            if (!permanent && state.Definition.Type ==
+                EnemyCombatModifierType.StatusDuration)
+            {
+                resolvedDuration = state.Evaluate(resolvedDuration);
+            }
+        }
+
+        EnemyStatusApplicationPolicy local =
+            resolvedDuration > 0f || permanent
+                ? EnemyStatusApplicationPolicy.Allowed(resolvedDuration)
+                : new EnemyStatusApplicationPolicy(false, 0f);
+        if (!local.CanApply)
+            return local;
+
+        IEnemyCombatRuntimeService service = CombatRuntimeService;
+        return service != null
+            ? service.ResolveStatusApplication(
+                this,
+                definition,
+                local.Duration)
+            : local;
+    }
+
+    private float GetStatusModifiedStat(
+        float baseValue,
+        StatusEffectStatType statType,
+        StatusEffectOperationType operationType)
+    {
+        StatusEffectStatAccumulator accumulator = default;
+        foreach (StatusEffectRuntimeState state in _statusEffects.Values)
+        {
+            if (state == null || !state.HasStacks ||
+                state.Definition == null)
+            {
+                continue;
+            }
+
+            int stacks = Mathf.Max(1, state.StackCount);
+            IReadOnlyList<StatusEffectStatModifierDefinition> modifiers =
+                state.Definition.StatModifiers;
+            if (modifiers != null)
+            {
+                foreach (StatusEffectStatModifierDefinition modifier in
+                         modifiers)
+                {
+                    if (modifier != null && modifier.StatType == statType)
+                        accumulator.Add(modifier, stacks);
+                }
+            }
+
+            IReadOnlyList<StatusEffectOperationDefinition> operations =
+                state.Definition.Operations;
+            if (operations == null)
+                continue;
+            foreach (StatusEffectOperationDefinition operation in operations)
+            {
+                if (operation == null ||
+                    operation.Trigger != StatusEffectOperationTrigger.OnApply ||
+                    operation.OperationType != operationType ||
+                    float.IsNaN(operation.Value) ||
+                    float.IsInfinity(operation.Value))
+                {
+                    continue;
+                }
+
+                float value = operation.Value *
+                    (operation.ScaleWithStacks ? stacks : 1);
+                if (operation.ValueMode == StatusEffectValueMode.Fixed)
+                    accumulator.AddFlat(value);
+                else
+                    accumulator.AddAdditiveRatio(value);
+            }
+        }
+
+        return accumulator.Evaluate(baseValue);
+    }
+
+    private float EvaluateCombatModifiers(
+        EnemyCombatModifierType type,
+        float baseValue)
+    {
+        float result = baseValue;
+        foreach (EnemyCombatModifierRuntimeState state in _combatModifiers)
+        {
+            if (state != null && state.IsActive &&
+                state.Definition.Type == type)
+            {
+                result = state.Evaluate(result);
+            }
+        }
+
+        return result;
+    }
+
+    private static float EvaluateModifier(
+        EnemyCombatModifier modifier,
+        float baseValue,
+        int stacks)
+    {
+        stacks = Mathf.Max(1, stacks);
+        float value = (baseValue + modifier.Amount * stacks) *
+                      Mathf.Max(0f, 1f + modifier.Percentage * stacks) *
+                      Mathf.Pow(modifier.Multiplier, stacks);
+        return NormalizeNonNegative(value);
+    }
+
+    private void SortCombatModifiers()
+    {
+        _combatModifiers.Sort((left, right) =>
+        {
+            int typeOrder = left.Definition.Type.CompareTo(
+                right.Definition.Type);
+            return typeOrder != 0
+                ? typeOrder
+                : string.Compare(
+                    left.Definition.SourceId,
+                    right.Definition.SourceId,
+                    StringComparison.Ordinal);
+        });
+    }
+
+    internal bool HasStatusEffectId(string statusId)
+    {
+        return TryGetStatusState(statusId, out _);
+    }
+
+    internal string ResolveModifierSourceId(
+        EnemyAbilityDefinition ability,
+        EnemyAbilityOperationDefinition operation)
+    {
+        if (!string.IsNullOrWhiteSpace(operation?.SourceId))
+            return operation.SourceId.Trim();
+
+        string enemyId = Definition.EnemyId;
+        string abilityId = ability?.AbilityId ?? string.Empty;
+        if (string.IsNullOrWhiteSpace(enemyId))
+            enemyId = "enemy";
+        if (string.IsNullOrWhiteSpace(abilityId))
+            abilityId = "runtime";
+        return $"{enemyId}:{abilityId}";
+    }
+
+    private static float NormalizeFinite(float value)
+    {
+        if (float.IsNaN(value))
+            return 0f;
+        return float.IsPositiveInfinity(value)
+            ? float.MaxValue
+            : Mathf.Max(0f, value);
+    }
+
+    private static bool IsFinitePositive(float value)
+    {
+        return !float.IsNaN(value) && !float.IsInfinity(value) &&
+               value > 0f;
+    }
+
+    private static float NormalizeNonNegative(float value)
+    {
+        return NormalizeFinite(value);
+    }
+
+    private static int SaturatingRoundToInt(float value)
+    {
+        if (float.IsNaN(value) || value <= 0f)
+            return 0;
+        if (float.IsInfinity(value) || value >= int.MaxValue)
+            return int.MaxValue;
+        return Mathf.Max(0, Mathf.RoundToInt(value));
+    }
+
     internal bool TickAbilityCooldown(float deltaTime)
     {
         foreach (EnemyAbilityRuntimeState state in _abilityStates)
         {
-            if (state.Definition.Trigger ==
-                EnemyAbilityTrigger.OnCooldown)
+            if (IsAbilityEnabledInCurrentPhase(state.Definition) &&
+                state.Definition.RespondsToTrigger(
+                    EnemyAbilityTrigger.OnCooldown))
             {
                 return state.TickCooldown(
                     deltaTime,
-                    AreAllActionsDisabled);
+                    AreAllActionsDisabled,
+                    MaxHealth > 0 ? Health * 100f / MaxHealth : 0f);
             }
         }
 

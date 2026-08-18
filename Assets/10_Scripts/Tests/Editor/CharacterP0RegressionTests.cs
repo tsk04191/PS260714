@@ -152,7 +152,7 @@ public sealed class CharacterP0RegressionTests
     }
 
     [Test]
-    public void ManualAreaRequest_ZeroTargetCountMeansAllCandidates()
+    public void ManualWorldAreaRequest_ZeroTargetCountRequiresOnlyPoint()
     {
         BattleAreaDefinition area = new();
         SetPrivateField(
@@ -170,7 +170,8 @@ public sealed class CharacterP0RegressionTests
             area);
 
         Assert.That(request.TargetCount, Is.Zero);
-        Assert.That(request.RequiredCount, Is.EqualTo(3));
+        Assert.That(request.CandidateCount, Is.EqualTo(3));
+        Assert.That(request.RequiredCount, Is.Zero);
     }
 
     [Test]
@@ -4126,7 +4127,7 @@ public sealed class CharacterP0RegressionTests
     }
 
     [Test]
-    public void EnemyShield_AbsorbsFixedDamageBeforeHealth()
+    public void EnemyShield_IsBypassedByFixedDamage()
     {
         EnemyRuntime target = CreateEnemyRuntime(20);
         Assert.That(target.GainShield(4), Is.EqualTo(4));
@@ -4137,12 +4138,12 @@ public sealed class CharacterP0RegressionTests
             CharacterAttackDamageType.Fixed);
 
         Assert.That(applied, Is.EqualTo(6));
-        Assert.That(target.CurrentShield, Is.Zero);
-        Assert.That(target.Health, Is.EqualTo(18));
+        Assert.That(target.CurrentShield, Is.EqualTo(4));
+        Assert.That(target.Health, Is.EqualTo(14));
     }
 
     [Test]
-    public void ShieldThenDamage_InSameActionUsesEffectOrder()
+    public void FixedDamageAfterShield_BypassesNewShield()
     {
         CharacterSO definition = CreateShieldCharacter(
             CharacterTargetFaction.Enemy,
@@ -4177,8 +4178,8 @@ public sealed class CharacterP0RegressionTests
 
         Assert.That(character.TryActivateActiveSkill(), Is.True);
 
-        Assert.That(target.CurrentShield, Is.Zero);
-        Assert.That(target.Health, Is.EqualTo(18));
+        Assert.That(target.CurrentShield, Is.EqualTo(5));
+        Assert.That(target.Health, Is.EqualTo(13));
         Assert.That(character.TotalDamageDealt, Is.EqualTo(7));
     }
 

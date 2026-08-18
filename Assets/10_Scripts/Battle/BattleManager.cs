@@ -13,13 +13,73 @@ public enum EBattleState
 }
 
 [DisallowMultipleComponent]
-public sealed class BattleManager : MonoBehaviour, IActiveSkillResource
+public sealed class BattleManager : MonoBehaviour, IActiveSkillResource,
+    IBattleEnemySummonService
 {
+    private sealed class ScheduledEnemySummon
+    {
+        public EnemyRuntime Source { get; }
+        public string AbilityId { get; }
+        public EnemySummonDefinition Definition { get; }
+        public float Remaining { get; private set; }
+
+        public ScheduledEnemySummon(
+            EnemyRuntime source,
+            string abilityId,
+            EnemySummonDefinition definition,
+            float delaySeconds)
+        {
+            Source = source;
+            AbilityId = (abilityId ?? string.Empty).Trim();
+            Definition = definition;
+            Remaining = Mathf.Max(0f, delaySeconds);
+        }
+
+        public bool Tick(float deltaTime)
+        {
+            Remaining = Mathf.Max(
+                0f,
+                Remaining - Mathf.Max(0f, deltaTime));
+            return Remaining <= 0f;
+        }
+    }
+
+    private sealed class TimedSpawnIntervalModifier
+    {
+        public string SourceId { get; }
+        public float Multiplier { get; private set; }
+        public float Remaining { get; private set; }
+
+        public TimedSpawnIntervalModifier(
+            string sourceId,
+            float multiplier,
+            float duration)
+        {
+            SourceId = sourceId;
+            Reapply(multiplier, duration);
+        }
+
+        public void Reapply(float multiplier, float duration)
+        {
+            Multiplier = multiplier;
+            Remaining = Mathf.Max(Remaining, duration);
+        }
+
+        public bool Tick(float deltaTime)
+        {
+            Remaining = Mathf.Max(
+                0f,
+                Remaining - Mathf.Max(0f, deltaTime));
+            return Remaining <= 0f;
+        }
+    }
+
     private const float DefaultGameSpeed = 1f;
     public const float MinimumSpawnIntervalRandomMultiplier = 0.75f;
     public const float MaximumSpawnIntervalRandomMultiplier = 1.25f;
     public const int DefaultMaximumEnergy = 3;
     public const float DefaultEnergyRechargeDuration = 5f;
+    public const int DefaultMaximumActiveSummons = 12;
 
     private static readonly float[] GameSpeedScales =
     {
@@ -30,6 +90,11 @@ public sealed class BattleManager : MonoBehaviour, IActiveSkillResource
 
     private readonly List<EnemyRuntime> _spawnQueue = new();
     private readonly List<IBattleCharacter> _characters = new();
+    private readonly List<EnemyRuntime> _summonedEnemies = new();
+    private readonly List<ScheduledEnemySummon> _scheduledEnemySummons =
+        new();
+    private readonly List<TimedSpawnIntervalModifier>
+        _spawnIntervalModifiers = new();
 
     private GameManager _manager;
     private IBattleBoard _board;
@@ -55,6 +120,8 @@ public sealed class BattleManager : MonoBehaviour, IActiveSkillResource
     private float _activeSkillRechargeDuration =
         DefaultEnergyRechargeDuration;
     private float _activeSkillRechargeRemaining;
+    private BattleSessionOptions _sessionOptions =
+        BattleSessionOptions.Standard;
 
     public EBattleState State { get; private set; } = EBattleState.Uninitialized;
     public bool IsInitialized => _manager != null;
@@ -91,6 +158,19 @@ public sealed class BattleManager : MonoBehaviour, IActiveSkillResource
     public int RemainingEnemySpawnCount =>
         Mathf.Max(0, _maximumEnemyCount - _spawnedEnemyCount);
     public IReadOnlyList<EnemyRuntime> SpawnQueue => _spawnQueue;
+    public IReadOnlyList<IBattleCharacter> Characters => _characters;
+    public BattleSessionOptions SessionOptions => _sessionOptions;
+    public int MaximumActiveSummons => DefaultMaximumActiveSummons;
+    public int PendingScheduledSummonCount =>
+        _scheduledEnemySummons.Count;
+    public int ActiveSummonCount
+    {
+        get
+        {
+            PruneSummonedEnemies();
+            return _summonedEnemies.Count;
+        }
+    }
 
     public event Action<EBattleState> StateChanged;
     public event Action SpawnQueueChanged;
@@ -102,6 +182,7 @@ public sealed class BattleManager : MonoBehaviour, IActiveSkillResource
     public event Action<int> ActiveSkillResourceChanged;
     public event Action ActiveSkillRechargeChanged;
     public event Action<int, int> BattleObjectiveHealthChanged;
+    public event Action<IReadOnlyList<IBattleCharacter>> CharactersChanged;
     event Action<int> IActiveSkillResource.Changed
     {
         add => ActiveSkillResourceChanged += value;
@@ -123,6 +204,8 @@ public sealed class BattleManager : MonoBehaviour, IActiveSkillResource
             return;
 
         TickActiveSkillRecharge(deltaTime);
+        TickScheduledEnemySummons(deltaTime);
+        TickSpawnIntervalModifiers(deltaTime);
         _board.TickStatusEffects(deltaTime);
         if (_manualTargetSelectionPending)
             return;
@@ -170,7 +253,8 @@ public sealed class BattleManager : MonoBehaviour, IActiveSkillResource
         float spawnInterval,
         float timeLimit = 0f,
         int initialEnemyCount = 0,
-        bool preserveCharacterHealth = false)
+        bool preserveCharacterHealth = false,
+        BattleSessionOptions sessionOptions = null)
     {
         if (!IsInitialized || board == null || characters == null || enemies == null)
         {
@@ -179,7 +263,10 @@ public sealed class BattleManager : MonoBehaviour, IActiveSkillResource
         }
 
         ReleaseSession();
+        _sessionOptions = sessionOptions ?? BattleSessionOptions.Standard;
         _board = board;
+        if (_board is DungeonBoardView dungeonBoard)
+            dungeonBoard.BindEnemySummonService(this);
         _board.OccupancyChanged += HandleBoardOccupancyChanged;
         _objective = (board as IBattleObjectiveProvider)?.Objective;
         if (_objective != null)
@@ -218,6 +305,7 @@ public sealed class BattleManager : MonoBehaviour, IActiveSkillResource
             _characters.Add(character);
         }
         _board.SetBattleCharacters(_characters);
+        CharactersChanged?.Invoke(Characters);
 
         foreach (EnemyRuntime enemy in enemies)
         {
@@ -284,6 +372,23 @@ public sealed class BattleManager : MonoBehaviour, IActiveSkillResource
         if (_activeSkillResource >= _maximumActiveSkillResource)
             SetActiveSkillRechargeRemaining(0f);
         return _activeSkillResource > previous;
+    }
+
+    public bool TryRefillActiveSkillResource()
+    {
+        if (!CanMutateSessionRuntime())
+            return false;
+
+        SetActiveSkillResource(_maximumActiveSkillResource);
+        SetActiveSkillRechargeRemaining(0f);
+        return true;
+    }
+
+    public bool TryRestoreObjective()
+    {
+        return CanMutateSessionRuntime() &&
+               _objective?.IsActive == true &&
+               _objective.RestoreToMaximum();
     }
 
     public void ConfigureActiveSkillResource(
@@ -370,6 +475,544 @@ public sealed class BattleManager : MonoBehaviour, IActiveSkillResource
         return true;
     }
 
+    public bool TrySetBattleCharacters(
+        IReadOnlyList<IBattleCharacter> characters,
+        bool preserveNewCharacterHealth = false)
+    {
+        if (characters == null || !CanMutateSessionRuntime())
+            return false;
+
+        List<IBattleCharacter> nextCharacters = new(characters.Count);
+        HashSet<IBattleCharacter> unique = new();
+        for (int index = 0; index < characters.Count; index++)
+        {
+            IBattleCharacter character = characters[index];
+            if (character == null || !unique.Add(character))
+                return false;
+            nextCharacters.Add(character);
+        }
+
+        bool sequenceChanged = nextCharacters.Count != _characters.Count;
+        if (!sequenceChanged)
+        {
+            for (int index = 0; index < nextCharacters.Count; index++)
+            {
+                if (ReferenceEquals(
+                        nextCharacters[index],
+                        _characters[index]))
+                {
+                    continue;
+                }
+
+                sequenceChanged = true;
+                break;
+            }
+        }
+        if (!sequenceChanged)
+            return true;
+
+        HashSet<IBattleCharacter> current = new(_characters);
+        List<IBattleCharacter> additions = new();
+        foreach (IBattleCharacter character in nextCharacters)
+        {
+            if (current.Contains(character))
+                continue;
+            if (!character.Initialize())
+                return false;
+            additions.Add(character);
+        }
+
+        foreach (IBattleCharacter character in additions)
+        {
+            if (preserveNewCharacterHealth &&
+                character is CharacterRuntime persistentCharacter)
+            {
+                persistentCharacter.PrepareForNextBattle();
+            }
+            else
+            {
+                character.ResetRuntime();
+            }
+        }
+
+        foreach (IBattleCharacter character in _characters)
+        {
+            if (!unique.Contains(character))
+                character?.BindBattle(null, null);
+        }
+
+        _characters.Clear();
+        _characters.AddRange(nextCharacters);
+        foreach (IBattleCharacter character in additions)
+            character.BindBattle(this, _board);
+
+        _board.SetBattleCharacters(_characters);
+        CharactersChanged?.Invoke(Characters);
+        if (SessionOptions.CompletesOn(
+                BattleCompletionPolicy.PartyDefeated))
+        {
+            CompleteIfPartyDefeated();
+        }
+        return true;
+    }
+
+    public bool TrySpawnEnemyImmediately(EnemyRuntime enemy)
+    {
+        if (enemy == null || !CanMutateSessionRuntime() ||
+            _processingSpawnQueue)
+        {
+            return false;
+        }
+
+        if (!_board.TryAddEnemy(enemy))
+        {
+            _boardFull = !_board.HasEmptyEnemyTile;
+            SpawnTimerChanged?.Invoke();
+            return false;
+        }
+
+        _maximumEnemyCount =
+            BattleValueMath.SaturatingAddNonNegative(
+                _maximumEnemyCount,
+                1);
+        _spawnedEnemyCount =
+            BattleValueMath.SaturatingAddNonNegative(
+                _spawnedEnemyCount,
+                1);
+        if (enemy.IsSummoned && !_summonedEnemies.Contains(enemy))
+            _summonedEnemies.Add(enemy);
+        _boardFull = false;
+        _spawnRetryRequested = false;
+        NotifyQueueAndTimerChanged();
+        return true;
+    }
+
+    public bool TryClearAllEnemiesAndSpawns()
+    {
+        if (!CanMutateSessionRuntime() || _processingSpawnQueue)
+            return false;
+
+        _spawnQueue.Clear();
+        _summonedEnemies.Clear();
+        _scheduledEnemySummons.Clear();
+        _spawnIntervalModifiers.Clear();
+        _maximumEnemyCount = 0;
+        _spawnedEnemyCount = 0;
+        _boardFull = false;
+        _spawnRetryRequested = false;
+        ResetSpawnTimerForNextEnemy();
+        _board.ClearAllEnemies();
+        NotifyQueueAndTimerChanged();
+        CheckForCompletion();
+        return true;
+    }
+
+    public int TrySummonEnemies(
+        EnemyRuntime source,
+        string abilityId,
+        EnemySummonDefinition definition)
+    {
+        if (!CanSummonFromSource(source, abilityId, definition) ||
+            !HasSession || State == EBattleState.Completed ||
+            definition == null)
+        {
+            return 0;
+        }
+
+        PruneSummonedEnemies();
+        int globalAvailable = Mathf.Max(
+            0,
+            MaximumActiveSummons - _summonedEnemies.Count);
+        if (globalAvailable <= 0)
+            return 0;
+
+        string resolvedAbilityId = (abilityId ?? string.Empty).Trim();
+        int activeForDefinition = CountActiveSummons(
+            source.Definition.EnemyId,
+            resolvedAbilityId);
+        int definitionAvailable = definition.MaximumActive > 0
+            ? Mathf.Max(0, definition.MaximumActive - activeForDefinition)
+            : globalAvailable;
+        int available = Mathf.Min(globalAvailable, definitionAvailable);
+        if (available <= 0)
+            return 0;
+
+        List<EnemySO> candidates = ResolveSummonCandidates(definition);
+        if (candidates.Count == 0)
+            return 0;
+
+        Dictionary<string, int> candidateCountMap =
+            ResolveCandidateCountMap(source, resolvedAbilityId);
+        EnemySO fixedCandidate = null;
+        int requested;
+        if (candidateCountMap.Count > 0)
+        {
+            List<EnemySO> eligibleCandidates = new();
+            foreach (EnemySO candidate in candidates)
+            {
+                if (candidate != null &&
+                    candidateCountMap.TryGetValue(
+                        candidate.EnemyId,
+                        out int mappedCount) &&
+                    mappedCount >= 1 &&
+                    mappedCount <= definition.MaximumCount &&
+                    mappedCount <= available)
+                {
+                    eligibleCandidates.Add(candidate);
+                }
+            }
+            if (eligibleCandidates.Count == 0)
+                return 0;
+
+            fixedCandidate = eligibleCandidates[
+                UnityEngine.Random.Range(0, eligibleCandidates.Count)];
+            requested = candidateCountMap[fixedCandidate.EnemyId];
+        }
+        else
+        {
+            requested = UnityEngine.Random.Range(
+                definition.MinimumCount,
+                definition.MaximumCount + 1);
+            requested = Mathf.Min(requested, available);
+        }
+
+        int summonedCount = 0;
+        for (int index = 0; index < requested; index++)
+        {
+            EnemySO candidate = fixedCandidate != null
+                ? fixedCandidate
+                : candidates[
+                    UnityEngine.Random.Range(0, candidates.Count)];
+            EnemyRuntime summoned = candidate?.CreateRuntime();
+            if (summoned == null)
+                continue;
+
+            summoned.MarkSummoned(
+                source,
+                resolvedAbilityId,
+                definition.ChildHealthMultiplier,
+                definition.ChildCoreAttackMultiplier);
+            if (!QueueEnemy(summoned))
+                continue;
+
+            _summonedEnemies.Add(summoned);
+            summonedCount++;
+        }
+
+        return summonedCount;
+    }
+
+    public bool TryScheduleSummon(
+        EnemyRuntime source,
+        string abilityId,
+        EnemySummonDefinition definition,
+        float delaySeconds)
+    {
+        if (float.IsNaN(delaySeconds) ||
+            float.IsInfinity(delaySeconds) ||
+            !CanSummonFromSource(source, abilityId, definition) ||
+            !HasSession || State == EBattleState.Completed)
+        {
+            return false;
+        }
+
+        if (delaySeconds <= 0f)
+            return TrySummonEnemies(source, abilityId, definition) > 0;
+
+        _scheduledEnemySummons.Add(new ScheduledEnemySummon(
+            source,
+            abilityId,
+            definition,
+            delaySeconds));
+        return true;
+    }
+
+    public bool TryAddSpawnIntervalModifier(
+        string sourceId,
+        float multiplier,
+        float duration)
+    {
+        sourceId = (sourceId ?? string.Empty).Trim();
+        if (string.IsNullOrEmpty(sourceId) ||
+            float.IsNaN(multiplier) ||
+            float.IsInfinity(multiplier) ||
+            multiplier <= 0f ||
+            float.IsNaN(duration) ||
+            float.IsInfinity(duration) ||
+            duration <= 0f ||
+            !HasSession || State == EBattleState.Completed)
+        {
+            return false;
+        }
+
+        float previousMultiplier =
+            ResolveSpawnIntervalModifierMultiplier();
+        foreach (TimedSpawnIntervalModifier modifier in
+                 _spawnIntervalModifiers)
+        {
+            if (modifier != null && string.Equals(
+                    modifier.SourceId,
+                    sourceId,
+                    StringComparison.Ordinal))
+            {
+                modifier.Reapply(multiplier, duration);
+                RescaleActiveSpawnTimer(
+                    previousMultiplier,
+                    ResolveSpawnIntervalModifierMultiplier());
+                return true;
+            }
+        }
+
+        _spawnIntervalModifiers.Add(new TimedSpawnIntervalModifier(
+            sourceId,
+            multiplier,
+            duration));
+        _spawnIntervalModifiers.Sort((left, right) => string.Compare(
+            left?.SourceId,
+            right?.SourceId,
+            StringComparison.Ordinal));
+        RescaleActiveSpawnTimer(
+            previousMultiplier,
+            ResolveSpawnIntervalModifierMultiplier());
+        return true;
+    }
+
+    private void TickScheduledEnemySummons(float deltaTime)
+    {
+        for (int index = _scheduledEnemySummons.Count - 1;
+             index >= 0;
+             index--)
+        {
+            ScheduledEnemySummon scheduled =
+                _scheduledEnemySummons[index];
+            if (scheduled == null || !scheduled.Tick(deltaTime))
+                continue;
+
+            _scheduledEnemySummons.RemoveAt(index);
+            TrySummonEnemies(
+                scheduled.Source,
+                scheduled.AbilityId,
+                scheduled.Definition);
+        }
+    }
+
+    private void TickSpawnIntervalModifiers(float deltaTime)
+    {
+        if (_spawnIntervalModifiers.Count == 0)
+            return;
+
+        float previousMultiplier =
+            ResolveSpawnIntervalModifierMultiplier();
+        bool removed = false;
+        for (int index = _spawnIntervalModifiers.Count - 1;
+             index >= 0;
+             index--)
+        {
+            TimedSpawnIntervalModifier modifier =
+                _spawnIntervalModifiers[index];
+            if (modifier == null || modifier.Tick(deltaTime))
+            {
+                _spawnIntervalModifiers.RemoveAt(index);
+                removed = true;
+            }
+        }
+
+        if (removed)
+        {
+            RescaleActiveSpawnTimer(
+                previousMultiplier,
+                ResolveSpawnIntervalModifierMultiplier());
+        }
+    }
+
+    private float ResolveSpawnIntervalModifierMultiplier()
+    {
+        float result = 1f;
+        foreach (TimedSpawnIntervalModifier modifier in
+                 _spawnIntervalModifiers)
+        {
+            if (modifier == null || modifier.Remaining <= 0f)
+                continue;
+            result *= modifier.Multiplier;
+            if (float.IsNaN(result) || float.IsInfinity(result))
+                return 1f;
+        }
+
+        return Mathf.Max(0.01f, result);
+    }
+
+    private void RescaleActiveSpawnTimer(
+        float previousMultiplier,
+        float currentMultiplier)
+    {
+        if (_scheduledSpawnInterval <= 0f ||
+            previousMultiplier <= 0f ||
+            currentMultiplier <= 0f)
+        {
+            return;
+        }
+
+        float ratio = currentMultiplier / previousMultiplier;
+        _scheduledSpawnInterval = TimePrecision.Normalize(
+            _scheduledSpawnInterval * ratio,
+            0.1f);
+        _spawnTimeRemaining = TimePrecision.Normalize(
+            _spawnTimeRemaining * ratio,
+            0.1f);
+        SpawnTimerChanged?.Invoke();
+    }
+
+    private static bool CanSummonFromSource(
+        EnemyRuntime source,
+        string abilityId,
+        EnemySummonDefinition definition)
+    {
+        if (source == null || definition == null ||
+            (source.IsSummoned && !definition.AllowRecursiveSummon))
+        {
+            return false;
+        }
+
+        if (source.Health > 0)
+            return true;
+
+        string resolvedAbilityId = (abilityId ?? string.Empty).Trim();
+        foreach (EnemyAbilityRuntimeState state in source.AbilityStates)
+        {
+            EnemyAbilityDefinition ability = state?.Definition;
+            if (ability != null &&
+                string.Equals(
+                    ability.AbilityId,
+                    resolvedAbilityId,
+                    StringComparison.Ordinal) &&
+                ability.RespondsToTrigger(EnemyAbilityTrigger.OnDeath))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static Dictionary<string, int> ResolveCandidateCountMap(
+        EnemyRuntime source,
+        string abilityId)
+    {
+        Dictionary<string, int> result = new(StringComparer.Ordinal);
+        if (source == null || string.IsNullOrWhiteSpace(abilityId))
+            return result;
+
+        foreach (EnemyAbilityRuntimeState state in source.AbilityStates)
+        {
+            EnemyAbilityDefinition ability = state?.Definition;
+            if (ability == null || !string.Equals(
+                    ability.AbilityId,
+                    abilityId,
+                    StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            foreach (EnemyAbilityParameterDefinition parameter in
+                     ability.Parameters)
+            {
+                if (parameter == null ||
+                    parameter.ValueType !=
+                        EnemyAbilityParameterValueType.Text ||
+                    !string.Equals(
+                        parameter.Key,
+                        "candidateCountMap",
+                        StringComparison.Ordinal))
+                {
+                    continue;
+                }
+
+                string[] entries = parameter.TextValue.Split(
+                    ',',
+                    StringSplitOptions.RemoveEmptyEntries);
+                foreach (string entry in entries)
+                {
+                    string[] pair = entry.Split(':');
+                    if (pair.Length != 2)
+                        continue;
+                    string candidateId = pair[0].Trim();
+                    if (!string.IsNullOrEmpty(candidateId) &&
+                        int.TryParse(pair[1].Trim(), out int count) &&
+                        count > 0)
+                    {
+                        result[candidateId] = count;
+                    }
+                }
+                return result;
+            }
+
+            return result;
+        }
+
+        return result;
+    }
+
+    private static List<EnemySO> ResolveSummonCandidates(
+        EnemySummonDefinition definition)
+    {
+        List<EnemySO> result = new();
+        HashSet<string> visitedIds = new(StringComparer.Ordinal);
+        foreach (EnemyReferenceDefinition reference in definition.Candidates)
+        {
+            if (reference == null)
+                continue;
+            EnemySO candidate = reference.Enemy != null
+                ? reference.Enemy
+                : EnemyDefinitionCatalog.FindById(reference.EnemyId);
+            if (candidate == null || string.IsNullOrWhiteSpace(
+                    candidate.EnemyId) ||
+                !visitedIds.Add(candidate.EnemyId))
+            {
+                continue;
+            }
+
+            result.Add(candidate);
+        }
+
+        return result;
+    }
+
+    private int CountActiveSummons(
+        string summonerEnemyId,
+        string abilityId)
+    {
+        int count = 0;
+        foreach (EnemyRuntime enemy in _summonedEnemies)
+        {
+            if (enemy != null && enemy.Health > 0 &&
+                string.Equals(
+                    enemy.SummonerEnemyId,
+                    summonerEnemyId,
+                    StringComparison.Ordinal) &&
+                string.Equals(
+                    enemy.OriginAbilityId,
+                    abilityId,
+                    StringComparison.Ordinal))
+            {
+                count++;
+            }
+        }
+
+        return count;
+    }
+
+    private void PruneSummonedEnemies()
+    {
+        for (int index = _summonedEnemies.Count - 1;
+             index >= 0;
+             index--)
+        {
+            EnemyRuntime enemy = _summonedEnemies[index];
+            if (enemy == null || enemy.Health <= 0)
+                _summonedEnemies.RemoveAt(index);
+        }
+    }
+
     public void NotifyBoardChanged()
     {
         HandleBoardOccupancyChanged();
@@ -404,6 +1047,7 @@ public sealed class BattleManager : MonoBehaviour, IActiveSkillResource
         ActiveSkillResourceChanged = null;
         ActiveSkillRechargeChanged = null;
         BattleObjectiveHealthChanged = null;
+        CharactersChanged = null;
     }
 
     private void OnDestroy()
@@ -538,8 +1182,12 @@ public sealed class BattleManager : MonoBehaviour, IActiveSkillResource
 
     private void CheckForCompletion()
     {
-        if (State == EBattleState.Completed || _board == null ||
-            _spawnQueue.Count > 0 || _board.LivingEnemyCount > 0)
+        if (!SessionOptions.CompletesOn(
+                BattleCompletionPolicy.EnemiesCleared) ||
+            State == EBattleState.Completed || _board == null ||
+            _spawnQueue.Count > 0 ||
+            _scheduledEnemySummons.Count > 0 ||
+            _board.LivingEnemyCount > 0)
         {
             return;
         }
@@ -549,7 +1197,9 @@ public sealed class BattleManager : MonoBehaviour, IActiveSkillResource
 
     private bool CompleteIfPartyDefeated()
     {
-        if (_objective?.IsActive == true)
+        if (!SessionOptions.CompletesOn(
+                BattleCompletionPolicy.PartyDefeated) ||
+            _objective?.IsActive == true)
             return false;
 
         if (State != EBattleState.Running || _characters.Count == 0)
@@ -567,7 +1217,9 @@ public sealed class BattleManager : MonoBehaviour, IActiveSkillResource
 
     private void TickBattleTimer(float deltaTime)
     {
-        if (_battleDuration <= 0f || _battleTimeRemaining <= 0f)
+        if (!SessionOptions.CompletesOn(
+                BattleCompletionPolicy.TimeExpired) ||
+            _battleDuration <= 0f || _battleTimeRemaining <= 0f)
             return;
 
         _battleTimeRemaining = Mathf.Max(
@@ -619,9 +1271,15 @@ public sealed class BattleManager : MonoBehaviour, IActiveSkillResource
             character?.BindBattle(null, null);
 
         _board?.SetBattleCharacters(null);
+        if (_board is DungeonBoardView dungeonBoard)
+            dungeonBoard.BindEnemySummonService(null);
 
         _spawnQueue.Clear();
+        _summonedEnemies.Clear();
+        _scheduledEnemySummons.Clear();
+        _spawnIntervalModifiers.Clear();
         _characters.Clear();
+        CharactersChanged?.Invoke(Characters);
         _board = null;
         _maximumEnemyCount = 0;
         _spawnedEnemyCount = 0;
@@ -630,6 +1288,7 @@ public sealed class BattleManager : MonoBehaviour, IActiveSkillResource
         _spawnTimeRemaining = 0f;
         _battleDuration = 0f;
         _battleTimeRemaining = 0f;
+        _sessionOptions = BattleSessionOptions.Standard;
         _boardFull = false;
         _spawnRetryRequested = false;
         _processingSpawnQueue = false;
@@ -689,8 +1348,16 @@ public sealed class BattleManager : MonoBehaviour, IActiveSkillResource
 
     private void HandleObjectiveDestroyed()
     {
-        if (State == EBattleState.Running)
+        if (State == EBattleState.Running &&
+            SessionOptions.CompletesOn(
+                BattleCompletionPolicy.ObjectiveDestroyed))
             CompleteBattle(EBattleResult.Defeat);
+    }
+
+    private bool CanMutateSessionRuntime()
+    {
+        return HasSession && State != EBattleState.Completed &&
+               !_manualTargetSelectionPending;
     }
 
     private void RestoreDefaultTimeScale()
@@ -716,7 +1383,21 @@ public sealed class BattleManager : MonoBehaviour, IActiveSkillResource
             return;
         }
 
-        float remainingDelta = deltaTime;
+        float recoveryMultiplier =
+            (_board as IEnemyCombatRuntimeServiceProvider)
+            ?.EnemyCombatRuntimeService
+            ?.ResolveResourceRecoveryMultiplier() ?? 1f;
+        if (float.IsNaN(recoveryMultiplier) ||
+            float.IsInfinity(recoveryMultiplier))
+        {
+            recoveryMultiplier = 1f;
+        }
+
+        float remainingDelta = deltaTime * Mathf.Max(
+            0f,
+            recoveryMultiplier);
+        if (remainingDelta <= 0f)
+            return;
         if (_activeSkillRechargeRemaining <= 0f)
         {
             SetActiveSkillRechargeRemaining(
@@ -804,7 +1485,8 @@ public sealed class BattleManager : MonoBehaviour, IActiveSkillResource
                 out _);
         }
         return TimePrecision.Normalize(
-            _spawnInterval * multiplier,
+            _spawnInterval * multiplier *
+            ResolveSpawnIntervalModifierMultiplier(),
             0.1f);
     }
 
@@ -824,8 +1506,9 @@ public sealed class BattleManager : MonoBehaviour, IActiveSkillResource
         {
             EnemyAbilityDefinition ability = state.Definition;
             if (!state.CanActivate ||
-                ability.Trigger !=
-                    EnemyAbilityTrigger.OnSpawnQueueEvaluation ||
+                !source.IsAbilityEnabledInCurrentPhase(ability) ||
+                !ability.RespondsToTrigger(
+                    EnemyAbilityTrigger.OnSpawnQueueEvaluation) ||
                 !EnemyAbilityConditionEvaluator.MatchesSourceOnly(
                     ability,
                     source,
@@ -878,8 +1561,9 @@ public sealed class BattleManager : MonoBehaviour, IActiveSkillResource
         {
             EnemyAbilityDefinition ability = state.Definition;
             if (!state.CanActivate ||
-                ability.Trigger !=
-                    EnemyAbilityTrigger.OnSpawnQueueEvaluation ||
+                !source.IsAbilityEnabledInCurrentPhase(ability) ||
+                !ability.RespondsToTrigger(
+                    EnemyAbilityTrigger.OnSpawnQueueEvaluation) ||
                 !EnemyAbilityConditionEvaluator.MatchesSourceOnly(
                     ability,
                     source,
@@ -903,7 +1587,12 @@ public sealed class BattleManager : MonoBehaviour, IActiveSkillResource
                 }
             }
 
-            state.RecordActivation(attempted, attempted);
+            state.RecordActivation(
+                attempted,
+                attempted,
+                source.MaxHealth > 0
+                    ? source.Health * 100f / source.MaxHealth
+                    : 0f);
         }
     }
 }

@@ -341,6 +341,30 @@ public sealed class CharacterCollectionData
         return data;
     }
 
+    public CharacterData CreateDetachedRuntimeData(CharacterSO definition)
+    {
+        if (definition == null)
+            return null;
+
+        CharacterProgressData progress = null;
+        foreach (CharacterProgressData candidate in _saveData.Characters)
+        {
+            if (candidate != null && string.Equals(
+                    candidate.CharacterId,
+                    definition.CharacterId,
+                    StringComparison.Ordinal))
+            {
+                progress = candidate.CreateSnapshot();
+                break;
+            }
+        }
+
+        progress ??= new CharacterProgressData(
+            definition.CharacterId,
+            definition.InitiallyOwned);
+        return definition.CreateData(progress);
+    }
+
     public CharacterData CreatePreviewData(CharacterSO definition)
     {
         if (definition == null)

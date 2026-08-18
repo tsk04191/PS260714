@@ -13,7 +13,9 @@ public sealed class EnemySO : ScriptableObject,
     IBattlePresentationUnitDefinition,
     IBattleAbilityProvider
 {
-    public const int CurrentCombatStatSchemaVersion = 1;
+    public const int CurrentCombatStatSchemaVersion = 2;
+    public const int CurrentRosterSchemaVersion = 1;
+    public const float DefaultFormationRadius = 0.35f;
     public const int MaximumFootprintSize = 9;
 
     [Header("Identity")]
@@ -25,6 +27,23 @@ public sealed class EnemySO : ScriptableObject,
     [SerializeField] private string cardCode;
     [SerializeField] private EEnemyGrade grade = EEnemyGrade.Normal;
     [SerializeField] private EEnemyType type = EEnemyType.Basic;
+
+    [Header("Roster Metadata")]
+    [SerializeField, HideInInspector]
+    private int rosterSchemaVersion;
+    [SerializeField]
+    private EnemyRosterTier rosterTier;
+    [SerializeField]
+    private List<string> roleTags = new();
+    [SerializeField]
+    private List<string> counterTags = new();
+    [SerializeField, Min(0), Tooltip("0 allows the wave composer default.")]
+    private int recommendedMaxPerWave;
+    [SerializeField, Min(0f), Tooltip("0 uses resolved Threat Cost.")]
+    private float spawnBudget;
+    [SerializeField, Tooltip(
+        "Only dedicated encounters may select this enemy.")]
+    private bool encounterOnly;
 
     [Header("Presentation")]
     [SerializeField] private Sprite iconSprite;
@@ -45,11 +64,24 @@ public sealed class EnemySO : ScriptableObject,
     [SerializeField, Min(0.01f), Tooltip(
         "Normalized radial distance travelled per second in circular battles.")]
     private float approachSpeed = 0.08f;
+    [SerializeField, Min(0.01f), Tooltip(
+        "World-space occupancy radius used by circular enemy formations.")]
+    private float formationRadius = DefaultFormationRadius;
     [SerializeField, HideInInspector]
     private int combatStatSchemaVersion;
     [SerializeField, Min(0.1f)] private float attackPower = 5f;
     [SerializeField, Min(1)] private int coreAttackDamage = 5;
+    [SerializeField]
+    private EnemyCoreAttackDamagePolicy coreAttackDamagePolicy;
+    [SerializeField, Min(0f), Tooltip(
+        "Used by Accumulate Fraction. Zero preserves the legacy integer " +
+        "damage value.")]
+    private float preciseCoreAttackDamage;
     [SerializeField, Min(0.1f)] private float coreAttackInterval = 2f;
+    [SerializeField, Min(0f), Tooltip(
+        "World-space distance from the defense line at which this enemy " +
+        "can attack the core. Zero is melee range.")]
+    private float coreAttackRange;
     [SerializeField, Min(0f), Tooltip("0 uses the default threat for this enemy type.")]
     private float threatCost;
     [SerializeField, Range(-1, 100), Tooltip("-1 uses the default unlock difficulty for this enemy type.")]
@@ -66,6 +98,10 @@ public sealed class EnemySO : ScriptableObject,
     [SerializeField]
     private List<EnemyAbilityDefinition> abilities = new();
 
+    [Header("Boss Phases")]
+    [SerializeField]
+    private List<EnemyBossPhaseDefinition> phaseDefinitions = new();
+
     public string EnemyId => enemyId ?? string.Empty;
     public string NameLocalizationKey => nameLocalizationKey ?? string.Empty;
     public string DescriptionLocalizationKey =>
@@ -75,6 +111,22 @@ public sealed class EnemySO : ScriptableObject,
     public string CardCode => cardCode ?? string.Empty;
     public EEnemyGrade Grade => grade;
     public EEnemyType Type => type;
+    public int RosterSchemaVersion => rosterSchemaVersion;
+    public EnemyRosterTier RosterTier => rosterSchemaVersion > 0
+        ? rosterTier
+        : GetRosterTier(grade);
+    public IReadOnlyList<string> RoleTags => roleTags != null
+        ? roleTags
+        : Array.Empty<string>();
+    public IReadOnlyList<string> CounterTags => counterTags != null
+        ? counterTags
+        : Array.Empty<string>();
+    public int RecommendedMaxPerWave =>
+        Mathf.Max(0, recommendedMaxPerWave);
+    public float SpawnBudget => IsFinite(spawnBudget) && spawnBudget > 0f
+        ? spawnBudget
+        : ThreatCost;
+    public bool EncounterOnly => encounterOnly;
     public Sprite IconSprite => iconSprite;
     public Sprite BoardSprite => boardSprite;
     public int SortOrder => sortOrder;
@@ -87,13 +139,30 @@ public sealed class EnemySO : ScriptableObject,
     public float SpawnIntervalMultiplier =>
         TimePrecision.Normalize(spawnIntervalMultiplier, 0.1f);
     public float ApproachSpeed => Mathf.Max(0.01f, approachSpeed);
+    public float FormationRadius =>
+        IsFinite(formationRadius) && formationRadius > 0f
+            ? formationRadius
+            : GetDefaultFormationRadius(type);
     public float AttackPower => combatStatSchemaVersion > 0
         ? Mathf.Max(0.1f, attackPower)
         : CoreAttackDamage;
     public int CoreAttackDamage => Mathf.Max(1, coreAttackDamage);
+    public EnemyCoreAttackDamagePolicy CoreAttackDamagePolicy =>
+        coreAttackDamagePolicy;
+    public float CoreAttackDamageValue =>
+        coreAttackDamagePolicy ==
+            EnemyCoreAttackDamagePolicy.AccumulateFraction &&
+        IsFinite(preciseCoreAttackDamage) &&
+        preciseCoreAttackDamage > 0f
+            ? preciseCoreAttackDamage
+            : CoreAttackDamage;
     public float CoreAttackInterval => TimePrecision.Normalize(
         coreAttackInterval,
         0.1f);
+    public float CoreAttackRange =>
+        IsFinite(coreAttackRange) && coreAttackRange >= 0f
+            ? coreAttackRange
+            : 0f;
     public float ThreatCost => threatCost > 0f
         ? threatCost
         : GetDefaultThreatCost(type);
@@ -117,11 +186,15 @@ public sealed class EnemySO : ScriptableObject,
         abilities != null
             ? abilities
             : Array.Empty<EnemyAbilityDefinition>();
+    public IReadOnlyList<EnemyBossPhaseDefinition> PhaseDefinitions =>
+        phaseDefinitions != null
+            ? phaseDefinitions
+            : Array.Empty<EnemyBossPhaseDefinition>();
     public IEnumerable<IBattleAbilityDefinition> EnumerateBattleAbilities()
     {
         foreach (EnemyAbilityDefinition ability in Abilities)
         {
-            if (ability?.HasUnifiedEffects == true)
+            if (ability?.HasExecutableContent == true)
                 yield return ability;
         }
     }
@@ -130,11 +203,20 @@ public sealed class EnemySO : ScriptableObject,
     internal int AuthoredInitialArmor => initialArmor;
     internal int AuthoredInitialShield => initialShield;
     internal float AuthoredApproachSpeed => approachSpeed;
+    internal float AuthoredFormationRadius => formationRadius;
     internal int AuthoredCombatStatSchemaVersion =>
         combatStatSchemaVersion;
+    internal int AuthoredRosterSchemaVersion => rosterSchemaVersion;
+    internal EnemyRosterTier AuthoredRosterTier => rosterTier;
+    internal int AuthoredRecommendedMaxPerWave =>
+        recommendedMaxPerWave;
+    internal float AuthoredSpawnBudget => spawnBudget;
     internal float AuthoredAttackPower => attackPower;
     internal int AuthoredCoreAttackDamage => coreAttackDamage;
+    internal float AuthoredPreciseCoreAttackDamage =>
+        preciseCoreAttackDamage;
     internal float AuthoredCoreAttackInterval => coreAttackInterval;
+    internal float AuthoredCoreAttackRange => coreAttackRange;
     internal int AuthoredUnlockDifficulty => unlockDifficulty;
     internal int AuthoredFootprintWidth => footprintWidth;
     internal int AuthoredFootprintHeight => footprintHeight;
@@ -158,7 +240,9 @@ public sealed class EnemySO : ScriptableObject,
     [ContextMenu("Apply Current Type Defaults")]
     private void ApplyCurrentTypeDefaults()
     {
+        string persistentId = enemyId;
         ApplyTypeDefaults(type, baseHealth);
+        enemyId = persistentId;
     }
 
     internal static EnemySO CreateRuntimeDefault(
@@ -180,14 +264,29 @@ public sealed class EnemySO : ScriptableObject,
         grade = IsSpecialType(enemyType)
             ? EEnemyGrade.Special
             : EEnemyGrade.Normal;
+        rosterSchemaVersion = CurrentRosterSchemaVersion;
+        rosterTier = GetRosterTier(grade);
+        roleTags = new List<string>
+        {
+            EnemyTypeDisplay.GetId(enemyType)
+        };
+        counterTags = new List<string>();
+        recommendedMaxPerWave = grade == EEnemyGrade.Special ? 2 : 0;
+        spawnBudget = 0f;
+        encounterOnly = false;
         baseHealth = Mathf.Max(1, health);
         sortOrder = (int)enemyType * 10;
         healthScale = 1f;
         initialArmor = 0;
         initialShield = 0;
         spawnIntervalMultiplier = 1f;
+        formationRadius = GetDefaultFormationRadius(enemyType);
         combatStatSchemaVersion = CurrentCombatStatSchemaVersion;
         attackPower = coreAttackDamage;
+        coreAttackDamagePolicy =
+            EnemyCoreAttackDamagePolicy.LegacyInteger;
+        preciseCoreAttackDamage = coreAttackDamage;
+        coreAttackRange = 0f;
         threatCost = 0f;
         unlockDifficulty = -1;
         footprintWidth = 1;
@@ -196,6 +295,7 @@ public sealed class EnemySO : ScriptableObject,
         nameLocalizationKey = string.Empty;
         descriptionLocalizationKey = string.Empty;
         description = string.Empty;
+        phaseDefinitions = new List<EnemyBossPhaseDefinition>();
 
         if (enemyType == EEnemyType.Assault)
             spawnIntervalMultiplier = 0.5f;
@@ -285,6 +385,17 @@ public sealed class EnemySO : ScriptableObject,
                enemyType == EEnemyType.Infiltrator;
     }
 
+    internal static EnemyRosterTier GetRosterTier(EEnemyGrade enemyGrade)
+    {
+        return enemyGrade switch
+        {
+            EEnemyGrade.Special => EnemyRosterTier.Special,
+            EEnemyGrade.Elite => EnemyRosterTier.Elite,
+            EEnemyGrade.Boss => EnemyRosterTier.Boss,
+            _ => EnemyRosterTier.General,
+        };
+    }
+
     private static float GetDefaultThreatCost(EEnemyType enemyType)
     {
         return enemyType switch
@@ -313,5 +424,23 @@ public sealed class EnemySO : ScriptableObject,
             EEnemyType.ShieldBearer => 70,
             _ => 0,
         };
+    }
+
+    internal static float GetDefaultFormationRadius(EEnemyType enemyType)
+    {
+        return enemyType switch
+        {
+            EEnemyType.Assault => 0.32f,
+            EEnemyType.Heavy => 0.45f,
+            EEnemyType.Mechanic => 0.38f,
+            EEnemyType.ShieldBearer => 0.45f,
+            EEnemyType.Infiltrator => 0.3f,
+            _ => DefaultFormationRadius,
+        };
+    }
+
+    private static bool IsFinite(float value)
+    {
+        return !float.IsNaN(value) && !float.IsInfinity(value);
     }
 }

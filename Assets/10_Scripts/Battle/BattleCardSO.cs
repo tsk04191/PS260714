@@ -66,6 +66,7 @@ public sealed class BattleCardSO : ScriptableObject,
     [SerializeField] private BattleCardRecyclePolicy recyclePolicy;
     [SerializeField] private bool availableAsStartingCard = true;
     [SerializeField] private bool availableAsDungeonReward = true;
+    [SerializeField, Min(1)] private int minimumMaximumEnergy = 1;
 
     [Header("Targeting")]
     [SerializeField] private CharacterTargetFaction targetFaction =
@@ -75,10 +76,15 @@ public sealed class BattleCardSO : ScriptableObject,
     [SerializeField] private CharacterAttackSubjectMetric subjectMetric;
     [SerializeField, Min(0)] private int targetCount = 1;
     [SerializeField] private BattleAreaDefinition areaDefinition = new();
+    [SerializeField] private BattleCardTargetFilter primaryTargetFilter = new();
+    [SerializeField]
+    private BattleCardSecondaryTargetDefinition secondaryTarget = new();
 
     [Header("Ability")]
     [SerializeField] private List<CharacterEffectDefinition> abilityEffects =
         new();
+    [SerializeField]
+    private List<BattleCardOperationDefinition> operations = new();
 
     public string CardId => (cardId ?? string.Empty).Trim();
     public ItemRarity Rarity => rarity;
@@ -96,6 +102,15 @@ public sealed class BattleCardSO : ScriptableObject,
     public BattleCardRecyclePolicy RecyclePolicy => recyclePolicy;
     public bool AvailableAsStartingCard => availableAsStartingCard;
     public bool AvailableAsDungeonReward => availableAsDungeonReward;
+    public int MinimumMaximumEnergy => Mathf.Max(1, minimumMaximumEnergy);
+    internal bool HasValidRawPlayRules =>
+        energyCost >= 0 && minimumMaximumEnergy >= 1;
+    internal bool HasAreaDefinition => areaDefinition != null;
+    internal bool HasPrimaryTargetFilterDefinition =>
+        primaryTargetFilter != null;
+    internal bool HasSecondaryTargetDefinition => secondaryTarget != null;
+    internal bool HasAbilityEffectStorage => abilityEffects != null;
+    internal bool HasOperationStorage => operations != null;
     public CharacterTargetFaction TargetFaction => targetFaction;
     public CharacterAttackSubject Subject => subject;
     public CharacterAttackSubjectMetric SubjectMetric => subjectMetric;
@@ -104,14 +119,21 @@ public sealed class BattleCardSO : ScriptableObject,
         : Mathf.Max(1, targetCount);
     public BattleAreaDefinition AreaDefinition =>
         areaDefinition ?? new BattleAreaDefinition();
+    public BattleCardTargetFilter PrimaryTargetFilter =>
+        primaryTargetFilter ?? new BattleCardTargetFilter();
+    public BattleCardSecondaryTargetDefinition SecondaryTarget =>
+        secondaryTarget ?? new BattleCardSecondaryTargetDefinition();
     public IReadOnlyList<CharacterEffectDefinition> AbilityEffects =>
         abilityEffects ?? (IReadOnlyList<CharacterEffectDefinition>)
             Array.Empty<CharacterEffectDefinition>();
+    public IReadOnlyList<BattleCardOperationDefinition> Operations =>
+        operations ?? (IReadOnlyList<BattleCardOperationDefinition>)
+            Array.Empty<BattleCardOperationDefinition>();
 
     public string AbilityId => CardId;
     public AbilityExecutionDomain ExecutionDomain =>
         AbilityExecutionDomain.Battle;
-    public int AbilitySchemaVersion => 1;
+    public int AbilitySchemaVersion => Operations.Count > 0 ? 2 : 1;
     public BattleEffectOriginKind OriginKind =>
         BattleEffectOriginKind.BattleCard;
     public BattleAbilityTargeting Targeting =>
@@ -122,15 +144,62 @@ public sealed class BattleCardSO : ScriptableObject,
             TargetCount,
             AreaDefinition);
     public IEnumerable<IBattleEffectDefinition> BattleEffects =>
-        (IEnumerable<IBattleEffectDefinition>)AbilityEffects;
+        EnumerateBattleEffects();
     public bool UsesLegacyEffectStorage => false;
-    public bool HasExecutableContent => AbilityEffects.Count > 0;
-    public bool RequiresActionTargets =>
-        BattleAbilityRules.RequiresActionTargets(this);
+    public bool HasExecutableContent =>
+        AbilityEffects.Count > 0 || Operations.Count > 0;
+    public bool RequiresActionTargets
+    {
+        get
+        {
+            if (BattleAbilityRules.RequiresActionTargets(this))
+                return true;
+            foreach (BattleCardOperationDefinition operation in Operations)
+            {
+                if (operation?.UsesPrimaryTarget == true ||
+                    operation?.UsesSecondaryTarget == true ||
+                    AreaDefinition.UsesWorldArea &&
+                    operation?.UsesDesignatedPoint == true)
+                {
+                    return true;
+                }
+            }
+            return false;
+        }
+    }
 
     public IEnumerable<IBattleAbilityDefinition> EnumerateBattleAbilities()
     {
         yield return this;
+    }
+
+    public bool AllowsOperationPrimaryTarget(CharacterSO character)
+    {
+        bool hasCharacterRestrictedPrimaryOperation = false;
+        bool matchesRestrictedOperation = false;
+        foreach (BattleCardOperationDefinition operation in Operations)
+        {
+            if (operation?.TargetScope != BattleCardTargetScope.Primary)
+                continue;
+            if (operation.RequiredCharacter == null)
+                return true;
+
+            hasCharacterRestrictedPrimaryOperation = true;
+            if (ReferenceEquals(operation.RequiredCharacter, character))
+                matchesRestrictedOperation = true;
+        }
+
+        return !hasCharacterRestrictedPrimaryOperation ||
+               matchesRestrictedOperation;
+    }
+
+    private IEnumerable<IBattleEffectDefinition> EnumerateBattleEffects()
+    {
+        foreach (CharacterEffectDefinition effect in AbilityEffects)
+        {
+            if (effect != null)
+                yield return effect;
+        }
     }
 
     public bool IsEligible(IReadOnlyList<CharacterSO> party)
@@ -266,6 +335,8 @@ public static class BattleCardDefinitionValidator
         }
         if (!AbilityDefinitionValidator.TryValidate(card, out error))
             return false;
+        if (!TryValidateCardSchema(card, out error))
+            return false;
         if (card.Affiliation != BattleCardAffiliation.Neutral)
             return true;
 
@@ -287,23 +358,640 @@ public static class BattleCardDefinitionValidator
 
         foreach (IBattleEffectDefinition effect in card.BattleEffects)
         {
-            ScalingValue scaling = effect.AmountScaling;
-            if (effect.BattleTargetMode == BattleEffectTargetMode.Source ||
-                effect.BattleEffectType == BattleEffectType.SpendHealth ||
-                (UsesAmountScaling(effect.BattleEffectType) &&
-                 (scaling.SourceAttackPowerScale != 0f ||
-                  scaling.SourceCurrentHealthScale != 0f ||
-                  scaling.SourceMaximumHealthScale != 0f ||
-                  scaling.SourceStatusStacksScale != 0f)))
+            if (UsesCharacterOnlySource(effect))
             {
                 error = "A neutral common card cannot use character-only " +
                         "source targeting or source-unit scaling.";
                 return false;
             }
         }
+        foreach (BattleCardOperationDefinition operation in card.Operations)
+        {
+            if (operation != null &&
+                (operation.Type == BattleCardOperationType.SharedEffect ||
+                 operation.Type == BattleCardOperationType.CreateZone) &&
+                operation.SharedEffect != null &&
+                UsesCharacterOnlySource(operation.SharedEffect))
+            {
+                error = "A neutral common card operation cannot use " +
+                        "character-only source targeting or source-unit " +
+                        "scaling.";
+                return false;
+            }
+        }
 
         error = string.Empty;
         return true;
+    }
+
+    private static bool TryValidateCardSchema(
+        BattleCardSO card,
+        out string error)
+    {
+        if (!Enum.IsDefined(typeof(ItemRarity), card.Rarity) ||
+            !Enum.IsDefined(
+                typeof(BattleCardAffiliation),
+                card.Affiliation) ||
+            !Enum.IsDefined(
+                typeof(BattleCardRequirementMatchMode),
+                card.RequirementMode) ||
+            !Enum.IsDefined(
+                typeof(BattleCardSourcePolicy),
+                card.SourcePolicy) ||
+            !Enum.IsDefined(
+                typeof(BattleCardRecyclePolicy),
+                card.RecyclePolicy) ||
+            !Enum.IsDefined(
+                typeof(CharacterTargetFaction),
+                card.TargetFaction) ||
+            !Enum.IsDefined(
+                typeof(CharacterAttackSubject),
+                card.Subject) ||
+            !Enum.IsDefined(
+                typeof(CharacterAttackSubjectMetric),
+                card.SubjectMetric))
+        {
+            error = "Battle card contains an undefined card enum value.";
+            return false;
+        }
+
+        if (!card.HasValidRawPlayRules)
+        {
+            error = "Battle card energy values cannot be negative or zero " +
+                    "where a positive maximum is required.";
+            return false;
+        }
+
+        int requiredMaximumEnergy = card.EnergyCost >= 4
+            ? card.EnergyCost
+            : 1;
+        if (card.MinimumMaximumEnergy < requiredMaximumEnergy)
+        {
+            error = $"A cost-{card.EnergyCost} card requires minimum " +
+                    $"maximum energy {requiredMaximumEnergy} or greater.";
+            return false;
+        }
+
+        if (!card.HasAreaDefinition ||
+            !card.HasPrimaryTargetFilterDefinition ||
+            !card.HasSecondaryTargetDefinition ||
+            !card.HasAbilityEffectStorage ||
+            !card.HasOperationStorage)
+        {
+            error = "Battle card targeting and operation collections must " +
+                    "not be null.";
+            return false;
+        }
+
+        if (!TryValidateTargetFilter(
+                card.PrimaryTargetFilter,
+                card.TargetFaction,
+                "Primary target",
+                out error) ||
+            !TryValidateSecondaryTarget(card.SecondaryTarget, out error))
+        {
+            return false;
+        }
+
+        for (int index = 0; index < card.AbilityEffects.Count; index++)
+        {
+            if (card.AbilityEffects[index] == null)
+            {
+                error = $"Battle card shared effect {index + 1} is null.";
+                return false;
+            }
+        }
+
+        HashSet<string> operationIds = new(StringComparer.Ordinal);
+        for (int index = 0; index < card.Operations.Count; index++)
+        {
+            BattleCardOperationDefinition operation =
+                card.Operations[index];
+            if (!TryValidateOperation(
+                    card,
+                    operation,
+                    index,
+                    operationIds,
+                    out error))
+            {
+                return false;
+            }
+        }
+
+        error = string.Empty;
+        return true;
+    }
+
+    private static bool TryValidateSecondaryTarget(
+        BattleCardSecondaryTargetDefinition secondary,
+        out string error)
+    {
+        if (secondary == null || !secondary.HasAreaDefinition ||
+            !secondary.HasFilterDefinition)
+        {
+            error = "Secondary target definition, area, and filter must " +
+                    "not be null.";
+            return false;
+        }
+        if (!secondary.Enabled)
+        {
+            error = string.Empty;
+            return true;
+        }
+        if (!Enum.IsDefined(
+                typeof(CharacterTargetFaction),
+                secondary.TargetFaction) ||
+            !Enum.IsDefined(
+                typeof(CharacterAttackSubject),
+                secondary.Subject) ||
+            !Enum.IsDefined(
+                typeof(CharacterAttackSubjectMetric),
+                secondary.SubjectMetric) ||
+            !secondary.HasValidTargetCount ||
+            !secondary.AreaDefinition.IsValid)
+        {
+            error = "Secondary target selection is invalid.";
+            return false;
+        }
+
+        if (secondary.UsesWorldPoint)
+        {
+            if (!secondary.AreaDefinition.UsesWorldArea ||
+                secondary.AreaDefinition.OriginMode !=
+                    CharacterAreaOriginMode.DesignatedPoint)
+            {
+                error = "A secondary world point requires a designated " +
+                        "world-area definition.";
+                return false;
+            }
+        }
+        else if (secondary.Subject == CharacterAttackSubject.None ||
+                 secondary.AreaDefinition.UsesWorldArea)
+        {
+            error = "A secondary unit target requires a unit selection " +
+                    "subject and a target-shaped area.";
+            return false;
+        }
+
+        return TryValidateTargetFilter(
+            secondary.Filter,
+            secondary.TargetFaction,
+            "Secondary target",
+            out error);
+    }
+
+    private static bool TryValidateTargetFilter(
+        BattleCardTargetFilter filter,
+        CharacterTargetFaction faction,
+        string label,
+        out string error)
+    {
+        if (filter == null)
+        {
+            error = $"{label} filter is null.";
+            return false;
+        }
+        if (faction != CharacterTargetFaction.Ally &&
+            (filter.RequiredRole != null ||
+             filter.RequiredCharacter != null ||
+             filter.IncludeDefeated))
+        {
+            error = $"{label} character, role, and defeated filters " +
+                    "require an allied target faction.";
+            return false;
+        }
+
+        error = string.Empty;
+        return true;
+    }
+
+    private static bool TryValidateOperation(
+        BattleCardSO card,
+        BattleCardOperationDefinition operation,
+        int index,
+        HashSet<string> operationIds,
+        out string error)
+    {
+        string path = $"Operation {index + 1}";
+        if (operation == null)
+        {
+            error = $"{path} is null.";
+            return false;
+        }
+        if (string.IsNullOrWhiteSpace(operation.OperationId) ||
+            !operationIds.Add(operation.OperationId))
+        {
+            error = $"{path} requires a unique non-empty operation ID.";
+            return false;
+        }
+        if (!Enum.IsDefined(
+                typeof(BattleCardOperationType),
+                operation.Type) ||
+            !Enum.IsDefined(
+                typeof(BattleCardTargetScope),
+                operation.TargetScope) ||
+            !Enum.IsDefined(
+                typeof(BattleCardMovementMode),
+                operation.MovementMode) ||
+            !Enum.IsDefined(
+                typeof(BattleCardZoneTrigger),
+                operation.ZoneTrigger) ||
+            !Enum.IsDefined(
+                typeof(BattleCardCostModifierMode),
+                operation.CostModifierMode) ||
+            !Enum.IsDefined(
+                typeof(BattleCardSpatialZone),
+                operation.SpatialZone))
+        {
+            error = $"{path} contains an undefined operation enum value.";
+            return false;
+        }
+        if (!operation.HasValidNumericValues ||
+            !operation.HasValidSelectionRange)
+        {
+            error = $"{path} contains an invalid numeric or selection " +
+                    "range value.";
+            return false;
+        }
+        if (!operation.HasConditionDefinition)
+        {
+            error = $"{path} condition definition is null.";
+            return false;
+        }
+        if (!TryValidateCondition(
+                operation.Condition,
+                index,
+                operation.TargetScope,
+                path,
+                out error))
+        {
+            return false;
+        }
+
+        if (operation.UsesPrimaryTarget &&
+            (card.Subject == CharacterAttackSubject.None ||
+             !card.Targeting.HasTarget))
+        {
+            error = $"{path} requires a configured primary target.";
+            return false;
+        }
+        if (operation.UsesSecondaryTarget &&
+            !card.SecondaryTarget.Enabled)
+        {
+            error = $"{path} requires an enabled secondary target.";
+            return false;
+        }
+        if ((operation.TargetScope ==
+                 BattleCardTargetScope.NearbyPrimaryEnemies ||
+             operation.TargetScope ==
+                 BattleCardTargetScope.BehindPrimaryEnemy) &&
+            card.TargetFaction != CharacterTargetFaction.Enemy)
+        {
+            error = $"{path} requires an enemy primary target.";
+            return false;
+        }
+        if (operation.TargetScope ==
+                BattleCardTargetScope.EnemiesAtDesignatedPoint &&
+            !HasDesignatedPoint(card))
+        {
+            error = $"{path} requires a designated primary or secondary " +
+                    "world point.";
+            return false;
+        }
+        if (operation.TargetScope ==
+                BattleCardTargetScope.EnemiesWithStatus &&
+            operation.RequiredStatus == null)
+        {
+            error = $"{path} requires a status filter.";
+            return false;
+        }
+        if (operation.TargetScope == BattleCardTargetScope.AlliesWithRole &&
+            operation.RequiredRole == null)
+        {
+            error = $"{path} requires a role filter.";
+            return false;
+        }
+        if (operation.TargetScope ==
+                BattleCardTargetScope.SpecificCharacter &&
+            operation.RequiredCharacter == null)
+        {
+            error = $"{path} requires a character reference.";
+            return false;
+        }
+        if (TryResolveScopeFaction(
+                card,
+                operation.TargetScope,
+                out CharacterTargetFaction scopeFaction) &&
+            scopeFaction != CharacterTargetFaction.Ally &&
+            (operation.RequiredRole != null ||
+             operation.RequiredCharacter != null))
+        {
+            error = $"{path} character and role filters require allied " +
+                    "targets.";
+            return false;
+        }
+
+        return TryValidateOperationType(
+            card,
+            operation,
+            path,
+            out error);
+    }
+
+    private static bool TryValidateCondition(
+        BattleCardConditionDefinition condition,
+        int operationIndex,
+        BattleCardTargetScope targetScope,
+        string path,
+        out string error)
+    {
+        if (condition == null ||
+            !Enum.IsDefined(typeof(BattleCardConditionType), condition.Type) ||
+            !Enum.IsDefined(
+                typeof(CharacterNumericComparison),
+                condition.Comparison) ||
+            !Enum.IsDefined(
+                typeof(BattleCardSpatialZone),
+                condition.Zone) ||
+            !condition.HasFiniteThreshold)
+        {
+            error = $"{path} has an invalid condition definition.";
+            return false;
+        }
+        if (condition.Type == BattleCardConditionType.PartyRoleCount &&
+            condition.Role == null)
+        {
+            error = $"{path} party-role condition requires a role.";
+            return false;
+        }
+        if (condition.Type == BattleCardConditionType.TargetHasStatus &&
+            condition.StatusEffect == null)
+        {
+            error = $"{path} target-status condition requires a status.";
+            return false;
+        }
+        if ((condition.Type ==
+                 BattleCardConditionType.PreviousOperationSucceeded ||
+             condition.Type ==
+                 BattleCardConditionType.PreviousOperationFailed ||
+             condition.Type ==
+                 BattleCardConditionType.PreviousOperationDefeatedAny) &&
+            operationIndex == 0)
+        {
+            error = $"{path} cannot query a previous operation at index 1.";
+            return false;
+        }
+        if ((condition.Type ==
+                 BattleCardConditionType.TargetHealthPercentage ||
+             condition.Type == BattleCardConditionType.TargetZone ||
+             condition.Type == BattleCardConditionType.TargetHasStatus) &&
+            targetScope == BattleCardTargetScope.None)
+        {
+            error = $"{path} target condition requires a target scope.";
+            return false;
+        }
+
+        error = string.Empty;
+        return true;
+    }
+
+    private static bool TryValidateOperationType(
+        BattleCardSO card,
+        BattleCardOperationDefinition operation,
+        string path,
+        out string error)
+    {
+        switch (operation.Type)
+        {
+            case BattleCardOperationType.SharedEffect:
+            case BattleCardOperationType.CreateZone:
+                string effectError = "Shared effect is missing.";
+                if (!operation.HasSharedEffectDefinition ||
+                    !BattleEffectRules.TryValidate(
+                        operation.SharedEffect,
+                        out effectError))
+                {
+                    error = $"{path} has an invalid shared effect: " +
+                            effectError;
+                    return false;
+                }
+                if (operation.Type == BattleCardOperationType.CreateZone &&
+                    (!HasDesignatedPoint(card) || operation.Radius <= 0f))
+                {
+                    error = $"{path} zone requires a designated point and " +
+                            "a positive radius.";
+                    return false;
+                }
+                break;
+
+            case BattleCardOperationType.ObjectiveRestore:
+                if (operation.Amount <= 0 &&
+                    !operation.UsePreviousChangedCount)
+                {
+                    error = $"{path} objective restore requires an amount.";
+                    return false;
+                }
+                break;
+
+            case BattleCardOperationType.ObjectiveInvulnerability:
+                if (operation.Duration <= 0f)
+                {
+                    error = $"{path} objective immunity requires a " +
+                            "positive duration.";
+                    return false;
+                }
+                break;
+
+            case BattleCardOperationType.ObjectiveDamageRedirect:
+                if (operation.Ratio <= 0f || operation.Ratio > 1f ||
+                    !TargetsAllies(card, operation.TargetScope))
+                {
+                    error = $"{path} objective redirect requires an allied " +
+                            "target and a ratio in (0, 1].";
+                    return false;
+                }
+                break;
+
+            case BattleCardOperationType.SpendTargetHealth:
+            case BattleCardOperationType.Revive:
+                if (!TargetsAllies(card, operation.TargetScope) ||
+                    operation.Type ==
+                        BattleCardOperationType.SpendTargetHealth &&
+                    operation.Amount <= 0 ||
+                    operation.Type == BattleCardOperationType.Revive &&
+                    operation.Amount <= 0 && operation.Ratio <= 0f)
+                {
+                    error = $"{path} requires an allied target and a " +
+                            "positive amount or ratio.";
+                    return false;
+                }
+                break;
+
+            case BattleCardOperationType.Draw:
+                if (operation.Count <= 0 &&
+                    !operation.UsePreviousChangedCount)
+                {
+                    error = $"{path} draw requires a positive count.";
+                    return false;
+                }
+                break;
+
+            case BattleCardOperationType.DiscardSelected:
+            case BattleCardOperationType.ExhaustSelected:
+            case BattleCardOperationType.ReturnDiscarded:
+                if (operation.MaximumSelectionCount <= 0)
+                {
+                    error = $"{path} card selection requires a positive " +
+                            "maximum count.";
+                    return false;
+                }
+                break;
+
+            case BattleCardOperationType.GainEnergy:
+                if (operation.Amount <= 0 &&
+                    !operation.UsePreviousChangedCount)
+                {
+                    error = $"{path} energy gain requires an amount.";
+                    return false;
+                }
+                break;
+
+            case BattleCardOperationType.ModifyCardCost:
+                if (operation.Count <= 0 ||
+                    operation.CostModifierMode ==
+                        BattleCardCostModifierMode.Add &&
+                    operation.Amount <= 0)
+                {
+                    error = $"{path} cost modifier requires a positive use " +
+                            "count and additive amount.";
+                    return false;
+                }
+                break;
+
+            case BattleCardOperationType.Move:
+                if (!TargetsAllies(card, operation.TargetScope) ||
+                    operation.MovementMode ==
+                        BattleCardMovementMode.ToWorldPoint &&
+                    !HasDesignatedPoint(card) ||
+                    operation.MovementMode ==
+                        BattleCardMovementMode.ToTargetFlank &&
+                    (!card.SecondaryTarget.Enabled ||
+                     card.SecondaryTarget.UsesWorldPoint ||
+                     card.SecondaryTarget.TargetFaction !=
+                        CharacterTargetFaction.Enemy))
+                {
+                    error = $"{path} movement targeting is incomplete.";
+                    return false;
+                }
+                break;
+
+            case BattleCardOperationType.Swap:
+                if (!TargetsAllies(card, operation.TargetScope))
+                {
+                    error = $"{path} swap requires allied targets.";
+                    return false;
+                }
+                break;
+
+            case BattleCardOperationType.PullEnemies:
+                if (!HasDesignatedPoint(card))
+                {
+                    error = $"{path} pull requires a designated point.";
+                    return false;
+                }
+                break;
+
+            case BattleCardOperationType.ApplyAttackModifier:
+            case BattleCardOperationType.ApplySkillModifier:
+            case BattleCardOperationType.ApplyHealthTrigger:
+                if (!TargetsAllies(card, operation.TargetScope))
+                {
+                    error = $"{path} modifier requires allied targets.";
+                    return false;
+                }
+                break;
+
+            case BattleCardOperationType.ExtendStatusDuration:
+                if (operation.StatusEffect == null ||
+                    operation.Duration <= 0f)
+                {
+                    error = $"{path} status extension requires a status " +
+                            "and positive duration.";
+                    return false;
+                }
+                break;
+
+            case BattleCardOperationType.ForceTarget:
+                if (operation.Duration <= 0f)
+                {
+                    error = $"{path} forced target requires a positive " +
+                            "duration.";
+                    return false;
+                }
+                break;
+        }
+
+        error = string.Empty;
+        return true;
+    }
+
+    private static bool HasDesignatedPoint(BattleCardSO card)
+    {
+        return card.AreaDefinition.UsesWorldArea &&
+                   card.AreaDefinition.OriginMode ==
+                       CharacterAreaOriginMode.DesignatedPoint ||
+               card.SecondaryTarget.Enabled &&
+                   card.SecondaryTarget.UsesWorldPoint &&
+                   card.SecondaryTarget.AreaDefinition.UsesWorldArea &&
+                   card.SecondaryTarget.AreaDefinition.OriginMode ==
+                       CharacterAreaOriginMode.DesignatedPoint;
+    }
+
+    private static bool TargetsAllies(
+        BattleCardSO card,
+        BattleCardTargetScope scope)
+    {
+        return TryResolveScopeFaction(card, scope, out
+                   CharacterTargetFaction faction) &&
+               faction == CharacterTargetFaction.Ally;
+    }
+
+    private static bool TryResolveScopeFaction(
+        BattleCardSO card,
+        BattleCardTargetScope scope,
+        out CharacterTargetFaction faction)
+    {
+        switch (scope)
+        {
+            case BattleCardTargetScope.Primary:
+                faction = card.TargetFaction;
+                return true;
+            case BattleCardTargetScope.Secondary:
+                faction = card.SecondaryTarget.TargetFaction;
+                return card.SecondaryTarget.Enabled &&
+                       !card.SecondaryTarget.UsesWorldPoint;
+            case BattleCardTargetScope.Source:
+            case BattleCardTargetScope.AllAllies:
+            case BattleCardTargetScope.AlliesWithRole:
+            case BattleCardTargetScope.LowestHealthAlly:
+            case BattleCardTargetScope.DeadOrLowestHealthAlly:
+            case BattleCardTargetScope.SpecificCharacter:
+                faction = CharacterTargetFaction.Ally;
+                return true;
+            case BattleCardTargetScope.AllEnemies:
+            case BattleCardTargetScope.RandomEnemies:
+            case BattleCardTargetScope.EnemiesWithStatus:
+            case BattleCardTargetScope.NearbyPrimaryEnemies:
+            case BattleCardTargetScope.BehindPrimaryEnemy:
+            case BattleCardTargetScope.DefenseLineEnemies:
+            case BattleCardTargetScope.RecentObjectiveAttackers:
+            case BattleCardTargetScope.EnemiesAtDesignatedPoint:
+                faction = CharacterTargetFaction.Enemy;
+                return true;
+            default:
+                faction = default;
+                return false;
+        }
     }
 
     private static bool UsesAmountScaling(BattleEffectType type)
@@ -315,6 +1003,21 @@ public static class BattleCardDefinitionValidator
                type == BattleEffectType.SpendHealth ||
                type == BattleEffectType.Shield ||
                type == BattleEffectType.CardDraw;
+    }
+
+    private static bool UsesCharacterOnlySource(
+        IBattleEffectDefinition effect)
+    {
+        if (effect == null)
+            return false;
+        ScalingValue scaling = effect.AmountScaling;
+        return effect.BattleTargetMode == BattleEffectTargetMode.Source ||
+               effect.BattleEffectType == BattleEffectType.SpendHealth ||
+               UsesAmountScaling(effect.BattleEffectType) &&
+               (scaling.SourceAttackPowerScale != 0f ||
+                scaling.SourceCurrentHealthScale != 0f ||
+                scaling.SourceMaximumHealthScale != 0f ||
+                scaling.SourceStatusStacksScale != 0f);
     }
 }
 

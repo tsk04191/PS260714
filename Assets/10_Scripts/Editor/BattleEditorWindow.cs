@@ -178,6 +178,9 @@ public sealed class BattleEditorWindow : EditorWindow
             "arenaMode",
             "coreMaximumHealth",
             "circularLaneCount",
+            "circularMaximumLayerCount",
+            "circularLayerSpacing",
+            "formationSeparationRatio",
             "wallRadiusNormalized",
             "spawnRadiusNormalized");
         DrawSection(

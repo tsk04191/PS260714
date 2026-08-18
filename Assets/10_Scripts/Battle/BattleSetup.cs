@@ -12,6 +12,15 @@ public sealed class BattleArenaSetup
 {
     public const int DefaultCoreMaximumHealth = 100;
     public const int DefaultLaneCount = 12;
+    public const int DefaultMaximumLayerCount = 3;
+    public const int MinimumLayerCount = 1;
+    public const int MaximumLayerCountLimit = 8;
+    public const float DefaultLayerSpacing = 0.55f;
+    public const float MinimumLayerSpacing = 0.1f;
+    public const float MaximumLayerSpacing = 2f;
+    public const float DefaultFormationSeparationRatio = 0.75f;
+    public const float MinimumFormationSeparationRatio = 0.5f;
+    public const float MaximumFormationSeparationRatio = 1f;
     public const float DefaultWallRadiusNormalized = 0.24f;
     public const float DefaultSpawnRadiusNormalized = 0.45f;
     public const float DefaultWorldRadius = 2.2666667f;
@@ -32,6 +41,12 @@ public sealed class BattleArenaSetup
     public float WallRadiusNormalized { get; }
     public float SpawnRadiusNormalized { get; }
     public float WorldRadius { get; }
+    public int MaximumLayerCount { get; }
+    public float LayerSpacing { get; }
+    public float FormationSeparationRatio { get; }
+    public int MaximumEnemyCapacity => UsesBattleCore
+        ? LaneCount * MaximumLayerCount
+        : 0;
     public bool UsesBattleCore => Mode == BattleArenaMode.CircularDefense;
 
     public BattleArenaSetup(
@@ -40,7 +55,11 @@ public sealed class BattleArenaSetup
         int laneCount,
         float wallRadiusNormalized,
         float spawnRadiusNormalized,
-        float worldRadius = DefaultWorldRadius)
+        float worldRadius = DefaultWorldRadius,
+        int maximumLayerCount = DefaultMaximumLayerCount,
+        float layerSpacing = DefaultLayerSpacing,
+        float formationSeparationRatio =
+            DefaultFormationSeparationRatio)
     {
         Mode = mode;
         if (mode != BattleArenaMode.CircularDefense)
@@ -50,6 +69,9 @@ public sealed class BattleArenaSetup
             WallRadiusNormalized = 0f;
             SpawnRadiusNormalized = 0f;
             WorldRadius = 0f;
+            MaximumLayerCount = 0;
+            LayerSpacing = 0f;
+            FormationSeparationRatio = 0f;
             return;
         }
 
@@ -64,6 +86,20 @@ public sealed class BattleArenaSetup
             WallRadiusNormalized + 0.05f,
             0.5f);
         WorldRadius = NormalizeWorldRadius(worldRadius);
+        MaximumLayerCount = Mathf.Clamp(
+            maximumLayerCount,
+            MinimumLayerCount,
+            MaximumLayerCountLimit);
+        LayerSpacing = NormalizeFinite(
+            layerSpacing,
+            DefaultLayerSpacing,
+            MinimumLayerSpacing,
+            MaximumLayerSpacing);
+        FormationSeparationRatio = NormalizeFinite(
+            formationSeparationRatio,
+            DefaultFormationSeparationRatio,
+            MinimumFormationSeparationRatio,
+            MaximumFormationSeparationRatio);
     }
 
     public static BattleArenaSetup CreateCircular(
@@ -71,7 +107,11 @@ public sealed class BattleArenaSetup
         int laneCount = DefaultLaneCount,
         float wallRadiusNormalized = DefaultWallRadiusNormalized,
         float spawnRadiusNormalized = DefaultSpawnRadiusNormalized,
-        float worldRadius = DefaultWorldRadius)
+        float worldRadius = DefaultWorldRadius,
+        int maximumLayerCount = DefaultMaximumLayerCount,
+        float layerSpacing = DefaultLayerSpacing,
+        float formationSeparationRatio =
+            DefaultFormationSeparationRatio)
     {
         return new BattleArenaSetup(
             BattleArenaMode.CircularDefense,
@@ -79,7 +119,10 @@ public sealed class BattleArenaSetup
             laneCount,
             wallRadiusNormalized,
             spawnRadiusNormalized,
-            worldRadius);
+            worldRadius,
+            maximumLayerCount,
+            layerSpacing,
+            formationSeparationRatio);
     }
 
     public BattleArenaSetup WithWorldRadius(float worldRadius)
@@ -91,7 +134,10 @@ public sealed class BattleArenaSetup
                 LaneCount,
                 WallRadiusNormalized,
                 SpawnRadiusNormalized,
-                worldRadius)
+                worldRadius,
+                MaximumLayerCount,
+                LayerSpacing,
+                FormationSeparationRatio)
             : this;
     }
 
@@ -104,7 +150,10 @@ public sealed class BattleArenaSetup
                 LaneCount,
                 WallRadiusNormalized,
                 SpawnRadiusNormalized,
-                WorldRadius)
+                WorldRadius,
+                MaximumLayerCount,
+                LayerSpacing,
+                FormationSeparationRatio)
             : this;
     }
 
@@ -116,6 +165,17 @@ public sealed class BattleArenaSetup
             worldRadius,
             MinimumWorldRadius,
             MaximumWorldRadius);
+    }
+
+    private static float NormalizeFinite(
+        float value,
+        float fallback,
+        float minimum,
+        float maximum)
+    {
+        return float.IsNaN(value) || float.IsInfinity(value)
+            ? fallback
+            : Mathf.Clamp(value, minimum, maximum);
     }
 }
 
@@ -153,8 +213,23 @@ public interface IBattleObjective
     int CurrentHealth { get; }
     int MaximumHealth { get; }
     bool IsDestroyed { get; }
+    bool IsDamageImmune { get; }
+    float DamageImmunityRemaining { get; }
+    bool HasPendingDamageRedirect { get; }
+    IBattleCharacter PendingDamageRedirectTarget { get; }
+    float PendingDamageRedirectRatio { get; }
     event Action<int, int> HealthChanged;
     event Action Destroyed;
+
+    int TakeDamage(int amount);
+    int Heal(int amount);
+    bool RestoreToMaximum();
+    bool TryGrantDamageImmunity(float duration);
+    bool TrySetNextDamageRedirect(
+        IBattleCharacter target,
+        float ratio);
+    void Tick(float deltaTime);
+    void ClearTransientDefenses();
 }
 
 public interface IBattleObjectiveProvider
@@ -162,12 +237,31 @@ public interface IBattleObjectiveProvider
     IBattleObjective Objective { get; }
 }
 
-public sealed class BattleCoreRuntime : IBattleObjective
+public sealed partial class BattleCoreRuntime :
+    IBattleObjective,
+    IBattleObjectiveModifierService
 {
+    public const float DefaultDamageImmunityDuration = 3f;
+    public const float DefaultDamageRedirectRatio = 0.3f;
+
+    private float damageImmunityRemaining;
+    private IBattleCharacter pendingDamageRedirectTarget;
+    private float pendingDamageRedirectRatio;
+
     public bool IsActive { get; private set; }
     public int CurrentHealth { get; private set; }
     public int MaximumHealth { get; private set; }
     public bool IsDestroyed => IsActive && CurrentHealth <= 0;
+    public bool IsDamageImmune => IsActive && !IsDestroyed &&
+                                  damageImmunityRemaining > 0f;
+    public float DamageImmunityRemaining => damageImmunityRemaining;
+    public bool HasPendingDamageRedirect =>
+        pendingDamageRedirectTarget != null &&
+        pendingDamageRedirectRatio > 0f;
+    public IBattleCharacter PendingDamageRedirectTarget =>
+        pendingDamageRedirectTarget;
+    public float PendingDamageRedirectRatio =>
+        pendingDamageRedirectRatio;
 
     public event Action<int, int> HealthChanged;
     public event Action Destroyed;
@@ -177,8 +271,12 @@ public sealed class BattleCoreRuntime : IBattleObjective
         bool active,
         int currentHealth = -1)
     {
+        ClearTransientDefenses();
+        objectiveModifiers.Clear();
+        objectiveDamageOverTime.Clear();
         IsActive = active;
-        MaximumHealth = active ? Mathf.Max(1, maximumHealth) : 0;
+        baseMaximumHealth = active ? Mathf.Max(1, maximumHealth) : 0;
+        MaximumHealth = baseMaximumHealth;
         CurrentHealth = active
             ? currentHealth < 0
                 ? MaximumHealth
@@ -189,10 +287,27 @@ public sealed class BattleCoreRuntime : IBattleObjective
 
     public int TakeDamage(int amount)
     {
-        if (!IsActive || IsDestroyed || amount <= 0)
+        return TakeDamage(amount, 0f);
+    }
+
+    public int TakeDamage(int amount, float protectionBypassRatio)
+    {
+        if (!IsActive || IsDestroyed || amount <= 0 ||
+            float.IsNaN(protectionBypassRatio) ||
+            float.IsInfinity(protectionBypassRatio) ||
+            protectionBypassRatio < 0f || protectionBypassRatio > 1f)
             return 0;
 
-        int applied = Mathf.Min(CurrentHealth, amount);
+        amount = ResolveModifiedDamage(amount, protectionBypassRatio);
+        if (amount <= 0)
+            return 0;
+
+        int redirectedAmount = ResolveRedirectedAmount(amount);
+        int remainingAmount = Mathf.Max(0, amount - redirectedAmount);
+        if (remainingAmount <= 0)
+            return 0;
+
+        int applied = Mathf.Min(CurrentHealth, remainingAmount);
         CurrentHealth -= applied;
         HealthChanged?.Invoke(CurrentHealth, MaximumHealth);
         if (CurrentHealth <= 0)
@@ -208,10 +323,106 @@ public sealed class BattleCoreRuntime : IBattleObjective
             return 0;
         }
 
-        int previous = CurrentHealth;
-        CurrentHealth = Mathf.Min(MaximumHealth, CurrentHealth + amount);
+        amount = ResolveModifiedHealing(amount);
+        if (amount <= 0)
+            return 0;
+
+        int applied = Mathf.Min(MaximumHealth - CurrentHealth, amount);
+        CurrentHealth += applied;
         HealthChanged?.Invoke(CurrentHealth, MaximumHealth);
-        return CurrentHealth - previous;
+        return applied;
+    }
+
+    public bool RestoreToMaximum()
+    {
+        if (!IsActive)
+            return false;
+
+        ClearTransientDefenses();
+        ClearTransientModifiers();
+        CurrentHealth = MaximumHealth;
+        HealthChanged?.Invoke(CurrentHealth, MaximumHealth);
+        return true;
+    }
+
+    public bool TryGrantDamageImmunity(float duration)
+    {
+        if (!IsActive || IsDestroyed || float.IsNaN(duration) ||
+            float.IsInfinity(duration) || duration <= 0f ||
+            duration <= damageImmunityRemaining)
+        {
+            return false;
+        }
+
+        damageImmunityRemaining = duration;
+        return true;
+    }
+
+    public bool TrySetNextDamageRedirect(
+        IBattleCharacter target,
+        float ratio)
+    {
+        if (!IsActive || IsDestroyed || !IsValidRedirectTarget(target) ||
+            float.IsNaN(ratio) || float.IsInfinity(ratio) ||
+            ratio <= 0f || ratio > 1f)
+        {
+            return false;
+        }
+
+        pendingDamageRedirectTarget = target;
+        pendingDamageRedirectRatio = ratio;
+        return true;
+    }
+
+    public void Tick(float deltaTime)
+    {
+        if (float.IsNaN(deltaTime) || float.IsInfinity(deltaTime) ||
+            deltaTime <= 0f)
+        {
+            return;
+        }
+
+        if (damageImmunityRemaining > 0f)
+        {
+            damageImmunityRemaining = Mathf.Max(
+                0f,
+                damageImmunityRemaining - deltaTime);
+        }
+        TickObjectiveModifiers(deltaTime);
+    }
+
+    public void ClearTransientDefenses()
+    {
+        damageImmunityRemaining = 0f;
+        pendingDamageRedirectTarget = null;
+        pendingDamageRedirectRatio = 0f;
+    }
+
+    private int ResolveRedirectedAmount(int incomingAmount)
+    {
+        if (!HasPendingDamageRedirect)
+            return 0;
+
+        IBattleCharacter target = pendingDamageRedirectTarget;
+        float ratio = pendingDamageRedirectRatio;
+        pendingDamageRedirectTarget = null;
+        pendingDamageRedirectRatio = 0f;
+        if (!IsValidRedirectTarget(target))
+            return 0;
+
+        int redirectedAmount = Mathf.Clamp(
+            Mathf.RoundToInt(incomingAmount * ratio),
+            0,
+            incomingAmount);
+        if (redirectedAmount > 0)
+            target.TakeDamage(redirectedAmount);
+        return redirectedAmount;
+    }
+
+    private static bool IsValidRedirectTarget(IBattleCharacter target)
+    {
+        return target != null && target.MaximumHealth > 0 &&
+               target.CurrentHealth > 0;
     }
 }
 
@@ -222,6 +433,45 @@ public enum EBattleResult
     Timeout,
     Aborted,
     Defeat,
+}
+
+[Flags]
+public enum BattleCompletionPolicy
+{
+    None = 0,
+    EnemiesCleared = 1 << 0,
+    PartyDefeated = 1 << 1,
+    ObjectiveDestroyed = 1 << 2,
+    TimeExpired = 1 << 3,
+    Standard = EnemiesCleared |
+               PartyDefeated |
+               ObjectiveDestroyed |
+               TimeExpired,
+}
+
+public sealed class BattleSessionOptions
+{
+    public static BattleSessionOptions Standard { get; } = new(
+        BattleCompletionPolicy.Standard);
+
+    public static BattleSessionOptions Practice { get; } = new(
+        BattleCompletionPolicy.None);
+
+    public BattleCompletionPolicy CompletionPolicy { get; }
+
+    public BattleSessionOptions(
+        BattleCompletionPolicy completionPolicy =
+            BattleCompletionPolicy.Standard)
+    {
+        CompletionPolicy = completionPolicy &
+                           BattleCompletionPolicy.Standard;
+    }
+
+    public bool CompletesOn(BattleCompletionPolicy condition)
+    {
+        return condition != BattleCompletionPolicy.None &&
+               (CompletionPolicy & condition) == condition;
+    }
 }
 
 public readonly struct BattleEnemyGradeCounts

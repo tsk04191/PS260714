@@ -4,6 +4,7 @@ using PS260714.Localization;
 using TMPro;
 using UnityEngine;
 using UnityEngine.EventSystems;
+using UnityEngine.InputSystem;
 using UnityEngine.UI;
 
 [DisallowMultipleComponent]
@@ -38,6 +39,9 @@ public sealed class DungeonBattleTab : MonoBehaviour
     [Header("Battle Core")]
     [SerializeField]
     private DungeonBattleCoreWorldGaugeView battleCoreGaugeView;
+
+    [Header("Practice Battle")]
+    [SerializeField] private PracticeBattlePanelView practiceBattlePanel;
 
     [Header("Page Navigation")]
     [SerializeField] private Button settingsButton;
@@ -82,6 +86,8 @@ public sealed class DungeonBattleTab : MonoBehaviour
     public RectTransform QueueHighlightRect => spawnQueueView != null
         ? spawnQueueView.transform as RectTransform
         : null;
+    public PracticeBattlePanelView PracticeBattlePanel =>
+        practiceBattlePanel;
     public RectTransform ItemHighlightRect
     {
         get
@@ -161,11 +167,26 @@ public sealed class DungeonBattleTab : MonoBehaviour
         UnbindControlEvents();
         UnbindBattleEvents();
         UnbindLocalizationEvents();
+        practiceBattlePanel?.BindController(null);
         _itemHandView?.Teardown();
         battleCoreGaugeView?.SetVisible(false);
         _battleManager = null;
         _page = null;
         _initialized = false;
+    }
+
+    public bool BindPracticeBattleController(
+        IPracticeBattleController controller)
+    {
+        if (practiceBattlePanel == null)
+        {
+            Debug.LogError(
+                "DungeonBattleTab practice panel reference is missing.",
+                this);
+            return false;
+        }
+
+        return practiceBattlePanel.BindController(controller);
     }
 
     public void Refresh()
@@ -225,6 +246,8 @@ public sealed class DungeonBattleTab : MonoBehaviour
             _pausePanelFitter == null ||
             _activeSkillResourceView == null ||
             _itemHandView == null || _partyInfoRect == null ||
+            practiceBattlePanel == null ||
+            !practiceBattlePanel.HasDesignerReferences ||
             settingsButton == null || dungeonPage == null ||
             settingPage == null)
         {
@@ -569,7 +592,10 @@ public sealed class DungeonBattleTab : MonoBehaviour
 
         if (_battleManager == null || _battleManager.BattleDuration <= 0f)
         {
-            battleTimeText.text = "00:00";
+            battleTimeText.text = _page?.IsPracticeMode == true
+                ? LocalizationService.Get(
+                    LocalizationKeys.UiPracticeInfiniteTime)
+                : "00:00";
             return;
         }
 
@@ -916,6 +942,20 @@ public abstract class DungeonItemHandViewBase : MonoBehaviour
         if (!_initialized || _battleManager == null)
             return;
 
+        if (_page?.BattleCardDeck.IsZoneSelectionPending == true &&
+            Keyboard.current != null)
+        {
+            if (Keyboard.current.enterKey.wasPressedThisFrame ||
+                Keyboard.current.numpadEnterKey.wasPressedThisFrame)
+            {
+                _page.TryConfirmBattleCardZoneSelection();
+            }
+            else if (Keyboard.current.escapeKey.wasPressedThisFrame)
+            {
+                _page.TryCancelBattleCardZoneSelection();
+            }
+        }
+
         RefreshCards();
     }
 
@@ -958,7 +998,12 @@ public abstract class DungeonItemHandViewBase : MonoBehaviour
         int visibleIndex = 0;
         if (_page.UsesBattleCards)
         {
-            foreach (BattleCardInstance instance in _page.BattleCardDeck.Hand)
+            BattleCardDeckRuntime deck = _page.BattleCardDeck;
+            IReadOnlyList<BattleCardInstance> visibleCards =
+                deck.IsZoneSelectionPending
+                    ? deck.CurrentSelection.Candidates
+                    : deck.Hand;
+            foreach (BattleCardInstance instance in visibleCards)
             {
                 DungeonItemCardView card = GetOrCreateCard(
                     visibleIndex,
@@ -1120,7 +1165,13 @@ public abstract class DungeonItemHandViewBase : MonoBehaviour
                     _battleManager.ActiveSkillResource,
                     _battleManager.State == EBattleState.Running,
                     _page.BattleCardDeck.Phase,
-                    _page.BattleCardDeck.CooldownRemaining);
+                    _page.BattleCardDeck.CooldownRemaining,
+                    _page.BattleCardDeck.GetEffectiveCost(
+                        card.CardInstance),
+                    _page.BattleCardDeck.IsCardLocked(
+                        card.CardInstance),
+                    IsSelectedForZone(card.CardInstance),
+                    _page.BattleCardDeck.IsZoneSelectionPending);
             }
             else
             {
@@ -1165,8 +1216,33 @@ public abstract class DungeonItemHandViewBase : MonoBehaviour
     {
         if (_page == null || _battleManager == null || instance == null)
             return;
+        if (_page.BattleCardDeck.IsZoneSelectionPending)
+        {
+            if (_page.TryToggleBattleCardZoneSelection(instance) &&
+                _page.BattleCardDeck.CurrentSelection?.MaximumCount == 1 &&
+                _page.BattleCardDeck.CurrentSelection.CanConfirm)
+            {
+                _page.TryConfirmBattleCardZoneSelection();
+            }
+            RefreshCards();
+            return;
+        }
         _page.TryBeginBattleCardUse(instance);
         RefreshCards();
+    }
+
+    private bool IsSelectedForZone(BattleCardInstance instance)
+    {
+        IReadOnlyList<BattleCardInstance> selected =
+            _page?.BattleCardDeck.CurrentSelection?.Selected;
+        if (selected == null || instance == null)
+            return false;
+        for (int index = 0; index < selected.Count; index++)
+        {
+            if (ReferenceEquals(selected[index], instance))
+                return true;
+        }
+        return false;
     }
 
     private bool HandleEnemyClicked(EnemyRuntime enemy)
@@ -1304,6 +1380,19 @@ public abstract class DungeonItemHandViewBase : MonoBehaviour
             bool korean = LocalizationService.CurrentLocale?.StartsWith(
                 "ko",
                 StringComparison.OrdinalIgnoreCase) == true;
+            if (deck.IsZoneSelectionPending)
+            {
+                BattleCardZoneSelectionState selection =
+                    deck.CurrentSelection;
+                _instructionText.text = korean
+                    ? $"카드를 선택하세요 ({selection.Selected.Count}/" +
+                      $"{selection.MinimumCount}-{selection.MaximumCount}). " +
+                      "Enter 확인, Esc 취소"
+                    : $"Select cards ({selection.Selected.Count}/" +
+                      $"{selection.MinimumCount}-{selection.MaximumCount}). " +
+                      "Enter to confirm, Esc to cancel";
+                return;
+            }
             _instructionText.text = deck.CooldownRemaining > 0f
                 ? korean
                     ? $"자동 드로우까지 {deck.CooldownRemaining:0.0}초"
@@ -1524,26 +1613,38 @@ public class DungeonItemCardView : MonoBehaviour,
         int energy,
         bool battleRunning,
         BattleCardDeckPhase phase,
-        float redrawCooldown)
+        float redrawCooldown,
+        int effectiveCost,
+        bool locked,
+        bool selected = false,
+        bool selectionMode = false)
     {
         BattleCardSO card = _cardInstance?.Definition;
         if (card == null)
             return;
-        bool available = battleRunning &&
-                         phase == BattleCardDeckPhase.Ready &&
-                         energy >= card.EnergyCost;
+        effectiveCost = Mathf.Max(0, effectiveCost);
+        bool available = selectionMode ||
+                         (battleRunning &&
+                          phase == BattleCardDeckPhase.Ready &&
+                          !locked &&
+                          energy >= effectiveCost);
         background.color = WithPanelAlpha(
-            available ? availableColor : disabledColor);
-        statusOverlay.color = available
-            ? Color.clear
-            : disabledOverlayColor;
-        string state = redrawCooldown > 0f
-            ? $"{TimePrecision.FloorToTenth(redrawCooldown):0.0}s"
-            : string.Empty;
+            selected
+                ? selectedColor
+                : available ? availableColor : disabledColor);
+        statusOverlay.color = selected
+            ? selectedOverlayColor
+            : available ? Color.clear : disabledOverlayColor;
+        string state = locked && !selectionMode
+            ? LocalizationService.Get(
+                LocalizationKeys.UiDungeonCardLocked)
+            : redrawCooldown > 0f
+                ? $"{TimePrecision.FloorToTenth(redrawCooldown):0.0}s"
+                : string.Empty;
         nameText.text = card.GetLocalizedDisplayName();
         stateText.text = state;
-        costText.text = card.EnergyCost.ToString();
-        RefreshBattleCardDetail(state);
+        costText.text = effectiveCost.ToString();
+        RefreshBattleCardDetail(state, effectiveCost);
     }
 
     private static Color WithPanelAlpha(Color color)
@@ -1570,7 +1671,9 @@ public class DungeonItemCardView : MonoBehaviour,
             (string.IsNullOrWhiteSpace(state) ? string.Empty : $"\n{state}");
     }
 
-    private void RefreshBattleCardDetail(string state)
+    private void RefreshBattleCardDetail(
+        string state,
+        int effectiveCost = -1)
     {
         BattleCardSO card = _cardInstance?.Definition;
         if (card == null)
@@ -1584,8 +1687,11 @@ public class DungeonItemCardView : MonoBehaviour,
         string recycle = card.RecyclePolicy == BattleCardRecyclePolicy.Exhaust
             ? "Exhaust"
             : "Discard";
+        int displayedCost = effectiveCost >= 0
+            ? effectiveCost
+            : card.EnergyCost;
         detailText.text =
-            $"{card.GetLocalizedDisplayName()} · COST {card.EnergyCost}\n" +
+            $"{card.GetLocalizedDisplayName()} · COST {displayedCost}\n" +
             $"{card.GetLocalizedDescription()}\n" +
             $"{affiliation} · {recycle}" +
             (string.IsNullOrWhiteSpace(state) ? string.Empty : $"\n{state}");

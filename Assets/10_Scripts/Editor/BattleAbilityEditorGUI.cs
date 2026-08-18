@@ -109,4 +109,15 @@ internal static class BattleAbilityEditorGUI
     {
         CharacterEditorWindow.AddEmbeddedDefaultEffect(effects);
     }
+
+    internal static void DrawEffect(
+        SerializedProperty effect,
+        Object owner,
+        float? previewAttackPower = null)
+    {
+        CharacterEditorWindow.DrawEmbeddedEffect(
+            effect,
+            owner,
+            previewAttackPower);
+    }
 }

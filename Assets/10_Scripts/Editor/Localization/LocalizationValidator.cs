@@ -6,6 +6,7 @@ using System.Text.RegularExpressions;
 using TMPro;
 using UnityEditor;
 using UnityEngine;
+using UnityEngine.TextCore.LowLevel;
 
 namespace PS260714.Localization.Editor
 {
@@ -658,11 +659,11 @@ namespace PS260714.Localization.Editor
                     continue;
                 }
 
-                if (!font.HasCharacters(
+                uint[] missing = FindMissingGlyphs(
+                    font,
                     characters.ToString(),
-                    out uint[] missing,
-                    true,
-                    false))
+                    catalog);
+                if (missing.Length > 0)
                 {
                     string preview = string.Concat(
                         missing.Take(16).Select(value =>
@@ -672,6 +673,181 @@ namespace PS260714.Localization.Editor
                         $"Font '{font.name}' is missing {missing.Length} glyphs " +
                         $"(sample: {preview}). Configure fallback fonts.");
                 }
+            }
+        }
+
+        private static uint[] FindMissingGlyphs(
+            TMP_FontAsset font,
+            string text,
+            LocalizationFontCatalog catalog)
+        {
+            HashSet<uint> requested = CollectCodePoints(text);
+            HashSet<uint> supported = new HashSet<uint>();
+            HashSet<int> visitedFonts = new HashSet<int>();
+
+            CollectSupportedGlyphs(
+                font,
+                requested,
+                supported,
+                visitedFonts);
+
+            if (catalog != null)
+            {
+                IReadOnlyList<TMP_FontAsset> catalogFallbacks =
+                    catalog.FallbackFonts;
+                for (int index = 0; index < catalogFallbacks.Count; index++)
+                {
+                    CollectSupportedGlyphs(
+                        catalogFallbacks[index],
+                        requested,
+                        supported,
+                        visitedFonts);
+                }
+            }
+
+            List<TMP_FontAsset> globalFallbacks =
+                TMP_Settings.fallbackFontAssets;
+            if (globalFallbacks != null)
+            {
+                for (int index = 0; index < globalFallbacks.Count; index++)
+                {
+                    CollectSupportedGlyphs(
+                        globalFallbacks[index],
+                        requested,
+                        supported,
+                        visitedFonts);
+                }
+            }
+
+            CollectSupportedGlyphs(
+                TMP_Settings.defaultFontAsset,
+                requested,
+                supported,
+                visitedFonts);
+
+            requested.ExceptWith(supported);
+            return requested.OrderBy(value => value).ToArray();
+        }
+
+        private static HashSet<uint> CollectCodePoints(string text)
+        {
+            HashSet<uint> result = new HashSet<uint>();
+            if (string.IsNullOrEmpty(text))
+            {
+                return result;
+            }
+
+            for (int index = 0; index < text.Length; index++)
+            {
+                char character = text[index];
+                if (char.IsControl(character))
+                {
+                    continue;
+                }
+
+                uint codePoint = character;
+                if (char.IsHighSurrogate(character) &&
+                    index + 1 < text.Length &&
+                    char.IsLowSurrogate(text[index + 1]))
+                {
+                    codePoint = (uint)char.ConvertToUtf32(
+                        character,
+                        text[++index]);
+                }
+
+                result.Add(codePoint);
+            }
+
+            return result;
+        }
+
+        private static void CollectSupportedGlyphs(
+            TMP_FontAsset font,
+            HashSet<uint> requested,
+            HashSet<uint> supported,
+            HashSet<int> visitedFonts)
+        {
+            if (font == null ||
+                !visitedFonts.Add(font.GetInstanceID()))
+            {
+                return;
+            }
+
+            foreach (uint codePoint in requested)
+            {
+                if (!supported.Contains(codePoint) &&
+                    font.HasCharacter((int)codePoint))
+                {
+                    supported.Add(codePoint);
+                }
+            }
+
+            if (font.atlasPopulationMode != AtlasPopulationMode.Static)
+            {
+                CollectDynamicSourceGlyphs(font, requested, supported);
+            }
+
+            List<TMP_FontAsset> fallbacks = font.fallbackFontAssetTable;
+            if (fallbacks == null)
+            {
+                return;
+            }
+
+            for (int index = 0; index < fallbacks.Count; index++)
+            {
+                CollectSupportedGlyphs(
+                    fallbacks[index],
+                    requested,
+                    supported,
+                    visitedFonts);
+            }
+        }
+
+        private static void CollectDynamicSourceGlyphs(
+            TMP_FontAsset font,
+            HashSet<uint> requested,
+            HashSet<uint> supported)
+        {
+            int pointSize = Mathf.Max(
+                1,
+                Mathf.RoundToInt(font.faceInfo.pointSize));
+            FontEngineError loadResult;
+            if (font.sourceFontFile != null)
+            {
+                loadResult = FontEngine.LoadFontFace(
+                    font.sourceFontFile,
+                    pointSize);
+            }
+            else
+            {
+                loadResult = FontEngine.LoadFontFace(
+                    font.faceInfo.familyName,
+                    font.faceInfo.styleName,
+                    pointSize);
+            }
+
+            if (loadResult != FontEngineError.Success)
+            {
+                return;
+            }
+
+            try
+            {
+                foreach (uint codePoint in requested)
+                {
+                    if (!supported.Contains(codePoint) &&
+                        FontEngine.TryGetGlyphIndex(
+                            codePoint,
+                            out uint glyphIndex) &&
+                        glyphIndex != 0)
+                    {
+                        supported.Add(codePoint);
+                    }
+                }
+            }
+            finally
+            {
+                FontEngine.UnloadFontFace();
             }
         }
 

@@ -69,6 +69,35 @@ public sealed class EnemyP0RegressionTests
     }
 
     [Test]
+    public void FixedDamage_BypassesShieldArmorAndIncomingProtection()
+    {
+        EnemySO definition = UnityEngine.Object.Instantiate(
+            LoadEnemy("Basic"));
+        definition.hideFlags = HideFlags.HideAndDontSave;
+        _createdObjects.Add(definition);
+        SerializedObject serialized = new(definition);
+        serialized.FindProperty("healthScale").floatValue = 1f;
+        serialized.FindProperty("initialArmor").intValue = 10;
+        serialized.FindProperty("initialShield").intValue = 10;
+        serialized.ApplyModifiedPropertiesWithoutUndo();
+        EnemyRuntime runtime = definition.CreateRuntime(50);
+        StatusEffectSO protection = CreateIncomingDamageStatus(-0.5f);
+
+        Assert.That(
+            runtime.ApplyStatusEffect(protection, 10f, 1),
+            Is.True);
+
+        int applied = runtime.TakeDamage(
+            20,
+            CharacterAttackDamageType.Fixed);
+
+        Assert.That(applied, Is.EqualTo(20));
+        Assert.That(runtime.Health, Is.EqualTo(30));
+        Assert.That(runtime.CurrentShield, Is.EqualTo(10));
+        Assert.That(runtime.Armor, Is.EqualTo(10));
+    }
+
+    [Test]
     public void BattleItemEnemyArea_UsesClickedTargetOnly()
     {
         EnemyRuntime center = LoadEnemy("Basic").CreateRuntime(20);
@@ -226,14 +255,14 @@ public sealed class EnemyP0RegressionTests
     }
 
     [Test]
-    public void Assault_MultipliesThePendingSpawnIntervalByOneHalf()
+    public void AssaultRoster_UsesNeutralSpawnInterval()
     {
         BattleManager manager = CreateBattleManager();
         SetPrivateField(manager, "_spawnInterval", 10f);
         GetPrivateList<EnemyRuntime>(manager, "_spawnQueue").Add(
             LoadEnemy("Assault").CreateRuntime());
 
-        Assert.That(manager.SpawnInterval, Is.EqualTo(5f));
+        Assert.That(manager.SpawnInterval, Is.EqualTo(10f));
     }
 
     [Test]
@@ -284,54 +313,47 @@ public sealed class EnemyP0RegressionTests
     }
 
     [Test]
-    public void Medic_HealsEveryOrthogonalNeighborButNotDiagonal()
+    public void MedicRoster_TargetsLowestHealthAllyInWorldRadius()
     {
-        EnemyRuntime medic = LoadEnemy("Medic").CreateRuntime();
-        EnemyRuntime up = CreateInjuredBasic();
-        EnemyRuntime down = CreateInjuredBasic();
-        EnemyRuntime left = CreateInjuredBasic();
-        EnemyRuntime right = CreateInjuredBasic();
-        EnemyRuntime diagonal = CreateInjuredBasic();
-        DungeonBoardView board = CreateBoard(
-            (1, 1, medic),
-            (0, 1, up),
-            (2, 1, down),
-            (1, 0, left),
-            (1, 2, right),
-            (0, 0, diagonal));
+        EnemySO medic = LoadEnemy("Medic");
+        Assert.That(medic.EnemyId, Is.EqualTo("S001"));
+        Assert.That(medic.Abilities, Has.Count.EqualTo(1));
 
-        board.TickEnemyAbilities(4f, Array.Empty<IBattleCharacter>());
-
-        Assert.That(up.Health, Is.EqualTo(11));
-        Assert.That(down.Health, Is.EqualTo(11));
-        Assert.That(left.Health, Is.EqualTo(11));
-        Assert.That(right.Health, Is.EqualTo(11));
-        Assert.That(diagonal.Health, Is.EqualTo(10));
+        EnemyAbilityDefinition ability = medic.Abilities[0];
+        Assert.That(ability.Cooldown, Is.EqualTo(4f));
         Assert.That(
-            medic.AbilityCooldownRemaining,
-            Is.EqualTo(4f).Within(0.0001f));
+            ability.Target.Faction,
+            Is.EqualTo(EnemyAbilityTargetFaction.EnemyAllies));
+        Assert.That(
+            ability.Target.Subject,
+            Is.EqualTo(EnemyAbilityTargetSubject.WorldRadius));
+        Assert.That(
+            ability.Target.Metric,
+            Is.EqualTo(EnemyAbilityTargetMetric.HealthPercentage));
+        Assert.That(ability.Target.TargetCount, Is.EqualTo(1));
+        Assert.That(ability.Target.WorldRadius, Is.EqualTo(3f));
+        CharacterEffectDefinition heal =
+            ability.Operations[0].Effects[0];
+        Assert.That(heal.Type, Is.EqualTo(CharacterEffectType.Heal));
+        Assert.That(heal.TargetMaxHealthScale, Is.EqualTo(0.08f));
     }
 
     [Test]
-    public void Medic_FailedActivationStaysReadyAndRetriesImmediately()
+    public void MedicRoster_UsesSuccessOnlyCooldownReset()
     {
-        EnemyRuntime medic = LoadEnemy("Medic").CreateRuntime();
-        EnemyRuntime neighbor = LoadEnemy("Basic").CreateRuntime();
-        DungeonBoardView board = CreateBoard(
-            (1, 1, medic),
-            (1, 2, neighbor));
+        EnemySO medic = LoadEnemy("Medic");
+        EnemyAbilityDefinition ability = medic.Abilities[0];
 
-        board.TickEnemyAbilities(4f, Array.Empty<IBattleCharacter>());
-
-        Assert.That(medic.AbilityCooldownRemaining, Is.Zero);
-
-        SetEnemyHealth(neighbor, neighbor.MaxHealth - 1);
-        board.TickEnemyAbilities(0.1f, Array.Empty<IBattleCharacter>());
-
-        Assert.That(neighbor.Health, Is.EqualTo(neighbor.MaxHealth));
         Assert.That(
-            medic.AbilityCooldownRemaining,
-            Is.EqualTo(4f).Within(0.0001f));
+            ability.CooldownResetPolicy,
+            Is.EqualTo(
+                EnemyAbilityCooldownResetPolicy.OnSuccessfulActivation));
+        Assert.That(
+            ability.ChargeConsumptionPolicy,
+            Is.EqualTo(
+                EnemyAbilityChargeConsumptionPolicy
+                    .OnSuccessfulActivation));
+        Assert.That(ability.HasUnlimitedCharges, Is.True);
     }
 
     [Test]
@@ -362,7 +384,7 @@ public sealed class EnemyP0RegressionTests
     }
 
     [Test]
-    public void Mechanic_WithNoPositiveDamageTargetStaysReady()
+    public void Mechanic_ZeroDamageTieSelectsFirstCandidate()
     {
         EnemyRuntime mechanic = LoadEnemy("Mechanic").CreateRuntime();
         DungeonBoardView board = CreateBoard((1, 1, mechanic));
@@ -373,9 +395,11 @@ public sealed class EnemyP0RegressionTests
             10f,
             new IBattleCharacter[] { first, second });
 
-        Assert.That(first.StatusApplicationCount, Is.Zero);
+        Assert.That(first.StatusApplicationCount, Is.EqualTo(1));
         Assert.That(second.StatusApplicationCount, Is.Zero);
-        Assert.That(mechanic.AbilityCooldownRemaining, Is.Zero);
+        Assert.That(
+            mechanic.AbilityCooldownRemaining,
+            Is.EqualTo(10f).Within(0.0001f));
     }
 
     [Test]
@@ -647,24 +671,22 @@ public sealed class EnemyP0RegressionTests
     }
 
     [Test]
-    public void MechanicAbilityAsset_RetriesUntilDamageTargetExists()
+    public void MechanicAbilityAsset_RetriesUntilPlayerTargetExists()
     {
         EnemyRuntime mechanic =
             CreateAbilityAssetClone("Mechanic").CreateRuntime();
         DungeonBoardView board = CreateBoard((1, 1, mechanic));
-        FakeBattleCharacter noDamage = new(0);
 
         board.TickEnemyAbilities(
             10f,
-            new[] { noDamage });
+            Array.Empty<IBattleCharacter>());
 
-        Assert.That(noDamage.StatusApplicationCount, Is.Zero);
         Assert.That(mechanic.AbilityCooldownRemaining, Is.Zero);
 
         FakeBattleCharacter damageDealer = new(8);
         board.TickEnemyAbilities(
             0.1f,
-            new[] { noDamage, damageDealer });
+            new[] { damageDealer });
 
         Assert.That(
             damageDealer.StatusApplicationCount,
@@ -825,7 +847,8 @@ public sealed class EnemyP0RegressionTests
             EnemyAbilityTargetMetric.None,
             EnemyAbilityOperationType.ModifyIncomingDamage,
             initialCharges: 2,
-            amount: 1,
+            amount: 0,
+            multiplier: 0.1f,
             incomingDamageType: CharacterAttackDamageType.Physical);
         DungeonBoardView board = CreateBoard((1, 1, source));
 
@@ -846,6 +869,39 @@ public sealed class EnemyP0RegressionTests
             GetAbilityRemainingCharges(
                 source,
                 "guard_two_physical_hits"),
+            Is.Zero);
+    }
+
+    [Test]
+    public void FixedDamage_BypassesGenericModularIncomingDamageModifier()
+    {
+        EnemyRuntime source = CreateModularTriggeredEnemy(
+            "guard_any_damage_once",
+            EnemyAbilityTrigger.BeforeSelfDamage,
+            EnemyAbilityTargetFaction.None,
+            EnemyAbilityTargetSubject.None,
+            EnemyAbilityTargetMetric.None,
+            EnemyAbilityOperationType.ModifyIncomingDamage,
+            initialCharges: 1,
+            amount: 0,
+            multiplier: 0.2f);
+        DungeonBoardView board = CreateBoard((1, 1, source));
+
+        Assert.That(
+            board.TryDamageCharacterTargets(
+                null,
+                new[] { source },
+                5,
+                CharacterAttackDamageType.Fixed,
+                false),
+            Is.EqualTo(5));
+        Assert.That(
+            GetAbilityRemainingCharges(source, "guard_any_damage_once"),
+            Is.EqualTo(1));
+
+        Assert.That(board.TryDamageEnemy(source, 5), Is.EqualTo(1));
+        Assert.That(
+            GetAbilityRemainingCharges(source, "guard_any_damage_once"),
             Is.Zero);
     }
 
@@ -878,6 +934,41 @@ public sealed class EnemyP0RegressionTests
         Assert.That(
             protector.Health,
             Is.EqualTo(protector.MaxHealth - 5));
+    }
+
+    [Test]
+    public void FixedDamage_BypassesModularDamageRedirect()
+    {
+        EnemyRuntime target = LoadEnemy("Basic").CreateRuntime();
+        EnemyRuntime protector = CreateModularTriggeredEnemy(
+            "redirect_fixed_once",
+            EnemyAbilityTrigger.BeforeAllyDamage,
+            EnemyAbilityTargetFaction.None,
+            EnemyAbilityTargetSubject.None,
+            EnemyAbilityTargetMetric.None,
+            EnemyAbilityOperationType.RedirectDamage,
+            initialCharges: 1,
+            range: 1,
+            includeDiagonals: true);
+        DungeonBoardView board = CreateBoard(
+            (1, 1, target),
+            (0, 0, protector));
+
+        Assert.That(
+            board.TryDamageCharacterTargets(
+                null,
+                new[] { target },
+                5,
+                CharacterAttackDamageType.Fixed,
+                false),
+            Is.EqualTo(5));
+        Assert.That(target.Health, Is.EqualTo(target.MaxHealth - 5));
+        Assert.That(protector.Health, Is.EqualTo(protector.MaxHealth));
+        Assert.That(
+            GetAbilityRemainingCharges(
+                protector,
+                "redirect_fixed_once"),
+            Is.EqualTo(1));
     }
 
     [Test]
@@ -1580,9 +1671,53 @@ public sealed class EnemyP0RegressionTests
         return status;
     }
 
+    private StatusEffectSO CreateIncomingDamageStatus(float ratio)
+    {
+        StatusEffectSO status =
+            ScriptableObject.CreateInstance<StatusEffectSO>();
+        status.hideFlags = HideFlags.HideAndDontSave;
+        _createdObjects.Add(status);
+        status.RegenerateStatusId();
+        SetPrivateField(
+            status,
+            "durationMode",
+            StatusEffectDurationMode.Timed);
+        SetPrivateField(status, "defaultDuration", 10f);
+
+        StatusEffectStatModifierDefinition modifier = new();
+        SetPrivateField(
+            modifier,
+            "statType",
+            StatusEffectStatType.IncomingDamage);
+        SetPrivateField(
+            modifier,
+            "mode",
+            StatusEffectStatModifierMode.AdditiveRatio);
+        SetPrivateField(modifier, "value", ratio);
+        SetPrivateField(modifier, "scaleWithStacks", false);
+        SetPrivateField(
+            status,
+            "statModifiers",
+            new List<StatusEffectStatModifierDefinition> { modifier });
+        status.ValidateDefinition();
+        return status;
+    }
+
     private EnemySO LoadEnemy(string assetName)
     {
-        string path = EnemyAssetFolder + assetName + ".asset";
+        string fileName = assetName switch
+        {
+            "Basic" => "G001_BasicRemnant.asset",
+            "Assault" => "G002_AssaultRemnant.asset",
+            "Heavy" => "G003_HeavyRemnant.asset",
+            "Medic" => "S001_MedicRemnant.asset",
+            "Mechanic" => "S002_MechanicRemnant.asset",
+            "Infiltrator" => "S003_InfiltratorRemnant.asset",
+            "Pointman" => "S004_PointmanRemnant.asset",
+            "ShieldBearer" => "S005_ShieldBearerRemnant.asset",
+            _ => assetName + ".asset",
+        };
+        string path = EnemyAssetFolder + fileName;
         EnemySO definition = AssetDatabase.LoadAssetAtPath<EnemySO>(path);
         Assert.That(
             definition,
@@ -2261,8 +2396,8 @@ public sealed class DungeonDefinitionRegressionTests
 {
     private const string FreeBattlePath =
         "Assets/06_Runtime/Resources/Dungeons/FreeBattle.asset";
-    private const string TestFieldPath =
-        "Assets/06_Runtime/Resources/Dungeons/TestField.asset";
+    private const string TutorialFieldPath =
+        "Assets/06_Runtime/Resources/Dungeons/TutorialField.asset";
 
     [Test]
     public void FreeBattle_DoesNotUseTutorialBattleSetup()
@@ -2279,11 +2414,11 @@ public sealed class DungeonDefinitionRegressionTests
     }
 
     [Test]
-    public void TestField_UsesTutorialBattleSetup()
+    public void TutorialField_UsesTutorialBattleSetup()
     {
         DungeonDefinition definition =
             AssetDatabase.LoadAssetAtPath<DungeonDefinition>(
-                TestFieldPath);
+                TutorialFieldPath);
 
         Assert.That(definition, Is.Not.Null);
         Assert.That(definition.HasTutorial, Is.True);

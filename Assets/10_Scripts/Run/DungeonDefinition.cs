@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using PS260714.Localization;
 using UnityEngine;
 using UnityEngine.Serialization;
 
@@ -13,6 +14,12 @@ public enum EDungeonStageSelectVisibility
 {
     Listed = 0,
     Hidden = 1,
+}
+
+public enum EDungeonRunMode
+{
+    Standard = 0,
+    Practice = 1,
 }
 
 public enum DungeonShieldRecoveryAmountMode
@@ -62,6 +69,7 @@ public sealed class DungeonDefinition : ScriptableObject
     [Header("Identity")]
     [SerializeField] private string dungeonId = "free_battle";
     [SerializeField, Min(1)] private int contentVersion = 1;
+    [SerializeField] private EDungeonRunMode runMode;
 
     [Header("Stage Select")]
     [SerializeField]
@@ -179,8 +187,14 @@ public sealed class DungeonDefinition : ScriptableObject
     [SerializeField] private DungeonModifier[] modifiers =
         Array.Empty<DungeonModifier>();
 
-    public string DungeonId => dungeonId;
+    public string DungeonId =>
+        DungeonDefinitionCatalog.NormalizeDungeonId(dungeonId);
     public int ContentVersion => contentVersion;
+    public EDungeonRunMode RunMode => runMode;
+    public bool IsPractice => RunMode == EDungeonRunMode.Practice;
+    public bool UsesStandardBattleCompletion => !IsPractice;
+    public bool AwardsBattleRewards => !IsPractice;
+    public bool PersistsDungeonProgress => !IsPractice;
     public bool IsListedInStageSelect =>
         stageSelectVisibility == EDungeonStageSelectVisibility.Listed;
     public int StageOrder => stageOrder;
@@ -191,20 +205,25 @@ public sealed class DungeonDefinition : ScriptableObject
             if (!string.IsNullOrWhiteSpace(titleLocalizationKey))
                 return titleLocalizationKey.Trim();
             if (string.Equals(
-                    dungeonId,
-                    DungeonDefinitionCatalog.TestFieldId,
+                    DungeonId,
+                    DungeonDefinitionCatalog.TutorialFieldId,
                     StringComparison.OrdinalIgnoreCase))
             {
-                return PS260714.Localization.LocalizationKeys
-                    .UiStageSelectTestField;
+                return LocalizationKeys.UiStageSelectTutorialField;
             }
             if (string.Equals(
-                    dungeonId,
+                    DungeonId,
+                    DungeonDefinitionCatalog.PracticeBattleId,
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                return LocalizationKeys.UiStageSelectPracticeBattle;
+            }
+            if (string.Equals(
+                    DungeonId,
                     DungeonDefinitionCatalog.FreeBattleId,
                     StringComparison.OrdinalIgnoreCase))
             {
-                return PS260714.Localization.LocalizationKeys
-                    .UiStageSelectFreeBattle;
+                return LocalizationKeys.UiStageSelectFreeBattle;
             }
             return string.Empty;
         }
@@ -216,21 +235,28 @@ public sealed class DungeonDefinition : ScriptableObject
             if (!string.IsNullOrWhiteSpace(fallbackTitle))
                 return fallbackTitle.Trim();
             if (string.Equals(
-                    dungeonId,
-                    DungeonDefinitionCatalog.TestFieldId,
+                    DungeonId,
+                    DungeonDefinitionCatalog.TutorialFieldId,
                     StringComparison.OrdinalIgnoreCase))
             {
-                return "STAGE 0 · TEST FIELD";
+                return "STAGE 0 · TUTORIAL FIELD";
             }
             if (string.Equals(
-                    dungeonId,
+                    DungeonId,
+                    DungeonDefinitionCatalog.PracticeBattleId,
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                return "PRACTICE BATTLE";
+            }
+            if (string.Equals(
+                    DungeonId,
                     DungeonDefinitionCatalog.FreeBattleId,
                     StringComparison.OrdinalIgnoreCase))
             {
                 return "FREE BATTLE";
             }
-            return !string.IsNullOrWhiteSpace(dungeonId)
-                ? dungeonId.Trim()
+            return !string.IsNullOrWhiteSpace(DungeonId)
+                ? DungeonId
                 : name;
         }
     }
@@ -402,7 +428,8 @@ public sealed class DungeonDefinition : ScriptableObject
             error = "Dungeon id is required.";
             return false;
         }
-        if (contentVersion < 1 || minimumBattleCount < 1 ||
+        if (!Enum.IsDefined(typeof(EDungeonRunMode), runMode) ||
+            contentVersion < 1 || minimumBattleCount < 1 ||
             maximumBattleCount < minimumBattleCount ||
             initialRunCurrency < 0 ||
             float.IsNaN(activeSkillCostRecoveryDuration) ||
@@ -421,6 +448,17 @@ public sealed class DungeonDefinition : ScriptableObject
             string.IsNullOrWhiteSpace(FallbackTitle))
         {
             error = "A listed dungeon requires a stage-select title.";
+            return false;
+        }
+        if (IsPractice &&
+            (minimumBattleCount != 1 || maximumBattleCount != 1 ||
+             insertEventBetweenBattles || selectStartingCharacter ||
+             selectStartingItems || initialRunCurrency != 0 ||
+             clearedBattleHealthCost != 0 || tutorial != null ||
+             useIntroBattleBalance))
+        {
+            error = "Practice mode requires one endless battle without " +
+                    "starting selections, run rewards, or tutorial flow.";
             return false;
         }
 
@@ -552,25 +590,43 @@ public sealed class DungeonDefinition : ScriptableObject
         bool tutorialStage)
     {
         DungeonDefinition definition = CreateInstance<DungeonDefinition>();
+        bool practiceStage = string.Equals(
+            id,
+            DungeonDefinitionCatalog.PracticeBattleId,
+            StringComparison.OrdinalIgnoreCase);
         definition.name = tutorialStage
-            ? "RuntimeTestFieldDefinition"
-            : "RuntimeFreeBattleDefinition";
+            ? "RuntimeTutorialFieldDefinition"
+            : practiceStage
+                ? "RuntimePracticeBattleDefinition"
+                : "RuntimeFreeBattleDefinition";
         definition.hideFlags = HideFlags.HideAndDontSave;
         definition.dungeonId = id;
-        definition.stageOrder = tutorialStage ? 0 : 1;
+        definition.runMode = practiceStage
+            ? EDungeonRunMode.Practice
+            : EDungeonRunMode.Standard;
+        definition.stageOrder = tutorialStage ? 0 : practiceStage ? 1 : 2;
         definition.titleLocalizationKey = tutorialStage
-            ? PS260714.Localization.LocalizationKeys
-                .UiStageSelectTestField
-            : PS260714.Localization.LocalizationKeys
-                .UiStageSelectFreeBattle;
+            ? LocalizationKeys.UiStageSelectTutorialField
+            : practiceStage
+                ? LocalizationKeys.UiStageSelectPracticeBattle
+                : LocalizationKeys.UiStageSelectFreeBattle;
         definition.fallbackTitle = tutorialStage
-            ? "STAGE 0 · TEST FIELD"
-            : "FREE BATTLE";
-        definition.minimumBattleCount = tutorialStage ? 1 : 5;
-        definition.maximumBattleCount = tutorialStage ? 1 : 8;
-        definition.insertEventBetweenBattles = !tutorialStage;
+            ? "STAGE 0 · TUTORIAL FIELD"
+            : practiceStage
+                ? "PRACTICE BATTLE"
+                : "FREE BATTLE";
+        definition.minimumBattleCount = tutorialStage || practiceStage ? 1 : 5;
+        definition.maximumBattleCount = tutorialStage || practiceStage ? 1 : 8;
+        definition.insertEventBetweenBattles =
+            !tutorialStage && !practiceStage;
+        definition.selectStartingCharacter = !practiceStage;
+        definition.selectStartingItems = !practiceStage;
         definition.useIntroBattleBalance = tutorialStage;
-        definition.completionDestination = tutorialStage
+        definition.initialRunCurrency = practiceStage ? 0 : 100;
+        definition.clearedBattleHealthCost = practiceStage
+            ? 0
+            : AutomaticClearedBattleHealthCost;
+        definition.completionDestination = tutorialStage || practiceStage
             ? EDungeonCompletionDestination.StageSelect
             : EDungeonCompletionDestination.Main;
         if (tutorialStage)

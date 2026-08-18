@@ -115,7 +115,8 @@ public sealed class StageSelectPage : RuntimeMenuPageBase
             if (definition == null)
                 continue;
 
-            bool cleared = progress != null &&
+            bool tracksProgress = definition.PersistsDungeonProgress;
+            bool cleared = tracksProgress && progress != null &&
                            progress.IsCleared(definition);
             Transform node = _stageContent.Find(
                 GetStageNodeName(definition));
@@ -134,7 +135,8 @@ public sealed class StageSelectPage : RuntimeMenuPageBase
                 node,
                 definition,
                 cleared,
-                !editorPreview);
+                !editorPreview,
+                tracksProgress);
             if (index > 0)
             {
                 DungeonDefinition previous = definitions[index - 1];
@@ -152,7 +154,8 @@ public sealed class StageSelectPage : RuntimeMenuPageBase
                         : UnclearedConnectorColor;
                 }
             }
-            previousCleared = cleared;
+            if (tracksProgress)
+                previousCleared = cleared;
         }
     }
 
@@ -179,7 +182,8 @@ public sealed class StageSelectPage : RuntimeMenuPageBase
         Transform node,
         DungeonDefinition definition,
         bool cleared,
-        bool updateStateVisuals)
+        bool updateStateVisuals,
+        bool tracksProgress)
     {
         if (node == null || definition == null)
             return;
@@ -213,6 +217,18 @@ public sealed class StageSelectPage : RuntimeMenuPageBase
         ApplyStageTitle(title, definition);
         if (updateStateVisuals)
         {
+            marker.gameObject.SetActive(tracksProgress);
+            if (progressLine != null)
+                progressLine.gameObject.SetActive(tracksProgress);
+            if (!tracksProgress)
+            {
+                button.targetGraphic = cover;
+                button.onClick.RemoveAllListeners();
+                button.onClick.AddListener(
+                    () => HandleStageClicked(definition));
+                return;
+            }
+
             marker.sprite = cleared
                 ? clearedMarkerSprite
                 : unclearedMarkerSprite;

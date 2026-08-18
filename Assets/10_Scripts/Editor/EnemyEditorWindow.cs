@@ -24,6 +24,7 @@ public sealed class EnemyEditorWindow : EditorWindow
     private bool _statsExpanded = true;
     private bool _presentationExpanded = true;
     private bool _abilitiesExpanded = true;
+    private bool _phasesExpanded = true;
 
     [MenuItem(
         MenuPath,
@@ -247,6 +248,7 @@ public sealed class EnemyEditorWindow : EditorWindow
                     DrawBaseStats();
                     DrawPresentation();
                     DrawAbilities();
+                    DrawBossPhases();
 
                     if (EditorGUI.EndChangeCheck() &&
                         _serialized.ApplyModifiedProperties())
@@ -373,6 +375,22 @@ public sealed class EnemyEditorWindow : EditorWindow
             DrawProperty("grade", "Grade");
             DrawProperty("type", "Type");
             DrawProperty("sortOrder", "Sort Order");
+            EditorGUILayout.Space(6f);
+            EditorGUILayout.LabelField(
+                "Roster Metadata",
+                EditorStyles.boldLabel);
+            using (new EditorGUI.DisabledScope(true))
+                DrawProperty("rosterSchemaVersion", "Roster Schema");
+            DrawProperty("rosterTier", "Roster Tier");
+            DrawPropertyWithChildren("roleTags", "Role Tags");
+            DrawPropertyWithChildren("counterTags", "Counter Tags");
+            DrawProperty(
+                "recommendedMaxPerWave",
+                "Recommended Maximum Per Wave (0 = Default)");
+            DrawProperty(
+                "spawnBudget",
+                "Spawn Budget (0 = Threat Cost)");
+            DrawProperty("encounterOnly", "Dedicated Encounter Only");
         }
     }
 
@@ -400,9 +418,30 @@ public sealed class EnemyEditorWindow : EditorWindow
                 "Circular Defense",
                 EditorStyles.boldLabel);
             DrawProperty("approachSpeed", "Approach Speed");
+            DrawProperty("formationRadius", "Formation Radius");
             DrawProperty("attackPower", "Attack Power");
-            DrawProperty("coreAttackDamage", "Core Attack Damage");
+            DrawProperty(
+                "coreAttackDamage",
+                "Legacy Core Attack Damage");
+            DrawProperty(
+                "coreAttackDamagePolicy",
+                "Core Damage Resolution");
+            SerializedProperty damagePolicy =
+                Find("coreAttackDamagePolicy");
+            if (damagePolicy != null &&
+                damagePolicy.enumValueIndex ==
+                (int)EnemyCoreAttackDamagePolicy.AccumulateFraction)
+            {
+                DrawProperty(
+                    "preciseCoreAttackDamage",
+                    "Precise Core Attack Damage");
+                EditorGUILayout.HelpBox(
+                    "Fractional damage carries into later core attacks " +
+                    "instead of being discarded per hit.",
+                    MessageType.Info);
+            }
             DrawProperty("coreAttackInterval", "Core Attack Interval");
+            DrawProperty("coreAttackRange", "Core Attack Range");
             DrawProperty("threatCost", "Threat Cost (0 = Type Default)");
             DrawProperty(
                 "unlockDifficulty",
@@ -483,6 +522,34 @@ public sealed class EnemyEditorWindow : EditorWindow
             moveTo);
         if (GUILayout.Button("Add Ability"))
             AddAbility(abilities);
+    }
+
+    private void DrawBossPhases()
+    {
+        SerializedProperty phases = Find("phaseDefinitions");
+        _phasesExpanded = EditorGUILayout.Foldout(
+            _phasesExpanded,
+            $"Boss Phases ({phases?.arraySize ?? 0})",
+            true,
+            EditorStyles.foldoutHeader);
+        if (!_phasesExpanded || phases == null)
+            return;
+
+        using (new EditorGUILayout.VerticalScope(EditorStyles.helpBox))
+        {
+            EditorGUILayout.HelpBox(
+                "Phase ranges use inclusive whole-number health " +
+                "percentages and must cover 0 through 100 exactly once. " +
+                "Ability IDs reference entries in this enemy's ability " +
+                "list. Advance On Core Contact is an early OR transition: " +
+                "either the next health threshold or core contact advances " +
+                "the phase.",
+                MessageType.Info);
+            EditorGUILayout.PropertyField(
+                phases,
+                new GUIContent("Phase Definitions"),
+                true);
+        }
     }
 
     private void DrawPresentation()
@@ -583,15 +650,34 @@ public sealed class EnemyEditorWindow : EditorWindow
             ability,
             "fallbackDescription",
             "Fallback Description");
+        DrawRelative(ability, "abilityTypeId", "Ability Type ID");
+        SerializedProperty parameters =
+            ability.FindPropertyRelative("parameters");
+        if (parameters != null)
+        {
+            EditorGUILayout.PropertyField(
+                parameters,
+                new GUIContent("Ability Parameters"),
+                true);
+        }
         DrawRelative(ability, "trigger", "Trigger");
+        DrawRelativeWithChildren(
+            ability,
+            "triggerEvents",
+            "Additional Trigger Events (OR)");
         DrawRelative(ability, "priority", "Priority");
 
         SerializedProperty trigger =
             ability.FindPropertyRelative("trigger");
-        if (trigger.enumValueIndex ==
-            (int)EnemyAbilityTrigger.OnCooldown)
+        if (SerializedAbilityUsesTrigger(
+                ability,
+                EnemyAbilityTrigger.OnCooldown))
         {
             DrawRelative(ability, "cooldown", "Cooldown");
+            DrawRelativeWithChildren(
+                ability,
+                "cooldownOverrides",
+                "Health-Based Cooldown Overrides");
             DrawRelative(
                 ability,
                 "cooldownResetPolicy",
@@ -600,6 +686,24 @@ public sealed class EnemyEditorWindow : EditorWindow
                 ability,
                 "pauseCooldownWhileDisabled",
                 "Pause While Disabled");
+        }
+        if (SerializedAbilityUsesTrigger(
+                ability,
+                EnemyAbilityTrigger.OnHealthThreshold))
+        {
+            DrawRelative(
+                ability,
+                "healthThresholdPercent",
+                "Health Threshold Percent");
+        }
+        if (SerializedAbilityUsesTrigger(
+                ability,
+                EnemyAbilityTrigger.AfterNoDamage))
+        {
+            DrawRelative(
+                ability,
+                "noDamageDuration",
+                "No-Damage Duration");
         }
 
         DrawRelative(
@@ -613,6 +717,19 @@ public sealed class EnemyEditorWindow : EditorWindow
                 "chargeConsumptionPolicy",
                 "Charge Consumption");
         }
+
+        SerializedProperty charge =
+            ability.FindPropertyRelative("charge");
+        SerializedProperty telegraph =
+            ability.FindPropertyRelative("telegraph");
+        EditorGUILayout.PropertyField(
+            charge,
+            new GUIContent("Charge"),
+            true);
+        EditorGUILayout.PropertyField(
+            telegraph,
+            new GUIContent("Telegraph"),
+            true);
 
         DrawConditions(ability);
         DrawTarget(ability);
@@ -764,6 +881,23 @@ public sealed class EnemyEditorWindow : EditorWindow
                             "expected",
                             "Expected");
                         break;
+
+                    case EnemyAbilityConditionType.RepeatedDamageSource:
+                        DrawRelative(
+                            condition,
+                            "windowDuration",
+                            "Source History Window (Seconds)");
+                        DrawRelative(
+                            condition,
+                            "expected",
+                            "Must Be Repeated Source");
+                        EditorGUILayout.HelpBox(
+                            "The combat event supplies the current incoming " +
+                            "source ID. This condition matches when the same " +
+                            "source damaged the evaluated enemy inside the " +
+                            "configured window.",
+                            MessageType.Info);
+                        break;
                 }
             }
         }
@@ -811,6 +945,12 @@ public sealed class EnemyEditorWindow : EditorWindow
                     target,
                     "includeDiagonals",
                     "Include Diagonals");
+            }
+            else if (subject == EnemyAbilityTargetSubject.WorldRadius)
+            {
+                DrawRelative(target, "worldRadius", "World Radius");
+                DrawRelative(target, "includeSource", "Include Source");
+                DrawRelative(target, "layerScope", "Formation Layers");
             }
             SerializedProperty areaDefinition =
                 target.FindPropertyRelative("areaDefinition");
@@ -882,8 +1022,7 @@ public sealed class EnemyEditorWindow : EditorWindow
                 DrawRelative(operation, "enabled", "Enabled");
                 SerializedProperty operationType =
                     operation.FindPropertyRelative("type");
-                using (new EditorGUI.DisabledScope(true))
-                    DrawRelative(operation, "type", "Type");
+                DrawRelative(operation, "type", "Type");
                 if (operationType.enumValueIndex !=
                     (int)EnemyAbilityOperationType.ExecuteEffects)
                 {
@@ -920,6 +1059,7 @@ public sealed class EnemyEditorWindow : EditorWindow
             "This trigger-specific operation is validated by the enemy " +
             "ability validator and stays outside the shared effect list.",
             MessageType.Info);
+        DrawRelative(operation, "sourceId", "Modifier Source ID");
         switch (type)
         {
             case EnemyAbilityOperationType.ModifySpawnInterval:
@@ -927,7 +1067,9 @@ public sealed class EnemyEditorWindow : EditorWindow
                 break;
 
             case EnemyAbilityOperationType.ModifyIncomingDamage:
-                DrawRelative(operation, "amount", "Resolved Damage");
+                DrawRelative(operation, "amount", "Flat Amount");
+                DrawRelative(operation, "percentage", "Additive Percent");
+                DrawRelative(operation, "multiplier", "Multiplier");
                 break;
 
             case EnemyAbilityOperationType.ExpandSpawnGroup:
@@ -961,6 +1103,124 @@ public sealed class EnemyEditorWindow : EditorWindow
                     "Priority Adjustment");
                 break;
 
+            case EnemyAbilityOperationType.ModifyCoreAttackDamage:
+                DrawRelative(operation, "amount", "Flat Amount");
+                DrawRelative(operation, "percentage", "Additive Percent");
+                DrawRelative(operation, "multiplier", "Multiplier");
+                DrawRelative(operation, "duration", "Duration");
+                DrawRelative(operation, "maximumStacks", "Maximum Stacks");
+                break;
+
+            case EnemyAbilityOperationType.ModifyCoreAttackInterval:
+            case EnemyAbilityOperationType.ModifyStatusDuration:
+                DrawRelative(operation, "multiplier", "Multiplier");
+                DrawRelative(operation, "percentage", "Additive Percent");
+                DrawRelative(operation, "duration", "Duration");
+                DrawRelative(operation, "worldRadius", "World Radius");
+                break;
+
+            case EnemyAbilityOperationType.GrantStatusImmunity:
+                DrawRelative(
+                    operation,
+                    "duration",
+                    "Duration (0 = While Active)");
+                DrawRelative(operation, "worldRadius", "World Radius");
+                break;
+
+            case EnemyAbilityOperationType.ChargeCoreAttack:
+                DrawRelative(operation, "multiplier", "Damage Multiplier");
+                break;
+
+            case EnemyAbilityOperationType.SummonEnemy:
+                DrawRelativeWithChildren(
+                    operation,
+                    "summon",
+                    "Summon Definition");
+                break;
+
+            case EnemyAbilityOperationType.ApplyCoreEffect:
+                DrawRelative(operation, "amount", "Flat Amount");
+                DrawRelative(operation, "percentage", "Additive Percent");
+                DrawRelative(operation, "multiplier", "Multiplier");
+                DrawRelative(operation, "duration", "Duration");
+                DrawRelative(operation, "interval", "Tick Interval");
+                DrawRelative(operation, "maximumStacks", "Maximum Stacks");
+                break;
+
+            case EnemyAbilityOperationType.CreateWorldZone:
+                DrawRelative(operation, "worldRadius", "World Radius");
+                DrawRelative(operation, "duration", "Duration");
+                DrawRelative(operation, "interval", "Tick Interval");
+                break;
+
+            case EnemyAbilityOperationType.LinkTargets:
+                DrawRelative(operation, "count", "Maximum Linked Targets");
+                DrawRelative(operation, "worldRadius", "World Radius");
+                DrawRelative(operation, "percentage", "Shared Percent");
+                DrawRelative(operation, "duration", "Duration");
+                break;
+
+            case EnemyAbilityOperationType.ReflectDamage:
+                DrawRelative(operation, "percentage", "Reflected Percent");
+                DrawRelative(operation, "duration", "Duration");
+                break;
+
+            case EnemyAbilityOperationType.ReplayAbility:
+                DrawRelative(
+                    operation,
+                    "referencedAbilityId",
+                    "Referenced Ability ID (Empty = Last)");
+                DrawRelativeWithChildren(
+                    operation,
+                    "reference",
+                    "Enemy Reference");
+                DrawRelative(operation, "multiplier", "Power Multiplier");
+                break;
+
+            case EnemyAbilityOperationType.ModifyCardCost:
+                DrawRelative(operation, "amount", "Cost Increase");
+                DrawRelative(operation, "duration", "Duration");
+                DrawRelative(operation, "maximumStacks", "Maximum Stacks");
+                break;
+
+            case EnemyAbilityOperationType.LockCard:
+                DrawRelative(operation, "count", "Locked Card Count");
+                DrawRelative(operation, "duration", "Duration");
+                break;
+
+            case EnemyAbilityOperationType.ModifyResourceRecovery:
+            case EnemyAbilityOperationType.ModifyCoreRecovery:
+            case EnemyAbilityOperationType.ModifyCoreMaximumHealth:
+                DrawRelative(operation, "amount", "Flat Amount");
+                DrawRelative(operation, "percentage", "Additive Percent");
+                DrawRelative(operation, "multiplier", "Multiplier");
+                DrawRelative(operation, "duration", "Duration");
+                DrawRelative(operation, "interval", "Tick Interval");
+                DrawRelative(operation, "maximumStacks", "Maximum Stacks");
+                break;
+
+            case EnemyAbilityOperationType.SetUntargetable:
+                DrawRelative(operation, "duration", "Duration");
+                break;
+
+            case EnemyAbilityOperationType.ModifyPlayerActionInterval:
+                DrawRelative(
+                    operation,
+                    "multiplier",
+                    "Player Action Interval Multiplier");
+                DrawRelative(
+                    operation,
+                    "duration",
+                    "Duration (0 = While Active)");
+                break;
+
+            case EnemyAbilityOperationType.ConvertCoreDamageToSelfShield:
+                DrawRelative(
+                    operation,
+                    "percentage",
+                    "Core Damage Conversion Percent");
+                break;
+
             default:
                 EditorGUILayout.HelpBox(
                     $"Unsupported operation type '{type}'.",
@@ -983,14 +1243,18 @@ public sealed class EnemyEditorWindow : EditorWindow
         SetString(ability, "abilityId", abilityId);
         SetString(ability, "nameLocalizationKey", string.Empty);
         SetString(ability, "descriptionLocalizationKey", string.Empty);
+        SetString(ability, "abilityTypeId", abilityId);
+        ability.FindPropertyRelative("parameters")?.ClearArray();
         SetString(ability, "fallbackName", "New Ability");
         SetString(ability, "fallbackDescription", string.Empty);
         SetEnum(
             ability,
             "trigger",
             (int)EnemyAbilityTrigger.OnCooldown);
+        ability.FindPropertyRelative("triggerEvents")?.ClearArray();
         SetInt(ability, "priority", 0);
         SetFloat(ability, "cooldown", 1f);
+        ability.FindPropertyRelative("cooldownOverrides")?.ClearArray();
         SetEnum(
             ability,
             "cooldownResetPolicy",
@@ -1005,6 +1269,23 @@ public sealed class EnemyEditorWindow : EditorWindow
             ability,
             "conditionMatchMode",
             (int)CharacterConditionMatchMode.All);
+        SetFloat(ability, "healthThresholdPercent", 50f);
+        SetFloat(ability, "noDamageDuration", 3f);
+        SerializedProperty charge =
+            ability.FindPropertyRelative("charge");
+        SetBool(charge, "enabled", false);
+        SetFloat(charge, "duration", 1f);
+        SetBool(charge, "interruptible", true);
+        SetEnum(
+            charge,
+            "interrupts",
+            (int)EnemyChargeInterruptFlags.Stun);
+        SerializedProperty telegraph =
+            ability.FindPropertyRelative("telegraph");
+        SetBool(telegraph, "enabled", false);
+        SetFloat(telegraph, "leadTime", 0.5f);
+        SetString(telegraph, "cueId", string.Empty);
+        SetFloat(telegraph, "worldRadius", 0f);
         ability.FindPropertyRelative("conditions").ClearArray();
 
         SerializedProperty target =
@@ -1024,6 +1305,12 @@ public sealed class EnemyEditorWindow : EditorWindow
         SetInt(target, "targetCount", 1);
         SetInt(target, "range", 1);
         SetBool(target, "includeDiagonals", false);
+        SetFloat(target, "worldRadius", 0f);
+        SetBool(target, "includeSource", false);
+        SetEnum(
+            target,
+            "layerScope",
+            (int)EnemyWorldLayerScope.All);
 
         SerializedProperty operations =
             ability.FindPropertyRelative("operations");
@@ -1070,6 +1357,7 @@ public sealed class EnemyEditorWindow : EditorWindow
             "incomingDamageType",
             (int)CharacterAttackDamageType.Physical);
         SetBool(condition, "expected", true);
+        SetFloat(condition, "windowDuration", 1f);
     }
 
     private static CharacterTargetFaction? ResolveConditionStatusFaction(
@@ -1095,6 +1383,33 @@ public sealed class EnemyEditorWindow : EditorWindow
                 CharacterTargetFaction.Ally,
             _ => null
         };
+    }
+
+    private static bool SerializedAbilityUsesTrigger(
+        SerializedProperty ability,
+        EnemyAbilityTrigger expected)
+    {
+        SerializedProperty primary =
+            ability?.FindPropertyRelative("trigger");
+        if (primary != null &&
+            primary.enumValueIndex == (int)expected)
+        {
+            return true;
+        }
+
+        SerializedProperty additional =
+            ability?.FindPropertyRelative("triggerEvents");
+        if (additional == null)
+            return false;
+        for (int index = 0; index < additional.arraySize; index++)
+        {
+            if (additional.GetArrayElementAtIndex(index).enumValueIndex ==
+                (int)expected)
+            {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static void AddOperation(
@@ -1124,6 +1439,27 @@ public sealed class EnemyEditorWindow : EditorWindow
             "targetPriorityMode",
             (int)EnemyTargetPriorityMode.Exclude);
         SetInt(operation, "targetPriorityAdjustment", 0);
+        SetString(operation, "sourceId", string.Empty);
+        SetFloat(operation, "duration", 0f);
+        SetFloat(operation, "interval", 0f);
+        SetFloat(operation, "worldRadius", 0f);
+        SetFloat(operation, "percentage", 0f);
+        SetInt(operation, "maximumStacks", 0);
+        SetString(operation, "referencedAbilityId", string.Empty);
+        SerializedProperty reference =
+            operation.FindPropertyRelative("reference");
+        SetObject(reference, "enemy", null);
+        SetString(reference, "enemyId", string.Empty);
+        SerializedProperty summon =
+            operation.FindPropertyRelative("summon");
+        summon.FindPropertyRelative("candidates")?.ClearArray();
+        SetInt(summon, "minimumCount", 1);
+        SetInt(summon, "maximumCount", 1);
+        SetInt(summon, "maximumActive", 0);
+        SetBool(summon, "allowRecursiveSummon", false);
+        SetBool(summon, "inheritFormationLayer", true);
+        SetFloat(summon, "childHealthMultiplier", 1f);
+        SetFloat(summon, "childCoreAttackMultiplier", 1f);
         SerializedProperty effects =
             operation.FindPropertyRelative("effects");
         effects.ClearArray();
@@ -1214,6 +1550,18 @@ public sealed class EnemyEditorWindow : EditorWindow
             EditorGUILayout.PropertyField(property, new GUIContent(label));
     }
 
+    private void DrawPropertyWithChildren(string propertyName, string label)
+    {
+        SerializedProperty property = Find(propertyName);
+        if (property != null)
+        {
+            EditorGUILayout.PropertyField(
+                property,
+                new GUIContent(label),
+                true);
+        }
+    }
+
     private static void DrawRelative(
         SerializedProperty parent,
         string propertyName,
@@ -1223,6 +1571,22 @@ public sealed class EnemyEditorWindow : EditorWindow
             parent?.FindPropertyRelative(propertyName);
         if (property != null)
             EditorGUILayout.PropertyField(property, new GUIContent(label));
+    }
+
+    private static void DrawRelativeWithChildren(
+        SerializedProperty parent,
+        string propertyName,
+        string label)
+    {
+        SerializedProperty property =
+            parent?.FindPropertyRelative(propertyName);
+        if (property != null)
+        {
+            EditorGUILayout.PropertyField(
+                property,
+                new GUIContent(label),
+                true);
+        }
     }
 
     private static void SetString(
@@ -1340,12 +1704,26 @@ public sealed class EnemyEditorWindow : EditorWindow
         EnemySO definition = CreateInstance<EnemySO>();
         definition.RegenerateEnemyId();
         SerializedObject serialized = new(definition);
+        serialized.FindProperty("rosterSchemaVersion").intValue =
+            EnemySO.CurrentRosterSchemaVersion;
+        serialized.FindProperty("rosterTier").enumValueIndex =
+            (int)EnemyRosterTier.General;
+        SerializedProperty roleTags =
+            serialized.FindProperty("roleTags");
+        roleTags.arraySize = 1;
+        roleTags.GetArrayElementAtIndex(0).stringValue =
+            EnemyTypeDisplay.GetId(definition.Type);
         serialized.FindProperty("combatStatSchemaVersion").intValue =
             EnemySO.CurrentCombatStatSchemaVersion;
         serialized.FindProperty("attackPower").floatValue =
             Mathf.Max(
                 0.1f,
                 serialized.FindProperty("coreAttackDamage").intValue);
+        serialized.FindProperty("preciseCoreAttackDamage").floatValue =
+            serialized.FindProperty("coreAttackDamage").intValue;
+        serialized.FindProperty("formationRadius").floatValue =
+            EnemySO.GetDefaultFormationRadius(definition.Type);
+        serialized.FindProperty("coreAttackRange").floatValue = 0f;
         serialized.ApplyModifiedPropertiesWithoutUndo();
 
         string path = AssetDatabase.GenerateUniqueAssetPath(

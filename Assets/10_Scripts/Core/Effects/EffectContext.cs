@@ -19,7 +19,8 @@ public enum BattleEffectTargetMode
 {
     InheritContext = 0,
     Source = 1,
-    FreshSelection = 2
+    FreshSelection = 2,
+    Objective = 3
 }
 
 public enum BattleEffectPreconditionFailurePolicy
@@ -155,6 +156,16 @@ public static class BattleEffectRules
             }
         }
 
+        if (effect.BattleTargetMode ==
+                BattleEffectTargetMode.Objective &&
+            effect.BattleEffectType != BattleEffectType.Heal &&
+            effect.BattleEffectType != BattleEffectType.Shield)
+        {
+            error = "Objective targeting is supported only for Heal and " +
+                    "Shield effects.";
+            return false;
+        }
+
         ScalingValue scaling = effect.AmountScaling;
         if (!scaling.IsFinite)
         {
@@ -171,6 +182,13 @@ public static class BattleEffectRules
             effect.TargetStatusScalingEffect == null)
         {
             error = "Target status scaling requires a status effect.";
+            return false;
+        }
+        if (effect.BattleTargetMode ==
+                BattleEffectTargetMode.Objective &&
+            scaling.TargetStatusStacksScale != 0f)
+        {
+            error = "Objective effects cannot use target status scaling.";
             return false;
         }
 
@@ -490,6 +508,11 @@ public readonly struct BattleAbilityTargeting
                 BattleAbilitySelectionMode.LowestValue,
             EnemyAbilityTargetSubject.Adjacent =>
                 BattleAbilitySelectionMode.Adjacent,
+            // Enemy world-radius selection is resolved by the battle board.
+            // Inherit keeps the neutral ability projection target-bearing
+            // without pretending that a player must make a selection.
+            EnemyAbilityTargetSubject.WorldRadius =>
+                BattleAbilitySelectionMode.Inherit,
             _ => BattleAbilitySelectionMode.None,
         };
         BattleAbilityTargetMetric metric = target.Metric switch
@@ -693,10 +716,11 @@ public static class AbilityDefinitionValidator
                         "a battle ability with a non-battle domain.";
                 return false;
             }
-            if (battleDefinition.AbilitySchemaVersion != 1)
+            if (battleDefinition.AbilitySchemaVersion < 1 ||
+                battleDefinition.AbilitySchemaVersion > 2)
             {
                 error = $"Ability '{definition.AbilityId}' does not use " +
-                        "the current battle ability schema.";
+                        "a supported battle ability schema.";
                 return false;
             }
             if (battleDefinition.UsesLegacyEffectStorage)
@@ -773,12 +797,6 @@ public static class AbilityDefinitionValidator
                 }
                 effectCount++;
             }
-            if (effectCount == 0)
-            {
-                error = $"Ability '{definition.AbilityId}' has no shared " +
-                        "battle effects.";
-                return false;
-            }
         }
         else if (definition.ExecutionDomain ==
                  AbilityExecutionDomain.Battle)
@@ -802,6 +820,7 @@ public enum CharacterActionKind
 
 public readonly struct EffectContext
 {
+    private static long _nextActionExecutionId;
     private readonly IReadOnlyList<EnemyRuntime> _enemyTargets;
     private readonly IReadOnlyList<IBattleCharacter> _allyTargets;
 
@@ -810,6 +829,7 @@ public readonly struct EffectContext
     public IBattleBoard Board { get; }
     public IActiveSkillResource Resource { get; }
     public CharacterActionKind ActionKind { get; }
+    public long ActionExecutionId { get; }
     public CharacterTargetFaction TargetFaction { get; }
     public float SourceAttackPower { get; }
     public int SourceCurrentHealth => SourceTarget.CurrentHealth;
@@ -840,7 +860,8 @@ public readonly struct EffectContext
         CharacterTargetFaction targetFaction,
         IReadOnlyList<EnemyRuntime> enemyTargets,
         IReadOnlyList<IBattleCharacter> allyTargets,
-        float sourceAttackPower)
+        float sourceAttackPower,
+        long actionExecutionId = 0)
         : this(
             source != null
                 ? BattleStatusTarget.FromAlly(source)
@@ -858,7 +879,10 @@ public readonly struct EffectContext
             0,
             0,
             0,
-            0)
+            0,
+            actionExecutionId > 0
+                ? actionExecutionId
+                : CreateActionExecutionId())
     {
     }
 
@@ -870,7 +894,8 @@ public readonly struct EffectContext
         CharacterTargetFaction targetFaction,
         IReadOnlyList<EnemyRuntime> enemyTargets,
         IReadOnlyList<IBattleCharacter> allyTargets,
-        float sourceAttackPower)
+        float sourceAttackPower,
+        long actionExecutionId = 0)
         : this(
             sourceTarget,
             board,
@@ -886,7 +911,10 @@ public readonly struct EffectContext
             0,
             0,
             0,
-            0)
+            0,
+            actionExecutionId > 0
+                ? actionExecutionId
+                : CreateActionExecutionId())
     {
     }
 
@@ -905,12 +933,14 @@ public readonly struct EffectContext
         int targetCurrentHealth,
         int targetMaximumHealth,
         int sourceStatusStacks,
-        int targetStatusStacks)
+        int targetStatusStacks,
+        long actionExecutionId)
     {
         SourceTarget = sourceTarget;
         Board = board;
         Resource = resource;
         ActionKind = actionKind;
+        ActionExecutionId = Math.Max(0L, actionExecutionId);
         TargetFaction = targetFaction;
         SourceAttackPower = IsFinite(sourceAttackPower)
             ? Mathf.Max(0f, sourceAttackPower)
@@ -958,7 +988,8 @@ public readonly struct EffectContext
             0,
             0,
             0,
-            0);
+            0,
+            CreateActionExecutionId());
     }
 
     public EffectContext SnapshotSourceStatus(
@@ -989,7 +1020,8 @@ public readonly struct EffectContext
             TargetCurrentHealth,
             TargetMaximumHealth,
             SourceStatusStacks,
-            TargetStatusStacks);
+            TargetStatusStacks,
+            ActionExecutionId);
     }
 
     public EffectContext RetargetToSource()
@@ -1031,7 +1063,8 @@ public readonly struct EffectContext
             0,
             0,
             SourceStatusStacks,
-            0);
+            0,
+            ActionExecutionId);
     }
 
     public EffectContext BindEnemyTarget(
@@ -1084,7 +1117,14 @@ public readonly struct EffectContext
             targetCurrentHealth,
             targetMaximumHealth,
             sourceStatusStacks,
-            targetStatusStacks);
+            targetStatusStacks,
+            ActionExecutionId);
+    }
+
+    public static long CreateActionExecutionId()
+    {
+        return System.Threading.Interlocked.Increment(
+            ref _nextActionExecutionId);
     }
 
     private static bool IsFinite(float value)
@@ -1197,19 +1237,24 @@ public readonly struct BattleAbilityUser
 public readonly struct BattleEffectContext
 {
     private readonly EffectContext _characterContext;
+    private readonly bool _objectiveTargeted;
 
     public BattleEffectOriginKind OriginKind { get; }
     public BattleAbilityUser User { get; }
     public BattleStatusTarget SourceTarget => User.Unit;
+    public long ActionExecutionId => _characterContext.ActionExecutionId;
     public BattleStatusTarget Target => _characterContext.Target;
     public BattleStatusTarget Holder => Target;
     public IBattleCharacter Source => _characterContext.Source;
     public IBattleBoard Board => _characterContext.Board;
+    public IBattleObjective Objective =>
+        (Board as IBattleObjectiveProvider)?.Objective;
     public IActiveSkillResource Resource => User.Resource ??
                                              _characterContext.Resource;
     public IBattleCardDrawService CardDrawService { get; }
     public CharacterTargetFaction TargetFaction =>
         _characterContext.TargetFaction;
+    public bool IsObjectiveTargeted => _objectiveTargeted;
     public float SourceAttackPower => User.AttackPower;
     public int SourceCurrentHealth =>
         _characterContext.SourceCurrentHealth;
@@ -1218,22 +1263,34 @@ public readonly struct BattleEffectContext
     public int SourceResource => _characterContext.SourceResource;
     public int SourceResourceMaximum =>
         _characterContext.SourceResourceMaximum;
-    public bool HasBoundTarget => _characterContext.HasBoundTarget;
-    public bool HasTargetHealth => _characterContext.HasTargetHealth;
+    public bool HasBoundTarget => _objectiveTargeted
+        ? Objective?.IsActive == true
+        : _characterContext.HasBoundTarget;
+    public bool HasTargetHealth => _objectiveTargeted
+        ? Objective?.IsActive == true
+        : _characterContext.HasTargetHealth;
     public int TargetCurrentHealth =>
-        _characterContext.TargetCurrentHealth;
+        _objectiveTargeted
+            ? Objective?.CurrentHealth ?? 0
+            : _characterContext.TargetCurrentHealth;
     public int TargetMaximumHealth =>
-        _characterContext.TargetMaximumHealth;
+        _objectiveTargeted
+            ? Objective?.MaximumHealth ?? 0
+            : _characterContext.TargetMaximumHealth;
     public int SourceStatusStacks =>
         _characterContext.SourceStatusStacks;
     public int TargetStatusStacks =>
-        _characterContext.TargetStatusStacks;
+        _objectiveTargeted ? 0 : _characterContext.TargetStatusStacks;
     public IReadOnlyList<EnemyRuntime> EnemyTargets =>
         _characterContext.EnemyTargets;
     public IReadOnlyList<IBattleCharacter> AllyTargets =>
         _characterContext.AllyTargets;
-    public int TargetCount => _characterContext.TargetCount;
-    public bool HasTargets => _characterContext.HasTargets;
+    public int TargetCount => _objectiveTargeted
+        ? Objective?.IsActive == true ? 1 : 0
+        : _characterContext.TargetCount;
+    public bool HasTargets => _objectiveTargeted
+        ? Objective?.IsActive == true
+        : _characterContext.HasTargets;
     public int PreviousStacks { get; }
     public int CurrentStacks { get; }
     public int AddedStacks =>
@@ -1252,7 +1309,8 @@ public readonly struct BattleEffectContext
         int currentStacks,
         int occurrenceCount,
         bool statusEffectsLastUntilBattleEnd = false,
-        IBattleCardDrawService cardDrawService = null)
+        IBattleCardDrawService cardDrawService = null,
+        bool objectiveTargeted = false)
     {
         _characterContext = characterContext;
         OriginKind = originKind;
@@ -1263,6 +1321,7 @@ public readonly struct BattleEffectContext
         StatusEffectsLastUntilBattleEnd =
             statusEffectsLastUntilBattleEnd;
         CardDrawService = cardDrawService;
+        _objectiveTargeted = objectiveTargeted;
     }
 
     public static BattleEffectContext FromCharacter(
@@ -1537,6 +1596,20 @@ public readonly struct BattleEffectContext
             allyTargets));
     }
 
+    public BattleEffectContext RetargetToObjective()
+    {
+        return new BattleEffectContext(
+            _characterContext,
+            OriginKind,
+            User,
+            PreviousStacks,
+            CurrentStacks,
+            OccurrenceCount,
+            StatusEffectsLastUntilBattleEnd,
+            CardDrawService,
+            true);
+    }
+
     public BattleEffectContext BindEnemyTarget(
         EnemyRuntime target,
         StatusEffectSO scalingStatusEffect)
@@ -1568,7 +1641,8 @@ public readonly struct BattleEffectContext
             currentStacks,
             occurrenceCount,
             StatusEffectsLastUntilBattleEnd,
-            CardDrawService);
+            CardDrawService,
+            _objectiveTargeted);
     }
 
     private BattleEffectContext Copy(EffectContext context)
@@ -1581,7 +1655,8 @@ public readonly struct BattleEffectContext
             CurrentStacks,
             OccurrenceCount,
             StatusEffectsLastUntilBattleEnd,
-            CardDrawService);
+            CardDrawService,
+            _objectiveTargeted);
     }
 
     private static IBattleCardDrawService ResolveCardDrawService(

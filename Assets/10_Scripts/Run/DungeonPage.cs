@@ -30,8 +30,9 @@ public readonly struct DungeonBattlePlan
     }
 }
 
-public class DungeonPage : MonoBehaviour, IPage
+public partial class DungeonPage : MonoBehaviour, IPage
 {
+    internal const int EnemyRosterBaselineHealth = 20;
     public const int MaximumPartySize = 4;
     public const int MinimumBattleCount = 5;
     public const int MaximumBattleCount = 8;
@@ -153,6 +154,7 @@ public class DungeonPage : MonoBehaviour, IPage
     private readonly Dictionary<string, BattleItemRunState> _battleItems =
         new(StringComparer.Ordinal);
     private readonly BattleCardDeckRuntime _battleCardDeck = new();
+    private readonly BattleCardRuntimeController _battleCardRuntime = new();
     private readonly List<BattleCardSO> _acquiredBattleCards = new();
     private int _maximumEnergy = BattleManager.DefaultMaximumEnergy;
     private float _energyRechargeDuration =
@@ -184,6 +186,11 @@ public class DungeonPage : MonoBehaviour, IPage
     public IReadOnlyList<CharacterRuntime> OwnedTurrets => _ownedTurrets;
     public bool UsesBattleCards =>
         _session.Definition?.UseBattleCards == true;
+    public bool IsPracticeMode =>
+        _session.IsActive && _session.Definition?.IsPractice == true;
+    internal bool RequiresDetachedCharacterInitialization =>
+        _pendingDefinition?.IsPractice == true ||
+        _session.Definition?.IsPractice == true;
     public BattleCardDeckRuntime BattleCardDeck => _battleCardDeck;
     public IReadOnlyList<BattleCardSO> AcquiredBattleCards =>
         _acquiredBattleCards;
@@ -286,13 +293,19 @@ public class DungeonPage : MonoBehaviour, IPage
 
     private void Update()
     {
+        SynchronizeBattleCardSelectionPause();
         if (_session.IsActive &&
             _battleManager != null &&
             _battleManager.State == EBattleState.Running)
         {
             TickBattleItemCooldowns(Time.deltaTime);
             if (UsesBattleCards)
-                _battleCardDeck.Tick(Time.deltaTime);
+            {
+                _battleCardDeck.Tick(
+                    Time.deltaTime /
+                    ResolveBattleCardActionPeriodMultiplier());
+                _battleCardRuntime.Tick(Time.deltaTime);
+            }
         }
 
         if (!_session.IsActive || _session.Definition == null ||
@@ -308,6 +321,54 @@ public class DungeonPage : MonoBehaviour, IPage
             modifier.OnRunTick(GetRuntimeContext(), deltaTime));
     }
 
+    private float ResolveBattleCardActionPeriodMultiplier()
+    {
+        IEnemyCombatRuntimeService service =
+            (board as IEnemyCombatRuntimeServiceProvider)
+            ?.EnemyCombatRuntimeService;
+        if (service == null)
+            return 1f;
+
+        float multiplier = 1f;
+        if (playerCharacters != null)
+        {
+            for (int index = 0;
+                 index < playerCharacters.Length;
+                 index++)
+            {
+                CharacterRuntime character = playerCharacters[index];
+                if (character == null || character.CurrentHealth <= 0)
+                    continue;
+
+                float candidate =
+                    service.ResolvePlayerActionPeriodMultiplier(character);
+                if (!float.IsNaN(candidate) &&
+                    !float.IsInfinity(candidate))
+                {
+                    multiplier = Mathf.Max(multiplier, candidate);
+                }
+            }
+        }
+
+        return Mathf.Max(TimePrecision.Step, multiplier);
+    }
+
+    private void SynchronizeBattleCardSelectionPause()
+    {
+        bool pending = UsesBattleCards &&
+                       _battleCardRuntime.IsCardSelectionPending;
+        bool wasPending = (_session.Pause.Reasons &
+                           EDungeonPauseReason.CardSelection) != 0;
+        if (pending == wasPending)
+            return;
+
+        if (pending)
+            _session.Pause.Add(EDungeonPauseReason.CardSelection);
+        else
+            _session.Pause.Remove(EDungeonPauseReason.CardSelection);
+        ApplyBattlePauseState();
+    }
+
     private void OnDisable()
     {
         if (!_session.IsActive)
@@ -320,6 +381,13 @@ public class DungeonPage : MonoBehaviour, IPage
     private void OnDestroy()
     {
         UnbindFlowEvents();
+        if (board != null)
+        {
+            board.BindCardDrawService(null);
+            board.BindCardControlService(null);
+            board.BindAbilityUserModifierService(null);
+        }
+        _battleCardRuntime.Clear();
         battleTab?.Teardown();
         _eventTab?.Teardown();
         _battleRewardOverlay?.Teardown();
@@ -474,10 +542,15 @@ public class DungeonPage : MonoBehaviour, IPage
             return;
         }
 
-        EnsureCharacterInfoInstances();
+        bool initializeDetachedCharacters =
+            _pendingDefinition?.IsPractice == true ||
+            _session.Definition?.IsPractice == true;
+        EnsureCharacterInfoInstances(initializeDetachedCharacters);
         board.BindCardDrawService(_battleCardDeck);
+        board.BindCardControlService(_battleCardDeck);
+        board.BindAbilityUserModifierService(_battleCardRuntime);
         board.Initialize(initialGridSize, maximumStackSize);
-        InitializePlayerCharacters();
+        InitializePlayerCharacters(initializeDetachedCharacters);
 
         if (flowController == null || !flowController.Initialize())
         {
@@ -494,6 +567,7 @@ public class DungeonPage : MonoBehaviour, IPage
                 "DungeonPage requires a configured DungeonBattleTab and GameManager.Battle.",
                 this);
         }
+        battleTab?.BindPracticeBattleController(this);
 
         InitializeEventTab();
         InitializeBattleRewardOverlay();
@@ -538,7 +612,13 @@ public class DungeonPage : MonoBehaviour, IPage
     public void PrepareTutorialStage()
     {
         PrepareDungeon(DungeonDefinitionCatalog.Get(
-            DungeonDefinitionCatalog.TestFieldId));
+            DungeonDefinitionCatalog.TutorialFieldId));
+    }
+
+    public void PreparePracticeBattle()
+    {
+        PrepareDungeon(DungeonDefinitionCatalog.Get(
+            DungeonDefinitionCatalog.PracticeBattleId));
     }
 
     public void PrepareFreeBattle()
@@ -608,11 +688,12 @@ public class DungeonPage : MonoBehaviour, IPage
             return;
         }
 
-        RefreshAvailableCharacterDefinitions();
+        if (!definition.IsPractice)
+            RefreshAvailableCharacterDefinitions();
         if (_battleManager.HasSession)
             _battleManager.EndBattle(board);
 
-        ClearPlayerParty();
+        ClearPlayerParty(definition.IsPractice);
         ResetRunResourcesAndItems(definition);
         board.ClearAllStacks();
         _tutorialController?.StopTutorial();
@@ -627,6 +708,8 @@ public class DungeonPage : MonoBehaviour, IPage
             battleCount,
             phases,
             definition.InitialRunCurrency);
+        NotifyPracticeModeChanged();
+        battleTab?.BindPracticeBattleController(this);
         _dungeonShieldMaximumHealth =
             definition.BattleShieldMaximumHealth;
         _dungeonShieldCurrentHealth = _dungeonShieldMaximumHealth;
@@ -641,6 +724,12 @@ public class DungeonPage : MonoBehaviour, IPage
         _startingCharacterSelectionPending = false;
         NotifyRunStarted();
 
+        if (definition.IsPractice)
+        {
+            BeginPracticeDungeonFlow();
+            return;
+        }
+
         if (!PrepareStartingCharacterSelection())
         {
             _session.Finish(EDungeonRunResult.Defeat);
@@ -654,6 +743,20 @@ public class DungeonPage : MonoBehaviour, IPage
             _startingCharacterChoices.Count > 0)
         {
             TrySelectStartingCharacter(_startingCharacterChoices[0]);
+        }
+    }
+
+    private void BeginPracticeDungeonFlow()
+    {
+        _startingCharacterSelectionPending = false;
+        _startingItemSelectionPending = false;
+        _startingCharacterChoices.Clear();
+        _startingItemSelection.Clear();
+        if (!BeginPreparedDungeonFlow())
+        {
+            Debug.LogError(
+                "Failed to start the practice battle flow.",
+                this);
         }
     }
 
@@ -874,7 +977,7 @@ public class DungeonPage : MonoBehaviour, IPage
              _session.PhaseSequence.Count == 0 ||
              _session.PhaseSequence[0] != EDungeonPhase.Battle))
         {
-            ClearPlayerParty();
+            ClearPlayerParty(IsPracticeMode);
             _session.Finish(EDungeonRunResult.Defeat);
             Debug.LogError(
                 "A prepared dungeon run must begin with a Battle phase.",
@@ -897,7 +1000,7 @@ public class DungeonPage : MonoBehaviour, IPage
             return true;
         }
 
-        ClearPlayerParty();
+        ClearPlayerParty(IsPracticeMode);
         _session.Finish(EDungeonRunResult.Defeat);
         Debug.LogError("Failed to start the dungeon run flow.", this);
         return false;
@@ -1047,6 +1150,7 @@ public class DungeonPage : MonoBehaviour, IPage
     {
         return UsesBattleCards && card != null &&
                card.AvailableAsDungeonReward &&
+               card.MinimumMaximumEnergy <= _maximumEnergy &&
                card.IsEligible(GetCurrentPartyDefinitions());
     }
 
@@ -1311,7 +1415,7 @@ public class DungeonPage : MonoBehaviour, IPage
                 characters.Add(character);
         }
 
-        if (characters.Count == 0)
+        if (characters.Count == 0 && !IsPracticeMode)
         {
             HandleBattleEnded(EBattleResult.Defeat);
             return false;
@@ -1332,7 +1436,13 @@ public class DungeonPage : MonoBehaviour, IPage
         string error;
         bool setupCreated;
         BattleSO fixedBattle = null;
-        if (_session.Definition != null &&
+        if (IsPracticeMode)
+        {
+            setup = CreatePracticeBattleSetup();
+            setupCreated = true;
+            error = string.Empty;
+        }
+        else if (_session.Definition != null &&
             _session.Definition.TryGetFixedBattle(
                 battleIndex,
                 out fixedBattle))
@@ -1392,9 +1502,17 @@ public class DungeonPage : MonoBehaviour, IPage
             setup.SpawnInterval,
             setup.TimeLimit,
             setup.InitialEnemyCount,
-            true);
+            true,
+            IsPracticeMode
+                ? BattleSessionOptions.Practice
+                : BattleSessionOptions.Standard);
         if (started)
         {
+            _battleCardRuntime.Bind(
+                board,
+                _battleManager,
+                _battleCardDeck,
+                characters);
             RequestDungeonBgm(
                 _session.Definition,
                 EDungeonBgmState.Battle,
@@ -1402,6 +1520,31 @@ public class DungeonPage : MonoBehaviour, IPage
             NotifyBattleStarted();
         }
         return started;
+    }
+
+    private BattleSetup CreatePracticeBattleSetup()
+    {
+        DungeonDefinition definition = _session.Definition;
+        BattleArenaSetup arena = BattleArenaSetup.CreateCircular(
+            definition != null
+                ? definition.BattleShieldMaximumHealth
+                : DungeonDefinition.DefaultBattleShieldMaximumHealth,
+            BattleArenaSetup.DefaultLaneCount,
+            BattleArenaSetup.DefaultWallRadiusNormalized,
+            BattleArenaSetup.DefaultSpawnRadiusNormalized,
+            definition != null
+                ? definition.BattleArenaRadius
+                : DungeonDefinition.DefaultBattleArenaRadius);
+        return new BattleSetup(
+            initialGridSize,
+            maximumStackSize,
+            1f,
+            0f,
+            new BattleEnemyGradeCounts(0, 0, 0, 0),
+            new List<EnemyRuntime>(),
+            0,
+            arena,
+            BattleEnvironmentSetup.Default);
     }
 
     private void GenerateBattlePlans(int battleCount, int runSeed)
@@ -1493,6 +1636,8 @@ public class DungeonPage : MonoBehaviour, IPage
         foreach (EnemySO definition in allDefinitions)
         {
             if (definition != null &&
+                !definition.EncounterOnly &&
+                definition.Grade != EEnemyGrade.Boss &&
                 plan.DifficultyScale >= definition.UnlockDifficulty)
             {
                 eligibleDefinitions.Add(definition);
@@ -1501,14 +1646,22 @@ public class DungeonPage : MonoBehaviour, IPage
 
         if (eligibleDefinitions.Count == 0)
         {
-            EnemySO safestDefinition = allDefinitions[0];
+            EnemySO safestDefinition = null;
             foreach (EnemySO definition in allDefinitions)
             {
-                if (definition != null &&
-                    definition.ThreatCost < safestDefinition.ThreatCost)
+                if (definition != null && !definition.EncounterOnly &&
+                    definition.Grade != EEnemyGrade.Boss &&
+                    (safestDefinition == null ||
+                     definition.ThreatCost < safestDefinition.ThreatCost))
                 {
                     safestDefinition = definition;
                 }
+            }
+            if (safestDefinition == null)
+            {
+                error = "Automatic battles require at least one " +
+                        "non-encounter enemy definition.";
+                return false;
             }
             eligibleDefinitions.Add(safestDefinition);
         }
@@ -1528,13 +1681,23 @@ public class DungeonPage : MonoBehaviour, IPage
         int specialCount = 0;
         int eliteCount = 0;
         int bossCount = 0;
+        EnemyWaveCompositionState composition = new();
         for (int index = 0; index < enemyCount; index++)
         {
-            EnemySO definition = SelectScaledEnemy(
+            EnemySO definition = EnemyWaveComposer.SelectAndRegister(
                 eligibleDefinitions,
                 progress,
-                random);
-            int maximumHealth = enemyHealthValues[index];
+                random,
+                composition);
+            if (definition == null)
+            {
+                error = "The automatic enemy wave composer could not " +
+                        "select a valid definition.";
+                return false;
+            }
+            int maximumHealth = ScaleRosterEnemyHealth(
+                enemyHealthValues[index],
+                definition);
             enemies.Add(definition.CreateRuntime(maximumHealth));
             switch (definition.Grade)
             {
@@ -1586,6 +1749,26 @@ public class DungeonPage : MonoBehaviour, IPage
                 : BattleEnvironmentSetup.Default);
         error = string.Empty;
         return true;
+    }
+
+    internal static int ScaleRosterEnemyHealth(
+        int baselineHealth,
+        EnemySO definition)
+    {
+        baselineHealth = Mathf.Max(1, baselineHealth);
+        if (definition == null || definition.RosterSchemaVersion <= 0)
+            return baselineHealth;
+
+        double authoredHealth = Math.Max(
+            1d,
+            definition.BaseHealth * (double)definition.HealthScale);
+        double scaled = baselineHealth * authoredHealth /
+                        EnemyRosterBaselineHealth;
+        if (double.IsNaN(scaled) || scaled <= 1d)
+            return 1;
+        if (double.IsInfinity(scaled) || scaled >= int.MaxValue)
+            return int.MaxValue;
+        return Mathf.Max(1, Mathf.RoundToInt((float)scaled));
     }
 
     private bool TryCreateTutorialBattleSetup(
@@ -1793,33 +1976,6 @@ public class DungeonPage : MonoBehaviour, IPage
             : definition.CreateData(new CharacterProgressData(
                 definition.CharacterId,
                 definition.InitiallyOwned));
-    }
-
-    private static EnemySO SelectScaledEnemy(
-        IReadOnlyList<EnemySO> definitions,
-        float progress,
-        System.Random random)
-    {
-        double exponent = Mathf.Lerp(-1.5f, 0.9f, progress);
-        double totalWeight = 0d;
-        double[] weights = new double[definitions.Count];
-        for (int index = 0; index < definitions.Count; index++)
-        {
-            double threat = Mathf.Max(0.1f, definitions[index].ThreatCost);
-            double jitter = 0.9d + random.NextDouble() * 0.2d;
-            weights[index] = Math.Pow(threat, exponent) * jitter;
-            totalWeight += weights[index];
-        }
-
-        double value = random.NextDouble() * totalWeight;
-        for (int index = 0; index < definitions.Count; index++)
-        {
-            value -= weights[index];
-            if (value <= 0d)
-                return definitions[index];
-        }
-
-        return definitions[definitions.Count - 1];
     }
 
     private static IReadOnlyList<int> CreateEnemyHealthDistributionFromTotal(
@@ -2043,6 +2199,9 @@ public class DungeonPage : MonoBehaviour, IPage
 
     private void HandleBattleCompleted()
     {
+        if (IsPracticeMode)
+            return;
+
         battleTab?.Refresh();
         CaptureDungeonShieldHealth();
         ApplyClearedBattleHealthCost();
@@ -2082,6 +2241,9 @@ public class DungeonPage : MonoBehaviour, IPage
 
     private void ApplyClearedBattleHealthCost()
     {
+        if (IsPracticeMode)
+            return;
+
         int healthCost = _session.Definition?
             .ResolveClearedBattleHealthCost(CurrentDifficultyScale) ?? 0;
         if (healthCost <= 0)
@@ -2095,6 +2257,12 @@ public class DungeonPage : MonoBehaviour, IPage
     {
         if (!_session.IsActive)
             return;
+
+        if (IsPracticeMode)
+        {
+            battleTab?.Refresh();
+            return;
+        }
 
         NotifyBattleEnded(result);
         if (result == EBattleResult.Timeout &&
@@ -2146,6 +2314,8 @@ public class DungeonPage : MonoBehaviour, IPage
     private void HandleDungeonFlowCompleted()
     {
         if (!_session.IsActive)
+            return;
+        if (IsPracticeMode)
             return;
 
         _battleRewardPending = false;
@@ -2299,8 +2469,10 @@ public class DungeonPage : MonoBehaviour, IPage
             _battleManager == null ||
             _battleManager.State != EBattleState.Running ||
             _battleManager.IsManualTargetSelectionPending ||
+            _battleCardRuntime.IsExecutionPending ||
             !_battleCardDeck.CanPlay(instance) ||
-            !_battleManager.CanSpend(instance.Definition.EnergyCost))
+            !_battleManager.CanSpend(
+                _battleCardDeck.GetEffectiveCost(instance)))
         {
             return false;
         }
@@ -2313,13 +2485,15 @@ public class DungeonPage : MonoBehaviour, IPage
             board == null)
             return false;
 
-        if (!BattleAbilityRules.RequiresActionTargets(card))
+        if (!card.RequiresActionTargets)
         {
-            return ExecuteBattleCard(
+            return TryBeginSecondaryBattleCardSelection(
                 instance,
                 source,
                 Array.Empty<EnemyRuntime>(),
-                Array.Empty<IBattleCharacter>());
+                Array.Empty<IBattleCharacter>(),
+                default,
+                false);
         }
 
         CharacterTargetFaction faction = card.TargetFaction;
@@ -2350,18 +2524,21 @@ public class DungeonPage : MonoBehaviour, IPage
                     : Array.Empty<EnemyRuntime>();
             IReadOnlyList<IBattleCharacter> allyCandidates =
                 faction == CharacterTargetFaction.Ally
-                    ? board.SelectAlliedCharacters(
+                    ? ResolveBattleCardAllyCandidates(
                         source,
                         candidateSubject,
                         card.SubjectMetric,
                         candidateTargetCount,
-                        CharacterConditionMatchMode.All,
-                        noConditions)
+                        card.PrimaryTargetFilter,
+                        card)
                     : Array.Empty<IBattleCharacter>();
+            enemyCandidates = FilterBattleCardEnemyCandidates(
+                enemyCandidates,
+                card.PrimaryTargetFilter);
             int candidateCount = faction == CharacterTargetFaction.Ally
                 ? allyCandidates.Count
                 : enemyCandidates.Count;
-            if (candidateCount == 0)
+            if (candidateCount == 0 && !usesArea)
                 return false;
 
             BattleManualTargetSelectionRequest request = new(
@@ -2384,29 +2561,33 @@ public class DungeonPage : MonoBehaviour, IPage
 
         IReadOnlyList<EnemyRuntime> enemyTargets =
             faction == CharacterTargetFaction.Enemy
-                ? board.SelectCharacterTargets(
-                    source,
-                    card.Subject,
-                    card.SubjectMetric,
-                    card.TargetCount,
-                    CharacterConditionMatchMode.All,
-                    noConditions)
+                ? FilterBattleCardEnemyCandidates(
+                    board.SelectCharacterTargets(
+                        source,
+                        card.Subject,
+                        card.SubjectMetric,
+                        card.TargetCount,
+                        CharacterConditionMatchMode.All,
+                        noConditions),
+                    card.PrimaryTargetFilter)
                 : Array.Empty<EnemyRuntime>();
         IReadOnlyList<IBattleCharacter> allyTargets =
             faction == CharacterTargetFaction.Ally
-                ? board.SelectAlliedCharacters(
+                ? ResolveBattleCardAllyCandidates(
                     source,
                     card.Subject,
                     card.SubjectMetric,
                     card.TargetCount,
-                    CharacterConditionMatchMode.All,
-                    noConditions)
+                    card.PrimaryTargetFilter,
+                    card)
                 : Array.Empty<IBattleCharacter>();
-        return ExecuteBattleCard(
+        return TryBeginSecondaryBattleCardSelection(
             instance,
             source,
             enemyTargets,
-            allyTargets);
+            allyTargets,
+            default,
+            false);
     }
 
     public bool TryMulliganBattleCards()
@@ -2415,6 +2596,7 @@ public class DungeonPage : MonoBehaviour, IPage
                _battleManager != null &&
                _battleManager.State == EBattleState.Running &&
                !_battleManager.IsManualTargetSelectionPending &&
+               !_battleCardRuntime.IsExecutionPending &&
                _battleCardDeck.TryMulligan();
     }
 
@@ -2423,20 +2605,147 @@ public class DungeonPage : MonoBehaviour, IPage
         CharacterRuntime source,
         BattleManualTargetSelectionResult result)
     {
-        if (result.Cancelled || !result.HasTargets)
+        if (result.Cancelled || !result.HasSelection)
+            return;
+        TryBeginSecondaryBattleCardSelection(
+            instance,
+            source,
+            result.EnemyTargets,
+            result.AllyTargets,
+            result.WorldPoint,
+            result.HasWorldPoint);
+    }
+
+    private bool TryBeginSecondaryBattleCardSelection(
+        BattleCardInstance instance,
+        CharacterRuntime source,
+        IReadOnlyList<EnemyRuntime> primaryEnemies,
+        IReadOnlyList<IBattleCharacter> primaryAllies,
+        Vector2 primaryPoint,
+        bool hasPrimaryPoint)
+    {
+        BattleCardSecondaryTargetDefinition secondary =
+            instance?.Definition?.SecondaryTarget;
+        if (secondary?.Enabled != true)
+        {
+            return ExecuteBattleCard(
+                instance,
+                source,
+                primaryEnemies,
+                primaryAllies,
+                primaryPoint,
+                hasPrimaryPoint);
+        }
+
+        IReadOnlyList<CharacterNumericCondition> noConditions =
+            Array.Empty<CharacterNumericCondition>();
+        bool usesArea = secondary.UsesWorldPoint ||
+                        secondary.AreaDefinition.UsesWorldArea;
+        CharacterAttackSubject candidateSubject = usesArea &&
+            secondary.Subject != CharacterAttackSubject.Manual &&
+            secondary.Subject != CharacterAttackSubject.None
+                ? secondary.Subject
+                : CharacterAttackSubject.All;
+        int candidateCount = usesArea ? int.MaxValue : secondary.TargetCount;
+        IReadOnlyList<EnemyRuntime> enemyCandidates =
+            secondary.TargetFaction == CharacterTargetFaction.Enemy
+                ? FilterBattleCardEnemyCandidates(
+                    board.SelectCharacterTargets(
+                        source,
+                        candidateSubject,
+                        secondary.SubjectMetric,
+                        candidateCount,
+                        CharacterConditionMatchMode.All,
+                        noConditions),
+                    secondary.Filter)
+                : Array.Empty<EnemyRuntime>();
+        IReadOnlyList<IBattleCharacter> allyCandidates =
+            secondary.TargetFaction == CharacterTargetFaction.Ally
+                ? ResolveBattleCardAllyCandidates(
+                    source,
+                    candidateSubject,
+                    secondary.SubjectMetric,
+                    candidateCount,
+                    secondary.Filter)
+                : Array.Empty<IBattleCharacter>();
+
+        if (secondary.Subject != CharacterAttackSubject.Manual && !usesArea)
+        {
+            return ExecuteBattleCard(
+                instance,
+                source,
+                primaryEnemies,
+                primaryAllies,
+                primaryPoint,
+                hasPrimaryPoint,
+                enemyCandidates,
+                allyCandidates);
+        }
+
+        if (board is not IBattleManualTargetSelectionService service ||
+            (!usesArea && enemyCandidates.Count == 0 &&
+             allyCandidates.Count == 0))
+        {
+            return false;
+        }
+
+        BattleManualTargetSelectionRequest request = new(
+            source,
+            secondary.TargetFaction,
+            secondary.TargetCount,
+            enemyCandidates,
+            allyCandidates,
+            true,
+            result => HandleSecondaryBattleCardTargetSelection(
+                instance,
+                source,
+                primaryEnemies,
+                primaryAllies,
+                primaryPoint,
+                hasPrimaryPoint,
+                result),
+            secondary.AreaDefinition,
+            secondary.Subject,
+            secondary.SubjectMetric,
+            BattleManualAreaPlacementMode.FreePointer);
+        return service.TryBeginManualTargetSelection(request);
+    }
+
+    private void HandleSecondaryBattleCardTargetSelection(
+        BattleCardInstance instance,
+        CharacterRuntime source,
+        IReadOnlyList<EnemyRuntime> primaryEnemies,
+        IReadOnlyList<IBattleCharacter> primaryAllies,
+        Vector2 primaryPoint,
+        bool hasPrimaryPoint,
+        BattleManualTargetSelectionResult result)
+    {
+        if (result.Cancelled || !result.HasSelection)
             return;
         ExecuteBattleCard(
             instance,
             source,
+            primaryEnemies,
+            primaryAllies,
+            primaryPoint,
+            hasPrimaryPoint,
             result.EnemyTargets,
-            result.AllyTargets);
+            result.AllyTargets,
+            result.WorldPoint,
+            result.HasWorldPoint);
     }
 
     private bool ExecuteBattleCard(
         BattleCardInstance instance,
         CharacterRuntime source,
         IReadOnlyList<EnemyRuntime> enemyTargets,
-        IReadOnlyList<IBattleCharacter> allyTargets)
+        IReadOnlyList<IBattleCharacter> allyTargets,
+        Vector2 primaryPoint = default,
+        bool hasPrimaryPoint = false,
+        IReadOnlyList<EnemyRuntime> secondaryEnemyTargets = null,
+        IReadOnlyList<IBattleCharacter> secondaryAllyTargets = null,
+        Vector2 secondaryPoint = default,
+        bool hasSecondaryPoint = false)
     {
         BattleCardSO card = instance?.Definition;
         bool usesCharacterUser = card != null &&
@@ -2444,11 +2753,29 @@ public class DungeonPage : MonoBehaviour, IPage
         if (card == null ||
             (usesCharacterUser && (source == null || !source.IsAlive)) ||
             !_battleCardDeck.CanPlay(instance) ||
-            _battleManager == null || board == null ||
-            !_battleManager.TrySpend(card.EnergyCost))
+            _battleManager == null || board == null)
         {
             return false;
         }
+
+        if (card.Operations.Count > 0)
+        {
+            return _battleCardRuntime.TryBeginExecution(
+                instance,
+                source,
+                enemyTargets,
+                allyTargets,
+                secondaryEnemyTargets,
+                secondaryAllyTargets,
+                primaryPoint,
+                hasPrimaryPoint,
+                secondaryPoint,
+                hasSecondaryPoint);
+        }
+
+        int effectiveCost = _battleCardDeck.GetEffectiveCost(instance);
+        if (!_battleManager.TrySpend(effectiveCost))
+            return false;
 
         BattleEffectContext context = BattleEffectContext.ForBattleCard(
             source,
@@ -2466,11 +2793,131 @@ public class DungeonPage : MonoBehaviour, IPage
             usesCharacterUser ? source.Data : null);
         if (!result.Succeeded)
         {
-            _battleManager.TryGain(card.EnergyCost);
+            _battleManager.TryGain(effectiveCost);
             return false;
         }
 
         return _battleCardDeck.CompleteSuccessfulPlay(instance);
+    }
+
+    public bool TryToggleBattleCardZoneSelection(
+        BattleCardInstance instance)
+    {
+        return _battleCardRuntime.TryToggleCardSelection(instance);
+    }
+
+    public bool TryConfirmBattleCardZoneSelection()
+    {
+        bool confirmed = _battleCardRuntime.TryConfirmCardSelection();
+        SynchronizeBattleCardSelectionPause();
+        return confirmed;
+    }
+
+    public bool TryCancelBattleCardZoneSelection()
+    {
+        bool cancelled = _battleCardRuntime.CancelPendingExecution();
+        SynchronizeBattleCardSelectionPause();
+        return cancelled;
+    }
+
+    private IReadOnlyList<IBattleCharacter>
+        ResolveBattleCardAllyCandidates(
+            CharacterRuntime source,
+            CharacterAttackSubject subject,
+            CharacterAttackSubjectMetric metric,
+            int targetCount,
+            BattleCardTargetFilter filter,
+            BattleCardSO primaryCard = null)
+    {
+        IEnumerable<IBattleCharacter> candidates;
+        if (filter?.IncludeDefeated == true)
+        {
+            List<IBattleCharacter> owned = new();
+            foreach (CharacterRuntime ally in _ownedTurrets)
+            {
+                if (ally != null)
+                    owned.Add(ally);
+            }
+            candidates = owned;
+        }
+        else
+        {
+            candidates = board.SelectAlliedCharacters(
+                source,
+                subject,
+                metric,
+                targetCount,
+                CharacterConditionMatchMode.All,
+                Array.Empty<CharacterNumericCondition>());
+        }
+
+        List<IBattleCharacter> result = new();
+        foreach (IBattleCharacter ally in candidates)
+        {
+            if (!MatchesBattleCardTargetFilter(ally, filter) ||
+                primaryCard != null &&
+                ally is CharacterRuntime runtime &&
+                !primaryCard.AllowsOperationPrimaryTarget(
+                    runtime.Definition))
+            {
+                continue;
+            }
+            result.Add(ally);
+            if (subject != CharacterAttackSubject.All &&
+                result.Count >= Mathf.Max(1, targetCount))
+            {
+                break;
+            }
+        }
+        return result;
+    }
+
+    private static IReadOnlyList<EnemyRuntime>
+        FilterBattleCardEnemyCandidates(
+            IReadOnlyList<EnemyRuntime> candidates,
+            BattleCardTargetFilter filter)
+    {
+        if (candidates == null || filter?.RequiredStatus == null)
+            return candidates ?? Array.Empty<EnemyRuntime>();
+        List<EnemyRuntime> result = new();
+        foreach (EnemyRuntime enemy in candidates)
+        {
+            if (enemy?.HasStatusEffect(filter.RequiredStatus) == true)
+                result.Add(enemy);
+        }
+        return result;
+    }
+
+    private static bool MatchesBattleCardTargetFilter(
+        IBattleCharacter target,
+        BattleCardTargetFilter filter)
+    {
+        if (target == null)
+            return false;
+        if (filter == null || !filter.IsConfigured)
+            return target.CurrentHealth > 0;
+        if (!filter.IncludeDefeated && target.CurrentHealth <= 0)
+            return false;
+        if (filter.RequiredStatus != null &&
+            !target.HasStatusEffect(filter.RequiredStatus))
+        {
+            return false;
+        }
+        if (target is not CharacterRuntime runtime ||
+            runtime.Definition == null)
+        {
+            return filter.RequiredCharacter == null &&
+                   filter.RequiredRole == null;
+        }
+        if (filter.RequiredCharacter != null &&
+            !ReferenceEquals(
+                runtime.Definition,
+                filter.RequiredCharacter))
+        {
+            return false;
+        }
+        return filter.RequiredRole == null ||
+               ReferenceEquals(runtime.Definition.Role, filter.RequiredRole);
     }
 
     private CharacterRuntime ResolveBattleCardSource(BattleCardSO card)
@@ -2522,24 +2969,28 @@ public class DungeonPage : MonoBehaviour, IPage
     {
         if (!UsesBattleCards)
         {
+            _battleCardRuntime.Clear();
             _battleCardDeck.Clear();
             return;
         }
 
         IReadOnlyList<CharacterSO> party = GetCurrentPartyDefinitions();
         List<BattleCardSO> resolvedDeck = new();
-        _session.Definition.BattleCardDeckRules.BuildDeck(
-            party,
-            resolvedDeck);
-        foreach (BattleCardSO acquired in _acquiredBattleCards)
+        if (!IsPracticeMode)
         {
-            if (acquired != null && acquired.IsEligible(party))
-                resolvedDeck.Add(acquired);
+            _session.Definition.BattleCardDeckRules.BuildDeck(
+                party,
+                resolvedDeck);
+            foreach (BattleCardSO acquired in _acquiredBattleCards)
+            {
+                if (acquired != null && acquired.IsEligible(party))
+                    resolvedDeck.Add(acquired);
+            }
         }
         BattleCardDeckRules deckRules =
             _session.Definition.BattleCardDeckRules;
         int partyKnowledge = ResolveParticipatingPartyKnowledge();
-        _battleCardDeck.ConfigureResolvedDeck(
+        bool configured = _battleCardDeck.ConfigureResolvedDeck(
             deckRules,
             resolvedDeck,
             battleSeed ^ unchecked((int)0xCA4D51A7),
@@ -2547,7 +2998,8 @@ public class DungeonPage : MonoBehaviour, IPage
                 ResolveParticipatingPartyJudgment()),
             deckRules.ResolveRedrawCooldown(partyKnowledge),
             deckRules.ResolveMulliganCooldown(partyKnowledge));
-        if (!_battleCardDeck.BeginBattle())
+        bool began = configured && _battleCardDeck.BeginBattle();
+        if (!began && !IsPracticeMode)
         {
             Debug.LogError(
                 "Battle card deck has no eligible cards. Configure the " +
@@ -2669,6 +3121,7 @@ public class DungeonPage : MonoBehaviour, IPage
             : DungeonDefinition.DefaultActiveSkillCostRecoveryDuration;
         _battleItems.Clear();
         _acquiredBattleCards.Clear();
+        _battleCardRuntime.Clear();
         _battleCardDeck.Clear();
         _battleManager?.ConfigureActiveSkillResource(
             _maximumEnergy,
@@ -2715,7 +3168,8 @@ public class DungeonPage : MonoBehaviour, IPage
         return true;
     }
 
-    private void InitializePlayerCharacters()
+    private void InitializePlayerCharacters(
+        bool useDetachedData = false)
     {
         EnsurePlayerCharacterSlots();
         EnsurePartySlotColors();
@@ -2729,10 +3183,7 @@ public class DungeonPage : MonoBehaviour, IPage
 
             CharacterSO definition = character.Definition;
             if (definition == null && index < catalog.Count)
-            {
                 definition = catalog[index];
-                character.ConfigureDefinition(definition);
-            }
 
             if (definition == null)
             {
@@ -2742,7 +3193,12 @@ public class DungeonPage : MonoBehaviour, IPage
                 continue;
             }
 
-            if (!character.Initialize())
+            bool initialized = useDetachedData
+                ? character.ConfigureDetachedDefinition(definition)
+                : ReferenceEquals(character.Definition, definition)
+                    ? character.Initialize()
+                    : character.ConfigureDefinition(definition);
+            if (!initialized)
             {
                 Debug.LogError(
                     $"Player party slot {index + 1} is not configured.",
@@ -2752,6 +3208,13 @@ public class DungeonPage : MonoBehaviour, IPage
 
             character.ConfigurePartySlot(index, partySlotColors[index]);
             _slotDefaultDefinitions[index] = definition;
+        }
+
+        if (useDetachedData)
+        {
+            _availableTurrets.Clear();
+            ClearPlayerParty(true);
+            return;
         }
 
         RefreshAvailableCharacterDefinitions();
@@ -2819,7 +3282,7 @@ public class DungeonPage : MonoBehaviour, IPage
         return data != null && data.IsOwned;
     }
 
-    private void ClearPlayerParty()
+    private void ClearPlayerParty(bool useDetachedData = false)
     {
         _ownedTurrets.Clear();
         _acquiredCharacterIds.Clear();
@@ -2836,7 +3299,12 @@ public class DungeonPage : MonoBehaviour, IPage
 
             CharacterSO definition = _slotDefaultDefinitions[index];
             if (definition != null)
-                character.ConfigureDefinition(definition);
+            {
+                if (useDetachedData)
+                    character.ConfigureDetachedDefinition(definition);
+                else
+                    character.ConfigureDefinition(definition);
+            }
             character.ConfigurePartySlot(index, partySlotColors[index]);
             character.gameObject.SetActive(false);
         }
@@ -3090,10 +3558,12 @@ public class DungeonPage : MonoBehaviour, IPage
         if (_battleManager != null && _battleManager.HasSession)
             _battleManager.EndBattle(board);
         board?.ClearAllStacks();
-        ClearPlayerParty();
+        ClearPlayerParty(IsPracticeMode);
         ResetRunResourcesAndItems();
         _session.Reset();
         _pendingDefinition = null;
+        NotifyPracticeModeChanged();
+        battleTab?.BindPracticeBattleController(this);
         battleTab?.Refresh();
     }
 
@@ -3128,7 +3598,7 @@ public class DungeonPage : MonoBehaviour, IPage
             EDungeonBgmState.Ready);
 
         if (result == EDungeonRunResult.Clear &&
-            _session.Definition != null)
+            _session.Definition?.PersistsDungeonProgress == true)
         {
             DataManager.Current?.DungeonProgressDatas?.MarkCleared(
                 _session.Definition);
@@ -4095,7 +4565,8 @@ public class DungeonPage : MonoBehaviour, IPage
             System.Array.Resize(ref playerCharacters, MaximumPartySize);
     }
 
-    private void EnsureCharacterInfoInstances()
+    private void EnsureCharacterInfoInstances(
+        bool useDetachedData = false)
     {
         if (_characterInfoInstancesPrepared)
             return;
@@ -4165,7 +4636,12 @@ public class DungeonPage : MonoBehaviour, IPage
             instance.name = $"grpPlayerCharacterSlot_{index + 1}";
             instance.transform.SetSiblingIndex(index);
             if (definitions[index] != null)
-                instance.ConfigureDefinition(definitions[index]);
+            {
+                if (useDetachedData)
+                    instance.ConfigureDetachedDefinition(definitions[index]);
+                else
+                    instance.ConfigureDefinition(definitions[index]);
+            }
             instances[index] = instance;
         }
 
@@ -4177,7 +4653,10 @@ public class DungeonPage : MonoBehaviour, IPage
             if (definitions[index] != null &&
                 instance.Definition != definitions[index])
             {
-                instance.ConfigureDefinition(definitions[index]);
+                if (useDetachedData)
+                    instance.ConfigureDetachedDefinition(definitions[index]);
+                else
+                    instance.ConfigureDefinition(definitions[index]);
             }
             instance.ConfigureWorldSdPresentation(
                 board != null && board.SupportsWorldPresentation);

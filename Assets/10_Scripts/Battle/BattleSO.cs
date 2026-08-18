@@ -78,6 +78,23 @@ public sealed class BattleSO : ScriptableObject
         BattleArenaSetup.DefaultCoreMaximumHealth;
     [SerializeField, Range(4, 64)] private int circularLaneCount =
         BattleArenaSetup.DefaultLaneCount;
+    [SerializeField, Range(
+        BattleArenaSetup.MinimumLayerCount,
+        BattleArenaSetup.MaximumLayerCountLimit)]
+    private int circularMaximumLayerCount =
+        BattleArenaSetup.DefaultMaximumLayerCount;
+    [SerializeField, Range(
+        BattleArenaSetup.MinimumLayerSpacing,
+        BattleArenaSetup.MaximumLayerSpacing)]
+    private float circularLayerSpacing =
+        BattleArenaSetup.DefaultLayerSpacing;
+    [SerializeField, Range(
+        BattleArenaSetup.MinimumFormationSeparationRatio,
+        BattleArenaSetup.MaximumFormationSeparationRatio), Tooltip(
+        "Minimum center separation as a ratio of the combined enemy " +
+        "formation radii. 0.75 allows up to 25% visual overlap.")]
+    private float formationSeparationRatio =
+        BattleArenaSetup.DefaultFormationSeparationRatio;
     [SerializeField, Range(0.12f, 0.4f)]
     private float wallRadiusNormalized =
         BattleArenaSetup.DefaultWallRadiusNormalized;
@@ -147,6 +164,20 @@ public sealed class BattleSO : ScriptableObject
     public BattleArenaMode ArenaMode => arenaMode;
     public int CoreMaximumHealth => Mathf.Max(1, coreMaximumHealth);
     public int CircularLaneCount => Mathf.Clamp(circularLaneCount, 4, 64);
+    public int CircularMaximumLayerCount => Mathf.Clamp(
+        circularMaximumLayerCount,
+        BattleArenaSetup.MinimumLayerCount,
+        BattleArenaSetup.MaximumLayerCountLimit);
+    public float CircularLayerSpacing => NormalizeFinite(
+        circularLayerSpacing,
+        BattleArenaSetup.DefaultLayerSpacing,
+        BattleArenaSetup.MinimumLayerSpacing,
+        BattleArenaSetup.MaximumLayerSpacing);
+    public float FormationSeparationRatio => NormalizeFinite(
+        formationSeparationRatio,
+        BattleArenaSetup.DefaultFormationSeparationRatio,
+        BattleArenaSetup.MinimumFormationSeparationRatio,
+        BattleArenaSetup.MaximumFormationSeparationRatio);
     public float WallRadiusNormalized => Mathf.Clamp(
         wallRadiusNormalized,
         0.12f,
@@ -267,7 +298,10 @@ public sealed class BattleSO : ScriptableObject
                 coreMaximumHealth,
                 circularLaneCount,
                 wallRadiusNormalized,
-                spawnRadiusNormalized)
+                spawnRadiusNormalized,
+                maximumLayerCount: circularMaximumLayerCount,
+                layerSpacing: circularLayerSpacing,
+                formationSeparationRatio: formationSeparationRatio)
             : BattleArenaSetup.Legacy;
     }
 
@@ -295,6 +329,26 @@ public sealed class BattleSO : ScriptableObject
             float.IsNaN(timeLimit) || float.IsInfinity(timeLimit))
         {
             error = "Battle identity, bounds, or timing values are invalid.";
+            return false;
+        }
+        if (arenaMode == BattleArenaMode.CircularDefense &&
+            (circularLaneCount < 4 || circularLaneCount > 64 ||
+             circularMaximumLayerCount <
+                 BattleArenaSetup.MinimumLayerCount ||
+             circularMaximumLayerCount >
+                 BattleArenaSetup.MaximumLayerCountLimit ||
+             !IsFinite(circularLayerSpacing) ||
+             circularLayerSpacing <
+                 BattleArenaSetup.MinimumLayerSpacing ||
+             circularLayerSpacing >
+                 BattleArenaSetup.MaximumLayerSpacing ||
+             !IsFinite(formationSeparationRatio) ||
+             formationSeparationRatio <
+                 BattleArenaSetup.MinimumFormationSeparationRatio ||
+             formationSeparationRatio >
+                 BattleArenaSetup.MaximumFormationSeparationRatio))
+        {
+            error = "Circular formation values are invalid.";
             return false;
         }
         if (!TryGetGradeCounts(out BattleEnemyGradeCounts counts, out error))
@@ -506,6 +560,22 @@ public sealed class BattleSO : ScriptableObject
 
         error = string.Empty;
         return true;
+    }
+
+    private static bool IsFinite(float value)
+    {
+        return !float.IsNaN(value) && !float.IsInfinity(value);
+    }
+
+    private static float NormalizeFinite(
+        float value,
+        float fallback,
+        float minimum,
+        float maximum)
+    {
+        return IsFinite(value)
+            ? Mathf.Clamp(value, minimum, maximum)
+            : fallback;
     }
 
     private BattleEnemyGradeRule[] GetRules()

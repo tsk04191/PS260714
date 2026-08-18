@@ -210,6 +210,7 @@ public sealed class BattleCardEditorWindow : EditorWindow
             DrawSection(
                 "Draw & Play Rules",
                 "energyCost",
+                "minimumMaximumEnergy",
                 "recyclePolicy",
                 "availableAsStartingCard",
                 "availableAsDungeonReward");
@@ -329,11 +330,265 @@ public sealed class BattleCardEditorWindow : EditorWindow
             BattleAbilityEditorGUI.DrawTargetCount(
                 Find("targetCount"),
                 Find("areaDefinition"));
+            DrawProperty(
+                "primaryTargetFilter",
+                "Primary Target Filter",
+                true);
+            DrawSecondaryTarget();
             EditorGUILayout.Space(4f);
+            EditorGUILayout.LabelField(
+                "Direct Shared Effects",
+                EditorStyles.miniBoldLabel);
             BattleAbilityEditorGUI.DrawEffectList(
                 Find("abilityEffects"),
                 selected);
+            EditorGUILayout.Space(6f);
+            DrawOperations();
         }
+    }
+
+    private void DrawSecondaryTarget()
+    {
+        SerializedProperty secondary = Find("secondaryTarget");
+        if (secondary == null)
+        {
+            EditorGUILayout.HelpBox(
+                "Secondary target definition was not found.",
+                MessageType.Error);
+            return;
+        }
+
+        using (new EditorGUILayout.VerticalScope(EditorStyles.helpBox))
+        {
+            EditorGUILayout.LabelField(
+                "Secondary Target",
+                EditorStyles.miniBoldLabel);
+            SerializedProperty enabled =
+                secondary.FindPropertyRelative("enabled");
+            EditorGUILayout.PropertyField(enabled, new GUIContent("Enabled"));
+            if (enabled?.boolValue != true)
+                return;
+
+            DrawRelativeProperty(secondary, "worldPoint", "World Point");
+            DrawRelativeProperty(
+                secondary,
+                "targetFaction",
+                "Target Faction");
+            SerializedProperty subject =
+                secondary.FindPropertyRelative("subject");
+            EditorGUILayout.PropertyField(
+                subject,
+                new GUIContent("Target Selection"));
+            DrawRelativeProperty(
+                secondary,
+                "subjectMetric",
+                "Selection Metric");
+            BattleAbilityEditorGUI.DrawAreaDefinition(
+                secondary.FindPropertyRelative("areaDefinition"),
+                subject,
+                selected);
+            BattleAbilityEditorGUI.DrawTargetCount(
+                secondary.FindPropertyRelative("targetCount"),
+                secondary.FindPropertyRelative("areaDefinition"));
+            DrawRelativeProperty(
+                secondary,
+                "filter",
+                "Secondary Target Filter",
+                true);
+        }
+    }
+
+    private void DrawOperations()
+    {
+        SerializedProperty operations = Find("operations");
+        if (operations == null || !operations.isArray)
+        {
+            EditorGUILayout.HelpBox(
+                "Card operation list was not found.",
+                MessageType.Error);
+            return;
+        }
+
+        EditorGUILayout.LabelField(
+            $"Ordered Operations ({operations.arraySize})",
+            EditorStyles.boldLabel);
+        int removeIndex = -1;
+        int moveFrom = -1;
+        int moveTo = -1;
+        for (int index = 0; index < operations.arraySize; index++)
+        {
+            SerializedProperty operation =
+                operations.GetArrayElementAtIndex(index);
+            using (new EditorGUILayout.VerticalScope(EditorStyles.helpBox))
+            {
+                using (new EditorGUILayout.HorizontalScope())
+                {
+                    SerializedProperty operationIdProperty =
+                        operation.FindPropertyRelative("operationId");
+                    string operationId = operationIdProperty?.stringValue;
+                    operation.isExpanded = EditorGUILayout.Foldout(
+                        operation.isExpanded,
+                        string.IsNullOrWhiteSpace(operationId)
+                            ? $"Operation {index + 1}"
+                            : $"{index + 1}. {operationId}",
+                        true);
+                    using (new EditorGUI.DisabledScope(index == 0))
+                    {
+                        if (GUILayout.Button("↑", GUILayout.Width(24f)))
+                        {
+                            moveFrom = index;
+                            moveTo = index - 1;
+                        }
+                    }
+                    using (new EditorGUI.DisabledScope(
+                               index >= operations.arraySize - 1))
+                    {
+                        if (GUILayout.Button("↓", GUILayout.Width(24f)))
+                        {
+                            moveFrom = index;
+                            moveTo = index + 1;
+                        }
+                    }
+                    if (GUILayout.Button("×", GUILayout.Width(24f)))
+                        removeIndex = index;
+                }
+
+                if (operation.isExpanded)
+                    DrawOperation(operation);
+            }
+
+            if (removeIndex >= 0 || moveFrom >= 0)
+                break;
+        }
+
+        if (removeIndex >= 0)
+        {
+            operations.DeleteArrayElementAtIndex(removeIndex);
+            GUI.changed = true;
+        }
+        else if (moveFrom >= 0)
+        {
+            operations.MoveArrayElement(moveFrom, moveTo);
+            GUI.changed = true;
+        }
+
+        if (GUILayout.Button("+ Add Operation"))
+        {
+            int index = operations.arraySize;
+            operations.InsertArrayElementAtIndex(index);
+            SerializedProperty added = operations.GetArrayElementAtIndex(index);
+            SerializedProperty id = added.FindPropertyRelative("operationId");
+            if (id != null)
+                id.stringValue = string.Empty;
+            added.isExpanded = true;
+            GUI.changed = true;
+        }
+    }
+
+    private void DrawOperation(SerializedProperty operation)
+    {
+        DrawRelativeProperty(operation, "operationId", "Operation ID");
+        SerializedProperty type = operation.FindPropertyRelative("type");
+        EditorGUILayout.PropertyField(type, new GUIContent("Operation Type"));
+        DrawRelativeProperty(operation, "targetScope", "Target Scope");
+        DrawRelativeProperty(operation, "condition", "Condition", true);
+
+        BattleCardOperationType operationType = type != null
+            ? (BattleCardOperationType)type.enumValueIndex
+            : default;
+        if (operationType == BattleCardOperationType.SharedEffect ||
+            operationType == BattleCardOperationType.CreateZone)
+        {
+            EditorGUILayout.Space(3f);
+            EditorGUILayout.LabelField(
+                "Shared Effect",
+                EditorStyles.miniBoldLabel);
+            BattleAbilityEditorGUI.DrawEffect(
+                operation.FindPropertyRelative("sharedEffect"),
+                selected);
+        }
+
+        EditorGUILayout.Space(3f);
+        EditorGUILayout.LabelField(
+            "References & Filters",
+            EditorStyles.miniBoldLabel);
+        DrawRelativeProperty(operation, "requiredRole", "Required Role");
+        DrawRelativeProperty(
+            operation,
+            "requiredCharacter",
+            "Required Character");
+        DrawRelativeProperty(operation, "statusEffect", "Status Effect");
+        DrawRelativeProperty(
+            operation,
+            "requiredStatus",
+            "Required Target Status");
+
+        EditorGUILayout.Space(3f);
+        EditorGUILayout.LabelField("Values", EditorStyles.miniBoldLabel);
+        DrawRelativeProperty(operation, "amount", "Amount");
+        DrawRelativeProperty(operation, "ratio", "Ratio");
+        DrawRelativeProperty(operation, "count", "Count / Uses");
+        DrawRelativeProperty(
+            operation,
+            "minimumSelectionCount",
+            "Minimum Selection Count");
+        DrawRelativeProperty(
+            operation,
+            "maximumSelectionCount",
+            "Maximum Selection Count");
+        DrawRelativeProperty(operation, "duration", "Duration");
+        DrawRelativeProperty(
+            operation,
+            "delaySeconds",
+            "Delay Seconds");
+        DrawRelativeProperty(operation, "radius", "Radius / Distance");
+        DrawRelativeProperty(
+            operation,
+            "statusDuration",
+            "Status Duration");
+        DrawRelativeProperty(
+            operation,
+            "statusStacks",
+            "Status Stacks");
+        DrawRelativeProperty(
+            operation,
+            "usePreviousChangedCount",
+            "Use Previous Changed Count");
+        DrawRelativeProperty(
+            operation,
+            "oncePerTarget",
+            "Once Per Target");
+
+        EditorGUILayout.Space(3f);
+        EditorGUILayout.LabelField("Modes", EditorStyles.miniBoldLabel);
+        DrawRelativeProperty(operation, "movementMode", "Movement Mode");
+        DrawRelativeProperty(operation, "zoneTrigger", "Zone Trigger");
+        DrawRelativeProperty(
+            operation,
+            "costModifierMode",
+            "Cost Modifier Mode");
+        DrawRelativeProperty(operation, "spatialZone", "Spatial Zone");
+    }
+
+    private static void DrawRelativeProperty(
+        SerializedProperty parent,
+        string propertyName,
+        string label,
+        bool includeChildren = false)
+    {
+        SerializedProperty property =
+            parent?.FindPropertyRelative(propertyName);
+        if (property == null)
+        {
+            EditorGUILayout.HelpBox(
+                $"Property '{propertyName}' was not found.",
+                MessageType.Error);
+            return;
+        }
+        EditorGUILayout.PropertyField(
+            property,
+            new GUIContent(label),
+            includeChildren);
     }
 
     private void DrawValidation()

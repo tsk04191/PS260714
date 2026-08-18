@@ -24,6 +24,7 @@ public enum EDungeonPauseReason
     Result = 1 << 3,
     NonBattlePhase = 1 << 4,
     BattleReward = 1 << 5,
+    CardSelection = 1 << 6,
 }
 
 public sealed class DungeonPauseCoordinator

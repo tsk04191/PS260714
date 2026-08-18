@@ -7,7 +7,7 @@ using UnityEngine;
 public sealed class BattleArchitectureRegressionTests
 {
     [Test]
-    public void EnemyAttackPower_IsMigratedAndUsedByAbilityContext()
+    public void EnemyCombatStats_AreMigratedAndUsedByRuntime()
     {
         string[] guids = AssetDatabase.FindAssets(
             "t:EnemySO",
@@ -22,8 +22,32 @@ public sealed class BattleArchitectureRegressionTests
                 definition.AuthoredCombatStatSchemaVersion,
                 Is.EqualTo(EnemySO.CurrentCombatStatSchemaVersion));
             Assert.That(definition.AttackPower, Is.GreaterThan(0f));
+            Assert.That(
+                definition.FormationRadius,
+                Is.GreaterThan(0f),
+                $"{definition.name} must author a positive formation radius.");
+            Assert.That(
+                float.IsNaN(definition.FormationRadius) ||
+                float.IsInfinity(definition.FormationRadius),
+                Is.False,
+                $"{definition.name} formation radius must be finite.");
+            Assert.That(
+                definition.CoreAttackRange,
+                Is.GreaterThanOrEqualTo(0f),
+                $"{definition.name} core range cannot be negative.");
+            Assert.That(
+                float.IsNaN(definition.CoreAttackRange) ||
+                float.IsInfinity(definition.CoreAttackRange),
+                Is.False,
+                $"{definition.name} core range must be finite.");
 
             EnemyRuntime enemy = definition.CreateRuntime();
+            Assert.That(
+                enemy.FormationRadius,
+                Is.EqualTo(definition.FormationRadius));
+            Assert.That(
+                enemy.CoreAttackRange,
+                Is.EqualTo(definition.CoreAttackRange));
             BattleEffectContext context =
                 BattleEffectContext.ForEnemyAbility(
                     enemy,

@@ -223,6 +223,44 @@ public sealed class LocalizationEditorTests
     }
 
     [Test]
+    public void CatalogSource_HasNoLocalizationValidationErrors()
+    {
+        LocalizationValidationResult result =
+            LocalizationValidator.Validate(
+                LocalizationCodeGenerator.LoadSource(),
+                false);
+
+        Assert.That(result.ErrorCount, Is.EqualTo(0));
+    }
+
+    [Test]
+    public void DynamicFontValidation_UsesSourceFaceWithoutChangingAtlas()
+    {
+        LocalizationFontCatalog catalog =
+            AssetDatabase.LoadAssetAtPath<LocalizationFontCatalog>(
+                FontCatalogPath);
+        Assert.That(catalog, Is.Not.Null);
+        Assert.That(catalog.GlobalDefaultFont, Is.Not.Null);
+        Assert.That(
+            catalog.GlobalDefaultFont.atlasPopulationMode,
+            Is.Not.EqualTo(AtlasPopulationMode.Static));
+        int characterCount =
+            catalog.GlobalDefaultFont.characterTable.Count;
+
+        LocalizationValidationResult result =
+            LocalizationValidator.Validate(
+                LocalizationSourceModel.FromDocuments(
+                    CreateLocalesDocument(),
+                    CreateStringsDocument("Fire 한글")),
+                true);
+
+        Assert.That(result.WarningCount, Is.EqualTo(0));
+        Assert.That(
+            catalog.GlobalDefaultFont.characterTable.Count,
+            Is.EqualTo(characterCount));
+    }
+
+    [Test]
     public void CsvRoundTrip_PreservesMarkupAndComma()
     {
         LocalizationCsvDocument source = CreateStringsDocument(

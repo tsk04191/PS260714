@@ -33,6 +33,31 @@ public interface IBattleCardDrawServiceProvider
     IBattleCardDrawService CardDrawService { get; }
 }
 
+/// <summary>
+/// Battle-wide card restrictions used by enemies and other systems that do
+/// not own the player's deck. Duration-based restrictions deliberately live
+/// beside the deck runtime so card UI and play validation share one source of
+/// truth.
+/// </summary>
+public interface IBattleCardControlService
+{
+    int ActiveLockedCardCount { get; }
+    int ActiveTimedCostModifierCount { get; }
+
+    bool IsCardLocked(BattleCardInstance card);
+    bool TryLockCard(BattleCardInstance card, float duration);
+    bool TryLockRandomHandCard(float duration);
+    bool TryAddTimedCostModifier(
+        BattleCardCostModifierMode mode,
+        int value,
+        float duration);
+}
+
+public interface IBattleCardControlServiceProvider
+{
+    IBattleCardControlService CardControlService { get; }
+}
+
 public enum BattleAbilityModifierValueKind
 {
     EffectAmount = 0,
@@ -50,6 +75,7 @@ public interface IBattleAbilityUserModifierService
     float Resolve(
         BattleAbilityUser user,
         BattleEffectOriginKind originKind,
+        long actionExecutionId,
         IBattleEffectDefinition effect,
         BattleAbilityModifierValueKind valueKind,
         float baseValue);
@@ -66,15 +92,18 @@ public readonly struct BattleEffectResult
     public bool Succeeded { get; }
     public bool Changed => Succeeded;
     public int DamageDealt { get; }
+    public int ResolvedAmount { get; }
 
     public BattleEffectResult(
         bool attempted,
         bool succeeded,
-        int damageDealt = 0)
+        int damageDealt = 0,
+        int resolvedAmount = 0)
     {
         Attempted = attempted;
         Succeeded = succeeded;
         DamageDealt = Mathf.Max(0, damageDealt);
+        ResolvedAmount = Mathf.Max(0, resolvedAmount);
     }
 
     public BattleEffectResult Combine(BattleEffectResult other)
@@ -84,7 +113,10 @@ public readonly struct BattleEffectResult
             Succeeded || other.Succeeded,
             BattleValueMath.SaturatingAddNonNegative(
                 DamageDealt,
-                other.DamageDealt));
+                other.DamageDealt),
+            BattleValueMath.SaturatingAddNonNegative(
+                ResolvedAmount,
+                other.ResolvedAmount));
     }
 
     public static BattleEffectResult Combine(
@@ -733,12 +765,20 @@ public static class BattleEffectExecutor
                 return default;
 
             int totalDamage = 0;
+            int totalResolvedAmount = 0;
+            int resolvedTargetCount = 0;
             int groupedDamage = 0;
             List<EnemyRuntime> groupedTargets = new();
             foreach (EnemyAmountSnapshot snapshot in snapshots)
             {
                 if (snapshot.Amount <= 0)
                     continue;
+
+                totalResolvedAmount =
+                    BattleValueMath.SaturatingAddNonNegative(
+                        totalResolvedAmount,
+                        snapshot.Amount);
+                resolvedTargetCount++;
 
                 if (groupedTargets.Count > 0 &&
                     snapshot.Amount != groupedDamage)
@@ -774,7 +814,14 @@ public static class BattleEffectExecutor
             return new BattleEffectResult(
                 true,
                 totalDamage > 0,
-                totalDamage);
+                totalDamage,
+                resolvedTargetCount > 0
+                    ? Mathf.Max(
+                        1,
+                        Mathf.RoundToInt(
+                            (float)totalResolvedAmount /
+                            resolvedTargetCount))
+                    : 0);
         }
 
         int sharedDamage = CalculateAmount(
@@ -798,7 +845,8 @@ public static class BattleEffectExecutor
             return new BattleEffectResult(
                 true,
                 damageDealt > 0,
-                damageDealt);
+                damageDealt,
+                sharedDamage);
         }
 
         bool fallbackSucceeded =
@@ -806,7 +854,8 @@ public static class BattleEffectExecutor
         return new BattleEffectResult(
             true,
             fallbackSucceeded,
-            fallbackSucceeded ? sharedDamage : 0);
+            fallbackSucceeded ? sharedDamage : 0,
+            sharedDamage);
     }
 
     private static BattleEffectResult ExecuteAlliedDamage(
@@ -903,6 +952,27 @@ public static class BattleEffectExecutor
         bool showAttackRange,
         string actionId)
     {
+        if (effect.BattleTargetMode ==
+            BattleEffectTargetMode.Objective)
+        {
+            IBattleObjective objective = context.Objective;
+            if (objective?.IsActive != true || objective.IsDestroyed)
+                return default;
+
+            int objectiveAmount = CalculateAmount(
+                effect,
+                context,
+                sourceData,
+                false,
+                amountMultiplier,
+                actionId);
+            if (objectiveAmount <= 0)
+                return default;
+
+            int restored = objective.Heal(objectiveAmount);
+            return new BattleEffectResult(true, restored > 0);
+        }
+
         if (context.Board == null)
             return default;
 
@@ -1099,6 +1169,7 @@ public static class BattleEffectExecutor
         float resolved = service.Resolve(
             context.User,
             context.OriginKind,
+            context.ActionExecutionId,
             effect,
             valueKind,
             baseValue);
@@ -1154,6 +1225,12 @@ public static class BattleEffectExecutor
 
             case BattleEffectTargetMode.FreshSelection:
                 return TrySelectFreshTargets(context, effect, out resolved);
+
+            case BattleEffectTargetMode.Objective:
+                resolved = context.RetargetToObjective();
+                IBattleObjective objective = resolved.Objective;
+                return objective?.IsActive == true &&
+                       !objective.IsDestroyed;
 
             default:
                 return false;
@@ -1220,7 +1297,19 @@ public static class BattleEffectExecutor
                Enum.IsDefined(
                    typeof(BattleEffectTargetMode),
                    effect.BattleTargetMode) &&
-               effect.AmountScaling.IsFinite;
+               effect.AmountScaling.IsFinite &&
+               (effect.BattleTargetMode !=
+                    BattleEffectTargetMode.Objective ||
+                IsSupportedObjectiveEffect(effect));
+    }
+
+    private static bool IsSupportedObjectiveEffect(
+        IBattleEffectDefinition effect)
+    {
+        return effect != null &&
+               (effect.BattleEffectType == BattleEffectType.Heal ||
+                effect.BattleEffectType == BattleEffectType.Shield) &&
+               effect.AmountScaling.TargetStatusStacksScale == 0f;
     }
 
     private static bool IsDirectDamageType(
@@ -1467,22 +1556,34 @@ public readonly struct BattleManualTargetSelectionResult
     public CharacterTargetFaction Faction { get; }
     public IReadOnlyList<EnemyRuntime> EnemyTargets { get; }
     public IReadOnlyList<IBattleCharacter> AllyTargets { get; }
+    public Vector2 WorldPoint { get; }
+    public Vector2 WorldDirection { get; }
+    public bool HasWorldPoint { get; }
     public bool Cancelled { get; }
     public bool HasTargets =>
         Faction == CharacterTargetFaction.Ally
             ? AllyTargets != null && AllyTargets.Count > 0
             : EnemyTargets != null && EnemyTargets.Count > 0;
+    public bool HasSelection => HasTargets || HasWorldPoint;
 
     public BattleManualTargetSelectionResult(
         CharacterTargetFaction faction,
         IReadOnlyList<EnemyRuntime> enemyTargets,
         IReadOnlyList<IBattleCharacter> allyTargets,
-        bool cancelled = false)
+        bool cancelled = false,
+        Vector2 worldPoint = default,
+        Vector2 worldDirection = default,
+        bool hasWorldPoint = false)
     {
         Faction = faction;
         EnemyTargets = enemyTargets ?? Array.Empty<EnemyRuntime>();
         AllyTargets = allyTargets ?? Array.Empty<IBattleCharacter>();
         Cancelled = cancelled;
+        WorldPoint = worldPoint;
+        WorldDirection = worldDirection.sqrMagnitude > 0.0001f
+            ? worldDirection.normalized
+            : Vector2.up;
+        HasWorldPoint = hasWorldPoint;
     }
 }
 
@@ -1549,8 +1650,10 @@ public sealed class BattleManualTargetSelectionRequest
         Faction == CharacterTargetFaction.Ally
             ? AllyCandidates.Count
             : EnemyCandidates.Count;
-    public int RequiredCount => UsesWorldArea && TargetCount == 0
-        ? CandidateCount
+    public int RequiredCount => UsesWorldArea
+        ? TargetCount == 0
+            ? 0
+            : Mathf.Min(TargetCount, CandidateCount)
         : Mathf.Min(TargetCount, CandidateCount);
 
     public void Complete(BattleManualTargetSelectionResult result)

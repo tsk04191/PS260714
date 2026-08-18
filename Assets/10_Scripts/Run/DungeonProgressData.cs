@@ -50,11 +50,15 @@ internal sealed class DungeonProgressEntrySaveData
 
     public bool Normalize()
     {
-        dungeonId = (dungeonId ?? string.Empty).Trim();
+        dungeonId = DungeonDefinitionCatalog.NormalizeDungeonId(dungeonId);
         clearCount = Mathf.Max(0, clearCount);
         clearedContentVersion = Mathf.Max(1, clearedContentVersion);
         return cleared && clearCount > 0 &&
-               !string.IsNullOrWhiteSpace(dungeonId);
+               !string.IsNullOrWhiteSpace(dungeonId) &&
+               !string.Equals(
+                   dungeonId,
+                   DungeonDefinitionCatalog.PracticeBattleId,
+                   StringComparison.OrdinalIgnoreCase);
     }
 }
 
@@ -94,7 +98,8 @@ public sealed class DungeonProgressData
 
     public bool IsCleared(DungeonDefinition definition)
     {
-        return definition != null && IsCleared(definition.DungeonId);
+        return definition != null && definition.PersistsDungeonProgress &&
+               IsCleared(definition.DungeonId);
     }
 
     public bool IsCleared(string dungeonId)
@@ -114,7 +119,8 @@ public sealed class DungeonProgressData
         DungeonDefinition definition,
         bool save = true)
     {
-        return definition != null && MarkCleared(
+        return definition != null && definition.PersistsDungeonProgress &&
+               MarkCleared(
             definition.DungeonId,
             definition.ContentVersion,
             save);
@@ -128,9 +134,16 @@ public sealed class DungeonProgressData
         if (_saveBlocked)
             return false;
 
-        string normalizedId = (dungeonId ?? string.Empty).Trim();
-        if (string.IsNullOrEmpty(normalizedId))
+        string normalizedId =
+            DungeonDefinitionCatalog.NormalizeDungeonId(dungeonId);
+        if (string.IsNullOrEmpty(normalizedId) ||
+            string.Equals(
+                normalizedId,
+                DungeonDefinitionCatalog.PracticeBattleId,
+                StringComparison.OrdinalIgnoreCase))
+        {
             return false;
+        }
 
         if (_entries.TryGetValue(
                 normalizedId,
@@ -241,7 +254,8 @@ public sealed class DungeonProgressData
         out DungeonProgressEntrySaveData entry)
     {
         entry = null;
-        string normalizedId = (dungeonId ?? string.Empty).Trim();
+        string normalizedId =
+            DungeonDefinitionCatalog.NormalizeDungeonId(dungeonId);
         return !string.IsNullOrEmpty(normalizedId) &&
                _entries.TryGetValue(normalizedId, out entry);
     }

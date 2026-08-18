@@ -142,7 +142,128 @@ public static class EnemyDefinitionValidator
             }
         }
 
+        ValidateCatalogReferences(definitions, ids, result);
+
         return result;
+    }
+
+    private static void ValidateCatalogReferences(
+        IReadOnlyList<EnemySO> definitions,
+        ISet<string> knownIds,
+        EnemyDefinitionValidationResult result)
+    {
+        for (int enemyIndex = 0;
+             enemyIndex < definitions.Count;
+             enemyIndex++)
+        {
+            EnemySO definition = definitions[enemyIndex];
+            if (definition == null)
+                continue;
+            for (int abilityIndex = 0;
+                 abilityIndex < definition.Abilities.Count;
+                 abilityIndex++)
+            {
+                EnemyAbilityDefinition ability =
+                    definition.Abilities[abilityIndex];
+                if (ability == null)
+                    continue;
+                string abilityPath =
+                    $"enemies[{enemyIndex}].abilities[{abilityIndex}]";
+
+                for (int parameterIndex = 0;
+                     parameterIndex < ability.Parameters.Count;
+                     parameterIndex++)
+                {
+                    EnemyAbilityParameterDefinition parameter =
+                        ability.Parameters[parameterIndex];
+                    if (parameter == null ||
+                        parameter.ValueType !=
+                            EnemyAbilityParameterValueType.EnemyReference)
+                    {
+                        continue;
+                    }
+                    ValidateCatalogReference(
+                        parameter.EnemyReference,
+                        knownIds,
+                        $"{abilityPath}.parameters[{parameterIndex}]" +
+                        ".enemyReference",
+                        result);
+                }
+
+                for (int operationIndex = 0;
+                     operationIndex < ability.Operations.Count;
+                     operationIndex++)
+                {
+                    EnemyAbilityOperationDefinition operation =
+                        ability.Operations[operationIndex];
+                    if (operation == null)
+                        continue;
+                    string operationPath =
+                        $"{abilityPath}.operations[{operationIndex}]";
+                    if (operation.Reference.IsConfigured)
+                    {
+                        ValidateCatalogReference(
+                            operation.Reference,
+                            knownIds,
+                            $"{operationPath}.reference",
+                            result);
+                    }
+                    if (operation.Type !=
+                        EnemyAbilityOperationType.SummonEnemy)
+                    {
+                        continue;
+                    }
+                    for (int candidateIndex = 0;
+                         candidateIndex < operation.Summon.Candidates.Count;
+                         candidateIndex++)
+                    {
+                        ValidateCatalogReference(
+                            operation.Summon.Candidates[candidateIndex],
+                            knownIds,
+                            $"{operationPath}.summon.candidates" +
+                            $"[{candidateIndex}]",
+                            result);
+                    }
+                }
+            }
+        }
+    }
+
+    private static void ValidateCatalogReference(
+        EnemyReferenceDefinition reference,
+        ISet<string> knownIds,
+        string path,
+        EnemyDefinitionValidationResult result)
+    {
+        if (reference == null ||
+            string.IsNullOrWhiteSpace(reference.ResolvedEnemyId))
+        {
+            return;
+        }
+        if (reference.Enemy != null &&
+            !string.IsNullOrWhiteSpace(reference.EnemyId) &&
+            !string.Equals(
+                reference.Enemy.EnemyId,
+                reference.EnemyId,
+                StringComparison.Ordinal))
+        {
+            AddError(
+                result,
+                "enemy.reference_id_mismatch",
+                path,
+                $"EnemySO reference ID '{reference.Enemy.EnemyId}' " +
+                $"does not match authored ID '{reference.EnemyId}'.");
+            return;
+        }
+        if (knownIds.Contains(reference.ResolvedEnemyId))
+            return;
+
+        AddError(
+            result,
+            "enemy.reference_unknown",
+            path,
+            $"Enemy reference '{reference.ResolvedEnemyId}' does not " +
+            "exist in this catalog.");
     }
 
     private static void ValidateDefinition(
@@ -160,9 +281,11 @@ public static class EnemyDefinitionValidator
         }
 
         ValidateIdentity(definition, result);
+        ValidateRosterMetadata(definition, result);
         ValidateBaseData(definition, result);
         ValidatePresentation(definition, result);
         ValidateAbilities(definition.Abilities, result);
+        ValidateBossPhases(definition, result);
     }
 
     private static void ValidatePresentation(
@@ -213,6 +336,87 @@ public static class EnemyDefinitionValidator
             "descriptionLocalizationKey",
             false,
             result);
+    }
+
+    private static void ValidateRosterMetadata(
+        EnemySO definition,
+        EnemyDefinitionValidationResult result)
+    {
+        if (definition.AuthoredRosterSchemaVersion < 0 ||
+            definition.AuthoredRosterSchemaVersion >
+                EnemySO.CurrentRosterSchemaVersion)
+        {
+            AddError(
+                result,
+                "enemy.roster_schema_unsupported",
+                "rosterSchemaVersion",
+                $"Roster schema {definition.AuthoredRosterSchemaVersion} " +
+                $"is unsupported; current schema is " +
+                $"{EnemySO.CurrentRosterSchemaVersion}.");
+        }
+        else if (definition.AuthoredRosterSchemaVersion <
+                 EnemySO.CurrentRosterSchemaVersion)
+        {
+            AddWarning(
+                result,
+                "enemy.roster_schema_outdated",
+                "rosterSchemaVersion",
+                "Run Tools/PS260714/Migrations/Migrate Enemy Roster " +
+                "Metadata.");
+        }
+
+        if (!Enum.IsDefined(
+                typeof(EnemyRosterTier),
+                definition.AuthoredRosterTier))
+        {
+            AddError(
+                result,
+                "enemy.roster_tier_invalid",
+                "rosterTier",
+                $"Roster tier '{definition.AuthoredRosterTier}' is " +
+                "unsupported.");
+        }
+
+        ValidateTags(
+            definition.RoleTags,
+            "roleTags",
+            definition.AuthoredRosterSchemaVersion > 0,
+            result);
+        ValidateTags(
+            definition.CounterTags,
+            "counterTags",
+            false,
+            result);
+
+        if (definition.AuthoredRecommendedMaxPerWave < 0)
+        {
+            AddError(
+                result,
+                "enemy.wave_cap_invalid",
+                "recommendedMaxPerWave",
+                "Recommended maximum per wave cannot be negative.");
+        }
+
+        if (!IsFinite(definition.AuthoredSpawnBudget) ||
+            definition.AuthoredSpawnBudget < 0f)
+        {
+            AddError(
+                result,
+                "enemy.spawn_budget_invalid",
+                "spawnBudget",
+                "Spawn budget must be finite and cannot be negative.");
+        }
+
+        if (definition.RosterTier == EnemyRosterTier.Boss &&
+            !definition.EncounterOnly)
+        {
+            AddWarning(
+                result,
+                "enemy.boss_not_encounter_only",
+                "encounterOnly",
+                "Boss roster entries should be limited to dedicated " +
+                "encounters.");
+        }
     }
 
     private static void ValidateBaseData(
@@ -276,6 +480,16 @@ public static class EnemyDefinitionValidator
                 "Circular approach speed must be finite and greater than zero.");
         }
 
+        if (!IsFinite(definition.AuthoredFormationRadius) ||
+            definition.AuthoredFormationRadius <= 0f)
+        {
+            AddError(
+                result,
+                "enemy.formation_radius_invalid",
+                "formationRadius",
+                "Formation radius must be finite and greater than zero.");
+        }
+
         if (definition.AuthoredCombatStatSchemaVersion !=
             EnemySO.CurrentCombatStatSchemaVersion)
         {
@@ -283,7 +497,7 @@ public static class EnemyDefinitionValidator
                 result,
                 "enemy.combat_stat_schema_outdated",
                 "combatStatSchemaVersion",
-                "Run Tools/PS260714/Migrations/Migrate Enemy Attack Power.");
+                "Run Tools/PS260714/Migrations/Migrate Enemy Combat Stats.");
         }
 
         if (!IsFinite(definition.AuthoredAttackPower) ||
@@ -305,6 +519,30 @@ public static class EnemyDefinitionValidator
                 "Core attack damage must be at least one.");
         }
 
+        if (!Enum.IsDefined(
+                typeof(EnemyCoreAttackDamagePolicy),
+                definition.CoreAttackDamagePolicy))
+        {
+            AddError(
+                result,
+                "enemy.core_attack_damage_policy_invalid",
+                "coreAttackDamagePolicy",
+                $"Core attack damage policy " +
+                $"'{definition.CoreAttackDamagePolicy}' is unsupported.");
+        }
+        else if (definition.CoreAttackDamagePolicy ==
+                 EnemyCoreAttackDamagePolicy.AccumulateFraction &&
+                 (!IsFinite(definition.AuthoredPreciseCoreAttackDamage) ||
+                  definition.AuthoredPreciseCoreAttackDamage <= 0f))
+        {
+            AddError(
+                result,
+                "enemy.precise_core_attack_damage_invalid",
+                "preciseCoreAttackDamage",
+                "Accumulate Fraction requires finite core attack damage " +
+                "greater than zero.");
+        }
+
         if (!IsFinite(definition.AuthoredCoreAttackInterval) ||
             definition.AuthoredCoreAttackInterval <= 0f)
         {
@@ -313,6 +551,16 @@ public static class EnemyDefinitionValidator
                 "enemy.core_attack_interval_invalid",
                 "coreAttackInterval",
                 "Core attack interval must be finite and greater than zero.");
+        }
+
+        if (!IsFinite(definition.AuthoredCoreAttackRange) ||
+            definition.AuthoredCoreAttackRange < 0f)
+        {
+            AddError(
+                result,
+                "enemy.core_attack_range_invalid",
+                "coreAttackRange",
+                "Core attack range must be finite and cannot be negative.");
         }
 
         if (!IsFinite(definition.ThreatCost) ||
@@ -438,18 +686,13 @@ public static class EnemyDefinitionValidator
                 false,
                 result);
 
-            if (!Enum.IsDefined(
-                    typeof(EnemyAbilityTrigger),
-                    ability.Trigger))
-            {
-                AddError(
-                    result,
-                    "ability.trigger_invalid",
-                    $"{path}.trigger",
-                    $"Ability trigger '{ability.Trigger}' is unsupported.");
-            }
+            ValidateAbilityMetadata(ability, path, result);
 
-            if (ability.Trigger == EnemyAbilityTrigger.OnCooldown &&
+            ValidateTriggerEvents(ability, path, result);
+
+            bool usesCooldown = ability.RespondsToTrigger(
+                EnemyAbilityTrigger.OnCooldown);
+            if (usesCooldown &&
                 ability.Cooldown <= 0f)
             {
                 AddError(
@@ -458,7 +701,7 @@ public static class EnemyDefinitionValidator
                     $"{path}.cooldown",
                     "OnCooldown abilities require a positive cooldown.");
             }
-            else if (ability.Trigger != EnemyAbilityTrigger.OnCooldown &&
+            else if (!usesCooldown &&
                      ability.Cooldown > 0f)
             {
                 AddWarning(
@@ -468,9 +711,319 @@ public static class EnemyDefinitionValidator
                     "Cooldown is only used by OnCooldown abilities.");
             }
 
+            if (ability.RespondsToTrigger(
+                    EnemyAbilityTrigger.OnHealthThreshold) &&
+                (ability.HealthThresholdPercent <= 0f ||
+                 ability.HealthThresholdPercent >= 100f))
+            {
+                AddError(
+                    result,
+                    "ability.health_threshold_invalid",
+                    $"{path}.healthThresholdPercent",
+                    "Health threshold triggers require a percentage " +
+                    "greater than zero and less than 100.");
+            }
+
+            if (ability.RespondsToTrigger(
+                    EnemyAbilityTrigger.AfterNoDamage) &&
+                ability.NoDamageDuration <= 0f)
+            {
+                AddError(
+                    result,
+                    "ability.no_damage_duration_required",
+                    $"{path}.noDamageDuration",
+                    "AfterNoDamage requires a positive duration.");
+            }
+
+            ValidateCooldownOverrides(ability, path, result);
+
+            ValidateChargeAndTelegraph(ability, path, result);
+
             ValidateTarget(ability.Target, path, result);
             ValidateConditions(ability, path, result);
             ValidateOperations(ability, path, result);
+        }
+    }
+
+    private static void ValidateBossPhases(
+        EnemySO definition,
+        EnemyDefinitionValidationResult result)
+    {
+        IReadOnlyList<EnemyBossPhaseDefinition> phases =
+            definition.PhaseDefinitions;
+        if (phases.Count == 0)
+        {
+            if (definition.AuthoredRosterSchemaVersion > 0 &&
+                definition.RosterTier == EnemyRosterTier.Boss)
+            {
+                AddError(
+                    result,
+                    "enemy.boss_phases_missing",
+                    "phaseDefinitions",
+                    "Boss roster entries require at least one phase.");
+            }
+            return;
+        }
+
+        if (definition.RosterTier != EnemyRosterTier.Boss)
+        {
+            AddWarning(
+                result,
+                "enemy.phases_on_non_boss",
+                "phaseDefinitions",
+                "Phase definitions are normally authored only for boss " +
+                "roster entries.");
+        }
+
+        HashSet<string> knownAbilityIds = new(StringComparer.Ordinal);
+        foreach (EnemyAbilityDefinition ability in definition.Abilities)
+        {
+            if (ability != null &&
+                !string.IsNullOrWhiteSpace(ability.AbilityId))
+            {
+                knownAbilityIds.Add(ability.AbilityId);
+            }
+        }
+
+        HashSet<string> phaseIds = new(StringComparer.Ordinal);
+        int[] coverage = new int[101];
+        for (int index = 0; index < phases.Count; index++)
+        {
+            EnemyBossPhaseDefinition phase = phases[index];
+            string path = $"phaseDefinitions[{index}]";
+            if (phase == null)
+            {
+                AddError(
+                    result,
+                    "enemy.boss_phase_null",
+                    path,
+                    "Boss phase definition is null.");
+                continue;
+            }
+
+            if (string.IsNullOrWhiteSpace(phase.PhaseId))
+            {
+                AddError(
+                    result,
+                    "enemy.boss_phase_id_missing",
+                    $"{path}.phaseId",
+                    "Boss phase ID is required.");
+            }
+            else if (!phaseIds.Add(phase.PhaseId))
+            {
+                AddError(
+                    result,
+                    "enemy.boss_phase_id_duplicate",
+                    $"{path}.phaseId",
+                    $"Boss phase ID '{phase.PhaseId}' is duplicated.");
+            }
+
+            ValidateLocalization(
+                phase.NameLocalizationKey,
+                phase.FallbackName,
+                $"{path}.nameLocalizationKey",
+                false,
+                result);
+
+            int minimum = phase.MinimumHealthPercent;
+            int maximum = phase.MaximumHealthPercent;
+            if (minimum < 0 || maximum > 100 || minimum > maximum)
+            {
+                AddError(
+                    result,
+                    "enemy.boss_phase_range_invalid",
+                    $"{path}.minimumHealthPercent",
+                    "Boss phase health range must satisfy 0 <= minimum " +
+                    "<= maximum <= 100.");
+            }
+            else
+            {
+                for (int percent = minimum; percent <= maximum; percent++)
+                    coverage[percent]++;
+            }
+
+            HashSet<string> phaseAbilityIds =
+                new(StringComparer.Ordinal);
+            for (int abilityIndex = 0;
+                 abilityIndex < phase.AbilityIds.Count;
+                 abilityIndex++)
+            {
+                string abilityId = phase.AbilityIds[abilityIndex];
+                string abilityPath =
+                    $"{path}.abilityIds[{abilityIndex}]";
+                if (string.IsNullOrWhiteSpace(abilityId))
+                {
+                    AddError(
+                        result,
+                        "enemy.boss_phase_ability_id_missing",
+                        abilityPath,
+                        "Boss phase ability IDs cannot be empty.");
+                }
+                else if (!phaseAbilityIds.Add(abilityId))
+                {
+                    AddError(
+                        result,
+                        "enemy.boss_phase_ability_id_duplicate",
+                        abilityPath,
+                        $"Boss phase ability ID '{abilityId}' is " +
+                        "duplicated in this phase.");
+                }
+                else if (!knownAbilityIds.Contains(abilityId))
+                {
+                    AddError(
+                        result,
+                        "enemy.boss_phase_ability_unknown",
+                        abilityPath,
+                        $"Boss phase references unknown ability " +
+                        $"'{abilityId}'.");
+                }
+            }
+        }
+
+        List<int> uncovered = new();
+        List<int> overlapping = new();
+        for (int percent = 0; percent <= 100; percent++)
+        {
+            if (coverage[percent] == 0)
+                uncovered.Add(percent);
+            else if (coverage[percent] > 1)
+                overlapping.Add(percent);
+        }
+
+        if (uncovered.Count > 0)
+        {
+            AddError(
+                result,
+                "enemy.boss_phase_coverage_gap",
+                "phaseDefinitions",
+                "Boss phases do not cover every whole-number health " +
+                $"percentage. First uncovered value: {uncovered[0]}%.");
+        }
+        if (overlapping.Count > 0)
+        {
+            AddError(
+                result,
+                "enemy.boss_phase_coverage_overlap",
+                "phaseDefinitions",
+                "Boss phase ranges overlap. First overlapping value: " +
+                $"{overlapping[0]}%.");
+        }
+    }
+
+    private static void ValidateTriggerEvents(
+        EnemyAbilityDefinition ability,
+        string abilityPath,
+        EnemyDefinitionValidationResult result)
+    {
+        if (!Enum.IsDefined(
+                typeof(EnemyAbilityTrigger),
+                ability.Trigger))
+        {
+            AddError(
+                result,
+                "ability.trigger_invalid",
+                $"{abilityPath}.trigger",
+                $"Ability trigger '{ability.Trigger}' is unsupported.");
+        }
+
+        HashSet<EnemyAbilityTrigger> triggers = new()
+        {
+            ability.Trigger
+        };
+        for (int index = 0;
+             index < ability.AdditionalTriggers.Count;
+             index++)
+        {
+            EnemyAbilityTrigger additional =
+                ability.AdditionalTriggers[index];
+            string path = $"{abilityPath}.triggerEvents[{index}]";
+            if (!Enum.IsDefined(typeof(EnemyAbilityTrigger), additional))
+            {
+                AddError(
+                    result,
+                    "ability.trigger_invalid",
+                    path,
+                    $"Ability trigger '{additional}' is unsupported.");
+            }
+            else if (!triggers.Add(additional))
+            {
+                AddError(
+                    result,
+                    "ability.trigger_duplicate",
+                    path,
+                    $"Ability trigger '{additional}' is duplicated.");
+            }
+        }
+    }
+
+    private static void ValidateCooldownOverrides(
+        EnemyAbilityDefinition ability,
+        string abilityPath,
+        EnemyDefinitionValidationResult result)
+    {
+        if (ability.CooldownOverrides.Count == 0)
+            return;
+
+        if (!ability.RespondsToTrigger(EnemyAbilityTrigger.OnCooldown))
+        {
+            AddError(
+                result,
+                "ability.cooldown_override_trigger_mismatch",
+                $"{abilityPath}.cooldownOverrides",
+                "Cooldown overrides require an OnCooldown trigger event.");
+        }
+
+        HashSet<float> thresholds = new();
+        for (int index = 0;
+             index < ability.CooldownOverrides.Count;
+             index++)
+        {
+            EnemyAbilityCooldownOverrideDefinition rule =
+                ability.CooldownOverrides[index];
+            string path = $"{abilityPath}.cooldownOverrides[{index}]";
+            if (rule == null)
+            {
+                AddError(
+                    result,
+                    "ability.cooldown_override_null",
+                    path,
+                    "Cooldown override is null.");
+                continue;
+            }
+
+            float threshold = rule.AuthoredHealthAtOrBelowPercent;
+            if (!IsFinite(threshold) ||
+                threshold <= 0f ||
+                threshold >= 100f)
+            {
+                AddError(
+                    result,
+                    "ability.cooldown_override_threshold_invalid",
+                    $"{path}.healthAtOrBelowPercent",
+                    "Cooldown override health threshold must be finite, " +
+                    "greater than zero, and less than 100.");
+            }
+            else if (!thresholds.Add(threshold))
+            {
+                AddError(
+                    result,
+                    "ability.cooldown_override_threshold_duplicate",
+                    $"{path}.healthAtOrBelowPercent",
+                    $"Cooldown override threshold " +
+                    $"{threshold}% is " +
+                    "duplicated.");
+            }
+
+            if (!IsFinite(rule.AuthoredCooldown) ||
+                rule.AuthoredCooldown <= 0f)
+            {
+                AddError(
+                    result,
+                    "ability.cooldown_override_value_invalid",
+                    $"{path}.cooldown",
+                    "Cooldown override must be finite and greater than " +
+                    "zero.");
+            }
         }
     }
 
@@ -533,6 +1086,39 @@ public static class EnemyDefinitionValidator
                 "Target faction and subject must either both be configured " +
                 "or both be None.");
         }
+        if (!Enum.IsDefined(
+                typeof(EnemyWorldLayerScope),
+                target.LayerScope))
+        {
+            AddError(
+                result,
+                "ability.target_layer_scope_invalid",
+                $"{abilityPath}.target.layerScope",
+                $"World layer scope '{target.LayerScope}' is " +
+                "unsupported.");
+        }
+        if (target.Subject == EnemyAbilityTargetSubject.WorldRadius)
+        {
+            if (!IsFinite(target.AuthoredWorldRadius) ||
+                target.AuthoredWorldRadius <= 0f)
+            {
+                AddError(
+                    result,
+                    "ability.target_world_radius_invalid",
+                    $"{abilityPath}.target.worldRadius",
+                    "World Radius targets require a finite, positive " +
+                    "radius.");
+            }
+        }
+        else if (IsFinite(target.AuthoredWorldRadius) &&
+                 target.AuthoredWorldRadius > 0f)
+        {
+            AddWarning(
+                result,
+                "ability.target_world_radius_unused",
+                $"{abilityPath}.target.worldRadius",
+                "World radius is only used by WorldRadius targets.");
+        }
         if (target.AreaDefinition == null)
         {
             AddError(
@@ -556,6 +1142,187 @@ public static class EnemyDefinitionValidator
                 "ability.world_area_unsupported",
                 $"{abilityPath}.target.areaDefinition",
                 "Enemy abilities currently support Target range only.");
+        }
+    }
+
+    private static void ValidateAbilityMetadata(
+        EnemyAbilityDefinition ability,
+        string abilityPath,
+        EnemyDefinitionValidationResult result)
+    {
+        if (string.IsNullOrWhiteSpace(ability.AbilityTypeId))
+        {
+            AddWarning(
+                result,
+                "ability.type_id_missing",
+                $"{abilityPath}.abilityTypeId",
+                "Ability Type ID is recommended for roster import and " +
+                "telemetry.");
+        }
+        else if (ContainsWhitespace(ability.AbilityTypeId))
+        {
+            AddError(
+                result,
+                "ability.type_id_whitespace",
+                $"{abilityPath}.abilityTypeId",
+                "Ability Type ID cannot contain whitespace.");
+        }
+
+        HashSet<string> parameterKeys = new(StringComparer.Ordinal);
+        IReadOnlyList<EnemyAbilityParameterDefinition> parameters =
+            ability.Parameters;
+        for (int index = 0; index < parameters.Count; index++)
+        {
+            EnemyAbilityParameterDefinition parameter = parameters[index];
+            string path = $"{abilityPath}.parameters[{index}]";
+            if (parameter == null)
+            {
+                AddError(
+                    result,
+                    "ability.parameter_null",
+                    path,
+                    "Ability parameter is null.");
+                continue;
+            }
+
+            if (string.IsNullOrWhiteSpace(parameter.Key))
+            {
+                AddError(
+                    result,
+                    "ability.parameter_key_missing",
+                    $"{path}.key",
+                    "Ability parameter key is required.");
+            }
+            else if (!parameterKeys.Add(parameter.Key))
+            {
+                AddError(
+                    result,
+                    "ability.parameter_key_duplicate",
+                    $"{path}.key",
+                    $"Ability parameter key '{parameter.Key}' is " +
+                    "duplicated.");
+            }
+
+            if (!Enum.IsDefined(
+                    typeof(EnemyAbilityParameterValueType),
+                    parameter.ValueType))
+            {
+                AddError(
+                    result,
+                    "ability.parameter_type_invalid",
+                    $"{path}.valueType",
+                    $"Parameter value type '{parameter.ValueType}' is " +
+                    "unsupported.");
+            }
+            else if (parameter.ValueType ==
+                         EnemyAbilityParameterValueType.Float &&
+                     !IsFinite(parameter.FloatValue))
+            {
+                AddError(
+                    result,
+                    "ability.parameter_float_invalid",
+                    $"{path}.floatValue",
+                    "Float parameter values must be finite.");
+            }
+            else if (parameter.ValueType ==
+                         EnemyAbilityParameterValueType.EnemyReference &&
+                     (parameter.EnemyReference == null ||
+                      !parameter.EnemyReference.IsConfigured))
+            {
+                AddError(
+                    result,
+                    "ability.parameter_reference_missing",
+                    $"{path}.enemyReference",
+                    "Enemy reference parameters require an EnemySO or " +
+                    "Enemy ID.");
+            }
+        }
+    }
+
+    private static void ValidateChargeAndTelegraph(
+        EnemyAbilityDefinition ability,
+        string abilityPath,
+        EnemyDefinitionValidationResult result)
+    {
+        EnemyAbilityChargeDefinition charge = ability.Charge;
+        if (charge == null)
+        {
+            AddError(
+                result,
+                "ability.charge_null",
+                $"{abilityPath}.charge",
+                "Charge definition is null.");
+        }
+        else if (charge.IsEnabled)
+        {
+            if (!IsFinite(charge.AuthoredDuration) ||
+                charge.AuthoredDuration <= 0f)
+            {
+                AddError(
+                    result,
+                    "ability.charge_duration_invalid",
+                    $"{abilityPath}.charge.duration",
+                    "Enabled charges require a finite, positive duration.");
+            }
+
+            if (charge.IsInterruptible &&
+                charge.Interrupts == EnemyChargeInterruptFlags.None)
+            {
+                AddError(
+                    result,
+                    "ability.charge_interrupts_missing",
+                    $"{abilityPath}.charge.interrupts",
+                    "Interruptible charges require at least one interrupt " +
+                    "reason.");
+            }
+            const EnemyChargeInterruptFlags knownInterrupts =
+                EnemyChargeInterruptFlags.Stun |
+                EnemyChargeInterruptFlags.ForcedMovement |
+                EnemyChargeInterruptFlags.DirectDamage |
+                EnemyChargeInterruptFlags.AnyControl;
+            if ((charge.Interrupts & ~knownInterrupts) != 0)
+            {
+                AddError(
+                    result,
+                    "ability.charge_interrupts_invalid",
+                    $"{abilityPath}.charge.interrupts",
+                    $"Charge interrupt flags '{charge.Interrupts}' contain " +
+                    "unsupported values.");
+            }
+        }
+
+        EnemyAbilityTelegraphDefinition telegraph = ability.Telegraph;
+        if (telegraph == null)
+        {
+            AddError(
+                result,
+                "ability.telegraph_null",
+                $"{abilityPath}.telegraph",
+                "Telegraph definition is null.");
+        }
+        else if (telegraph.IsEnabled)
+        {
+            if (!IsFinite(telegraph.AuthoredLeadTime) ||
+                telegraph.AuthoredLeadTime < 0f)
+            {
+                AddError(
+                    result,
+                    "ability.telegraph_lead_time_invalid",
+                    $"{abilityPath}.telegraph.leadTime",
+                    "Enabled telegraphs require a finite, non-negative " +
+                    "lead time. Zero represents an immediate ready cue.");
+            }
+
+            if (!IsFinite(telegraph.AuthoredWorldRadius) ||
+                telegraph.AuthoredWorldRadius < 0f)
+            {
+                AddError(
+                    result,
+                    "ability.telegraph_radius_invalid",
+                    $"{abilityPath}.telegraph.worldRadius",
+                    "Telegraph world radius must be finite and cannot be " +
+                    "negative.");
+            }
         }
     }
 
@@ -711,8 +1478,10 @@ public static class EnemyDefinitionValidator
             }
             if (condition.Type ==
                     EnemyAbilityConditionType.IncomingDamageType &&
-                ability.Trigger != EnemyAbilityTrigger.BeforeSelfDamage &&
-                ability.Trigger != EnemyAbilityTrigger.BeforeAllyDamage)
+                !ability.RespondsToTrigger(
+                    EnemyAbilityTrigger.BeforeSelfDamage) &&
+                !ability.RespondsToTrigger(
+                    EnemyAbilityTrigger.BeforeAllyDamage))
             {
                 AddError(
                     result,
@@ -720,6 +1489,32 @@ public static class EnemyDefinitionValidator
                     path,
                     "IncomingDamageType can only be used by a " +
                     "before-damage trigger.");
+            }
+            if (condition.Type ==
+                    EnemyAbilityConditionType.RepeatedDamageSource)
+            {
+                if (!IsFinite(condition.AuthoredWindowDuration) ||
+                    condition.AuthoredWindowDuration <= 0f)
+                {
+                    AddError(
+                        result,
+                        "ability.condition_damage_source_window_invalid",
+                        $"{path}.windowDuration",
+                        "RepeatedDamageSource requires a finite, positive " +
+                        "history window in seconds.");
+                }
+                if (!ability.RespondsToTrigger(
+                        EnemyAbilityTrigger.BeforeSelfDamage) &&
+                    !ability.RespondsToTrigger(
+                        EnemyAbilityTrigger.BeforeAllyDamage))
+                {
+                    AddError(
+                        result,
+                        "ability.condition_damage_trigger_mismatch",
+                        path,
+                        "RepeatedDamageSource can only be used by a " +
+                        "before-damage trigger.");
+                }
             }
         }
     }
@@ -814,7 +1609,55 @@ public static class EnemyDefinitionValidator
                 continue;
             }
 
-            if (!IsCompatible(ability.Trigger, operation.Type))
+            if (ContainsWhitespace(operation.SourceId))
+            {
+                AddError(
+                    result,
+                    "ability.source_id_whitespace",
+                    $"{path}.sourceId",
+                    "Operation Source ID cannot contain whitespace.");
+            }
+
+            if (!IsFinite(operation.AuthoredDuration) ||
+                operation.AuthoredDuration < 0f)
+            {
+                AddError(
+                    result,
+                    "ability.duration_invalid",
+                    $"{path}.duration",
+                    "Operation duration must be finite and cannot be " +
+                    "negative.");
+            }
+            if (!IsFinite(operation.AuthoredInterval) ||
+                operation.AuthoredInterval < 0f)
+            {
+                AddError(
+                    result,
+                    "ability.interval_invalid",
+                    $"{path}.interval",
+                    "Operation interval must be finite and cannot be " +
+                    "negative.");
+            }
+            if (!IsFinite(operation.AuthoredWorldRadius) ||
+                operation.AuthoredWorldRadius < 0f)
+            {
+                AddError(
+                    result,
+                    "ability.world_radius_invalid",
+                    $"{path}.worldRadius",
+                    "Operation world radius must be finite and cannot be " +
+                    "negative.");
+            }
+            if (operation.AuthoredMaximumStacks < 0)
+            {
+                AddError(
+                    result,
+                    "ability.maximum_stacks_invalid",
+                    $"{path}.maximumStacks",
+                    "Operation maximum stacks cannot be negative.");
+            }
+
+            if (!IsCompatibleWithAnyTrigger(ability, operation.Type))
             {
                 AddError(
                     result,
@@ -824,11 +1667,12 @@ public static class EnemyDefinitionValidator
                     $"{ability.Trigger}.");
             }
 
-            ValidateOperationValues(operation, path, result);
+            ValidateOperationValues(ability, operation, path, result);
         }
     }
 
     private static void ValidateOperationValues(
+        EnemyAbilityDefinition ability,
         EnemyAbilityOperationDefinition operation,
         string path,
         EnemyDefinitionValidationResult result)
@@ -886,14 +1730,7 @@ public static class EnemyDefinitionValidator
                 break;
 
             case EnemyAbilityOperationType.ModifyIncomingDamage:
-                if (operation.Amount < 0)
-                {
-                    AddError(
-                        result,
-                        "ability.amount_invalid",
-                        $"{path}.amount",
-                        "Incoming damage amount cannot be negative.");
-                }
+                ValidateModifierValues(operation, path, result);
                 break;
 
             case EnemyAbilityOperationType.ExpandSpawnGroup:
@@ -955,6 +1792,310 @@ public static class EnemyDefinitionValidator
                         "priority adjustment.");
                 }
                 break;
+
+            case EnemyAbilityOperationType.ModifyCoreAttackDamage:
+            case EnemyAbilityOperationType.ModifyStatusDuration:
+            case EnemyAbilityOperationType.ModifyResourceRecovery:
+            case EnemyAbilityOperationType.ModifyCoreRecovery:
+            case EnemyAbilityOperationType.ModifyCoreMaximumHealth:
+                ValidateModifierValues(operation, path, result);
+                break;
+
+            case EnemyAbilityOperationType.ModifyCoreAttackInterval:
+                if (!IsFinite(operation.Multiplier) ||
+                    operation.Multiplier <= 0f)
+                {
+                    AddError(
+                        result,
+                        "ability.multiplier_invalid",
+                        $"{path}.multiplier",
+                        "Core attack interval multiplier must be finite " +
+                        "and greater than zero.");
+                }
+                break;
+
+            case EnemyAbilityOperationType.GrantStatusImmunity:
+                ValidateDuration(operation, path, allowPermanent: true, result);
+                break;
+
+            case EnemyAbilityOperationType.ChargeCoreAttack:
+                if (!ability.Charge.IsEnabled)
+                {
+                    AddError(
+                        result,
+                        "ability.charge_definition_required",
+                        $"{path}.type",
+                        "ChargeCoreAttack requires an enabled ability " +
+                        "charge definition.");
+                }
+                break;
+
+            case EnemyAbilityOperationType.SummonEnemy:
+                ValidateSummon(operation.Summon, path, result);
+                break;
+
+            case EnemyAbilityOperationType.ApplyCoreEffect:
+                ValidateModifierValues(operation, path, result);
+                if (operation.Interval > 0f && operation.Duration <= 0f)
+                {
+                    AddError(
+                        result,
+                        "ability.effect_duration_required",
+                        $"{path}.duration",
+                        "Periodic core effects require a positive " +
+                        "duration.");
+                }
+                break;
+
+            case EnemyAbilityOperationType.CreateWorldZone:
+                if (!IsFinite(operation.WorldRadius) ||
+                    operation.WorldRadius <= 0f)
+                {
+                    AddError(
+                        result,
+                        "ability.world_radius_invalid",
+                        $"{path}.worldRadius",
+                        "World zones require a finite, positive radius.");
+                }
+                ValidateDuration(operation, path, allowPermanent: false, result);
+                break;
+
+            case EnemyAbilityOperationType.LinkTargets:
+                if (operation.Count < 1)
+                {
+                    AddError(
+                        result,
+                        "ability.link_count_invalid",
+                        $"{path}.count",
+                        "LinkTargets requires at least one linked target.");
+                }
+                break;
+
+            case EnemyAbilityOperationType.ReflectDamage:
+                if (!IsFinite(operation.Percentage) ||
+                    operation.Percentage <= 0f)
+                {
+                    AddError(
+                        result,
+                        "ability.percentage_invalid",
+                        $"{path}.percentage",
+                        "Reflected damage percentage must be finite and " +
+                        "greater than zero.");
+                }
+                break;
+
+            case EnemyAbilityOperationType.ReplayAbility:
+                if (!string.IsNullOrWhiteSpace(
+                        operation.ReferencedAbilityId) &&
+                    ContainsWhitespace(operation.ReferencedAbilityId))
+                {
+                    AddError(
+                        result,
+                        "ability.reference_id_whitespace",
+                        $"{path}.referencedAbilityId",
+                        "Referenced Ability ID cannot contain whitespace.");
+                }
+                break;
+
+            case EnemyAbilityOperationType.ModifyCardCost:
+                if (operation.Amount <= 0)
+                {
+                    AddError(
+                        result,
+                        "ability.amount_invalid",
+                        $"{path}.amount",
+                        "Card cost modification requires a positive " +
+                        "amount.");
+                }
+                ValidateDuration(operation, path, allowPermanent: false, result);
+                break;
+
+            case EnemyAbilityOperationType.ModifyPlayerActionInterval:
+                if (!IsFinite(operation.Multiplier) ||
+                    operation.Multiplier <= 0f)
+                {
+                    AddError(
+                        result,
+                        "ability.multiplier_invalid",
+                        $"{path}.multiplier",
+                        "Player action interval multiplier must be finite " +
+                        "and greater than zero.");
+                }
+                ValidateDuration(operation, path, allowPermanent: true, result);
+                break;
+
+            case EnemyAbilityOperationType.ConvertCoreDamageToSelfShield:
+                if (!IsFinite(operation.Percentage) ||
+                    operation.Percentage <= 0f)
+                {
+                    AddError(
+                        result,
+                        "ability.percentage_invalid",
+                        $"{path}.percentage",
+                        "Core damage conversion requires a finite, " +
+                        "positive percentage.");
+                }
+                break;
+
+            case EnemyAbilityOperationType.LockCard:
+                if (operation.Count <= 0)
+                {
+                    AddError(
+                        result,
+                        "ability.count_invalid",
+                        $"{path}.count",
+                        "LockCard requires at least one card.");
+                }
+                ValidateDuration(operation, path, allowPermanent: false, result);
+                break;
+
+            case EnemyAbilityOperationType.SetUntargetable:
+                ValidateDuration(operation, path, allowPermanent: false, result);
+                break;
+        }
+    }
+
+    private static void ValidateModifierValues(
+        EnemyAbilityOperationDefinition operation,
+        string path,
+        EnemyDefinitionValidationResult result)
+    {
+        if (!IsFinite(operation.Multiplier) || operation.Multiplier < 0f)
+        {
+            AddError(
+                result,
+                "ability.multiplier_invalid",
+                $"{path}.multiplier",
+                "Modifier multiplier must be finite and cannot be " +
+                "negative.");
+        }
+        if (!IsFinite(operation.Percentage))
+        {
+            AddError(
+                result,
+                "ability.percentage_invalid",
+                $"{path}.percentage",
+                "Modifier percentage must be finite.");
+        }
+    }
+
+    private static void ValidateDuration(
+        EnemyAbilityOperationDefinition operation,
+        string path,
+        bool allowPermanent,
+        EnemyDefinitionValidationResult result)
+    {
+        if (!IsFinite(operation.AuthoredDuration) ||
+            (!allowPermanent && operation.AuthoredDuration <= 0f) ||
+            (allowPermanent && operation.AuthoredDuration < 0f))
+        {
+            AddError(
+                result,
+                "ability.duration_invalid",
+                $"{path}.duration",
+                allowPermanent
+                    ? "Duration must be finite and cannot be negative; " +
+                      "zero means permanent."
+                    : "Duration must be finite and greater than zero.");
+        }
+    }
+
+    private static void ValidateSummon(
+        EnemySummonDefinition summon,
+        string path,
+        EnemyDefinitionValidationResult result)
+    {
+        if (summon == null)
+        {
+            AddError(
+                result,
+                "ability.summon_null",
+                $"{path}.summon",
+                "Summon definition is null.");
+            return;
+        }
+
+        if (summon.AuthoredMinimumCount <= 0 ||
+            summon.AuthoredMaximumCount < summon.AuthoredMinimumCount)
+        {
+            AddError(
+                result,
+                "ability.summon_count_invalid",
+                $"{path}.summon.maximumCount",
+                "Summon maximum count must be at least the positive " +
+                "minimum count.");
+        }
+
+        if (summon.AuthoredMaximumActive < 0)
+        {
+            AddError(
+                result,
+                "ability.summon_active_cap_invalid",
+                $"{path}.summon.maximumActive",
+                "Summon active cap cannot be negative; zero means no " +
+                "explicit cap for non-recursive summons.");
+        }
+        if (!IsFinite(summon.AuthoredChildHealthMultiplier) ||
+            summon.AuthoredChildHealthMultiplier <= 0f ||
+            !IsFinite(summon.AuthoredChildCoreAttackMultiplier) ||
+            summon.AuthoredChildCoreAttackMultiplier <= 0f)
+        {
+            AddError(
+                result,
+                "ability.summon_child_multiplier_invalid",
+                $"{path}.summon.childHealthMultiplier",
+                "Summoned child health and core-attack multipliers must " +
+                "be finite and greater than zero.");
+        }
+
+        if (summon.Candidates.Count == 0)
+        {
+            AddError(
+                result,
+                "ability.summon_candidates_empty",
+                $"{path}.summon.candidates",
+                "SummonEnemy requires at least one enemy reference.");
+            return;
+        }
+
+        HashSet<string> candidateIds = new(StringComparer.Ordinal);
+        for (int index = 0; index < summon.Candidates.Count; index++)
+        {
+            EnemyReferenceDefinition candidate = summon.Candidates[index];
+            string candidatePath =
+                $"{path}.summon.candidates[{index}]";
+            if (candidate == null ||
+                string.IsNullOrWhiteSpace(candidate.ResolvedEnemyId))
+            {
+                AddError(
+                    result,
+                    "ability.summon_candidate_missing",
+                    candidatePath,
+                    "Summon candidates require an EnemySO or Enemy ID.");
+                continue;
+            }
+
+            if (!candidateIds.Add(candidate.ResolvedEnemyId))
+            {
+                AddError(
+                    result,
+                    "ability.summon_candidate_duplicate",
+                    candidatePath,
+                    $"Summon candidate '{candidate.ResolvedEnemyId}' is " +
+                    "duplicated.");
+            }
+
+        }
+
+        if (summon.AllowRecursiveSummon &&
+            summon.AuthoredMaximumActive <= 0)
+        {
+            AddError(
+                result,
+                "ability.recursive_summon_cap_missing",
+                $"{path}.summon.maximumActive",
+                "Recursive summoning requires a positive active " +
+                "summon cap.");
         }
     }
 
@@ -965,9 +2106,13 @@ public static class EnemyDefinitionValidator
         return operation switch
         {
             EnemyAbilityOperationType.ModifySpawnInterval =>
-                trigger == EnemyAbilityTrigger.OnSpawnQueueEvaluation,
+                trigger == EnemyAbilityTrigger.OnSpawnQueueEvaluation ||
+                trigger == EnemyAbilityTrigger.OnCooldown ||
+                trigger == EnemyAbilityTrigger.AlwaysWhileActive ||
+                trigger == EnemyAbilityTrigger.OnPhaseChanged,
             EnemyAbilityOperationType.ModifyIncomingDamage =>
-                trigger == EnemyAbilityTrigger.BeforeSelfDamage,
+                trigger != EnemyAbilityTrigger.OnSpawnQueueEvaluation &&
+                trigger != EnemyAbilityTrigger.OnTargetPriorityEvaluation,
             EnemyAbilityOperationType.ExpandSpawnGroup =>
                 trigger == EnemyAbilityTrigger.OnSpawnQueueEvaluation,
             EnemyAbilityOperationType.GrantArmor =>
@@ -975,12 +2120,53 @@ public static class EnemyDefinitionValidator
             EnemyAbilityOperationType.RedirectDamage =>
                 trigger == EnemyAbilityTrigger.BeforeAllyDamage,
             EnemyAbilityOperationType.ModifyTargetPriority =>
-                trigger == EnemyAbilityTrigger.OnTargetPriorityEvaluation,
+                trigger == EnemyAbilityTrigger.OnTargetPriorityEvaluation ||
+                trigger == EnemyAbilityTrigger.OnCooldown ||
+                trigger == EnemyAbilityTrigger.AlwaysWhileActive,
             EnemyAbilityOperationType.ExecuteEffects =>
+                trigger != EnemyAbilityTrigger.OnSpawnQueueEvaluation &&
+                trigger != EnemyAbilityTrigger.OnTargetPriorityEvaluation,
+            EnemyAbilityOperationType.ModifyCoreAttackDamage or
+            EnemyAbilityOperationType.ModifyCoreAttackInterval or
+            EnemyAbilityOperationType.ModifyStatusDuration or
+            EnemyAbilityOperationType.GrantStatusImmunity or
+            EnemyAbilityOperationType.ChargeCoreAttack or
+            EnemyAbilityOperationType.SummonEnemy or
+            EnemyAbilityOperationType.ApplyCoreEffect or
+            EnemyAbilityOperationType.CreateWorldZone or
+            EnemyAbilityOperationType.LinkTargets or
+            EnemyAbilityOperationType.ReflectDamage or
+            EnemyAbilityOperationType.ReplayAbility or
+            EnemyAbilityOperationType.ModifyCardCost or
+            EnemyAbilityOperationType.LockCard or
+            EnemyAbilityOperationType.ModifyResourceRecovery or
+            EnemyAbilityOperationType.ModifyCoreRecovery or
+            EnemyAbilityOperationType.ModifyCoreMaximumHealth or
+            EnemyAbilityOperationType.SetUntargetable =>
+                trigger != EnemyAbilityTrigger.OnSpawnQueueEvaluation &&
+                trigger != EnemyAbilityTrigger.OnTargetPriorityEvaluation,
+            EnemyAbilityOperationType.ModifyPlayerActionInterval or
+            EnemyAbilityOperationType.ConvertCoreDamageToSelfShield =>
                 trigger != EnemyAbilityTrigger.OnSpawnQueueEvaluation &&
                 trigger != EnemyAbilityTrigger.OnTargetPriorityEvaluation,
             _ => false
         };
+    }
+
+    private static bool IsCompatibleWithAnyTrigger(
+        EnemyAbilityDefinition ability,
+        EnemyAbilityOperationType operation)
+    {
+        if (ability == null)
+            return false;
+        if (IsCompatible(ability.Trigger, operation))
+            return true;
+        foreach (EnemyAbilityTrigger trigger in ability.AdditionalTriggers)
+        {
+            if (IsCompatible(trigger, operation))
+                return true;
+        }
+        return false;
     }
 
     private static void ValidateLocalization(
@@ -1059,6 +2245,61 @@ public static class EnemyDefinitionValidator
                 "enemyId",
                 $"EnemyId '{definition.EnemyId}' is duplicated.");
             return;
+        }
+    }
+
+    private static void ValidateTags(
+        IReadOnlyList<string> tags,
+        string path,
+        bool required,
+        EnemyDefinitionValidationResult result)
+    {
+        if (tags == null || tags.Count == 0)
+        {
+            if (required)
+            {
+                AddError(
+                    result,
+                    "enemy.role_tags_missing",
+                    path,
+                    "Current roster entries require at least one role " +
+                    "tag.");
+            }
+            return;
+        }
+
+        HashSet<string> uniqueTags = new(StringComparer.Ordinal);
+        for (int index = 0; index < tags.Count; index++)
+        {
+            string tag = tags[index];
+            string tagPath = $"{path}[{index}]";
+            if (string.IsNullOrWhiteSpace(tag))
+            {
+                AddError(
+                    result,
+                    "enemy.tag_empty",
+                    tagPath,
+                    "Enemy tags cannot be empty.");
+                continue;
+            }
+
+            if (ContainsWhitespace(tag))
+            {
+                AddError(
+                    result,
+                    "enemy.tag_whitespace",
+                    tagPath,
+                    "Enemy tags cannot contain whitespace.");
+            }
+
+            if (!uniqueTags.Add(tag))
+            {
+                AddError(
+                    result,
+                    "enemy.tag_duplicate",
+                    tagPath,
+                    $"Enemy tag '{tag}' is duplicated.");
+            }
         }
     }
 

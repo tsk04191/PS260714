@@ -10,7 +10,22 @@ public enum EnemyAbilityTrigger
     BeforeAllyDamage = 3,
     OnDeath = 4,
     OnSpawnQueueEvaluation = 5,
-    OnTargetPriorityEvaluation = 6
+    OnTargetPriorityEvaluation = 6,
+    AlwaysWhileActive = 7,
+    OnFirstCoreContact = 8,
+    OnCoreContact = 9,
+    BeforeCoreAttack = 10,
+    OnCoreHit = 11,
+    OnHealthThreshold = 12,
+    AfterNoDamage = 13,
+    OnNearbyEnemyDeath = 14,
+    OnChargeStarted = 15,
+    OnChargeInterrupted = 16,
+    OnPhaseChanged = 17,
+    OnPlayerCardPlayed = 18,
+    OnAllyEnteredRadius = 19,
+    OnDamageTaken = 20,
+    OnStatusApplied = 21
 }
 
 public enum EnemyAbilityOperationType
@@ -21,7 +36,26 @@ public enum EnemyAbilityOperationType
     ExpandSpawnGroup = 3,
     GrantArmor = 4,
     RedirectDamage = 5,
-    ModifyTargetPriority = 6
+    ModifyTargetPriority = 6,
+    ModifyCoreAttackDamage = 7,
+    ModifyCoreAttackInterval = 8,
+    ModifyStatusDuration = 9,
+    GrantStatusImmunity = 10,
+    ChargeCoreAttack = 11,
+    SummonEnemy = 12,
+    ApplyCoreEffect = 13,
+    CreateWorldZone = 14,
+    LinkTargets = 15,
+    ReflectDamage = 16,
+    ReplayAbility = 17,
+    ModifyCardCost = 18,
+    LockCard = 19,
+    ModifyResourceRecovery = 20,
+    ModifyCoreRecovery = 21,
+    ModifyCoreMaximumHealth = 22,
+    SetUntargetable = 23,
+    ModifyPlayerActionInterval = 24,
+    ConvertCoreDamageToSelfShield = 25
 }
 
 public enum EnemyTargetPriorityMode
@@ -59,7 +93,8 @@ public enum EnemyAbilityTargetSubject
     Random = 3,
     HighestValue = 4,
     LowestValue = 5,
-    Adjacent = 6
+    Adjacent = 6,
+    WorldRadius = 7
 }
 
 public enum EnemyAbilityTargetMetric
@@ -82,7 +117,8 @@ public enum EnemyAbilityConditionType
     TargetHasStatus = 5,
     IncomingDamageType = 6,
     HasAlternateTarget = 7,
-    TargetTotalDamageDealt = 8
+    TargetTotalDamageDealt = 8,
+    RepeatedDamageSource = 9
 }
 
 public static class EnemyAbilityIds
@@ -114,6 +150,12 @@ public sealed class EnemyAbilityTargetDefinition
     private int range = 1;
     [SerializeField]
     private bool includeDiagonals;
+    [SerializeField, Min(0f)]
+    private float worldRadius;
+    [SerializeField]
+    private bool includeSource;
+    [SerializeField]
+    private EnemyWorldLayerScope layerScope;
     [SerializeField]
     private BattleAreaDefinition areaDefinition = new();
 
@@ -123,6 +165,10 @@ public sealed class EnemyAbilityTargetDefinition
     public int TargetCount => targetCount;
     public int Range => range;
     public bool IncludeDiagonals => includeDiagonals;
+    public float WorldRadius => Mathf.Max(0f, worldRadius);
+    public bool IncludeSource => includeSource;
+    public EnemyWorldLayerScope LayerScope => layerScope;
+    internal float AuthoredWorldRadius => worldRadius;
     public BattleAreaDefinition AreaDefinition =>
         areaDefinition ??= new BattleAreaDefinition();
     public bool HasTarget =>
@@ -136,7 +182,11 @@ public sealed class EnemyAbilityTargetDefinition
             EnemyAbilityTargetMetric.None,
         int count = 1,
         int targetRange = 1,
-        bool diagonals = false)
+        bool diagonals = false,
+        float radius = 0f,
+        bool includesSource = false,
+        EnemyWorldLayerScope worldLayerScope =
+            EnemyWorldLayerScope.All)
     {
         return new EnemyAbilityTargetDefinition
         {
@@ -146,6 +196,9 @@ public sealed class EnemyAbilityTargetDefinition
             targetCount = Mathf.Max(1, count),
             range = Mathf.Max(1, targetRange),
             includeDiagonals = diagonals,
+            worldRadius = Mathf.Max(0f, radius),
+            includeSource = includesSource,
+            layerScope = worldLayerScope,
             areaDefinition = new BattleAreaDefinition(),
         };
     }
@@ -157,6 +210,11 @@ public sealed class EnemyAbilityTargetDefinition
             range,
             1,
             DungeonBoardView.MaximumGridSize - 1);
+        if (float.IsNaN(worldRadius) || float.IsInfinity(worldRadius))
+            worldRadius = 0f;
+        worldRadius = Mathf.Max(0f, worldRadius);
+        if (!Enum.IsDefined(typeof(EnemyWorldLayerScope), layerScope))
+            layerScope = EnemyWorldLayerScope.All;
         areaDefinition ??= new BattleAreaDefinition();
         areaDefinition.Validate();
     }
@@ -185,6 +243,11 @@ public sealed class EnemyAbilityConditionDefinition
     private CharacterAttackDamageType incomingDamageType;
     [SerializeField]
     private bool expected = true;
+    [SerializeField, Min(0f), Tooltip(
+        "For RepeatedDamageSource, the prior-hit history window in " +
+        "seconds. The current incoming source ID is supplied by combat " +
+        "runtime context.")]
+    private float windowDuration;
 
     public EnemyAbilityConditionType Type => type;
     public CharacterNumericComparison Comparison => comparison;
@@ -205,6 +268,8 @@ public sealed class EnemyAbilityConditionDefinition
     public CharacterAttackDamageType IncomingDamageType =>
         incomingDamageType;
     public bool Expected => expected;
+    public float WindowDuration => Mathf.Max(0f, windowDuration);
+    internal float AuthoredWindowDuration => windowDuration;
 
     internal static EnemyAbilityConditionDefinition
         CreateIncomingDamagePreset(
@@ -259,6 +324,12 @@ public sealed class EnemyAbilityConditionDefinition
         statusMatchCount = Mathf.Max(1, statusMatchCount);
         if (float.IsNaN(threshold) || float.IsInfinity(threshold))
             threshold = 0f;
+        if (float.IsNaN(windowDuration) ||
+            float.IsInfinity(windowDuration))
+        {
+            windowDuration = 0f;
+        }
+        windowDuration = Mathf.Max(0f, windowDuration);
     }
 }
 
@@ -285,6 +356,24 @@ public sealed class EnemyAbilityOperationDefinition
     private EnemyTargetPriorityMode targetPriorityMode;
     [SerializeField]
     private int targetPriorityAdjustment;
+    [SerializeField]
+    private string sourceId;
+    [SerializeField, Min(0f)]
+    private float duration;
+    [SerializeField, Min(0f)]
+    private float interval;
+    [SerializeField, Min(0f)]
+    private float worldRadius;
+    [SerializeField]
+    private float percentage;
+    [SerializeField, Min(0)]
+    private int maximumStacks;
+    [SerializeField]
+    private string referencedAbilityId;
+    [SerializeField]
+    private EnemyReferenceDefinition reference = new();
+    [SerializeField]
+    private EnemySummonDefinition summon = new();
 
     public EnemyAbilityOperationType Type => type;
     public IReadOnlyList<CharacterEffectDefinition> Effects =>
@@ -300,6 +389,21 @@ public sealed class EnemyAbilityOperationDefinition
     public EnemyTargetPriorityMode TargetPriorityMode =>
         targetPriorityMode;
     public int TargetPriorityAdjustment => targetPriorityAdjustment;
+    public string SourceId => sourceId ?? string.Empty;
+    public float Duration => Mathf.Max(0f, duration);
+    public float Interval => Mathf.Max(0f, interval);
+    public float WorldRadius => Mathf.Max(0f, worldRadius);
+    public float Percentage => percentage;
+    public int MaximumStacks => Mathf.Max(0, maximumStacks);
+    public string ReferencedAbilityId => referencedAbilityId ?? string.Empty;
+    public EnemyReferenceDefinition Reference =>
+        reference ??= new EnemyReferenceDefinition();
+    public EnemySummonDefinition Summon =>
+        summon ??= new EnemySummonDefinition();
+    internal float AuthoredDuration => duration;
+    internal float AuthoredInterval => interval;
+    internal float AuthoredWorldRadius => worldRadius;
+    internal int AuthoredMaximumStacks => maximumStacks;
 
     internal static EnemyAbilityOperationDefinition CreateRuntimePreset(
         EnemyAbilityOperationType operationType,
@@ -335,6 +439,8 @@ public sealed class EnemyAbilityOperationDefinition
             enabled = true,
             targetPriorityMode = priorityMode,
             targetPriorityAdjustment = priorityAdjustment,
+            reference = new EnemyReferenceDefinition(),
+            summon = new EnemySummonDefinition(),
         };
     }
 
@@ -359,6 +465,26 @@ public sealed class EnemyAbilityOperationDefinition
         {
             targetPriorityMode = EnemyTargetPriorityMode.Exclude;
         }
+        duration = NormalizeNonNegative(duration);
+        interval = NormalizeNonNegative(interval);
+        worldRadius = NormalizeNonNegative(worldRadius);
+        if (float.IsNaN(percentage) || float.IsInfinity(percentage))
+            percentage = 0f;
+        maximumStacks = Mathf.Max(0, maximumStacks);
+        referencedAbilityId =
+            (referencedAbilityId ?? string.Empty).Trim();
+        sourceId = (sourceId ?? string.Empty).Trim();
+        reference ??= new EnemyReferenceDefinition();
+        reference.Validate();
+        summon ??= new EnemySummonDefinition();
+        summon.Validate();
+    }
+
+    private static float NormalizeNonNegative(float value)
+    {
+        return !float.IsNaN(value) && !float.IsInfinity(value)
+            ? Mathf.Max(0f, value)
+            : 0f;
     }
 }
 
@@ -372,15 +498,25 @@ public sealed class EnemyAbilityDefinition : IBattleAbilityDefinition
     [SerializeField]
     private string descriptionLocalizationKey;
     [SerializeField]
+    private string abilityTypeId;
+    [SerializeField]
+    private List<EnemyAbilityParameterDefinition> parameters = new();
+    [SerializeField]
     private string fallbackName;
     [SerializeField, TextArea(2, 6)]
     private string fallbackDescription;
     [SerializeField]
     private EnemyAbilityTrigger trigger;
+    [SerializeField, Tooltip(
+        "Additional OR triggers. The primary Trigger is always included.")]
+    private List<EnemyAbilityTrigger> triggerEvents = new();
     [SerializeField]
     private int priority;
     [SerializeField, Min(0f)]
     private float cooldown;
+    [SerializeField]
+    private List<EnemyAbilityCooldownOverrideDefinition>
+        cooldownOverrides = new();
     [SerializeField]
     private EnemyAbilityCooldownResetPolicy cooldownResetPolicy;
     [SerializeField]
@@ -397,17 +533,38 @@ public sealed class EnemyAbilityDefinition : IBattleAbilityDefinition
     private EnemyAbilityTargetDefinition target = new();
     [SerializeField]
     private List<EnemyAbilityOperationDefinition> operations = new();
+    [SerializeField, Range(0f, 100f)]
+    private float healthThresholdPercent;
+    [SerializeField, Min(0f)]
+    private float noDamageDuration;
+    [SerializeField]
+    private EnemyAbilityChargeDefinition charge = new();
+    [SerializeField]
+    private EnemyAbilityTelegraphDefinition telegraph = new();
 
     public string AbilityId => abilityId ?? string.Empty;
     public string NameLocalizationKey => nameLocalizationKey ?? string.Empty;
     public string DescriptionLocalizationKey =>
         descriptionLocalizationKey ?? string.Empty;
+    public string AbilityTypeId => abilityTypeId ?? string.Empty;
+    public IReadOnlyList<EnemyAbilityParameterDefinition> Parameters =>
+        parameters != null
+            ? parameters
+            : Array.Empty<EnemyAbilityParameterDefinition>();
     public string FallbackName => fallbackName ?? string.Empty;
     public string FallbackDescription => fallbackDescription ?? string.Empty;
     public EnemyAbilityTrigger Trigger => trigger;
+    public IReadOnlyList<EnemyAbilityTrigger> AdditionalTriggers =>
+        triggerEvents != null
+            ? triggerEvents
+            : Array.Empty<EnemyAbilityTrigger>();
     public int Priority => priority;
     public float Cooldown =>
         TimePrecision.FloorToTenth(Mathf.Max(0f, cooldown));
+    public IReadOnlyList<EnemyAbilityCooldownOverrideDefinition>
+        CooldownOverrides => cooldownOverrides != null
+            ? cooldownOverrides
+            : Array.Empty<EnemyAbilityCooldownOverrideDefinition>();
     public EnemyAbilityCooldownResetPolicy CooldownResetPolicy =>
         cooldownResetPolicy;
     public bool PauseCooldownWhileDisabled => pauseCooldownWhileDisabled;
@@ -426,6 +583,13 @@ public sealed class EnemyAbilityDefinition : IBattleAbilityDefinition
         operations != null
             ? operations
             : Array.Empty<EnemyAbilityOperationDefinition>();
+    public float HealthThresholdPercent =>
+        Mathf.Clamp(healthThresholdPercent, 0f, 100f);
+    public float NoDamageDuration => Mathf.Max(0f, noDamageDuration);
+    public EnemyAbilityChargeDefinition Charge =>
+        charge ??= new EnemyAbilityChargeDefinition();
+    public EnemyAbilityTelegraphDefinition Telegraph =>
+        telegraph ??= new EnemyAbilityTelegraphDefinition();
     public AbilityExecutionDomain ExecutionDomain =>
         AbilityExecutionDomain.Battle;
     public int AbilitySchemaVersion => 1;
@@ -436,32 +600,80 @@ public sealed class EnemyAbilityDefinition : IBattleAbilityDefinition
     public IEnumerable<IBattleEffectDefinition> BattleEffects =>
         EnumerateBattleEffects();
     public bool UsesLegacyEffectStorage => false;
-    public bool HasExecutableContent => HasUnifiedEffects;
+    public bool HasExecutableContent
+    {
+        get
+        {
+            foreach (EnemyAbilityOperationDefinition operation in Operations)
+            {
+                if (operation == null || !operation.Enabled)
+                    continue;
+                if (operation.Type !=
+                    EnemyAbilityOperationType.ExecuteEffects)
+                {
+                    return true;
+                }
+                if (operation.Effects.Count > 0)
+                    return true;
+            }
+            return false;
+        }
+    }
     public bool HasUnifiedEffects
     {
         get
         {
-            bool hasEffects = false;
             foreach (EnemyAbilityOperationDefinition operation in Operations)
             {
-                if (operation == null ||
-                    operation.Type !=
-                        EnemyAbilityOperationType.ExecuteEffects ||
-                    operation.Effects.Count == 0)
-                {
-                    return false;
-                }
-                hasEffects = true;
+                if (operation?.Enabled == true &&
+                    operation.Type ==
+                        EnemyAbilityOperationType.ExecuteEffects &&
+                    operation.Effects.Count > 0)
+                    return true;
             }
-            return hasEffects;
+            return false;
         }
+    }
+
+    public bool RespondsToTrigger(EnemyAbilityTrigger eventTrigger)
+    {
+        if (trigger == eventTrigger)
+            return true;
+        foreach (EnemyAbilityTrigger additional in AdditionalTriggers)
+        {
+            if (additional == eventTrigger)
+                return true;
+        }
+        return false;
+    }
+
+    public float ResolveCooldown(float sourceHealthPercentage)
+    {
+        float resolved = Cooldown;
+        float health = Mathf.Clamp(sourceHealthPercentage, 0f, 100f);
+        float bestThreshold = float.PositiveInfinity;
+        foreach (EnemyAbilityCooldownOverrideDefinition rule in
+                 CooldownOverrides)
+        {
+            if (rule == null || rule.Cooldown <= 0f ||
+                health > rule.HealthAtOrBelowPercent ||
+                rule.HealthAtOrBelowPercent >= bestThreshold)
+            {
+                continue;
+            }
+
+            bestThreshold = rule.HealthAtOrBelowPercent;
+            resolved = rule.Cooldown;
+        }
+        return TimePrecision.FloorToTenth(Mathf.Max(0f, resolved));
     }
 
     private IEnumerable<IBattleEffectDefinition> EnumerateBattleEffects()
     {
         foreach (EnemyAbilityOperationDefinition operation in Operations)
         {
-            if (operation == null)
+            if (operation == null || !operation.Enabled ||
+                operation.Type != EnemyAbilityOperationType.ExecuteEffects)
                 continue;
 
             foreach (CharacterEffectDefinition effect in operation.Effects)
@@ -512,10 +724,15 @@ public sealed class EnemyAbilityDefinition : IBattleAbilityDefinition
         EnemyAbilityDefinition definition = new()
         {
             abilityId = id ?? string.Empty,
+            abilityTypeId = id ?? string.Empty,
+            parameters = new List<EnemyAbilityParameterDefinition>(),
             fallbackName = name ?? string.Empty,
             fallbackDescription = description ?? string.Empty,
             trigger = abilityTrigger,
+            triggerEvents = new List<EnemyAbilityTrigger>(),
             cooldown = Mathf.Max(0f, abilityCooldown),
+            cooldownOverrides =
+                new List<EnemyAbilityCooldownOverrideDefinition>(),
             cooldownResetPolicy =
                 EnemyAbilityCooldownResetPolicy.OnSuccessfulActivation,
             pauseCooldownWhileDisabled = true,
@@ -527,6 +744,8 @@ public sealed class EnemyAbilityDefinition : IBattleAbilityDefinition
             target = targetDefinition ??
                      new EnemyAbilityTargetDefinition(),
             operations = copiedOperations,
+            charge = new EnemyAbilityChargeDefinition(),
+            telegraph = new EnemyAbilityTelegraphDefinition(),
         };
         definition.Validate();
         return definition;
@@ -538,11 +757,25 @@ public sealed class EnemyAbilityDefinition : IBattleAbilityDefinition
         nameLocalizationKey = (nameLocalizationKey ?? string.Empty).Trim();
         descriptionLocalizationKey =
             (descriptionLocalizationKey ?? string.Empty).Trim();
+        abilityTypeId = (abilityTypeId ?? string.Empty).Trim();
         fallbackName = (fallbackName ?? string.Empty).Trim();
         fallbackDescription = fallbackDescription ?? string.Empty;
         cooldown = TimePrecision.FloorToTenth(
             Mathf.Max(0f, cooldown));
         initialCharges = Mathf.Max(0, initialCharges);
+
+        triggerEvents ??= new List<EnemyAbilityTrigger>();
+        cooldownOverrides ??=
+            new List<EnemyAbilityCooldownOverrideDefinition>();
+        foreach (EnemyAbilityCooldownOverrideDefinition rule in
+                 cooldownOverrides)
+        {
+            rule?.Validate();
+        }
+
+        parameters ??= new List<EnemyAbilityParameterDefinition>();
+        foreach (EnemyAbilityParameterDefinition parameter in parameters)
+            parameter?.Validate();
 
         conditions ??= new List<EnemyAbilityConditionDefinition>();
         foreach (EnemyAbilityConditionDefinition condition in conditions)
@@ -554,6 +787,25 @@ public sealed class EnemyAbilityDefinition : IBattleAbilityDefinition
         operations ??= new List<EnemyAbilityOperationDefinition>();
         foreach (EnemyAbilityOperationDefinition operation in operations)
             operation?.Validate();
+
+        healthThresholdPercent = Mathf.Clamp(
+            IsFinite(healthThresholdPercent)
+                ? healthThresholdPercent
+                : 0f,
+            0f,
+            100f);
+        noDamageDuration = IsFinite(noDamageDuration)
+            ? Mathf.Max(0f, noDamageDuration)
+            : 0f;
+        charge ??= new EnemyAbilityChargeDefinition();
+        charge.Validate();
+        telegraph ??= new EnemyAbilityTelegraphDefinition();
+        telegraph.Validate();
+    }
+
+    private static bool IsFinite(float value)
+    {
+        return !float.IsNaN(value) && !float.IsInfinity(value);
     }
 }
 
@@ -582,7 +834,15 @@ internal sealed class EnemyAbilityRuntimeState
 
     public bool TickCooldown(float deltaTime, bool sourceDisabled)
     {
-        if (Definition.Trigger != EnemyAbilityTrigger.OnCooldown ||
+        return TickCooldown(deltaTime, sourceDisabled, 100f);
+    }
+
+    public bool TickCooldown(
+        float deltaTime,
+        bool sourceDisabled,
+        float sourceHealthPercentage)
+    {
+        if (!Definition.RespondsToTrigger(EnemyAbilityTrigger.OnCooldown) ||
             Definition.Cooldown <= 0f ||
             deltaTime <= 0f ||
             !HasRemainingCharge)
@@ -593,6 +853,14 @@ internal sealed class EnemyAbilityRuntimeState
         if (sourceDisabled && Definition.PauseCooldownWhileDisabled)
             return false;
 
+        float resolvedCooldown =
+            Definition.ResolveCooldown(sourceHealthPercentage);
+        if (resolvedCooldown > 0f &&
+            _cooldownRemaining > resolvedCooldown)
+        {
+            _cooldownRemaining = resolvedCooldown;
+        }
+
         _cooldownRemaining = Mathf.Max(
             0f,
             _cooldownRemaining - deltaTime);
@@ -600,6 +868,14 @@ internal sealed class EnemyAbilityRuntimeState
     }
 
     public void RecordActivation(bool attempted, bool succeeded)
+    {
+        RecordActivation(attempted, succeeded, 100f);
+    }
+
+    public void RecordActivation(
+        bool attempted,
+        bool succeeded,
+        float sourceHealthPercentage)
     {
         if (!attempted)
             return;
@@ -620,14 +896,19 @@ internal sealed class EnemyAbilityRuntimeState
                 EnemyAbilityCooldownResetPolicy.OnAttempt ||
             succeeded;
         if (resetCooldown)
-            ResetCooldown();
+            ResetCooldown(sourceHealthPercentage);
     }
 
     private void ResetCooldown()
     {
-        _cooldownRemaining = Definition.Trigger ==
-                             EnemyAbilityTrigger.OnCooldown
-            ? Definition.Cooldown
+        ResetCooldown(100f);
+    }
+
+    private void ResetCooldown(float sourceHealthPercentage)
+    {
+        _cooldownRemaining = Definition.RespondsToTrigger(
+            EnemyAbilityTrigger.OnCooldown)
+            ? Definition.ResolveCooldown(sourceHealthPercentage)
             : 0f;
     }
 }
@@ -638,6 +919,19 @@ internal static class EnemyAbilityConditionEvaluator
         EnemyAbilityDefinition ability,
         EnemyRuntime source,
         bool hasAlternateTarget)
+    {
+        return MatchesSourceOnly(
+            ability,
+            source,
+            hasAlternateTarget,
+            null);
+    }
+
+    public static bool MatchesSourceOnly(
+        EnemyAbilityDefinition ability,
+        EnemyRuntime source,
+        bool hasAlternateTarget,
+        Func<float, bool> isRepeatedDamageSourceWithinWindow)
     {
         if (ability == null || source == null)
             return false;
@@ -678,6 +972,10 @@ internal static class EnemyAbilityConditionEvaluator
                     condition.Expected,
                 EnemyAbilityConditionType.HasAlternateTarget =>
                     hasAlternateTarget == condition.Expected,
+                EnemyAbilityConditionType.RepeatedDamageSource =>
+                    isRepeatedDamageSourceWithinWindow != null &&
+                    isRepeatedDamageSourceWithinWindow(
+                        condition.WindowDuration) == condition.Expected,
                 _ => false
             };
             if (matchAny && matched)

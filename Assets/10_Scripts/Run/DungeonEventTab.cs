@@ -485,6 +485,17 @@ public sealed class DungeonEventTab
             _currentRewardOptions.Add(RewardOption.CreateCategory(
                 ERewardOptionType.BattleItemCategory));
         }
+        if (_page.MaximumEnergy < 5)
+        {
+            _currentRewardOptions.Add(RewardOption.CreateEnergyUpgrade(
+                EDungeonEnergyUpgradeType.MaximumEnergy));
+        }
+        if (_page.EnergyRechargeDuration >
+            DungeonPage.MinimumEnergyRechargeDuration)
+        {
+            _currentRewardOptions.Add(RewardOption.CreateEnergyUpgrade(
+                EDungeonEnergyUpgradeType.RechargeSpeed));
+        }
     }
 
     private void GenerateRewardContentOptions(ERewardOptionType category)

@@ -298,6 +298,7 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
     [SerializeField, Min(0f)] private float tooltipEdgePadding = 12f;
 
     private bool _initialized;
+    private bool _initializeWithDetachedData;
     private int _currentHealth;
     private bool _healthPerformanceEnabled;
     private int _currentShield;
@@ -507,6 +508,34 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
                 : 0;
     }
 
+    public bool TryExtendStatusDuration(
+        StatusEffectSO definition,
+        float seconds)
+    {
+        if (definition == null ||
+            string.IsNullOrWhiteSpace(definition.StatusId) ||
+            !_statusEffects.TryGetValue(
+                definition.StatusId,
+                out StatusEffectRuntimeState state) ||
+            state == null ||
+            !state.HasStacks)
+        {
+            return false;
+        }
+
+        BattleStatusSnapshot previousSnapshot =
+            CreateStatusSnapshot(state);
+        if (!state.TryExtendDuration(seconds))
+            return false;
+
+        NotifyStatusChanged(
+            BattleStatusChangeType.Reapplied,
+            previousSnapshot,
+            CreateStatusSnapshot(state));
+        RefreshUi();
+        return true;
+    }
+
     public bool TryConsumeStatusStacks(
         StatusEffectSO definition,
         int stackCount)
@@ -644,8 +673,22 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
         // Party slots may intentionally start without a definition. They are
         // initialized later when DungeonPage assigns a CharacterSO through
         // ConfigureDefinition().
-        if (original != null)
+        if (original == null)
+            return;
+
+        DungeonPage dungeonPage =
+            GetComponentInParent<DungeonPage>(true);
+        bool previousMode = _initializeWithDetachedData;
+        _initializeWithDetachedData = previousMode ||
+            dungeonPage?.RequiresDetachedCharacterInitialization == true;
+        try
+        {
             Initialize();
+        }
+        finally
+        {
+            _initializeWithDetachedData = previousMode;
+        }
     }
 
     private void OnEnable()
@@ -684,7 +727,9 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
         if (cooldownText != null)
             LocalizationFontResolver.ApplyGameDefault(cooldownText);
 
-        SetCharacterData(CreateCharacterData(original));
+        SetCharacterData(_initializeWithDetachedData
+            ? CreateDetachedCharacterData(original)
+            : CreateCharacterData(original));
         _currentHealth = Data.MaximumHealth;
         InitializeAttackSfxSpeaker();
         _remainingCooldown = GetEffectiveAttackCooldown();
@@ -764,15 +809,41 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
 
     public bool ConfigureDefinition(CharacterSO definition)
     {
+        return ConfigureDefinition(definition, false);
+    }
+
+    public bool ConfigureDetachedDefinition(CharacterSO definition)
+    {
+        return ConfigureDefinition(definition, true);
+    }
+
+    private bool ConfigureDefinition(
+        CharacterSO definition,
+        bool useDetachedData)
+    {
         if (definition == null)
             return false;
 
         BindBattle(null, null);
         original = definition;
         if (!_initialized)
-            return Initialize();
+        {
+            bool previousMode = _initializeWithDetachedData;
+            _initializeWithDetachedData = useDetachedData;
+            try
+            {
+                if (!Initialize())
+                    return false;
+            }
+            finally
+            {
+                _initializeWithDetachedData = previousMode;
+            }
+        }
 
-        SetCharacterData(CreateCharacterData(original));
+        SetCharacterData(useDetachedData
+            ? CreateDetachedCharacterData(original)
+            : CreateCharacterData(original));
         ResetRuntime();
         return true;
     }
@@ -801,6 +872,21 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
             DataManager.Current?.CharacterDatas;
         return collection != null
             ? collection.CreateRuntimeData(definition)
+            : definition.CreateData(new CharacterProgressData(
+                definition.CharacterId,
+                definition.InitiallyOwned));
+    }
+
+    private static CharacterData CreateDetachedCharacterData(
+        CharacterSO definition)
+    {
+        if (definition == null)
+            return null;
+
+        CharacterCollectionData collection =
+            DataManager.Current?.CharacterDatas;
+        return collection != null
+            ? collection.CreateDetachedRuntimeData(definition)
             : definition.CreateData(new CharacterProgressData(
                 definition.CharacterId,
                 definition.InitiallyOwned));
@@ -988,7 +1074,10 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
         TickTemporaryBoosts(deltaTime);
 
         bool passiveCooldownPaused = ArePassiveCooldownsPaused;
-        float activeDeltaTime = deltaTime;
+        float actionPeriodMultiplier = ResolvePlayerActionPeriodMultiplier(
+            board);
+        float actionDeltaTime = deltaTime / actionPeriodMultiplier;
+        float activeDeltaTime = actionDeltaTime;
         if (_attackRecoveryRemaining > 0f)
         {
             float recoveryDeltaTime = Mathf.Min(
@@ -1004,16 +1093,20 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
         }
 
         float disabledDuration = GetDisabledDuration();
-        TickGenericStatusEffects(deltaTime, activeDeltaTime);
+        TickGenericStatusEffects(
+            deltaTime,
+            Mathf.Min(deltaTime, activeDeltaTime * actionPeriodMultiplier));
         if (_manualTargetRequestPending)
         {
             RefreshUi();
             return;
         }
-        activeDeltaTime -= Mathf.Min(activeDeltaTime, disabledDuration);
+        activeDeltaTime -= Mathf.Min(
+            activeDeltaTime,
+            disabledDuration / actionPeriodMultiplier);
 
         if (!passiveCooldownPaused)
-            TickCooldownPassives(deltaTime, board);
+            TickCooldownPassives(actionDeltaTime, board);
         if (_manualTargetRequestPending)
         {
             RefreshUi();
@@ -1038,6 +1131,18 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
         }
 
         RefreshUi();
+    }
+
+    private float ResolvePlayerActionPeriodMultiplier(IBattleBoard board)
+    {
+        float multiplier =
+            (board as IEnemyCombatRuntimeServiceProvider)
+            ?.EnemyCombatRuntimeService
+            ?.ResolvePlayerActionPeriodMultiplier(this) ?? 1f;
+        return !float.IsNaN(multiplier) &&
+               !float.IsInfinity(multiplier)
+            ? Mathf.Max(TimePrecision.Step, multiplier)
+            : 1f;
     }
 
     public void RecordDamageDealt(int damage)
@@ -1849,14 +1954,16 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
 
     public bool CanActivateActiveSkill()
     {
-        return (_initialized || Initialize()) &&
-               CanAct &&
+        if ((!_initialized && !Initialize()) || Data == null)
+            return false;
+        int resolvedCost = ResolveActiveSkillEnergyCost(
+            Data.ActiveSkillCost);
+        return CanAct &&
                _activeSkillResource != null &&
                _board != null &&
-               Data != null &&
                Data.HasCustomSkillDefinitions &&
                !IsActiveSkillBlocked &&
-               _activeSkillResource.CanSpend(Data.ActiveSkillCost);
+               _activeSkillResource.CanSpend(resolvedCost);
     }
 
     public bool TryActivateActiveSkill()
@@ -1897,7 +2004,8 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
             if (!EffectCostReservation.TryCreate(
                     _activeSkillResource,
                     this,
-                    Data.GetSkillCost(definition),
+                    ResolveActiveSkillEnergyCost(
+                        Data.GetSkillCost(definition)),
                     out EffectCostReservation costReservation))
             {
                 continue;
@@ -1967,7 +2075,9 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
 
     private bool TryActivateSkillSequence()
     {
-        int skillCost = Data.ActiveSkillCost;
+        long actionExecutionId = EffectContext.CreateActionExecutionId();
+        int skillCost = ResolveActiveSkillEnergyCost(
+            Data.ActiveSkillCost);
         if (!EffectCostReservation.TryCreate(
                 _activeSkillResource,
                 this,
@@ -2092,7 +2202,8 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
                             actionDefinition.Effects,
                             CharacterActionKind.Skill,
                             actionDefinition.ActionId,
-                            action.Effects)
+                            action.Effects,
+                            actionExecutionId)
                         : ExecuteLegacyAbilityOnTargets(
                             _board,
                             action.Targets,
@@ -2366,12 +2477,32 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
 
     private void FinishCustomSkillActivation(bool succeeded)
     {
+        ResolveBattleCardActionRuntimeService()
+            ?.NotifyActiveSkillResolved(this, true);
         if (succeeded && Data.ActiveSkillRecoveryDuration > 0f)
             BeginAttackRecovery(Data.ActiveSkillRecoveryDuration);
         _skillSdTimeRemaining = Mathf.Max(
             _skillSdTimeRemaining,
             SkillSdDisplayDuration);
         RefreshUi();
+    }
+
+    private int ResolveActiveSkillEnergyCost(int baseCost)
+    {
+        IBattleCardActionRuntimeService service =
+            ResolveBattleCardActionRuntimeService();
+        return service != null
+            ? service.ResolveActiveSkillEnergyCost(this, baseCost)
+            : Mathf.Max(0, baseCost);
+    }
+
+    private IBattleCardActionRuntimeService
+        ResolveBattleCardActionRuntimeService()
+    {
+        return (_board as
+                    IBattleAbilityUserModifierServiceProvider)?
+                .AbilityUserModifierService as
+            IBattleCardActionRuntimeService;
     }
 
     private bool TryAttack(IBattleBoard board)
@@ -2381,6 +2512,7 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
 
     private bool TryCustomAttack(IBattleBoard board)
     {
+        long actionExecutionId = EffectContext.CreateActionExecutionId();
         bool previousAttempted = false;
         bool previousSucceeded = false;
         bool anyAttempted = false;
@@ -2471,7 +2603,8 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
                             definition.Effects,
                             CharacterActionKind.Attack,
                             definition.ActionId,
-                            effects)
+                            effects,
+                            actionExecutionId)
                         : default;
                 }
                 else
@@ -3759,7 +3892,8 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
         IReadOnlyList<CharacterEffectDefinition> effects,
         CharacterActionKind actionKind,
         string actionId,
-        IReadOnlyList<PreparedEffectExecution> preparedEffects)
+        IReadOnlyList<PreparedEffectExecution> preparedEffects,
+        long actionExecutionId = 0)
     {
         if (board == null || effects == null || effects.Count == 0 ||
             !CanExecutePreparedExplicitEffects(
@@ -3780,7 +3914,8 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
             targets.Faction,
             targets.EnemyTargets,
             targets.AllyTargets,
-            GetScalingAttackPower());
+            GetScalingAttackPower(),
+            actionExecutionId);
         float[] effectAttackPowers = new float[effects.Count];
         for (int index = 0; index < effects.Count; index++)
         {

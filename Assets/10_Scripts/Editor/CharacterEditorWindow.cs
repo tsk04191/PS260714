@@ -521,7 +521,8 @@ public sealed class CharacterEditorWindow : EditorWindow
     {
         "행동 대상",
         "시전자 자신",
-        "별도 새 대상"
+        "별도 새 대상",
+        "Objective"
     };
 
     private static readonly string[] EffectPreconditionFailurePolicyOptions =
@@ -4510,6 +4511,24 @@ public sealed class CharacterEditorWindow : EditorWindow
         SerializedProperty effects)
     {
         AddDefaultEffect(effects);
+    }
+
+    internal static void DrawEmbeddedEffect(
+        SerializedProperty effect,
+        UnityEngine.Object owner,
+        float? previewAttackPower = null)
+    {
+        if (effect == null)
+        {
+            EditorGUILayout.HelpBox(
+                "Shared effect definition was not found.",
+                MessageType.Error);
+            return;
+        }
+
+        DrawEffect(
+            effect,
+            new ActionEditorContext(owner, previewAttackPower));
     }
 
     private static void DrawEffectList(

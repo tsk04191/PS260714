@@ -38,7 +38,7 @@ public sealed class EnemyDefinitionValidationTests
                 definitions.Add(definition);
         }
 
-        Assert.That(definitions, Has.Count.EqualTo(8));
+        Assert.That(definitions, Has.Count.EqualTo(46));
         EnemyDefinitionValidationResult result =
             EnemyDefinitionValidator.ValidateAll(definitions);
         foreach (EnemySO definition in definitions)
@@ -196,6 +196,8 @@ public sealed class EnemyDefinitionValidationTests
         EnemySO definition = CreateEnemy("invalid_authored_enemy");
         SetPrivateField(definition, "healthScale", -2f);
         SetPrivateField(definition, "initialArmor", -1);
+        SetPrivateField(definition, "formationRadius", float.NaN);
+        SetPrivateField(definition, "coreAttackRange", -1f);
         SetPrivateField(definition, "unlockDifficulty", -2);
         SetPrivateField(
             definition,
@@ -212,12 +214,111 @@ public sealed class EnemyDefinitionValidationTests
 
         Assert.That(HasCode(result, "enemy.health_scale_invalid"), Is.True);
         Assert.That(HasCode(result, "enemy.initial_defense_invalid"), Is.True);
+        Assert.That(HasCode(result, "enemy.formation_radius_invalid"), Is.True);
+        Assert.That(HasCode(result, "enemy.core_attack_range_invalid"), Is.True);
         Assert.That(HasCode(result, "enemy.unlock_difficulty_invalid"), Is.True);
         Assert.That(HasCode(result, "enemy.footprint_invalid"), Is.True);
         Assert.That(
             HasCode(result, "enemy.large_footprint_must_be_exclusive"),
             Is.True,
             BuildFailureMessage(result));
+    }
+
+    [Test]
+    public void FormationAndCoreAttackRange_AreExposedByRuntime()
+    {
+        EnemySO definition = CreateEnemy("formation_runtime_enemy");
+        SetPrivateField(definition, "formationRadius", 0.42f);
+        SetPrivateField(definition, "coreAttackRange", 1.15f);
+
+        EnemyRuntime runtime = definition.CreateRuntime();
+
+        Assert.That(definition.FormationRadius, Is.EqualTo(0.42f));
+        Assert.That(definition.CoreAttackRange, Is.EqualTo(1.15f));
+        Assert.That(runtime.FormationRadius, Is.EqualTo(0.42f));
+        Assert.That(runtime.CoreAttackRange, Is.EqualTo(1.15f));
+        Assert.That(
+            EnemyDefinitionValidator.Validate(definition).ErrorCount,
+            Is.Zero);
+    }
+
+    [Test]
+    public void CombatStatMigration_AddsFormationDefaultsAndPreservesStats()
+    {
+        EnemySO missingValues = CreateEnemy("missing_formation_values");
+        SetPrivateField(missingValues, "type", EEnemyType.Heavy);
+        SetPrivateField(missingValues, "combatStatSchemaVersion", 1);
+        SetPrivateField(missingValues, "attackPower", 9f);
+        SetPrivateField(missingValues, "formationRadius", 0f);
+        SetPrivateField(missingValues, "coreAttackRange", -1f);
+
+        Assert.That(
+            EnemyCombatStatMigration.ApplyMigration(missingValues),
+            Is.True);
+        Assert.That(
+            missingValues.AuthoredCombatStatSchemaVersion,
+            Is.EqualTo(EnemySO.CurrentCombatStatSchemaVersion));
+        Assert.That(missingValues.AttackPower, Is.EqualTo(9f));
+        Assert.That(missingValues.FormationRadius, Is.EqualTo(0.45f));
+        Assert.That(missingValues.CoreAttackRange, Is.Zero);
+    }
+
+    [TestCase(EEnemyType.Basic, 0.35f)]
+    [TestCase(EEnemyType.Assault, 0.32f)]
+    [TestCase(EEnemyType.Heavy, 0.45f)]
+    [TestCase(EEnemyType.Medic, 0.35f)]
+    [TestCase(EEnemyType.Mechanic, 0.38f)]
+    [TestCase(EEnemyType.Pointman, 0.35f)]
+    [TestCase(EEnemyType.ShieldBearer, 0.45f)]
+    [TestCase(EEnemyType.Infiltrator, 0.3f)]
+    public void CombatStatMigration_UsesTypeFormationRadius(
+        EEnemyType enemyType,
+        float expectedRadius)
+    {
+        EnemySO definition = CreateEnemy(
+            $"formation_radius_{(int)enemyType}");
+        SetPrivateField(definition, "type", enemyType);
+        SetPrivateField(definition, "combatStatSchemaVersion", 1);
+
+        Assert.That(
+            EnemyCombatStatMigration.ApplyMigration(definition),
+            Is.True);
+        Assert.That(
+            definition.FormationRadius,
+            Is.EqualTo(expectedRadius));
+        Assert.That(definition.CoreAttackRange, Is.Zero);
+    }
+
+    [Test]
+    public void CombatStatMigration_StagesLegacyAttackPowerAndSkipsFutureSchema()
+    {
+        EnemySO legacy = CreateEnemy("legacy_combat_stats");
+        SetPrivateField(legacy, "combatStatSchemaVersion", 0);
+        SetPrivateField(legacy, "attackPower", 1f);
+        SetPrivateField(legacy, "coreAttackDamage", 7);
+        SetPrivateField(legacy, "formationRadius", 0f);
+
+        Assert.That(
+            EnemyCombatStatMigration.ApplyMigration(legacy),
+            Is.True);
+        Assert.That(legacy.AttackPower, Is.EqualTo(7f));
+        Assert.That(
+            legacy.AuthoredCombatStatSchemaVersion,
+            Is.EqualTo(EnemySO.CurrentCombatStatSchemaVersion));
+
+        EnemySO future = CreateEnemy("future_combat_stats");
+        int futureVersion = EnemySO.CurrentCombatStatSchemaVersion + 1;
+        SetPrivateField(
+            future,
+            "combatStatSchemaVersion",
+            futureVersion);
+
+        Assert.That(
+            EnemyCombatStatMigration.ApplyMigration(future),
+            Is.False);
+        Assert.That(
+            future.AuthoredCombatStatSchemaVersion,
+            Is.EqualTo(futureVersion));
     }
 
     [Test]
@@ -518,20 +619,32 @@ public sealed class EnemyDefinitionValidationTests
     }
 
     [Test]
-    public void HeavyIncompatibleAbilityWasDeleted()
+    public void HeavyRosterAsset_UsesStaggerResistance()
     {
         EnemySO definition = CreateAssetClone("Heavy");
-        Assert.That(definition.Abilities, Is.Empty);
+        Assert.That(definition.EnemyId, Is.EqualTo("G003"));
+        Assert.That(definition.Abilities, Has.Count.EqualTo(1));
+
+        EnemyAbilityDefinition ability = definition.Abilities[0];
+        Assert.That(
+            ability.AbilityId,
+            Is.EqualTo("roster_g003_stagger_resistance"));
+        Assert.That(ability.Operations, Has.Count.EqualTo(1));
+        Assert.That(
+            ability.Operations[0].Type,
+            Is.EqualTo(
+                EnemyAbilityOperationType.ModifyStatusDuration));
+        Assert.That(ability.Operations[0].Multiplier, Is.EqualTo(0.5f));
     }
 
     [Test]
-    public void MechanicAbilityAsset_RequiresPositiveDamageTarget()
+    public void MechanicAbilityAsset_TargetsHighestDamageWithoutThreshold()
     {
         EnemySO definition = CreateAssetClone("Mechanic");
 
         EnemyAbilityDefinition ability = FindAbility(
             definition,
-            EnemyAbilityIds.DisableHighestDamage);
+            "roster_s002_highest_threat_stun");
         Assert.That(ability.Target.Faction,
             Is.EqualTo(
                 EnemyAbilityTargetFaction.PlayerCharacters));
@@ -540,15 +653,7 @@ public sealed class EnemyDefinitionValidationTests
         Assert.That(ability.Target.Metric,
             Is.EqualTo(
                 EnemyAbilityTargetMetric.TotalDamageDealt));
-        Assert.That(ability.Conditions, Has.Count.EqualTo(1));
-        Assert.That(
-            ability.Conditions[0].Type,
-            Is.EqualTo(
-                EnemyAbilityConditionType.TargetTotalDamageDealt));
-        Assert.That(
-            ability.Conditions[0].Comparison,
-            Is.EqualTo(CharacterNumericComparison.GreaterThan));
-        Assert.That(ability.Conditions[0].Threshold, Is.Zero);
+        Assert.That(ability.Conditions, Is.Empty);
         CharacterEffectDefinition effect =
             ability.Operations[0].Effects[0];
         Assert.That(
@@ -561,10 +666,25 @@ public sealed class EnemyDefinitionValidationTests
     }
 
     [Test]
-    public void ShieldBearerIncompatibleAbilitiesWereDeleted()
+    public void ShieldBearerRosterAsset_UsesNearbyShieldAura()
     {
         EnemySO definition = CreateAssetClone("ShieldBearer");
-        Assert.That(definition.Abilities, Is.Empty);
+        Assert.That(definition.EnemyId, Is.EqualTo("S005"));
+        Assert.That(definition.Abilities, Has.Count.EqualTo(1));
+
+        EnemyAbilityDefinition ability = definition.Abilities[0];
+        Assert.That(
+            ability.AbilityId,
+            Is.EqualTo("roster_s005_ally_shield_aura"));
+        Assert.That(
+            ability.Target.Subject,
+            Is.EqualTo(EnemyAbilityTargetSubject.WorldRadius));
+        Assert.That(ability.Target.WorldRadius, Is.EqualTo(2.5f));
+        Assert.That(ability.Target.TargetCount, Is.EqualTo(2));
+        CharacterEffectDefinition shield =
+            ability.Operations[0].Effects[0];
+        Assert.That(shield.Type, Is.EqualTo(CharacterEffectType.Shield));
+        Assert.That(shield.TargetMaxHealthScale, Is.EqualTo(0.15f));
     }
 
     [TestCase(EEnemyType.Basic, 0)]
@@ -584,6 +704,11 @@ public sealed class EnemyDefinitionValidationTests
         Assert.That(
             definition.Abilities,
             Has.Count.EqualTo(expectedAbilityCount));
+        Assert.That(
+            definition.FormationRadius,
+            Is.EqualTo(
+                EnemySO.GetDefaultFormationRadius(enemyType)));
+        Assert.That(definition.CoreAttackRange, Is.Zero);
         EnemyDefinitionValidationResult result =
             EnemyDefinitionValidator.Validate(definition);
         Assert.That(
@@ -593,62 +718,26 @@ public sealed class EnemyDefinitionValidationTests
     }
 
     [Test]
-    public void EnemyCodexAbilityDescription_UsesModularAbilityValues()
+    public void EnemyCodexAbilityDescription_UsesRosterLocalization()
     {
-        EnemySO medic = CreateAssetClone("Medic");
-        SerializedObject medicSerialized = new(medic);
-        SerializedProperty medicAbility = medicSerialized
-            .FindProperty("abilities")
-            .GetArrayElementAtIndex(0);
-        medicAbility.FindPropertyRelative("cooldown").floatValue = 7f;
-        medicAbility.FindPropertyRelative("operations")
-            .GetArrayElementAtIndex(0)
-            .FindPropertyRelative("effects")
-            .GetArrayElementAtIndex(0)
-            .FindPropertyRelative("damageAmount").floatValue = 4f;
-        medicSerialized.ApplyModifiedPropertiesWithoutUndo();
-        EnemyAbilityDefinition adjacentHeal =
-            FindAbility(medic, EnemyAbilityIds.AdjacentHeal);
-        CharacterEffectDefinition heal =
-            adjacentHeal.Operations[0].Effects[0];
-        Assert.That(
-            EnemyLocalization.GetAbility(medic),
-            Is.EqualTo(LocalizationService.Get(
-                LocalizationKeys.CodexEnemyAbilityMedic,
-                LocalizationService.Arg(
-                    "cooldown",
-                    adjacentHeal.Cooldown),
-                LocalizationService.Arg(
-                    "power",
-                    heal.DamageAmount))));
+        foreach (string assetName in new[] { "Medic", "Mechanic" })
+        {
+            EnemySO definition = CreateAssetClone(assetName);
+            Assert.That(definition.Abilities, Has.Count.EqualTo(1));
+            EnemyAbilityDefinition ability = definition.Abilities[0];
+            string expectedName = LocalizationService.Get(
+                ability.NameLocalizationKey);
+            string expectedDescription = LocalizationService.Get(
+                ability.DescriptionLocalizationKey,
+                BattleAbilityLocalizationArguments.Build(
+                    ability,
+                    definition.AttackPower));
 
-        EnemySO mechanic = CreateAssetClone("Mechanic");
-        SerializedObject mechanicSerialized = new(mechanic);
-        SerializedProperty mechanicAbility = mechanicSerialized
-            .FindProperty("abilities")
-            .GetArrayElementAtIndex(0);
-        mechanicAbility.FindPropertyRelative("cooldown").floatValue = 8f;
-        mechanicAbility.FindPropertyRelative("operations")
-            .GetArrayElementAtIndex(0)
-            .FindPropertyRelative("effects")
-            .GetArrayElementAtIndex(0)
-            .FindPropertyRelative("statusDuration").floatValue = 3f;
-        mechanicSerialized.ApplyModifiedPropertiesWithoutUndo();
-        EnemyAbilityDefinition disable = FindAbility(
-            mechanic,
-            EnemyAbilityIds.DisableHighestDamage);
-        CharacterEffectDefinition stun =
-            disable.Operations[0].Effects[0];
-        Assert.That(
-            EnemyLocalization.GetAbility(mechanic),
-            Is.EqualTo(LocalizationService.Get(
-                LocalizationKeys.CodexEnemyAbilityMechanic,
-                LocalizationService.Arg(
-                    "cooldown",
-                    disable.Cooldown),
-                LocalizationService.Arg(
-                    "duration",
-                    stun.StatusDuration))));
+            Assert.That(
+                EnemyLocalization.GetAbility(definition),
+                Is.EqualTo(
+                    $"{expectedName}\n{expectedDescription}"));
+        }
     }
 
     [Test]
@@ -705,8 +794,20 @@ public sealed class EnemyDefinitionValidationTests
 
     private EnemySO CreateAssetClone(string assetName)
     {
+        string fileName = assetName switch
+        {
+            "Basic" => "G001_BasicRemnant.asset",
+            "Assault" => "G002_AssaultRemnant.asset",
+            "Heavy" => "G003_HeavyRemnant.asset",
+            "Medic" => "S001_MedicRemnant.asset",
+            "Mechanic" => "S002_MechanicRemnant.asset",
+            "Infiltrator" => "S003_InfiltratorRemnant.asset",
+            "Pointman" => "S004_PointmanRemnant.asset",
+            "ShieldBearer" => "S005_ShieldBearerRemnant.asset",
+            _ => assetName + ".asset",
+        };
         EnemySO source = AssetDatabase.LoadAssetAtPath<EnemySO>(
-            $"Assets/06_Runtime/Resources/Enemies/{assetName}.asset");
+            $"Assets/06_Runtime/Resources/Enemies/{fileName}");
         Assert.That(
             source,
             Is.Not.Null,

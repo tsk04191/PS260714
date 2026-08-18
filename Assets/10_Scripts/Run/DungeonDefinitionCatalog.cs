@@ -5,7 +5,13 @@ using UnityEngine;
 public static class DungeonDefinitionCatalog
 {
     public const string FreeBattleId = "free_battle";
-    public const string TestFieldId = "test_field";
+    public const string TutorialFieldId = "tutorial_field";
+    public const string PracticeBattleId = "practice_battle";
+    public const string LegacyTestFieldId = "test_field";
+
+    [Obsolete(
+        "Use TutorialFieldId. The canonical dungeon id is tutorial_field.")]
+    public const string TestFieldId = TutorialFieldId;
 
     private const string ResourcesPath = "Dungeons";
 
@@ -16,24 +22,66 @@ public static class DungeonDefinitionCatalog
     public static DungeonDefinition Get(string dungeonId)
     {
         EnsureLoaded();
-        if (!string.IsNullOrWhiteSpace(dungeonId) &&
-            Definitions.TryGetValue(dungeonId.Trim(), out DungeonDefinition value))
+        string normalizedId = NormalizeDungeonId(dungeonId);
+        if (!string.IsNullOrWhiteSpace(normalizedId) &&
+            Definitions.TryGetValue(normalizedId, out DungeonDefinition value))
         {
             return value;
         }
 
         bool tutorialStage = string.Equals(
-            dungeonId,
-            TestFieldId,
+            normalizedId,
+            TutorialFieldId,
             StringComparison.OrdinalIgnoreCase);
+        bool practiceStage = string.Equals(
+            normalizedId,
+            PracticeBattleId,
+            StringComparison.OrdinalIgnoreCase);
+        string fallbackId = tutorialStage
+            ? TutorialFieldId
+            : practiceStage
+                ? PracticeBattleId
+                : FreeBattleId;
         DungeonDefinition fallback = DungeonDefinition.CreateRuntimeFallback(
-            tutorialStage ? TestFieldId : FreeBattleId,
+            fallbackId,
             tutorialStage);
         Definitions[fallback.DungeonId] = fallback;
         Debug.LogWarning(
             $"Dungeon definition '{dungeonId}' was not found under " +
             $"Resources/{ResourcesPath}. A runtime fallback is being used.");
         return fallback;
+    }
+
+    public static string NormalizeDungeonId(string dungeonId)
+    {
+        string normalized = (dungeonId ?? string.Empty).Trim();
+        if (string.Equals(
+                normalized,
+                LegacyTestFieldId,
+                StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(
+                normalized,
+                TutorialFieldId,
+                StringComparison.OrdinalIgnoreCase))
+        {
+            return TutorialFieldId;
+        }
+        if (string.Equals(
+                normalized,
+                PracticeBattleId,
+                StringComparison.OrdinalIgnoreCase))
+        {
+            return PracticeBattleId;
+        }
+        if (string.Equals(
+                normalized,
+                FreeBattleId,
+                StringComparison.OrdinalIgnoreCase))
+        {
+            return FreeBattleId;
+        }
+
+        return normalized;
     }
 
     public static IReadOnlyCollection<DungeonDefinition> GetAll()
@@ -108,11 +156,12 @@ public static class DungeonDefinitionCatalog
                 continue;
             }
 
-            if (!Definitions.TryAdd(definition.DungeonId, definition))
+            string normalizedId = NormalizeDungeonId(definition.DungeonId);
+            if (!Definitions.TryAdd(normalizedId, definition))
             {
                 Debug.LogError(
                     $"Duplicate dungeon definition id: " +
-                    definition.DungeonId,
+                    normalizedId,
                     definition);
             }
         }

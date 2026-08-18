@@ -471,6 +471,7 @@ public readonly struct BattleEffectResolvedEvent
     private readonly BattleStatusTarget[] _targets;
 
     public BattleEffectOriginKind OriginKind { get; }
+    public long ActionExecutionId { get; }
     public BattleStatusTarget Source { get; }
     public CharacterTargetFaction TargetFaction { get; }
     public IBattleEffectDefinition Effect { get; }
@@ -487,6 +488,7 @@ public readonly struct BattleEffectResolvedEvent
         BattleEffectResult result)
     {
         OriginKind = context.OriginKind;
+        ActionExecutionId = context.ActionExecutionId;
         Source = context.SourceTarget;
         TargetFaction = context.TargetFaction;
         Effect = effect;

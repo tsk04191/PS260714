@@ -219,7 +219,8 @@ public enum CharacterEffectTargetMode
 {
     InheritAction = 0,
     Source = 1,
-    FreshSelection = 2
+    FreshSelection = 2,
+    Objective = 3
 }
 
 public enum CharacterEffectPreconditionFailurePolicy
