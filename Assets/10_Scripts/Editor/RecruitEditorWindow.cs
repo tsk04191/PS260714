@@ -256,12 +256,20 @@ public sealed class RecruitEditorWindow : EditorWindow
                 string bannerId = GetTrimmedString(banner, "bannerId");
                 string ticketGroupId =
                     GetTrimmedString(banner, "ticketGroupId");
+                string displayName =
+                    PS260714EditorAssetDisplayName.Resolve(
+                        GetTrimmedString(
+                            banner,
+                            "titleLocalizationKey"),
+                        GetTrimmedString(banner, "fallbackTitle"),
+                        Fallback(bannerId, "banner"));
                 Sprite bannerArt = banner.FindPropertyRelative("bannerArt")
                     ?.objectReferenceValue as Sprite;
                 if (PS260714AssetEditorList.DrawRow(
                         index == _selectedBannerIndex,
                         new GUIContent(
-                            $"{index + 1:00}  {Fallback(bannerId, "banner")}\n" +
+                            $"{index + 1:00}  {displayName}\n" +
+                            $"{Fallback(bannerId, "banner")} · " +
                             Fallback(ticketGroupId, "ticket group"),
                             PS260714AssetEditorList.GetAssetPreview(bannerArt),
                             bannerId)))
@@ -2579,14 +2587,6 @@ internal sealed class RecruitRewardMultiSelectWindow : EditorWindow
 
     private static string GetName(UnityEngine.Object candidate)
     {
-        return candidate switch
-        {
-            CharacterSO character =>
-                !string.IsNullOrWhiteSpace(character.CharacterName)
-                    ? character.CharacterName
-                    : character.name,
-            ItemDefinitionSO item => item.GetDisplayName(true),
-            _ => candidate != null ? candidate.name : string.Empty,
-        };
+        return PS260714EditorAssetDisplayName.Get(candidate);
     }
 }

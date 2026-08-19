@@ -31,6 +31,130 @@ public sealed class BattleCardTests
     }
 
     [Test]
+    public void PublicCatalog_FreeMovementCardsUseCommandEffects()
+    {
+        BattleCardSO barrier = LoadPublicCard(
+            "Card034_BarrierRedeployment.asset");
+        BattleCardSO emergency = LoadPublicCard(
+            "Card042_EmergencyRetreat.asset");
+        BattleCardSO assault = LoadPublicCard(
+            "Card061_AdvanceCommand.asset");
+        BattleCardSO defense = LoadPublicCard(
+            "Card062_RetreatCommand.asset");
+        BattleCardSO rapidResponse = LoadPublicCard(
+            "Card063_EmergencyRelocation.asset");
+        BattleCardSO crossDeployment = LoadPublicCard(
+            "Card064_FormationSwap.asset");
+        BattleCardSO rally = LoadPublicCard(
+            "Card065_CentralRally.asset");
+        BattleCardSO coordinatedAssault = LoadPublicCard(
+            "Card066_OuterEncirclement.asset");
+        BattleCardSO flankingAssault = LoadPublicCard(
+            "Card067_FlankingManeuver.asset");
+        BattleCardSO blockade = LoadPublicCard(
+            "Card068_BlockadePoint.asset");
+        BattleCardSO guidingBarrier = LoadPublicCard(
+            "Card069_GuidingBarrier.asset");
+        BattleCardSO encirclement = LoadPublicCard(
+            "Card070_CircularEncirclement.asset");
+        BattleCardSO vanguardShield = LoadPublicCard(
+            "Card086_VanguardShield.asset");
+
+        AssertOperationTypes(
+            emergency,
+            BattleCardOperationType.SharedEffect,
+            BattleCardOperationType.SharedEffect);
+        Assert.That(
+            emergency.Operations[1].SharedEffect.Type,
+            Is.EqualTo(CharacterEffectType.RemoveStatus));
+        AssertOperationTypes(
+            assault,
+            BattleCardOperationType.ApplyAttackModifier);
+        Assert.That(assault.Operations[0].Amount, Is.EqualTo(10));
+        AssertOperationTypes(defense, BattleCardOperationType.SharedEffect);
+        AssertOperationTypes(
+            rapidResponse,
+            BattleCardOperationType.ReadyBasicAttack);
+        AssertOperationTypes(
+            crossDeployment,
+            BattleCardOperationType.ReadyBasicAttack,
+            BattleCardOperationType.ApplyAttackModifier);
+        Assert.That(crossDeployment.TargetCount, Is.EqualTo(2));
+        Assert.That(crossDeployment.Operations[0].Count, Is.EqualTo(2));
+        Assert.That(crossDeployment.Operations[1].Amount, Is.EqualTo(10));
+        AssertOperationTypes(
+            rally,
+            BattleCardOperationType.ApplyAttackModifier,
+            BattleCardOperationType.Draw);
+        Assert.That(rally.Operations[0].Amount, Is.EqualTo(4));
+        AssertOperationTypes(
+            coordinatedAssault,
+            BattleCardOperationType.ApplyAttackModifier);
+        Assert.That(
+            coordinatedAssault.Operations[0].Amount,
+            Is.EqualTo(12));
+        AssertOperationTypes(
+            flankingAssault,
+            BattleCardOperationType.ApplyAttackModifier);
+        Assert.That(flankingAssault.Operations[0].Amount, Is.Zero);
+        Assert.That(
+            flankingAssault.Operations[0].Ratio,
+            Is.EqualTo(0.5f).Within(0.001f));
+        AssertOperationTypes(
+            blockade,
+            BattleCardOperationType.CreateZone,
+            BattleCardOperationType.CreateZone);
+        AssertOperationTypes(
+            guidingBarrier,
+            BattleCardOperationType.PullEnemies,
+            BattleCardOperationType.SharedEffect);
+        AssertOperationTypes(
+            encirclement,
+            BattleCardOperationType.SharedEffect,
+            BattleCardOperationType.ApplyAttackModifier,
+            BattleCardOperationType.ReadyBasicAttack);
+        Assert.That(encirclement.Operations[1].Amount, Is.EqualTo(10));
+        Assert.That(
+            barrier.Operations[1].Condition.Type,
+            Is.EqualTo(
+                BattleCardConditionType.ObjectiveHealthPercentage));
+        Assert.That(
+            barrier.Operations[1].Condition.Threshold,
+            Is.EqualTo(30f));
+        Assert.That(
+            vanguardShield.Operations[1].Condition.Type,
+            Is.EqualTo(BattleCardConditionType.TargetHealthPercentage));
+        Assert.That(
+            vanguardShield.Operations[1].Condition.Threshold,
+            Is.EqualTo(50f));
+
+        foreach (BattleCardSO card in new[]
+                 {
+                     barrier,
+                     emergency,
+                     assault,
+                     defense,
+                     rapidResponse,
+                     crossDeployment,
+                     rally,
+                     coordinatedAssault,
+                     flankingAssault,
+                     blockade,
+                     guidingBarrier,
+                     encirclement,
+                     vanguardShield,
+                 })
+        {
+            Assert.That(
+                BattleCardDefinitionValidator.TryValidate(
+                    card,
+                    out string error),
+                Is.True,
+                $"{card.CardId}: {error}");
+        }
+    }
+
+    [Test]
     public void AutomaticCooldown_StartsFull_AllowsPlay_ThenReplacesHand()
     {
         BattleCardDeckRules rules = CreateRules(
@@ -784,6 +908,29 @@ public sealed class BattleCardTests
         for (int index = 0; index < count; index++)
             cards.Add(CreateCard($"card.test.{index}"));
         return cards;
+    }
+
+    private static BattleCardSO LoadPublicCard(string fileName)
+    {
+        string path =
+            "Assets/06_Runtime/Resources/Cards/" + fileName;
+        BattleCardSO card = AssetDatabase.LoadAssetAtPath<BattleCardSO>(path);
+        Assert.That(card, Is.Not.Null, path);
+        return card;
+    }
+
+    private static void AssertOperationTypes(
+        BattleCardSO card,
+        params BattleCardOperationType[] expected)
+    {
+        Assert.That(card.Operations, Has.Count.EqualTo(expected.Length));
+        for (int index = 0; index < expected.Length; index++)
+        {
+            Assert.That(
+                card.Operations[index].Type,
+                Is.EqualTo(expected[index]),
+                $"{card.CardId} operation {index}");
+        }
     }
 
     private BattleCardSO CreateCard(string id)

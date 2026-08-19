@@ -363,7 +363,7 @@ internal static class PS260714StatusEffectSelection
         EditorGUILayout.PrefixLabel(label);
         GUIContent buttonContent = selected != null
             ? new GUIContent(
-                selected.name,
+                PS260714EditorAssetDisplayName.Get(selected),
                 PS260714AssetEditorList.GetAssetPreview(selected.Icon),
                 selected.StatusId)
             : new GUIContent(options.AllowNone ? "없음" : "상태 선택");
@@ -622,7 +622,7 @@ internal static class PS260714StatusEffectSelection
                         definition);
                     bool choose = EditorGUILayout.ToggleLeft(
                         new GUIContent(
-                            definition.name,
+                            PS260714EditorAssetDisplayName.Get(definition),
                             PS260714AssetEditorList.GetAssetPreview(
                                 definition.Icon),
                             definition.StatusId),
@@ -682,6 +682,9 @@ internal static class PS260714StatusEffectSelection
             string search = (_searchText ?? string.Empty).Trim();
             if (!string.IsNullOrEmpty(search) &&
                 definition.name.IndexOf(
+                    search,
+                    StringComparison.OrdinalIgnoreCase) < 0 &&
+                PS260714EditorAssetDisplayName.Get(definition).IndexOf(
                     search,
                     StringComparison.OrdinalIgnoreCase) < 0 &&
                 (definition.NameLocalizationKey ?? string.Empty).IndexOf(
@@ -804,7 +807,7 @@ internal static class PS260714StatusEffectSelection
                         definition);
                     bool toggled = EditorGUILayout.ToggleLeft(
                         new GUIContent(
-                            definition.name,
+                            PS260714EditorAssetDisplayName.Get(definition),
                             PS260714AssetEditorList.GetAssetPreview(
                                 definition.Icon),
                             definition.StatusId),
@@ -867,6 +870,9 @@ internal static class PS260714StatusEffectSelection
             string search = (_searchText ?? string.Empty).Trim();
             if (!string.IsNullOrEmpty(search) &&
                 definition.name.IndexOf(
+                    search,
+                    StringComparison.OrdinalIgnoreCase) < 0 &&
+                PS260714EditorAssetDisplayName.Get(definition).IndexOf(
                     search,
                     StringComparison.OrdinalIgnoreCase) < 0 &&
                 (definition.NameLocalizationKey ?? string.Empty).IndexOf(

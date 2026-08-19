@@ -296,11 +296,13 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
     {
         public Vector2 Position;
         public Vector2 Destination;
+        public Vector2 FacingDirection;
 
         public AllyMovementState(Vector2 position)
         {
             Position = position;
             Destination = position;
+            FacingDirection = Vector2.zero;
         }
     }
 
@@ -583,23 +585,19 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
 
         public void SetFacingDirection(Vector2 direction, Camera camera)
         {
-            if (_spriteRenderer == null || camera == null ||
-                direction.sqrMagnitude <= 0.0001f)
+            if (_spriteRenderer == null || camera == null)
             {
                 return;
             }
 
-            Vector3 worldDirection = new(direction.x, 0f, direction.y);
-            float screenHorizontal = Vector3.Dot(
-                worldDirection.normalized,
-                camera.transform.right);
-            if (Mathf.Abs(screenHorizontal) <= 0.001f)
-                return;
-
-            bool faceScreenRight = screenHorizontal > 0f;
-            _spriteRenderer.flipX = _sourceFacesRight
-                ? !faceScreenRight
-                : faceScreenRight;
+            if (TryResolveWorldSpriteFlipX(
+                    _sourceFacesRight,
+                    direction,
+                    camera.transform.right,
+                    out bool flipX))
+            {
+                _spriteRenderer.flipX = flipX;
+            }
         }
 
         public void RefreshDepthSorting(Camera camera, int sortingRange)
@@ -6445,6 +6443,18 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
                 worldCamera,
                 style.WorldDepthSortingRange);
         }
+        foreach (KeyValuePair<EnemyRuntime, WorldActorView> entry in
+                 _worldEnemyActors)
+        {
+            if (_circularEnemyStates.TryGetValue(
+                    entry.Key,
+                    out CircularEnemyState state))
+            {
+                entry.Value?.SetFacingDirection(
+                    -state.ResolvedPosition,
+                    worldCamera);
+            }
+        }
         foreach (WorldActorView view in _worldAllyActors.Values)
         {
             view?.FaceCamera(worldCamera);
@@ -6470,7 +6480,7 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
                 style,
                 worldCamera);
             entry.Value?.SetFacingDirection(
-                movement.Destination - movement.Position,
+                movement.FacingDirection,
                 worldCamera);
         }
 
@@ -6678,7 +6688,9 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
                 presentation != null
                     ? presentation.WorldEnemyHeight
                     : worldEnemyHeight,
-                100 + laneIndex))
+                100 + laneIndex,
+                sourceFacesRight:
+                    enemy.Definition?.BoardSpriteFacesRight ?? true))
             return;
 
         view.SetWorldPosition(new Vector3(
@@ -6686,7 +6698,58 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
             0f,
             state.ResolvedPosition.y));
         view.FaceCamera(worldCamera);
+        view.SetFacingDirection(
+            -state.ResolvedPosition,
+            worldCamera);
         view.RefreshEnemyHealth(enemy, presentation);
+    }
+
+    internal static bool TryResolveWorldSpriteFlipX(
+        bool sourceFacesRight,
+        Vector2 facingDirection,
+        Vector3 cameraRight,
+        out bool flipX)
+    {
+        flipX = false;
+        if (facingDirection.sqrMagnitude <= 0.0001f ||
+            cameraRight.sqrMagnitude <= 0.0001f)
+        {
+            return false;
+        }
+
+        Vector3 worldDirection = new(
+            facingDirection.x,
+            0f,
+            facingDirection.y);
+        float screenHorizontal = Vector3.Dot(
+            worldDirection.normalized,
+            cameraRight.normalized);
+        if (Mathf.Abs(screenHorizontal) <= 0.001f)
+            return false;
+
+        bool faceScreenRight = screenHorizontal > 0f;
+        flipX = sourceFacesRight
+            ? !faceScreenRight
+            : faceScreenRight;
+        return true;
+    }
+
+    internal static bool TryResolveCharacterFacingDirection(
+        Vector2 sourcePosition,
+        Vector2 targetPosition,
+        out Vector2 facingDirection)
+    {
+        facingDirection = targetPosition - sourcePosition;
+        if (!IsFinite(sourcePosition) ||
+            !IsFinite(targetPosition) ||
+            facingDirection.sqrMagnitude <= 0.0001f)
+        {
+            facingDirection = Vector2.zero;
+            return false;
+        }
+
+        facingDirection.Normalize();
+        return true;
     }
 
     private void RefreshWorldAllyViews()
@@ -6758,6 +6821,9 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
                 movement.Position.y));
             view.SetSelected(ReferenceEquals(character, _selectedWorldAlly));
             view.FaceCamera(worldCamera);
+            view.SetFacingDirection(
+                movement.FacingDirection,
+                worldCamera);
         }
     }
 
@@ -7614,6 +7680,8 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
         }
 
         character.StatusLifecycle += HandleStatusLifecycle;
+        character.ActionFacingRequested +=
+            HandleCharacterActionFacingRequested;
         character.BindManualTargetHandler(HandleManualAllyClicked);
         GetOrCreateAllyVfxHandle(character);
     }
@@ -7625,6 +7693,8 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
             if (character != null)
             {
                 character.StatusLifecycle -= HandleStatusLifecycle;
+                character.ActionFacingRequested -=
+                    HandleCharacterActionFacingRequested;
                 character.BindManualTargetHandler(null);
                 character.SetManualTargetSelectionState(false, false);
             }
@@ -7636,6 +7706,73 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
     private void HandleStatusLifecycle(StatusEffectLifecycleEvent eventData)
     {
         PublishStatusLifecycle(eventData);
+    }
+
+    private void HandleCharacterActionFacingRequested(
+        CharacterActionFacingRequest request)
+    {
+        if (request.Source == null ||
+            !_worldAllyMovement.TryGetValue(
+                request.Source,
+                out AllyMovementState movement) ||
+            !TryResolveCharacterActionTargetPosition(
+                request,
+                out Vector2 targetPosition) ||
+            !TryResolveCharacterFacingDirection(
+                movement.Position,
+                targetPosition,
+                out Vector2 facingDirection))
+        {
+            return;
+        }
+
+        movement.FacingDirection = facingDirection;
+        if (_worldAllyActors.TryGetValue(
+                request.Source,
+                out WorldActorView view))
+        {
+            view?.SetFacingDirection(facingDirection, worldCamera);
+        }
+    }
+
+    private bool TryResolveCharacterActionTargetPosition(
+        CharacterActionFacingRequest request,
+        out Vector2 targetPosition)
+    {
+        targetPosition = Vector2.zero;
+        if (request.TargetFaction == CharacterTargetFaction.Enemy)
+        {
+            foreach (EnemyRuntime target in request.EnemyTargets)
+            {
+                if (target != null &&
+                    _circularEnemyStates.TryGetValue(
+                        target,
+                        out CircularEnemyState state) &&
+                    state != null)
+                {
+                    targetPosition = state.ResolvedPosition;
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        foreach (IBattleCharacter target in request.AllyTargets)
+        {
+            if (target != null &&
+                !ReferenceEquals(target, request.Source) &&
+                _worldAllyMovement.TryGetValue(
+                    target,
+                    out AllyMovementState state) &&
+                state != null)
+            {
+                targetPosition = state.Position;
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private BattleVfxTargetHandle GetOrCreateEnemyVfxHandle(
@@ -8915,6 +9052,21 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
         if ((firstPosition - secondPosition).sqrMagnitude <= 0.0001f)
             return false;
 
+        if (TryResolveCharacterFacingDirection(
+                firstPosition,
+                secondPosition,
+                out Vector2 firstFacingDirection))
+        {
+            firstState.FacingDirection = firstFacingDirection;
+        }
+        if (TryResolveCharacterFacingDirection(
+                secondPosition,
+                firstPosition,
+                out Vector2 secondFacingDirection))
+        {
+            secondState.FacingDirection = secondFacingDirection;
+        }
+
         firstState.Position = secondPosition;
         firstState.Destination = secondPosition;
         secondState.Position = firstPosition;
@@ -9143,6 +9295,13 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
         if (!destinationChanged && !positionChanged)
             return false;
 
+        if (TryResolveCharacterFacingDirection(
+                state.Position,
+                resolved,
+                out Vector2 facingDirection))
+        {
+            state.FacingDirection = facingDirection;
+        }
         state.Destination = resolved;
         if (instant)
         {
@@ -10343,6 +10502,25 @@ public sealed class DungeonBoardView : MonoBehaviour, IBattleBoard,
                    out AllyMovementState movement)
             ? movement.Position
             : Vector2.zero;
+    }
+
+    internal bool TryGetAllyFacingDirection(
+        IBattleCharacter character,
+        out Vector2 facingDirection)
+    {
+        facingDirection = Vector2.zero;
+        if (character == null ||
+            !_worldAllyMovement.TryGetValue(
+                character,
+                out AllyMovementState movement) ||
+            movement == null ||
+            movement.FacingDirection.sqrMagnitude <= 0.0001f)
+        {
+            return false;
+        }
+
+        facingDirection = movement.FacingDirection;
+        return true;
     }
 
     private float GetWorldWallRadius()

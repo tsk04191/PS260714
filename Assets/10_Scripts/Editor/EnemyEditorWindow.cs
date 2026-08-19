@@ -3,19 +3,41 @@ using System.Collections.Generic;
 using UnityEditor;
 using UnityEngine;
 
+internal enum EnemyEditorListSortMode
+{
+    Name = 0,
+    Grade = 1
+}
+
 public sealed class EnemyEditorWindow : EditorWindow
 {
     public const string MenuPath = PS260714EditorMenu.EnemyEditor;
 
     private const string AssetFolder = "Assets/06_Runtime/Resources/Enemies";
     private const string RenameControlName = "EnemyAssetRenameField";
+    private static readonly string[] GradeFilterLabels =
+    {
+        "All Grades",
+        "Normal",
+        "Special",
+        "Elite",
+        "Boss"
+    };
+    private static readonly string[] SortModeLabels =
+    {
+        "Name Order",
+        "Grade Order"
+    };
     private readonly List<EnemySO> _definitions = new();
+    private readonly List<EnemySO> _visibleDefinitions = new();
 
     private EnemySO _selected;
     private SerializedObject _serialized;
     private Vector2 _listScroll;
     private Vector2 _editorScroll;
     private string _searchText = string.Empty;
+    [SerializeField] private int _gradeFilterIndex;
+    [SerializeField] private EnemyEditorListSortMode _sortMode;
     private string _renameAssetName = string.Empty;
     private bool _isRenaming;
     private bool _focusRenameField;
@@ -162,31 +184,25 @@ public sealed class EnemyEditorWindow : EditorWindow
         {
             _searchText =
                 PS260714AssetEditorList.DrawSearchField(_searchText);
+            DrawListOptions();
+            BuildVisibleDefinitions();
 
-            int visibleCount = 0;
             using (EditorGUILayout.ScrollViewScope scroll =
                    new(_listScroll))
             {
                 _listScroll = scroll.scrollPosition;
-                foreach (EnemySO definition in _definitions)
+                foreach (EnemySO definition in _visibleDefinitions)
                 {
-                    if (definition == null ||
-                        !MatchesSearch(definition))
-                    {
-                        continue;
-                    }
-
-                    visibleCount++;
                     bool selected =
                         ReferenceEquals(definition, _selected);
                     string detail =
-                        $"{definition.Type} / " +
+                        $"{definition.Grade} / {definition.Type} / " +
                         $"A{definition.Abilities.Count}";
                     if (PS260714AssetEditorList.DrawAssetRow(
                             selected,
                             definition,
                             definition.IconSprite,
-                            definition.name,
+                            GetDisplayName(definition),
                             detail,
                             definition.EnemyId))
                     {
@@ -194,7 +210,7 @@ public sealed class EnemyEditorWindow : EditorWindow
                     }
                 }
 
-                if (visibleCount == 0)
+                if (_visibleDefinitions.Count == 0)
                 {
                     EditorGUILayout.HelpBox(
                         _definitions.Count == 0
@@ -204,9 +220,48 @@ public sealed class EnemyEditorWindow : EditorWindow
                 }
             }
             PS260714AssetEditorList.DrawCountFooter(
-                visibleCount,
+                _visibleDefinitions.Count,
                 _definitions.Count);
         }
+    }
+
+    private void DrawListOptions()
+    {
+        _gradeFilterIndex = Mathf.Clamp(
+            _gradeFilterIndex,
+            0,
+            GradeFilterLabels.Length - 1);
+        if (!Enum.IsDefined(typeof(EnemyEditorListSortMode), _sortMode))
+            _sortMode = EnemyEditorListSortMode.Name;
+
+        using (new EditorGUILayout.HorizontalScope())
+        {
+            _gradeFilterIndex = EditorGUILayout.Popup(
+                _gradeFilterIndex,
+                GradeFilterLabels,
+                GUILayout.Width(112f));
+            _sortMode = (EnemyEditorListSortMode)EditorGUILayout.Popup(
+                (int)_sortMode,
+                SortModeLabels,
+                GUILayout.Width(112f));
+        }
+    }
+
+    private void BuildVisibleDefinitions()
+    {
+        _visibleDefinitions.Clear();
+        foreach (EnemySO definition in _definitions)
+        {
+            if (definition != null &&
+                MatchesGradeFilter(definition, _gradeFilterIndex) &&
+                MatchesSearch(definition))
+            {
+                _visibleDefinitions.Add(definition);
+            }
+        }
+
+        _visibleDefinitions.Sort((left, right) =>
+            CompareDefinitions(left, right, _sortMode));
     }
 
     private static void DrawSeparator()
@@ -569,6 +624,7 @@ public sealed class EnemyEditorWindow : EditorWindow
         {
             DrawProperty("iconSprite", "Codex Icon");
             DrawBoardSprite();
+            DrawBoardSpriteDirection();
             PS260714AssetReferenceField.Draw(
                 Find("spawnVfxCue"),
                 new GUIContent("Spawn VFX Cue"));
@@ -579,6 +635,19 @@ public sealed class EnemyEditorWindow : EditorWindow
                 "Spawn plays after the enemy card is placed. Death uses the cached card anchor after removal.",
                 MessageType.Info);
         }
+    }
+
+    private void DrawBoardSpriteDirection()
+    {
+        SerializedProperty property = Find("boardSpriteFacesRight");
+        if (property == null)
+            return;
+
+        PS260714EditorSdDirectionField.Draw(property);
+        EditorGUILayout.HelpBox(
+            "Choose the direction shown by the source SD sprite. " +
+            "In battle, the sprite turns to face the shield center.",
+            MessageType.Info);
     }
 
     private void DrawBoardSprite()
@@ -1668,12 +1737,76 @@ public sealed class EnemyEditorWindow : EditorWindow
                definition.EnemyId.IndexOf(
                    search,
                    StringComparison.OrdinalIgnoreCase) >= 0 ||
+               GetDisplayName(definition).IndexOf(
+                   search,
+                   StringComparison.OrdinalIgnoreCase) >= 0 ||
                definition.DisplayName.IndexOf(
                    search,
                    StringComparison.OrdinalIgnoreCase) >= 0 ||
                definition.Type.ToString().IndexOf(
                    search,
+                   StringComparison.OrdinalIgnoreCase) >= 0 ||
+               definition.Grade.ToString().IndexOf(
+                   search,
                    StringComparison.OrdinalIgnoreCase) >= 0;
+    }
+
+    internal static bool MatchesGradeFilter(
+        EnemySO definition,
+        int gradeFilterIndex)
+    {
+        if (definition == null)
+            return false;
+        if (gradeFilterIndex <= 0 ||
+            gradeFilterIndex >= GradeFilterLabels.Length)
+        {
+            return true;
+        }
+
+        return definition.Grade ==
+               (EEnemyGrade)(gradeFilterIndex - 1);
+    }
+
+    internal static int CompareDefinitions(
+        EnemySO left,
+        EnemySO right,
+        EnemyEditorListSortMode sortMode)
+    {
+        if (ReferenceEquals(left, right))
+            return 0;
+        if (left == null)
+            return 1;
+        if (right == null)
+            return -1;
+
+        if (sortMode == EnemyEditorListSortMode.Grade)
+        {
+            int gradeComparison = left.Grade.CompareTo(right.Grade);
+            if (gradeComparison != 0)
+                return gradeComparison;
+        }
+
+        int nameComparison = string.Compare(
+            GetDisplayName(left),
+            GetDisplayName(right),
+            StringComparison.CurrentCultureIgnoreCase);
+        if (nameComparison != 0)
+            return nameComparison;
+
+        return string.Compare(
+            left.name,
+            right.name,
+            StringComparison.OrdinalIgnoreCase);
+    }
+
+    internal static string GetDisplayName(EnemySO definition)
+    {
+        return definition != null
+            ? PS260714EditorAssetDisplayName.Resolve(
+                definition,
+                definition.NameLocalizationKey,
+                definition.DisplayName)
+            : string.Empty;
     }
 
     private void SelectDefinition(EnemySO definition)

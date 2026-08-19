@@ -165,7 +165,8 @@ public sealed class GameManagerEditor : Editor
         {
             CharacterSO character = eligible[index];
             labels[index + 1] =
-                $"{character.name}  [{character.CharacterId}]";
+                $"{PS260714EditorAssetDisplayName.Get(character)}  " +
+                $"[{character.CharacterId}]";
         }
 
         CharacterSO current =
@@ -1427,7 +1428,7 @@ public sealed class CommonSettingsProjectProvider : SettingsProvider
                             DrawSelectionButton(
                                 role,
                                 role != null
-                                    ? role.GetDisplayName()
+                                    ? PS260714EditorAssetDisplayName.Get(role)
                                     : "(비어 있는 직군 참조)");
                         }
                     }
@@ -1452,7 +1453,8 @@ public sealed class CommonSettingsProjectProvider : SettingsProvider
                             DrawSelectionButton(
                                 archetype,
                                 archetype != null
-                                    ? archetype.GetDisplayName()
+                                    ? PS260714EditorAssetDisplayName.Get(
+                                        archetype)
                                     : "(비어 있는 세부 직군 참조)");
                         }
                     }

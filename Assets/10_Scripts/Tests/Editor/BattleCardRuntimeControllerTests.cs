@@ -334,6 +334,46 @@ public sealed class BattleCardRuntimeControllerTests
     }
 
     [Test]
+    public void ReadyBasicAttack_OnlyClearsEligibleAlliedCooldowns()
+    {
+        CharacterRuntime waiting = RuntimeCharacter(null, "ready_waiting");
+        CharacterRuntime recovering = RuntimeCharacter(
+            null,
+            "ready_recovering");
+        SetField(waiting, "_remainingCooldown", 2f);
+        SetField(recovering, "_remainingCooldown", 2f);
+        SetField(recovering, "_attackRecoveryRemaining", 0.5f);
+        BattleCardSO card = Card(
+            1,
+            Operation(
+                BattleCardOperationType.ReadyBasicAttack,
+                BattleCardTargetScope.Primary));
+        SetField(card, "targetFaction", CharacterTargetFaction.Ally);
+        BattleCardDeckRuntime deck = Deck(card);
+        TestResource resource = new(10, 10);
+        BattleCardRuntimeController controller = Controller(
+            new FakeBoard(CreateObjective(), new FakeSpatialService()),
+            resource,
+            deck,
+            new IBattleCharacter[] { waiting, recovering });
+
+        Assert.That(
+            controller.TryBeginExecution(
+                Find(deck, card),
+                waiting,
+                null,
+                new IBattleCharacter[] { waiting, recovering }),
+            Is.True);
+
+        Assert.That(GetField<float>(waiting, "_remainingCooldown"), Is.Zero);
+        Assert.That(
+            GetField<float>(recovering, "_remainingCooldown"),
+            Is.EqualTo(2f));
+        Assert.That(resource.Current, Is.EqualTo(9));
+        Assert.That(deck.DiscardPile, Has.Count.EqualTo(1));
+    }
+
+    [Test]
     public void StatusStackModifier_CoversEveryEffectInOneSkillAndConsumesOnce()
     {
         CharacterRoleSO role = Create<CharacterRoleSO>();
@@ -906,6 +946,19 @@ public sealed class BattleCardRuntimeControllerTests
             Is.Not.Null,
             $"Missing test field '{target.GetType().Name}.{name}'.");
         field.SetValue(target, value);
+    }
+
+    private static T GetField<T>(object target, string name)
+    {
+        Assert.That(target, Is.Not.Null);
+        FieldInfo field = target.GetType().GetField(
+            name,
+            BindingFlags.Instance | BindingFlags.NonPublic);
+        Assert.That(
+            field,
+            Is.Not.Null,
+            $"Missing test field '{target.GetType().Name}.{name}'.");
+        return (T)field.GetValue(target);
     }
 
     private sealed class TestResource : IActiveSkillResource

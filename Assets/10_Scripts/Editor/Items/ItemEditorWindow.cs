@@ -140,7 +140,8 @@ public sealed class ItemEditorWindow : EditorWindow
                     continue;
 
                 visibleCount++;
-                string displayName = item.GetDisplayName(true);
+                string displayName =
+                    PS260714EditorAssetDisplayName.Get(item);
                 string category = GetCategoryLabel(item.Category);
                 if (PS260714AssetEditorList.DrawAssetRow(
                         item == _selected,
@@ -958,6 +959,9 @@ public sealed class ItemEditorWindow : EditorWindow
 
         return Contains(item.name, query) ||
                Contains(item.ItemId, query) ||
+               Contains(
+                   PS260714EditorAssetDisplayName.Get(item),
+                   query) ||
                Contains(item.GetDisplayName(true), query) ||
                Contains(item.GetDisplayName(false), query) ||
                Contains(GetCategoryLabel(item.Category), query);

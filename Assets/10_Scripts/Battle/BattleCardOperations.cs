@@ -28,6 +28,7 @@ public enum BattleCardOperationType
     ApplyHealthTrigger = 22,
     ExtendStatusDuration = 23,
     ForceTarget = 24,
+    ReadyBasicAttack = 25,
 }
 
 public enum BattleCardTargetScope

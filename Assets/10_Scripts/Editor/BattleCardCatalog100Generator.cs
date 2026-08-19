@@ -65,7 +65,7 @@ public static class BattleCardCatalog100Generator
         "31|응급 수리|1|Common|Discard|코어 보호막 25 회복|EmergencyRepair",
         "32|정밀 수리|2|Common|Discard|코어 보호막 45 회복. 코어가 30% 이하이면 추가 20|PrecisionRepair",
         "33|보호막 재기동|3|Rare|Exhaust|코어 보호막 80 회복|ShieldRestart",
-        "34|방벽 재배치|2|Rare|Discard|대원 1명에게 보호막 35. 외곽에 있으면 추가 15|BarrierRedeployment",
+        "34|방벽 재배치|2|Rare|Discard|대원 1명에게 보호막 35. 코어 체력이 30% 이하면 추가 15|BarrierRedeployment",
         "35|대원 보호막|1|Common|Discard|대원 1명에게 보호막 25|OperatorShield",
         "36|긴급 회복|2|Common|Exhaust|대원 1명의 체력 30 회복|EmergencyRecovery",
         "37|광역 응급 처치|3|Rare|Exhaust|모든 대원의 체력 18 회복|FieldFirstAid",
@@ -73,7 +73,7 @@ public static class BattleCardCatalog100Generator
         "39|희생의 수리|2|Rare|Exhaust|대원 1명의 체력 15를 소모하고 코어 보호막 80 회복|SacrificialRepair",
         "40|방어 분담|1|Common|Discard|다음 코어 피해의 30%를 지정 대원이 대신 받음|DamageSharing",
         "41|최후 방어선|3|Rare|Exhaust|코어 보호막 50 회복, 방어선의 적을 1초 기절|LastDefenseLine",
-        "42|긴급 후퇴|1|Common|Discard|대원 1명을 외곽으로 이동하고 보호막 20|EmergencyRetreat",
+        "42|긴급 방호|1|Common|Discard|대원 1명에게 보호막 20, 해로운 상태 1개 제거|EmergencyRetreat",
         "43|불굴|2|Rare|Exhaust|체력 30% 이하 대원에게 체력 20과 Power 1스택|Indomitable",
         "44|회복 순환|2|Common|Discard|대원 1명 체력 20 회복, 카드 1장 드로우|RecoveryCycle",
         "45|코어 봉인|4|Epic|Exhaust|3초 동안 코어가 피해를 받지 않음|CoreSeal",
@@ -92,16 +92,16 @@ public static class BattleCardCatalog100Generator
         "58|순간 판단|1|Rare|Exhaust|다음 카드 비용 -1, 카드 1장 드로우|SnapDecision",
         "59|소멸의 대가|1|Rare|Exhaust|손패 1장을 소멸하고 에너지 1 회복|PriceOfExhaustion",
         "60|무리한 주문|4|Epic|Exhaust|현재 손패를 버리고 에너지 2 회복, 카드 2장 드로우|RecklessSpell",
-        "61|전진 명령|0|Common|Discard|대원 1명을 코어 방향으로 한 칸 이동. 다음 공격 피해 +10|AdvanceCommand",
-        "62|후퇴 명령|0|Common|Discard|대원 1명을 외곽으로 한 칸 이동하고 보호막 15|RetreatCommand",
-        "63|긴급 재배치|1|Common|Discard|대원 1명을 지정 지점으로 순간 이동|EmergencyRelocation",
-        "64|전열 교대|2|Rare|Exhaust|대원 2명의 위치를 서로 교체|FormationSwap",
-        "65|중앙 집결|1|Common|Discard|모든 대원을 코어 방향으로 한 칸 이동하고 1장 드로우|CentralRally",
-        "66|외곽 포위|2|Rare|Exhaust|모든 대원을 외곽으로 이동. 다음 기본 공격 피해 +8|OuterEncirclement",
-        "67|측면 기동|1|Rare|Exhaust|대원 1명을 대상 적의 측면으로 이동. 다음 공격 피해 +20|FlankingManeuver",
+        "61|진격 명령|0|Common|Discard|대원 1명의 다음 기본 공격 피해 +10|AdvanceCommand",
+        "62|방어 명령|0|Common|Discard|대원 1명에게 보호막 15|RetreatCommand",
+        "63|즉응 명령|1|Common|Discard|대원 1명의 기본 공격 대기시간을 즉시 완료|EmergencyRelocation",
+        "64|교차 전개|2|Rare|Exhaust|대원 2명의 기본 공격 대기시간을 즉시 완료하고 다음 기본 공격 피해 +10|FormationSwap",
+        "65|전원 집결|1|Common|Discard|카드 1장 드로우. 모든 대원의 다음 기본 공격 피해 +4|CentralRally",
+        "66|일제 공세|2|Rare|Exhaust|모든 대원의 다음 기본 공격 피해 +12|OuterEncirclement",
+        "67|측면 협공|1|Rare|Exhaust|대원 1명의 다음 기본 공격이 50% 위력으로 한 번 더 판정|FlankingManeuver",
         "68|봉쇄 지점|2|Rare|Discard|지정 지점에 5초간 영역 생성. 진입한 적에게 피해 15와 Stun 1초|BlockadePoint",
         "69|유도 장벽|3|Rare|Exhaust|지정 지점으로 적을 끌어당기고 Stun 1초|GuidingBarrier",
-        "70|원형 포위|4|Epic|Exhaust|서로 다른 구역에 대원이 2명 이상 있으면 모든 적에게 Opening 1스택|CircularEncirclement",
+        "70|완전 포위|4|Epic|Exhaust|모든 적에게 Opening 1스택. 모든 대원의 다음 기본 공격 피해 +10, 기본 공격 대기시간 즉시 완료|CircularEncirclement",
         "71|공격 강화|1|Common|Discard|대원 1명에게 Power 1스택, 10초|PowerBoost",
         "72|신속 강화|1|Common|Discard|대원 1명에게 Speed 1스택, 10초|SpeedBoost",
         "73|집중 사격|2|Common|Exhaust|지정 대원은 8초 동안 지정 적을 우선 공격|FocusedFire",
@@ -117,7 +117,7 @@ public static class BattleCardCatalog100Generator
         "83|상태 역전|2|Rare|Exhaust|적의 Fire/Blood/Poison을 제거하고 스택당 피해 10|StatusReversal",
         "84|개방의 순간|2|Rare|Exhaust|Opening 상태 적의 지속시간 +5초, 피해 15|OpeningMoment",
         "85|기절 확산|3|Rare|Exhaust|대상 Stun 1.5초, 주변 적 Stun 0.75초|StunSpread",
-        "86|전위의 방패|1|Common|Discard|전위 대원에게 보호막 30. 안쪽 구역이면 추가 15|VanguardShield",
+        "86|전위의 방패|1|Common|Discard|전위 대원에게 보호막 30. 대상 체력이 50% 이하면 추가 15|VanguardShield",
         "87|전위 돌파|2|Rare|Exhaust|전위 대원에게 Power 1스택. 다음 공격이 Stun 1초|VanguardBreakthrough",
         "88|사수 관측|1|Common|Discard|사수 대원의 다음 공격 피해 +20, 대상에게 Opening 1스택|ShooterObservation",
         "89|사수 일제|3|Rare|Exhaust|모든 사수 대원에게 Speed 1스택, 8초, 1장 드로우|ShooterVolley",
@@ -611,14 +611,13 @@ public static class BattleCardCatalog100Generator
                     BattleCardTargetScope.Primary,
                     Shield(35)));
                 s.Operations.Add(Shared(
-                    "outer_bonus",
+                    "critical_core_bonus",
                     BattleCardTargetScope.Primary,
                     Shield(15),
                     Condition(
-                        BattleCardConditionType.TargetZone,
-                        CharacterNumericComparison.Equal,
-                        0f,
-                        zone: BattleCardSpatialZone.Outer)));
+                        BattleCardConditionType.ObjectiveHealthPercentage,
+                        CharacterNumericComparison.LessThanOrEqual,
+                        30f)));
                 break;
             case 35:
                 TargetAlly(s);
@@ -673,14 +672,14 @@ public static class BattleCardCatalog100Generator
                 break;
             case 42:
                 TargetAlly(s);
-                s.Operations.Add(Move(
-                    "retreat",
-                    BattleCardTargetScope.Primary,
-                    BattleCardMovementMode.ToOuterZone));
                 s.Operations.Add(Shared(
-                    "retreat_shield",
+                    "emergency_shield",
                     BattleCardTargetScope.Primary,
                     Shield(20)));
+                s.Operations.Add(Shared(
+                    "emergency_cleanse",
+                    BattleCardTargetScope.Primary,
+                    RemoveDebuffs(1)));
                 break;
             case 43:
                 TargetAlly(s);
@@ -887,11 +886,6 @@ public static class BattleCardCatalog100Generator
                 break;
             case 61:
                 TargetAlly(s);
-                s.Operations.Add(Move(
-                    "step_coreward",
-                    BattleCardTargetScope.Primary,
-                    BattleCardMovementMode.CorewardByDistance,
-                    amount: 1));
                 s.Operations.Add(Operation(
                     "next_attack_bonus",
                     BattleCardOperationType.ApplyAttackModifier,
@@ -901,11 +895,6 @@ public static class BattleCardCatalog100Generator
                 break;
             case 62:
                 TargetAlly(s);
-                s.Operations.Add(Move(
-                    "step_outward",
-                    BattleCardTargetScope.Primary,
-                    BattleCardMovementMode.OutwardByDistance,
-                    amount: 1));
                 s.Operations.Add(Shared(
                     "shield",
                     BattleCardTargetScope.Primary,
@@ -913,27 +902,34 @@ public static class BattleCardCatalog100Generator
                 break;
             case 63:
                 TargetAlly(s);
-                SetSecondaryWorldPoint(s);
-                s.Operations.Add(Move(
-                    "teleport",
+                s.Operations.Add(Operation(
+                    "ready_basic_attack",
+                    BattleCardOperationType.ReadyBasicAttack,
                     BattleCardTargetScope.Primary,
-                    BattleCardMovementMode.ToWorldPoint));
+                    count: 1));
                 break;
             case 64:
                 TargetAlly(s, targetCount: 2);
                 s.Operations.Add(Operation(
-                    "swap",
-                    BattleCardOperationType.Swap,
+                    "ready_two_basic_attacks",
+                    BattleCardOperationType.ReadyBasicAttack,
                     BattleCardTargetScope.Primary,
                     count: 2));
+                s.Operations.Add(Operation(
+                    "next_attack_bonus",
+                    BattleCardOperationType.ApplyAttackModifier,
+                    BattleCardTargetScope.Primary,
+                    amount: 10,
+                    count: 1));
                 break;
             case 65:
                 TargetNone(s);
-                s.Operations.Add(Move(
-                    "rally_all",
+                s.Operations.Add(Operation(
+                    "rally_attack_bonus",
+                    BattleCardOperationType.ApplyAttackModifier,
                     BattleCardTargetScope.AllAllies,
-                    BattleCardMovementMode.CorewardByDistance,
-                    amount: 1));
+                    amount: 4,
+                    count: 1));
                 s.Operations.Add(Operation(
                     "draw",
                     BattleCardOperationType.Draw,
@@ -941,29 +937,21 @@ public static class BattleCardCatalog100Generator
                 break;
             case 66:
                 TargetNone(s);
-                s.Operations.Add(Move(
-                    "move_all_outer",
-                    BattleCardTargetScope.AllAllies,
-                    BattleCardMovementMode.ToOuterZone));
                 s.Operations.Add(Operation(
                     "next_basic_bonus",
                     BattleCardOperationType.ApplyAttackModifier,
                     BattleCardTargetScope.AllAllies,
-                    amount: 8,
+                    amount: 12,
                     count: 1));
                 break;
             case 67:
                 TargetAlly(s);
-                SetSecondaryCharacterTarget(s, CharacterTargetFaction.Enemy);
-                s.Operations.Add(Move(
-                    "flank_target",
-                    BattleCardTargetScope.Primary,
-                    BattleCardMovementMode.ToTargetFlank));
                 s.Operations.Add(Operation(
-                    "next_attack_bonus",
+                    "repeat_half_power",
                     BattleCardOperationType.ApplyAttackModifier,
                     BattleCardTargetScope.Primary,
-                    amount: 20,
+                    amount: 0,
+                    ratio: 0.5f,
                     count: 1));
                 break;
             case 68:
@@ -1010,11 +998,17 @@ public static class BattleCardCatalog100Generator
                 s.Operations.Add(Shared(
                     "encirclement_opening",
                     BattleCardTargetScope.AllEnemies,
-                    ApplyStatus("Opening", 1f),
-                    Condition(
-                        BattleCardConditionType.DistinctAllyZoneCount,
-                        CharacterNumericComparison.GreaterThanOrEqual,
-                        2f)));
+                    ApplyStatus("Opening", 1f)));
+                s.Operations.Add(Operation(
+                    "encirclement_attack_bonus",
+                    BattleCardOperationType.ApplyAttackModifier,
+                    BattleCardTargetScope.AllAllies,
+                    amount: 10,
+                    count: 1));
+                s.Operations.Add(Operation(
+                    "ready_all_basic_attacks",
+                    BattleCardOperationType.ReadyBasicAttack,
+                    BattleCardTargetScope.AllAllies));
                 break;
             case 71:
                 TargetAlly(s);
@@ -1160,14 +1154,13 @@ public static class BattleCardCatalog100Generator
                     BattleCardTargetScope.Primary,
                     Shield(30)));
                 s.Operations.Add(Shared(
-                    "inner_bonus",
+                    "low_health_bonus",
                     BattleCardTargetScope.Primary,
                     Shield(15),
                     Condition(
-                        BattleCardConditionType.TargetZone,
-                        CharacterNumericComparison.Equal,
-                        0f,
-                        zone: BattleCardSpatialZone.Inner)));
+                        BattleCardConditionType.TargetHealthPercentage,
+                        CharacterNumericComparison.LessThanOrEqual,
+                        50f)));
                 break;
             case 87:
                 ConfigureRoleCard(s, "Vanguard", VanguardCharacters);

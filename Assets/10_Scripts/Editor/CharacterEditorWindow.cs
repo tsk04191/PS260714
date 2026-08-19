@@ -850,7 +850,7 @@ public sealed class CharacterEditorWindow : EditorWindow
             selected,
             character,
             character.IconSprite,
-            character.name,
+            PS260714EditorAssetDisplayName.Get(character),
             detail,
             character.CharacterId);
         if (clicked)
@@ -1103,9 +1103,13 @@ public sealed class CharacterEditorWindow : EditorWindow
             _serializedCharacter.FindProperty(
                 "worldSdHeadHeightNormalized"),
             new GUIContent("Head Height"));
-        EditorGUILayout.PropertyField(
-            _serializedCharacter.FindProperty("worldSdFacesRight"),
-            new GUIContent("Source Faces Right"));
+        PS260714EditorSdDirectionField.Draw(
+            _serializedCharacter.FindProperty("worldSdFacesRight"));
+        EditorGUILayout.HelpBox(
+            "Choose the direction shown by the source SD sprite. " +
+            "In battle, the sprite turns to face its latest movement or " +
+            "action target.",
+            MessageType.Info);
         EditorGUILayout.EndVertical();
         EditorGUILayout.Space(8f);
     }
@@ -6958,6 +6962,9 @@ public sealed class CharacterEditorWindow : EditorWindow
 
         string search = _searchText.Trim();
         return (character.name ?? string.Empty).IndexOf(
+                   search,
+                   StringComparison.OrdinalIgnoreCase) >= 0 ||
+               PS260714EditorAssetDisplayName.Get(character).IndexOf(
                    search,
                    StringComparison.OrdinalIgnoreCase) >= 0 ||
                (character.CharacterName ?? string.Empty).IndexOf(

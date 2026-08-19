@@ -127,9 +127,10 @@ public sealed class DungeonEventEditorWindow : EditorWindow
         _eventList = new PS260714UIToolkitAssetList<DungeonEventSO>(
             "EVENT ASSETS",
             PS260714AssetEditorList.Width,
-            item => item.name,
+            item => PS260714EditorAssetDisplayName.Get(item),
             item => item.EventId,
-            item => $"{item.name}\\n{item.EventId}\\n{item.DisplayName}",
+            item => $"{PS260714EditorAssetDisplayName.Get(item)}\\n" +
+                    $"{item.name}\\n{item.EventId}\\n{item.DisplayName}",
             SelectEvent);
         _renameRow = new PS260714UIToolkitRenameRow(
             RenameSelected,
@@ -263,6 +264,7 @@ public sealed class DungeonEventEditorWindow : EditorWindow
             return;
 
         EditorUtility.SetDirty(_selectedEvent);
+        _eventList?.Refresh();
         _graph?.RefreshGraph(false);
         _preview?.Bind(_selectedEvent);
     }
@@ -291,6 +293,7 @@ public sealed class DungeonEventEditorWindow : EditorWindow
             if (this == null || _selectedEvent == null)
                 return;
             RebuildSelectedTrees();
+            _eventList?.Refresh();
             Repaint();
         };
     }

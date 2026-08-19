@@ -904,6 +904,7 @@ public static class BattleCardDefinitionValidator
             case BattleCardOperationType.ApplyAttackModifier:
             case BattleCardOperationType.ApplySkillModifier:
             case BattleCardOperationType.ApplyHealthTrigger:
+            case BattleCardOperationType.ReadyBasicAttack:
                 if (!TargetsAllies(card, operation.TargetScope))
                 {
                     error = $"{path} modifier requires allied targets.";

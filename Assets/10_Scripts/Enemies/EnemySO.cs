@@ -51,6 +51,8 @@ public sealed class EnemySO : ScriptableObject,
     [SerializeField] private Sprite iconSprite;
     [Tooltip("Enemy-specific Sprite used by the dungeon world actor.")]
     [SerializeField] private Sprite boardSprite;
+    [Tooltip("Enable when the source SD sprite faces right by default.")]
+    [SerializeField] private bool boardSpriteFacesRight = true;
     [SerializeField] private int sortOrder;
 
     [Header("3D VFX")]
@@ -136,6 +138,7 @@ public sealed class EnemySO : ScriptableObject,
     public bool EncounterOnly => encounterOnly;
     public Sprite IconSprite => iconSprite;
     public Sprite BoardSprite => boardSprite;
+    public bool BoardSpriteFacesRight => boardSpriteFacesRight;
     public int SortOrder => sortOrder;
     public BattleVfxCueSO SpawnVfxCue => spawnVfxCue;
     public BattleVfxCueSO DeathVfxCue => deathVfxCue;
@@ -291,6 +294,7 @@ public sealed class EnemySO : ScriptableObject,
         encounterOnly = false;
         baseHealth = Mathf.Max(1, health);
         sortOrder = (int)enemyType * 10;
+        boardSpriteFacesRight = true;
         healthScale = 1f;
         initialArmor = 0;
         initialShield = 0;

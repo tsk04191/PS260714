@@ -121,9 +121,10 @@ public sealed class DungeonRestEditorWindow : EditorWindow
         _restList = new PS260714UIToolkitAssetList<DungeonRestSO>(
             "REST ASSETS",
             PS260714AssetEditorList.Width,
-            item => item.name,
+            item => PS260714EditorAssetDisplayName.Get(item),
             item => item.RoomId,
-            item => $"{item.name}\n{item.RoomId}\n{item.DisplayName}",
+            item => $"{PS260714EditorAssetDisplayName.Get(item)}\n" +
+                    $"{item.name}\n{item.RoomId}\n{item.DisplayName}",
             SelectRest);
         _renameRow = new PS260714UIToolkitRenameRow(
             RenameSelected,
@@ -427,6 +428,7 @@ public sealed class DungeonRestEditorWindow : EditorWindow
         if (_selectedRest == null)
             return;
         EditorUtility.SetDirty(_selectedRest);
+        _restList?.Refresh();
         _preview?.MarkDirtyRepaint();
         Repaint();
     }

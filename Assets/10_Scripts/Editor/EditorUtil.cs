@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using PS260714.Localization;
 using UnityEditor;
 using UnityEditor.UIElements;
 using UnityEngine;
@@ -240,6 +241,104 @@ internal static class PS260714AssetEditorList
             clipping = TextClipping.Clip,
             wordWrap = false
         };
+    }
+}
+
+internal static class PS260714EditorAssetDisplayName
+{
+    private static readonly string[] LocalizationKeyPropertyNames =
+    {
+        "nameLocalizationKey",
+        "titleLocalizationKey"
+    };
+
+    private static readonly string[] FallbackPropertyNames =
+    {
+        "fallbackName",
+        "fallbackTitle",
+        "displayName",
+        "characterName"
+    };
+
+    internal static string Get(UnityEngine.Object asset)
+    {
+        if (asset == null)
+            return string.Empty;
+
+        SerializedObject serialized = new(asset);
+        serialized.UpdateIfRequiredOrScript();
+        string localizationKey = FindFirstString(
+            serialized,
+            LocalizationKeyPropertyNames);
+        string fallback = FindFirstString(
+            serialized,
+            FallbackPropertyNames);
+        return Resolve(
+            localizationKey,
+            fallback,
+            GetFileName(asset));
+    }
+
+    internal static string Resolve(
+        string localizationKey,
+        string fallback,
+        string fileName)
+    {
+        string normalizedKey = (localizationKey ?? string.Empty).Trim();
+        if (!string.IsNullOrEmpty(normalizedKey) &&
+            LocalizationService.TryGet(
+                normalizedKey,
+                out string localized) &&
+            !string.IsNullOrWhiteSpace(localized))
+        {
+            return localized.Trim();
+        }
+
+        string normalizedFallback = (fallback ?? string.Empty).Trim();
+        if (!string.IsNullOrEmpty(normalizedFallback))
+            return normalizedFallback;
+
+        return (fileName ?? string.Empty).Trim();
+    }
+
+    internal static string Resolve(
+        UnityEngine.Object asset,
+        string localizationKey,
+        string fallback)
+    {
+        return Resolve(
+            localizationKey,
+            fallback,
+            asset != null ? GetFileName(asset) : string.Empty);
+    }
+
+    private static string FindFirstString(
+        SerializedObject serialized,
+        IReadOnlyList<string> propertyNames)
+    {
+        for (int index = 0; index < propertyNames.Count; index++)
+        {
+            SerializedProperty property = serialized.FindProperty(
+                propertyNames[index]);
+            if (property == null ||
+                property.propertyType != SerializedPropertyType.String ||
+                string.IsNullOrWhiteSpace(property.stringValue))
+            {
+                continue;
+            }
+
+            return property.stringValue.Trim();
+        }
+
+        return string.Empty;
+    }
+
+    private static string GetFileName(UnityEngine.Object asset)
+    {
+        string path = AssetDatabase.GetAssetPath(asset);
+        if (!string.IsNullOrWhiteSpace(path))
+            return Path.GetFileNameWithoutExtension(path);
+        return (asset.name ?? string.Empty).Trim();
     }
 }
 
@@ -703,6 +802,11 @@ internal sealed class PS260714UIToolkitAssetList<T> : VisualElement
         _suppressSelection = false;
     }
 
+    internal void Refresh()
+    {
+        ApplyFilter();
+    }
+
     private void ApplyFilter(T preferred = null)
     {
         T previous = preferred;
@@ -830,6 +934,48 @@ internal sealed class PS260714UIToolkitRenameRow : VisualElement
     {
         style.display = DisplayStyle.None;
         Field.SetValueWithoutNotify(string.Empty);
+    }
+}
+
+internal static class PS260714EditorSdDirectionField
+{
+    internal static void Draw(SerializedProperty property)
+    {
+        if (property == null)
+            return;
+
+        EditorGUILayout.Space(4f);
+        EditorGUILayout.LabelField(
+            "Current SD Direction",
+            EditorStyles.boldLabel);
+        using (new EditorGUILayout.HorizontalScope())
+        {
+            bool facesRight = property.boolValue;
+            bool chooseLeft = GUILayout.Toggle(
+                !facesRight,
+                "Left",
+                "Button");
+            bool chooseRight = GUILayout.Toggle(
+                facesRight,
+                "Right",
+                "Button");
+            property.boolValue = ResolveFacesRight(
+                facesRight,
+                chooseLeft,
+                chooseRight);
+        }
+    }
+
+    internal static bool ResolveFacesRight(
+        bool facesRight,
+        bool chooseLeft,
+        bool chooseRight)
+    {
+        if (chooseLeft && facesRight)
+            return false;
+        if (chooseRight && !facesRight)
+            return true;
+        return facesRight;
     }
 }
 

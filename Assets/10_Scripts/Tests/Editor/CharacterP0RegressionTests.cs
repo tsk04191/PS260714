@@ -1422,6 +1422,30 @@ public sealed class CharacterP0RegressionTests
     }
 
     [Test]
+    public void ConfiguredAttack_RequestsFacingTowardSelectedTarget()
+    {
+        EnemyRuntime target = CreateEnemyRuntime();
+        FakeBattleBoard board = new()
+        {
+            LivingEnemyCountValue = 1,
+            SelectedEnemyTargets = new[] { target },
+        };
+        CharacterRuntime character = CreateCharacter(
+            CreateBaseCharacterFixture("AttackFacingFixture"));
+        List<CharacterActionFacingRequest> requests = new();
+        character.ActionFacingRequested += requests.Add;
+        character.BindBattle(null, board);
+
+        character.TickBattle(character.Data.AttackCooldown, board);
+
+        Assert.That(requests, Has.Count.GreaterThanOrEqualTo(1));
+        Assert.That(
+            requests[0].TargetFaction,
+            Is.EqualTo(CharacterTargetFaction.Enemy));
+        Assert.That(requests[0].EnemyTargets, Does.Contain(target));
+    }
+
+    [Test]
     public void FailedAttackLinkage_UsesFallbackOnlyAfterPreviousFailure()
     {
         CharacterSO definition = CreateBaseCharacterFixture(
@@ -2181,6 +2205,8 @@ public sealed class CharacterP0RegressionTests
             LivingEnemyCountValue = 1,
             SelectedEnemyTargets = new[] { target },
         };
+        List<CharacterActionFacingRequest> facingRequests = new();
+        suiren.ActionFacingRequested += facingRequests.Add;
         suiren.BindBattle(resource, board);
 
         bool activated = suiren.TryActivateActiveSkill();
@@ -2190,6 +2216,11 @@ public sealed class CharacterP0RegressionTests
         Assert.That(suiren.TotalDamageDealt, Is.EqualTo(2));
         Assert.That(board.DamageTargetSnapshots, Has.Count.EqualTo(1));
         Assert.That(board.DamageTargetSnapshots[0], Does.Contain(target));
+        Assert.That(facingRequests, Has.Count.GreaterThanOrEqualTo(1));
+        Assert.That(
+            facingRequests[0].TargetFaction,
+            Is.EqualTo(CharacterTargetFaction.Enemy));
+        Assert.That(facingRequests[0].EnemyTargets, Does.Contain(target));
     }
 
     [Test]

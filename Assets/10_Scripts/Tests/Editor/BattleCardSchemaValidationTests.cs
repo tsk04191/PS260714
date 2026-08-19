@@ -351,6 +351,29 @@ public sealed class BattleCardSchemaValidationTests
     }
 
     [Test]
+    public void ReadyBasicAttack_RequiresAlliedTargets()
+    {
+        BattleCardOperationDefinition ready = Operation(
+            BattleCardOperationType.ReadyBasicAttack,
+            BattleCardTargetScope.Primary);
+        BattleCardSO card = Card(ready);
+        SetField(card, "subject", CharacterAttackSubject.Manual);
+
+        Assert.That(
+            BattleCardDefinitionValidator.TryValidate(card, out string error),
+            Is.False);
+        Assert.That(error, Does.Contain("allied target"));
+
+        SetField(card, "targetFaction", CharacterTargetFaction.Ally);
+        Assert.That(
+            BattleCardDefinitionValidator.TryValidate(
+                card,
+                out string configuredError),
+            Is.True,
+            configuredError);
+    }
+
+    [Test]
     public void SpatialOperation_RequiresDesignatedPoint()
     {
         BattleCardOperationDefinition zone = Operation(

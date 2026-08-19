@@ -176,6 +176,71 @@ public sealed class EnemyDefinitionValidationTests
     }
 
     [Test]
+    public void EnemyWorldSdDirection_DefaultsRightAndCanBeAuthoredLeft()
+    {
+        EnemySO definition = CreateEnemy("world_sd_direction");
+
+        Assert.That(definition.BoardSpriteFacesRight, Is.True);
+
+        SerializedObject serialized = new(definition);
+        serialized.FindProperty("boardSpriteFacesRight").boolValue = false;
+        serialized.ApplyModifiedPropertiesWithoutUndo();
+
+        Assert.That(definition.BoardSpriteFacesRight, Is.False);
+    }
+
+    [Test]
+    public void WorldSdDirectionButtons_StayMutuallyExclusiveAcrossEditors()
+    {
+        Assert.That(
+            PS260714EditorSdDirectionField.ResolveFacesRight(
+                true,
+                true,
+                true),
+            Is.False);
+        Assert.That(
+            PS260714EditorSdDirectionField.ResolveFacesRight(
+                false,
+                true,
+                true),
+            Is.True);
+        Assert.That(
+            PS260714EditorSdDirectionField.ResolveFacesRight(
+                true,
+                false,
+                false),
+            Is.True);
+        Assert.That(
+            PS260714EditorSdDirectionField.ResolveFacesRight(
+                false,
+                false,
+                false),
+            Is.False);
+    }
+
+    [TestCase(true, -2f, false)]
+    [TestCase(true, 2f, true)]
+    [TestCase(false, -2f, true)]
+    [TestCase(false, 2f, false)]
+    public void EnemyWorldSdFacing_LooksAtShieldCenter(
+        bool sourceFacesRight,
+        float enemyX,
+        bool expectedFlipX)
+    {
+        Vector2 enemyPosition = new(enemyX, 0f);
+        Vector2 directionToShieldCenter = -enemyPosition;
+
+        bool resolved = DungeonBoardView.TryResolveWorldSpriteFlipX(
+            sourceFacesRight,
+            directionToShieldCenter,
+            Vector3.right,
+            out bool flipX);
+
+        Assert.That(resolved, Is.True);
+        Assert.That(flipX, Is.EqualTo(expectedFlipX));
+    }
+
+    [Test]
     public void DuplicateEnemyId_IsRejected()
     {
         EnemySO first = CreateEnemy("duplicate_enemy");
@@ -577,6 +642,89 @@ public sealed class EnemyDefinitionValidationTests
         Assert.That(condition.Expected, Is.True);
     }
 
+    [Test]
+    public void EnemyEditor_GradeFilter_MatchesAllOrSelectedGrade()
+    {
+        EnemySO normal = CreateEnemy("editor_filter_normal");
+        ConfigureEditorListEnemy(
+            normal,
+            "Normal Enemy",
+            EEnemyGrade.Normal,
+            "NormalEnemyFile");
+        EnemySO boss = CreateEnemy("editor_filter_boss");
+        ConfigureEditorListEnemy(
+            boss,
+            "Boss Enemy",
+            EEnemyGrade.Boss,
+            "BossEnemyFile");
+
+        Assert.That(
+            EnemyEditorWindow.MatchesGradeFilter(normal, 0),
+            Is.True);
+        Assert.That(
+            EnemyEditorWindow.MatchesGradeFilter(boss, 0),
+            Is.True);
+        Assert.That(
+            EnemyEditorWindow.MatchesGradeFilter(normal, 1),
+            Is.True);
+        Assert.That(
+            EnemyEditorWindow.MatchesGradeFilter(boss, 1),
+            Is.False);
+        Assert.That(
+            EnemyEditorWindow.MatchesGradeFilter(boss, 4),
+            Is.True);
+        Assert.That(
+            EnemyEditorWindow.MatchesGradeFilter(normal, 4),
+            Is.False);
+    }
+
+    [Test]
+    public void EnemyEditor_ListSort_OrdersByNameOrGrade()
+    {
+        EnemySO alphaBoss = CreateEnemy("editor_sort_alpha");
+        ConfigureEditorListEnemy(
+            alphaBoss,
+            "Alpha",
+            EEnemyGrade.Boss,
+            "Z_AlphaFile");
+        EnemySO betaSpecial = CreateEnemy("editor_sort_beta");
+        ConfigureEditorListEnemy(
+            betaSpecial,
+            "Beta",
+            EEnemyGrade.Special,
+            "M_BetaFile");
+        EnemySO gammaNormal = CreateEnemy("editor_sort_gamma");
+        ConfigureEditorListEnemy(
+            gammaNormal,
+            "Gamma",
+            EEnemyGrade.Normal,
+            "A_GammaFile");
+
+        List<EnemySO> definitions = new()
+        {
+            gammaNormal,
+            alphaBoss,
+            betaSpecial
+        };
+        definitions.Sort((left, right) =>
+            EnemyEditorWindow.CompareDefinitions(
+                left,
+                right,
+                EnemyEditorListSortMode.Name));
+        Assert.That(
+            definitions,
+            Is.EqualTo(new[] { alphaBoss, betaSpecial, gammaNormal }));
+
+        definitions.Sort((left, right) =>
+            EnemyEditorWindow.CompareDefinitions(
+                left,
+                right,
+                EnemyEditorListSortMode.Grade));
+        Assert.That(
+            definitions,
+            Is.EqualTo(new[] { gammaNormal, betaSpecial, alphaBoss }));
+    }
+
     [TestCase(EnemyAbilityTrigger.OnSpawn)]
     [TestCase(EnemyAbilityTrigger.BeforeSelfDamage)]
     [TestCase(EnemyAbilityTrigger.BeforeAllyDamage)]
@@ -801,6 +949,21 @@ public sealed class EnemyDefinitionValidationTests
             EnemySO.CurrentCombatStatSchemaVersion;
         serialized.ApplyModifiedPropertiesWithoutUndo();
         return definition;
+    }
+
+    private static void ConfigureEditorListEnemy(
+        EnemySO definition,
+        string displayName,
+        EEnemyGrade grade,
+        string fileName)
+    {
+        definition.name = fileName;
+        SerializedObject serialized = new(definition);
+        serialized.FindProperty("nameLocalizationKey").stringValue =
+            string.Empty;
+        serialized.FindProperty("displayName").stringValue = displayName;
+        serialized.FindProperty("grade").enumValueIndex = (int)grade;
+        serialized.ApplyModifiedPropertiesWithoutUndo();
     }
 
     private EnemySO CreateAssetClone(string assetName)

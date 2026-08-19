@@ -139,7 +139,7 @@ public sealed class BattleEditorWindow : EditorWindow
                         battle == _battle,
                         battle,
                         null,
-                        battle.DisplayName,
+                        PS260714EditorAssetDisplayName.Get(battle),
                         $"{battle.BattleId} · {battle.TotalEnemyCount} enemies",
                         AssetDatabase.GetAssetPath(battle)))
                 {

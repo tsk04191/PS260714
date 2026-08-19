@@ -238,7 +238,7 @@ public sealed class BattleVfxEditorWindow : EditorWindow
                             selected,
                             cue,
                             cue.Prefab,
-                            cue.name,
+                            PS260714EditorAssetDisplayName.Get(cue),
                             cue.CueId,
                             AssetDatabase.GetAssetPath(cue)))
                     {

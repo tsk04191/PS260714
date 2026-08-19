@@ -40,6 +40,49 @@ public sealed class CharacterDefinitionValidationTests
     }
 
     [Test]
+    public void CharacterWorldSdDirection_DefaultsRightAndCanBeAuthoredLeft()
+    {
+        CharacterSO definition = CreateDefinition();
+
+        Assert.That(definition.WorldSdFacesRight, Is.True);
+
+        SerializedObject serialized = new(definition);
+        serialized.FindProperty("worldSdFacesRight").boolValue = false;
+        serialized.ApplyModifiedPropertiesWithoutUndo();
+
+        Assert.That(definition.WorldSdFacesRight, Is.False);
+    }
+
+    [Test]
+    public void CharacterWorldSdFacing_UsesLatestMovementOrActionDirection()
+    {
+        Assert.That(
+            DungeonBoardView.TryResolveCharacterFacingDirection(
+                Vector2.zero,
+                new Vector2(2f, 0f),
+                out Vector2 latestDirection),
+            Is.True);
+        Assert.That(latestDirection.x, Is.GreaterThan(0f));
+
+        Assert.That(
+            DungeonBoardView.TryResolveCharacterFacingDirection(
+                Vector2.zero,
+                new Vector2(-3f, 0f),
+                out latestDirection),
+            Is.True);
+        Assert.That(latestDirection.x, Is.LessThan(0f));
+
+        Assert.That(
+            DungeonBoardView.TryResolveWorldSpriteFlipX(
+                true,
+                latestDirection,
+                Vector3.right,
+                out bool flipX),
+            Is.True);
+        Assert.That(flipX, Is.True);
+    }
+
+    [Test]
     public void Validate_AttackWithoutRequiredSections_ReturnsErrors()
     {
         CharacterSO definition = CreateDefinition();

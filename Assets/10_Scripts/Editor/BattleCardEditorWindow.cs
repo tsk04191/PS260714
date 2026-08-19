@@ -169,7 +169,7 @@ public sealed class BattleCardEditorWindow : EditorWindow
                         card == selected,
                         card,
                         card.Icon,
-                        card.GetLocalizedDisplayName(),
+                        PS260714EditorAssetDisplayName.Get(card),
                         $"{card.Affiliation} / Cost {card.EnergyCost}",
                         card.CardId))
                 {
@@ -875,6 +875,9 @@ public sealed class BattleCardEditorWindow : EditorWindow
         return query.Length == 0 ||
                Contains(card.name, query) ||
                Contains(card.CardId, query) ||
+               Contains(
+                   PS260714EditorAssetDisplayName.Get(card),
+                   query) ||
                Contains(card.GetLocalizedDisplayName(), query) ||
                Contains(card.Affiliation.ToString(), query);
     }

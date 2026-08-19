@@ -253,7 +253,7 @@ public sealed class StatusEffectEditorWindow : EditorWindow
                     selected,
                     definition,
                     definition.Icon,
-                    definition.name,
+                    PS260714EditorAssetDisplayName.Get(definition),
                     definition.Alignment.ToString(),
                     definition.StatusId))
             {
@@ -1213,6 +1213,9 @@ public sealed class StatusEffectEditorWindow : EditorWindow
                    search,
                    StringComparison.OrdinalIgnoreCase) >= 0 ||
                definition.StatusId.IndexOf(
+                   search,
+                   StringComparison.OrdinalIgnoreCase) >= 0 ||
+               PS260714EditorAssetDisplayName.Get(definition).IndexOf(
                    search,
                    StringComparison.OrdinalIgnoreCase) >= 0 ||
                (definition.NameLocalizationKey ?? string.Empty).IndexOf(

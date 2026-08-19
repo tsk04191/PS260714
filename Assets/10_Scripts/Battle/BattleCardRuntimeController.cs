@@ -685,6 +685,9 @@ public sealed class BattleCardRuntimeController :
             case BattleCardOperationType.ForceTarget:
                 return AddForcedTarget(operation, targets);
 
+            case BattleCardOperationType.ReadyBasicAttack:
+                return ReadyBasicAttacks(targets);
+
             default:
                 return default;
         }
@@ -783,6 +786,20 @@ public sealed class BattleCardRuntimeController :
             changed = BattleValueMath.SaturatingAddNonNegative(
                 changed,
                 runtime.RestoreHealth(amount, true));
+        }
+        return new OperationOutcome(true, changed > 0, changed);
+    }
+
+    private static OperationOutcome ReadyBasicAttacks(TargetSet targets)
+    {
+        int changed = 0;
+        foreach (IBattleCharacter target in targets.Allies)
+        {
+            if (target is CharacterRuntime runtime &&
+                runtime.TryReadyBasicAttack())
+            {
+                changed++;
+            }
         }
         return new OperationOutcome(true, changed > 0, changed);
     }

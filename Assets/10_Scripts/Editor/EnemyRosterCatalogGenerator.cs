@@ -1510,6 +1510,10 @@ public static class EnemyRosterCatalogGenerator
 
         SetObject(serialized, "iconSprite", template.IconSprite);
         SetObject(serialized, "boardSprite", template.BoardSprite);
+        SetBool(
+            serialized,
+            "boardSpriteFacesRight",
+            template.BoardSpriteFacesRight);
         SetInt(serialized, "sortOrder", spec.SortOrder);
         SetObject(serialized, "spawnVfxCue", template.SpawnVfxCue);
         SetObject(serialized, "deathVfxCue", template.DeathVfxCue);
@@ -2563,6 +2567,10 @@ public static class EnemyRosterCatalogGenerator
         AppendYaml(yaml, 2, $"encounterOnly: {YamlBool(spec.EncounterOnly)}");
         AppendYaml(yaml, 2, $"iconSprite: {presentation.IconSprite}");
         AppendYaml(yaml, 2, $"boardSprite: {presentation.BoardSprite}");
+        AppendYaml(
+            yaml,
+            2,
+            $"boardSpriteFacesRight: {presentation.BoardSpriteFacesRight}");
         AppendYaml(yaml, 2, $"sortOrder: {spec.SortOrder}");
         AppendYaml(yaml, 2, $"spawnVfxCue: {presentation.SpawnVfxCue}");
         AppendYaml(yaml, 2, $"deathVfxCue: {presentation.DeathVfxCue}");
@@ -3269,6 +3277,10 @@ public static class EnemyRosterCatalogGenerator
             result.Add(type, new YamlPresentationTemplate(
                 ReadYamlField(lines, "iconSprite"),
                 ReadYamlField(lines, "boardSprite"),
+                ReadOptionalYamlField(
+                    lines,
+                    "boardSpriteFacesRight",
+                    "1"),
                 ReadYamlField(lines, "spawnVfxCue"),
                 ReadYamlField(lines, "deathVfxCue")));
         }
@@ -3287,6 +3299,26 @@ public static class EnemyRosterCatalogGenerator
             throw new InvalidOperationException(
                 $"YAML field '{fieldName}' is missing.");
         }
+        string value = line.Substring(prefix.Length).Trim();
+        if (string.IsNullOrEmpty(value))
+        {
+            throw new InvalidOperationException(
+                $"YAML field '{fieldName}' is empty.");
+        }
+        return value;
+    }
+
+    private static string ReadOptionalYamlField(
+        IEnumerable<string> lines,
+        string fieldName,
+        string defaultValue)
+    {
+        string prefix = "  " + fieldName + ":";
+        string line = lines.FirstOrDefault(candidate =>
+            candidate.StartsWith(prefix, StringComparison.Ordinal));
+        if (line == null)
+            return defaultValue;
+
         string value = line.Substring(prefix.Length).Trim();
         if (string.IsNullOrEmpty(value))
         {
@@ -4164,17 +4196,20 @@ public static class EnemyRosterCatalogGenerator
     {
         public string IconSprite { get; }
         public string BoardSprite { get; }
+        public string BoardSpriteFacesRight { get; }
         public string SpawnVfxCue { get; }
         public string DeathVfxCue { get; }
 
         public YamlPresentationTemplate(
             string iconSprite,
             string boardSprite,
+            string boardSpriteFacesRight,
             string spawnVfxCue,
             string deathVfxCue)
         {
             IconSprite = iconSprite;
             BoardSprite = boardSprite;
+            BoardSpriteFacesRight = boardSpriteFacesRight;
             SpawnVfxCue = spawnVfxCue;
             DeathVfxCue = deathVfxCue;
         }

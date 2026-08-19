@@ -223,7 +223,7 @@ public sealed class PracticeBattleUiTests
         Assert.That(panel.BindController(standard), Is.True);
         Assert.That(practice.IsDebugVisualizationEnabled, Is.False);
         Assert.That(practice.DebugVisualizationSetCallCount, Is.EqualTo(2));
-        Assert.That(changedCount, Is.EqualTo(2));
+        Assert.That(changedCount, Is.EqualTo(3));
         Assert.That(standard.DebugVisualizationSetCallCount, Is.Zero);
         Assert.That(panel.gameObject.activeSelf, Is.False);
         InvokeMethod(panel, "OnDisable");
@@ -235,7 +235,7 @@ public sealed class PracticeBattleUiTests
         Assert.That(panel.BindController(null), Is.True);
         Assert.That(practice.IsDebugVisualizationEnabled, Is.False);
         Assert.That(practice.DebugVisualizationSetCallCount, Is.EqualTo(4));
-        Assert.That(changedCount, Is.EqualTo(4));
+        Assert.That(changedCount, Is.EqualTo(5));
         Assert.That(panel.gameObject.activeSelf, Is.False);
     }
 

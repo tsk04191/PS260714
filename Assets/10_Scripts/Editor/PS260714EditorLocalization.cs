@@ -294,6 +294,19 @@ internal static class PS260714EditorText
             ["Ground Offset"] = "지면 오프셋",
             ["Head Height"] = "머리 높이",
             ["Source Faces Right"] = "원본이 오른쪽을 바라봄",
+            ["Current SD Direction"] = "현재 SD 방향",
+            ["Left"] = "왼쪽",
+            ["Right"] = "오른쪽",
+            ["Choose the direction shown by the source SD sprite. " +
+             "In battle, the sprite turns to face the shield center."] =
+                "원본 SD 스프라이트가 바라보는 방향을 선택합니다. " +
+                "전투에서는 보호막 중심을 바라보도록 전환됩니다.",
+            ["Choose the direction shown by the source SD sprite. " +
+             "In battle, the sprite turns to face its latest movement or " +
+             "action target."] =
+                "원본 SD 스프라이트가 바라보는 방향을 선택합니다. " +
+                "전투에서는 마지막 이동 방향이나 행동 대상을 바라보도록 " +
+                "전환됩니다.",
             ["Flow Policy"] = "진행 정책",
             ["Field View Prefab"] = "필드 뷰 프리팹",
             ["Dungeon BGM Profile"] = "던전 BGM 프로필",

@@ -182,6 +182,18 @@ public sealed class BattleSpatialServiceTests
                     out Vector2 secondPosition),
                 Is.True);
             Assert.That(secondPosition.x, Is.EqualTo(-1f).Within(0.001f));
+            Assert.That(
+                board.TryGetAllyFacingDirection(
+                    first,
+                    out Vector2 firstFacingDirection),
+                Is.True);
+            Assert.That(firstFacingDirection.x, Is.GreaterThan(0f));
+            Assert.That(
+                board.TryGetAllyFacingDirection(
+                    second,
+                    out Vector2 secondFacingDirection),
+                Is.True);
+            Assert.That(secondFacingDirection.x, Is.LessThan(0f));
 
             Assert.That(
                 board.MoveAlliesToPoint(
@@ -192,6 +204,12 @@ public sealed class BattleSpatialServiceTests
             Assert.That(
                 board.GetUnitZone(BattleStatusTarget.FromAlly(second)),
                 Is.EqualTo(BattleSpatialZone.Outer));
+            Assert.That(
+                board.TryGetAllyFacingDirection(
+                    second,
+                    out Vector2 latestFacingDirection),
+                Is.True);
+            Assert.That(latestFacingDirection.x, Is.GreaterThan(0f));
         }
         finally
         {

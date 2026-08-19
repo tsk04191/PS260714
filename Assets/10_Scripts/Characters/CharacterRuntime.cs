@@ -13,6 +13,26 @@ internal enum CharacterAbilityIconKind
     Active,
 }
 
+internal readonly struct CharacterActionFacingRequest
+{
+    public CharacterRuntime Source { get; }
+    public CharacterTargetFaction TargetFaction { get; }
+    public IReadOnlyList<EnemyRuntime> EnemyTargets { get; }
+    public IReadOnlyList<IBattleCharacter> AllyTargets { get; }
+
+    public CharacterActionFacingRequest(
+        CharacterRuntime source,
+        CharacterTargetFaction targetFaction,
+        IReadOnlyList<EnemyRuntime> enemyTargets,
+        IReadOnlyList<IBattleCharacter> allyTargets)
+    {
+        Source = source;
+        TargetFaction = targetFaction;
+        EnemyTargets = enemyTargets ?? Array.Empty<EnemyRuntime>();
+        AllyTargets = allyTargets ?? Array.Empty<IBattleCharacter>();
+    }
+}
+
 public class CharacterBuffIconView : MonoBehaviour
 {
     [SerializeField] private Image icon;
@@ -441,6 +461,20 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
     public event System.Action<BattleStatusChangedEvent> StatusChanged;
     public event System.Action<StatusEffectLifecycleEvent> StatusLifecycle;
     public event System.Action<int, int> HealthChanged;
+    internal event Action<CharacterActionFacingRequest> ActionFacingRequested;
+
+    internal bool TryReadyBasicAttack()
+    {
+        if (!IsAlive || _attackRecoveryRemaining > 0f ||
+            _remainingCooldown <= 0f)
+        {
+            return false;
+        }
+
+        _remainingCooldown = 0f;
+        RefreshUi();
+        return true;
+    }
 
     public bool TryGetVfxAnchor(
         BattleVfxAnchorType anchorType,
@@ -3769,6 +3803,7 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
 
         if (damageType == CharacterAttackDamageType.StatusRemoval)
         {
+            RequestActionFacing(targets);
             return targets.Faction == CharacterTargetFaction.Ally
                 ? board.TryRemoveAlliedCharacterStatus(
                     this,
@@ -3785,6 +3820,7 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
 
         if (damageType == CharacterAttackDamageType.StatusEffect)
         {
+            RequestActionFacing(targets);
             return targets.Faction == CharacterTargetFaction.Ally
                 ? board.TryApplyAlliedCharacterStatus(
                     BattleAbilityUser.FromCharacter(
@@ -3818,6 +3854,7 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
         if (damage <= 0)
             return false;
 
+        RequestActionFacing(targets);
         damageDealt = board.TryDamageCharacterTargets(
             this,
             enemyTargets,
@@ -3949,6 +3986,9 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
                 continue;
             }
 
+            if (BattleEffectRules.RequiresTargets(effect.BattleEffectType))
+                RequestActionFacing(effectContext);
+
             bool effectShowAttackRange =
                 effect.TargetMode ==
                 CharacterEffectTargetMode.FreshSelection
@@ -3980,6 +4020,30 @@ public sealed class CharacterRuntime : MonoBehaviour, IBattleCharacter,
         }
 
         return combined;
+    }
+
+    private void RequestActionFacing(AbilityTargetSelection targets)
+    {
+        if (targets.Count <= 0)
+            return;
+
+        ActionFacingRequested?.Invoke(new CharacterActionFacingRequest(
+            this,
+            targets.Faction,
+            targets.EnemyTargets,
+            targets.AllyTargets));
+    }
+
+    private void RequestActionFacing(EffectContext context)
+    {
+        if (!context.HasTargets)
+            return;
+
+        ActionFacingRequested?.Invoke(new CharacterActionFacingRequest(
+            this,
+            context.TargetFaction,
+            context.EnemyTargets,
+            context.AllyTargets));
     }
 
     private static bool TryResolveEffectContext(

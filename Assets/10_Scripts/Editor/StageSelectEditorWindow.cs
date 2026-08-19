@@ -263,7 +263,10 @@ public sealed class StageSelectEditorWindow : EditorWindow
                         definition == _selected,
                         definition,
                         definition.StageCoverSprite,
-                        definition.FallbackTitle,
+                        PS260714EditorAssetDisplayName.Resolve(
+                            definition,
+                            definition.TitleLocalizationKey,
+                            definition.FallbackTitle),
                         $"{visibility} - {definition.DungeonId}",
                         AssetDatabase.GetAssetPath(definition)))
                 {
@@ -684,6 +687,12 @@ public sealed class StageSelectEditorWindow : EditorWindow
                    search,
                    StringComparison.OrdinalIgnoreCase) >= 0 ||
                definition.DungeonId.IndexOf(
+                   search,
+                   StringComparison.OrdinalIgnoreCase) >= 0 ||
+               PS260714EditorAssetDisplayName.Resolve(
+                   definition,
+                   definition.TitleLocalizationKey,
+                   definition.FallbackTitle).IndexOf(
                    search,
                    StringComparison.OrdinalIgnoreCase) >= 0 ||
                definition.FallbackTitle.IndexOf(

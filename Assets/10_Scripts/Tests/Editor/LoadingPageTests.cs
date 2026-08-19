@@ -45,9 +45,7 @@ public sealed class LoadingPageTests
     [Test]
     public void Installer_IsIdempotentAndKeepsSingleLoadingPage()
     {
-        Scene scene = EditorSceneManager.NewScene(
-            NewSceneSetup.EmptyScene,
-            NewSceneMode.Additive);
+        Scene scene = EditorSceneManager.NewPreviewScene();
         GameObject popup = new("layPopup", typeof(RectTransform));
         SceneManager.MoveGameObjectToScene(popup, scene);
         try
@@ -63,7 +61,7 @@ public sealed class LoadingPageTests
         }
         finally
         {
-            EditorSceneManager.CloseScene(scene, true);
+            EditorSceneManager.ClosePreviewScene(scene);
         }
     }
 

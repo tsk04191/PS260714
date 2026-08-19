@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Reflection;
 using NUnit.Framework;
+using PS260714.Localization;
 using UnityEditor;
 using UnityEngine;
 using static TestReflection;
@@ -18,6 +19,76 @@ public sealed class StatusEffectEditorTests
     {
         _definition = ScriptableObject.CreateInstance<StatusEffectSO>();
         _definition.hideFlags = HideFlags.HideAndDontSave;
+    }
+
+    [Test]
+    public void EditorAssetDisplayName_UsesRequiredPriorityOrder()
+    {
+        Assert.That(
+            LocalizationService.TryGet(
+                LocalizationKeys.UiCommonBack,
+                out string localized),
+            Is.True);
+        Assert.That(
+            PS260714EditorAssetDisplayName.Resolve(
+                LocalizationKeys.UiCommonBack,
+                "Authored Fallback",
+                "AssetFileName"),
+            Is.EqualTo(localized.Trim()));
+        Assert.That(
+            PS260714EditorAssetDisplayName.Resolve(
+                "test.missing.editor.asset.name",
+                "Authored Fallback",
+                "AssetFileName"),
+            Is.EqualTo("Authored Fallback"));
+        Assert.That(
+            PS260714EditorAssetDisplayName.Resolve(
+                string.Empty,
+                " ",
+                "AssetFileName"),
+            Is.EqualTo("AssetFileName"));
+    }
+
+    [Test]
+    public void EditorAssetDisplayName_ReadsCommonSerializedNameFields()
+    {
+        CharacterSO character =
+            ScriptableObject.CreateInstance<CharacterSO>();
+        character.name = "CharacterFileName";
+        try
+        {
+            SerializedObject serialized = new(character);
+            serialized.FindProperty("nameLocalizationKey").stringValue =
+                LocalizationKeys.UiCommonBack;
+            serialized.FindProperty("characterName").stringValue =
+                "Authored Character Name";
+            serialized.ApplyModifiedPropertiesWithoutUndo();
+
+            Assert.That(
+                PS260714EditorAssetDisplayName.Get(character),
+                Is.EqualTo(LocalizationService.Get(
+                    LocalizationKeys.UiCommonBack).Trim()));
+
+            serialized.UpdateIfRequiredOrScript();
+            serialized.FindProperty("nameLocalizationKey").stringValue =
+                "test.missing.editor.character.name";
+            serialized.ApplyModifiedPropertiesWithoutUndo();
+            Assert.That(
+                PS260714EditorAssetDisplayName.Get(character),
+                Is.EqualTo("Authored Character Name"));
+
+            serialized.UpdateIfRequiredOrScript();
+            serialized.FindProperty("characterName").stringValue =
+                string.Empty;
+            serialized.ApplyModifiedPropertiesWithoutUndo();
+            Assert.That(
+                PS260714EditorAssetDisplayName.Get(character),
+                Is.EqualTo("CharacterFileName"));
+        }
+        finally
+        {
+            UnityEngine.Object.DestroyImmediate(character);
+        }
     }
 
     [TearDown]
